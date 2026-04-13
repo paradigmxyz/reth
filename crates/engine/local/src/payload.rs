@@ -57,6 +57,8 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
+            // TODO(focil): add IL fixture for testing
+            inclusion_list_transactions: Some(vec![]),
         }
     }
 }

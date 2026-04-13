@@ -275,7 +275,6 @@ pub fn create_chain_config(
     // Check if DAO fork is supported (it has an activation block)
     let dao_fork_support = hardforks.fork(EthereumHardfork::Dao) != ForkCondition::Never;
 
-    #[expect(clippy::needless_update)]
     ChainConfig {
         chain_id: chain.map(|c| c.id()).unwrap_or(0),
         homestead_block: block_num(EthereumHardfork::Homestead),
@@ -615,10 +614,18 @@ impl<H: BlockHeader> ChainSpec<H> {
     }
 
     /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
-    /// hardforks.
+    /// schedulable hardforks (i.e., all forks are `ForkCondition::Never`).
     #[inline]
     pub fn latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(self.hardforks.last().unwrap().0).unwrap()
+        // Skip Never-condition forks (like Eip7805 before it's scheduled) since they
+        // have no meaningful fork ID.
+        let (_, cond) = self
+            .hardforks
+            .forks_iter()
+            .filter(|(_, cond)| !matches!(cond, ForkCondition::Never))
+            .last()
+            .expect("chainspec must have at least one schedulable hardfork");
+        self.fork_id(&self.satisfy(cond))
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -885,6 +892,8 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
+            (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
+            (EthereumHardfork::Eip7805.boxed(), genesis.config.eip7805_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts

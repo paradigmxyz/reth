@@ -90,6 +90,7 @@ const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
         suggested_fee_recipient: alloy_primitives::Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        inclusion_list_transactions: None,
     }
 }
 

@@ -18,7 +18,7 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -96,6 +96,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
+    }
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
+        self.inner.il()
     }
 }
 

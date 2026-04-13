@@ -24,6 +24,8 @@ pub(crate) const fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes 
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        // TODO(focil): add IL fixture for testing
+        inclusion_list_transactions: Some(vec![]),
     }
 }
 
@@ -36,6 +38,7 @@ pub(crate) const fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAt
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: None,
+        inclusion_list_transactions: None,
     }
 }
 

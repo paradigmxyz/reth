@@ -2,15 +2,21 @@
 
 use crate::PayloadBuilderError;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{B256, U256};
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    eip7685::Requests,
+};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
 use reth_chain_state::ComputedTrieData;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::BlockExecutionOutput;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,
@@ -95,6 +101,58 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
     fn requests(&self) -> Option<Requests>;
 }
 
+/// Attributes used to guide the construction of a new execution payload.
+///
+/// Extends basic payload attributes with additional context needed during the
+/// building process, tracking in-progress payload jobs and their parameters.
+pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
+    /// The external payload attributes format this type can be constructed from.
+    type RpcPayloadAttributes: Send + Sync + 'static;
+    /// The error type used in [`PayloadBuilderAttributes::try_new`].
+    type Error: core::error::Error + Send + Sync + 'static;
+
+    /// Constructs new builder attributes from external payload attributes.
+    ///
+    /// Validates attributes and generates a unique [`PayloadId`] based on the
+    /// parent block, attributes, and version.
+    fn try_new(
+        parent: B256,
+        rpc_payload_attributes: Self::RpcPayloadAttributes,
+        version: u8,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
+
+    /// Returns the unique identifier for this payload build job.
+    fn payload_id(&self) -> PayloadId;
+
+    /// Returns the hash of the parent block this payload builds on.
+    fn parent(&self) -> B256;
+
+    /// Returns the timestamp to be used in the payload's header.
+    fn timestamp(&self) -> u64;
+
+    /// Returns the beacon chain block root from the parent block.
+    ///
+    /// Returns `None` for pre-merge blocks or non-beacon contexts.
+    fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Returns the address that should receive transaction fees.
+    fn suggested_fee_recipient(&self) -> Address;
+
+    /// Returns the randomness value for this block.
+    fn prev_randao(&self) -> B256;
+
+    /// Returns the list of withdrawals to be processed in this block.
+    fn withdrawals(&self) -> &Withdrawals;
+
+    /// Returns the inclusion list (IL) for the running payload job.
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>>;
+
+    /// Returns a clone of the attributes with an updated inclusion list (IL) given by `il`.
+    fn clone_with_il(&self, il: Vec<Bytes>) -> Self;
+}
+
 /// Basic attributes required to initiate payload construction.
 ///
 /// Defines minimal parameters needed to build a new execution payload.
@@ -117,6 +175,9 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-merge blocks, `None` for pre-merge blocks.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Returns the inclusion list for the payload attributes.
+    fn il(&self) -> Option<&Vec<Bytes>>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -134,6 +195,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
+        self.inclusion_list_transactions.as_ref()
     }
 }
 
@@ -217,6 +282,12 @@ pub fn payload_id(
         hasher.update(parent_beacon_block);
     }
 
+    if let Some(il) = &attributes.inclusion_list_transactions {
+        for tx in il {
+            hasher.update(tx);
+        }
+    }
+
     let out = hasher.finalize();
 
     #[allow(deprecated)] // generic-array 0.14 deprecated
@@ -254,6 +325,7 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
+            inclusion_list_transactions: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -291,6 +363,7 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
+            inclusion_list_transactions: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -323,6 +396,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            inclusion_list_transactions: None,
         };
 
         // Verify that the generated payload ID matches the expected value

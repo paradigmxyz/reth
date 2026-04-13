@@ -126,6 +126,9 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
+    /// Thrown if the pre-Bogota `PayloadAttributes` or `ExecutionPayload` contains an IL.
+    #[error("IL not supported before Bogota")]
+    IlNotSupportedPreBogota,
 }
 
 /// Error validating payload received over `newPayload` API.

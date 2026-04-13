@@ -86,6 +86,20 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
+    /// Post Hegota (EIP-7805 / FOCIL) payload handler.
+    ///
+    /// TODO(FOCIL): Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_newpayloadv6>
+    #[method(name = "newPayloadV6")]
+    async fn new_payload_v6(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatus>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -121,6 +135,20 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Post Hegota (EIP-7805 / FOCIL) forkchoice update handler.
+    ///
+    /// This is the same as `forkchoiceUpdatedV4`, but expects an additional
+    /// `inclusionListTransactions` field in the `payloadAttributes`.
+    ///
+    /// TODO(FOCIL): Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_forkchoiceupdatedv5>
+    #[method(name = "forkchoiceUpdatedV5")]
+    async fn fork_choice_updated_v5(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
@@ -297,6 +325,10 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
+
+    /// Fetch the inclusion list (IL).
+    #[method(name = "getInclusionListV1")]
+    async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>>;
 
     /// Fetch blobs for the consensus layer from the blob store.
     ///

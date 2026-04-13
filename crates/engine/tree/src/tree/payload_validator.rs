@@ -44,18 +44,19 @@ use crate::tree::{
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::{
+    transaction::{Either, TxHashRef},
+    Transaction,
+};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
-#[cfg(feature = "trie-debug")]
-use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
-
-use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use alloy_primitives::{map::B256Set, Bytes, B256, U256};
+use alloy_rlp::Decodable;
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
@@ -63,7 +64,8 @@ use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
-use reth_errors::{BlockExecutionError, ProviderResult};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
@@ -74,7 +76,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    Recovered, RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
@@ -86,6 +88,8 @@ use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State}
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+#[cfg(feature = "trie-debug")]
+use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
@@ -575,6 +579,20 @@ where
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
+        // NOTE
+        //
+        // we may not want to `flat_map` here so that IL indices of invalid transactions are
+        // preserved.
+        let il: Option<Vec<Recovered<TransactionSigned>>> = input.inclusion_list().map(|il| {
+            il.iter()
+                .filter_map(|tx| {
+                    let signed = TransactionSigned::decode(&mut tx.as_ref()).ok()?;
+                    let signer = signed.recover_signer().ok()?;
+                    Some(Recovered::new_unchecked(signed, signer))
+                })
+                .collect()
+        });
+
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
         // trie task without cloning the expensive BundleState.
@@ -637,6 +655,42 @@ where
                     .entered();
             handle.try_into_inner().expect("sole handle")
         });
+
+        // Inclusion list verification — create a fresh state provider at the parent for
+        // nonce/balance lookups (state_provider was consumed by execute_block above).
+        if let Some(il) = &il {
+            let validation_start = Instant::now();
+            let il_state_provider =
+                self.provider.history_by_block_hash(parent_hash).map_err(|err| {
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        %err,
+                        "Failed to obtain parent state for IL validation"
+                    );
+                    InsertBlockError::new(
+                        block.clone().into_sealed_block(),
+                        BlockExecutionError::Validation(BlockValidationError::InvalidInclusionList)
+                            .into(),
+                    )
+                })?;
+            match self.validate_block_inclusion_list(il_state_provider, &block, il) {
+                Ok(()) => {
+                    self.metrics
+                        .ef_execution
+                        .record_inclusion_list_block_validation_time(validation_start.elapsed());
+                }
+                Err(err) => {
+                    self.metrics
+                        .ef_execution
+                        .record_inclusion_list_block_validation_time(validation_start.elapsed());
+
+                    warn!(target: "engine::tree", "Block failed inclusion list validation");
+                    self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+                    return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+                }
+            }
+        }
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -1872,6 +1926,106 @@ where
             code_cache_misses,
         })
     }
+
+    fn validate_block_inclusion_list<S>(
+        &self,
+        state_provider: S,
+        block: &RecoveredBlock<N::Block>,
+        il: impl AsRef<[Recovered<TransactionSigned>]>,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: StateProvider,
+    {
+        // Gather all tx hashes already in the block
+        let included: B256Set =
+            block.transactions_recovered().map(|tx| *tx.inner().tx_hash()).collect();
+
+        // Compute remaining gas after block execution
+        let remaining = block.header().gas_limit().saturating_sub(block.gas_used());
+
+        // Total number of transactions in the inclusion list
+        let il_len = il.as_ref().len();
+
+        // Check each inclusion-list transaction
+        for (idx, recovered) in il.as_ref().iter().enumerate() {
+            let tx = recovered.inner();
+            let h = tx.tx_hash();
+
+            // Skip if already included
+            if included.contains(h) {
+                self.metrics.ef_execution.record_inclusion_list_transaction_included();
+                continue
+            }
+
+            // Skip blob (EIP-4844) transactions (reason: blob_transaction)
+            if tx.is_eip4844() {
+                self.metrics.ef_execution.record_inclusion_list_transaction_excluded("blob_tx");
+                continue
+            }
+
+            // Skip if not enough gas (reason: gas_limit)
+            if tx.gas_limit() > remaining {
+                self.metrics
+                    .ef_execution
+                    .record_inclusion_list_transaction_excluded("gas_limit_exceeded");
+                continue
+            }
+
+            // Get sender address
+            let sender = recovered.signer();
+
+            // Get nonce
+            let account_nonce = match state_provider.account_nonce(&sender) {
+                Ok(Some(nonce)) => nonce,
+                // account does not exist or error reading nonce (reason: unknown)
+                Ok(None) | Err(_) => {
+                    self.metrics.ef_execution.record_inclusion_list_transaction_excluded("unknown");
+                    continue
+                }
+            };
+
+            // Check nonce matches - if not, it's excluded due to nonce mismatch
+            if account_nonce != tx.nonce() {
+                self.metrics
+                    .ef_execution
+                    .record_inclusion_list_transaction_excluded("invalid_nonce");
+                continue
+            }
+
+            // Check balance (value + gas_limit * max_fee_per_gas)
+            let max_cost = tx.value().saturating_add(
+                U256::from(tx.gas_limit()).saturating_mul(U256::from(tx.max_fee_per_gas())),
+            );
+
+            let account_balance = match state_provider.account_balance(&sender) {
+                Ok(Some(balance)) => balance,
+                // account does not exist or error reading balance (reason: unknown)
+                Ok(None) | Err(_) => {
+                    self.metrics.ef_execution.record_inclusion_list_transaction_excluded("unknown");
+                    continue
+                }
+            };
+
+            if account_balance >= max_cost {
+                // Transaction would still be valid - inclusion list violation
+                warn!(target: "engine::tree", tx_hash = ?recovered.hash(), "IL transaction not included in block but required");
+
+                // Number of unchecked transactions plus the current tx
+                let unknown_count = (il_len - idx) as u64;
+                self.metrics
+                    .ef_execution
+                    .record_inclusion_list_transaction_excluded_unknown(unknown_count);
+
+                return Err(BlockExecutionError::Validation(
+                    BlockValidationError::InvalidInclusionList,
+                ));
+            }
+            // Insufficient balance (reason: balance)
+            self.metrics.ef_execution.record_inclusion_list_transaction_excluded("invalid_balance");
+        }
+
+        Ok(())
+    }
 }
 
 /// Strategy describing how to compute the state root.
@@ -2089,6 +2243,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.block_with_parent(),
             Self::Block(block) => block.block_with_parent(),
+        }
+    }
+
+    /// Returns inclusion list for payload.
+    pub fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
+        match self {
+            Self::Payload(payload) => payload.inclusion_list(),
+            Self::Block(_block) => None,
         }
     }
 

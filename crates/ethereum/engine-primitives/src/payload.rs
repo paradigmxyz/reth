@@ -3,18 +3,21 @@
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{
     eip4844::BlobTransactionSidecar,
+    eip4895::Withdrawals,
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
 };
-use alloy_primitives::U256;
+use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
-use reth_ethereum_primitives::EthPrimitives;
-use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use core::convert::Infallible;
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+use reth_payload_primitives::{payload_id, BuiltPayload, PayloadBuilderAttributes};
+use reth_primitives_traits::{NodePrimitives, Recovered, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
 
@@ -315,5 +318,131 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecar>> for BlobSidecars {
 impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars {
     fn from(value: alloc::vec::IntoIter<BlobTransactionSidecarEip7594>) -> Self {
         value.collect::<Vec<_>>().into()
+    }
+}
+
+/// Container type for all components required to build a payload.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EthPayloadBuilderAttributes {
+    /// Id of the payload
+    pub id: PayloadId,
+    /// Parent block to build the payload on top
+    pub parent: B256,
+    /// Unix timestamp for the generated payload
+    ///
+    /// Number of seconds since the Unix epoch.
+    pub timestamp: u64,
+    /// Address of the recipient for collecting transaction fee
+    pub suggested_fee_recipient: Address,
+    /// Randomness value for the generated payload
+    pub prev_randao: B256,
+    /// Withdrawals for the generated payload
+    pub withdrawals: Withdrawals,
+    /// Root of the parent beacon block
+    pub parent_beacon_block_root: Option<B256>,
+    /// Inclusion list for the generated payload.
+    pub il: Option<Vec<Option<Recovered<TransactionSigned>>>>,
+}
+
+// === impl EthPayloadBuilderAttributes ===
+
+impl EthPayloadBuilderAttributes {
+    /// Returns the identifier of the payload.
+    pub const fn payload_id(&self) -> PayloadId {
+        self.id
+    }
+
+    /// Creates a new payload builder for the given parent block and the attributes.
+    ///
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
+    pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
+        let id = payload_id(&parent, &attributes);
+
+        // if the IL is present, then attempt to decode each transaction in the IL.
+        let il = attributes.inclusion_list_transactions.map(|il| {
+            il.into_iter().map(|tx| Recovered::decode(&mut tx.0.as_ref()).ok()).collect()
+        });
+
+        Self {
+            id,
+            parent,
+            timestamp: attributes.timestamp,
+            suggested_fee_recipient: attributes.suggested_fee_recipient,
+            prev_randao: attributes.prev_randao,
+            withdrawals: attributes.withdrawals.unwrap_or_default().into(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            il,
+        }
+    }
+}
+
+impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
+    type RpcPayloadAttributes = PayloadAttributes;
+    type Error = Infallible;
+
+    /// Creates a new payload builder for the given parent block and the attributes.
+    ///
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
+    fn try_new(
+        parent: B256,
+        attributes: PayloadAttributes,
+        _version: u8,
+    ) -> Result<Self, Infallible> {
+        Ok(Self::new(parent, attributes))
+    }
+
+    fn payload_id(&self) -> PayloadId {
+        self.id
+    }
+
+    fn parent(&self) -> B256 {
+        self.parent
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.parent_beacon_block_root
+    }
+
+    fn suggested_fee_recipient(&self) -> Address {
+        self.suggested_fee_recipient
+    }
+
+    fn prev_randao(&self) -> B256 {
+        self.prev_randao
+    }
+
+    fn withdrawals(&self) -> &Withdrawals {
+        &self.withdrawals
+    }
+
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
+        self.il.as_ref()
+    }
+
+    fn clone_with_il(&self, il: Vec<Bytes>) -> Self {
+        let attributes = PayloadAttributes {
+            timestamp: self.timestamp,
+            prev_randao: self.prev_randao,
+            suggested_fee_recipient: self.suggested_fee_recipient,
+            withdrawals: Some(self.withdrawals.0.clone()),
+            parent_beacon_block_root: self.parent_beacon_block_root,
+            inclusion_list_transactions: Some(il),
+        };
+        Self::new(self.parent, attributes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attributes_serde() {
+        let attributes = r#"{"timestamp":"0x1235","prevRandao":"0xf343b00e02dc34ec0124241f74f32191be28fb370bb48060f5fa4df99bda774c","suggestedFeeRecipient":"0x0000000000000000000000000000000000000000","withdrawals":null,"parentBeaconBlockRoot":null}"#;
+        let _attributes: PayloadAttributes = serde_json::from_str(attributes).unwrap();
     }
 }

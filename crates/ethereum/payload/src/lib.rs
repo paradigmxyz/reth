@@ -10,7 +10,7 @@
 
 use alloy_consensus::Transaction;
 use alloy_primitives::U256;
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
@@ -43,6 +43,8 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
+
+mod metrics;
 
 pub mod validator;
 pub use validator::EthereumExecutionPayloadValidator;
@@ -124,6 +126,10 @@ where
             None,
         );
 
+        // NOTE
+        //
+        // the payload may not be empty if there is an IL to apply to the payload. the call to
+        // `apply_inclusion_list` is in the definition of `default_ethereum_payload`.
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
@@ -239,6 +245,10 @@ where
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
+    // Track transaction hashes that have been successfully executed from the pool
+    // to avoid re-executing them from the inclusion list
+    let mut executed_tx_hashes = std::collections::HashSet::new();
+
     let withdrawals_rlp_length =
         attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 
@@ -336,7 +346,10 @@ where
         let tx_hash = *tx.tx_hash();
 
         let gas_used = match builder.execute_transaction(tx) {
-            Ok(gas_used) => gas_used,
+            Ok(gas_used) => {
+                executed_tx_hashes.insert(tx_hash);
+                gas_used
+            }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
@@ -380,6 +393,161 @@ where
         // Add blob tx sidecar to the payload.
         if let Some(sidecar) = blob_tx_sidecar {
             blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
+        }
+    }
+
+    // apply IL
+    //
+    // NOTE
+    //
+    // we apply after all other transactions so that we can ensure that the payload is IL-compliant.
+    // if we attempted to apply the IL at the beginning, and then applied some other transactions,
+    // then we would need to go back through the IL and retry any transactions that could not be
+    // included at the start but may now be valid due to state changes caused by non-IL
+    // transactions.
+    // Decode inclusion list transactions from raw bytes into recovered transactions.
+    // Transactions that cannot be decoded are represented as None and skipped during application.
+    let decoded_il: Vec<Option<reth_primitives_traits::Recovered<TransactionSigned>>> = attributes
+        .inclusion_list_transactions
+        .as_ref()
+        .map(|il_bytes| {
+            il_bytes
+                .iter()
+                .map(|tx| {
+                    let mut buf: &[u8] = tx.as_ref();
+                    reth_primitives_traits::Recovered::decode(&mut buf).ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let il = &decoded_il;
+
+    // the IL bitfield tracks whether we need to consider the IL transaction at the corresponding
+    // index any longer.
+    //
+    // if the tx could not be decoded, then we mark it false.
+    // if the tx cannot execute for some reason that cannot change, then we mark it false.
+    // if the tx executes successfully and is added to the block, then we mark it false.
+    //
+    // if a transaction from the IL is executed successfully, then we need to go back over each of
+    // the remaining IL transactions that might now be valid.
+    let mut il_bitfield: Vec<_> = il.iter().map(|tx| tx.is_some()).collect();
+
+    let mut i = 0;
+    let n = il.len();
+    let mut pass_flag = false;
+    // Track exclusion reasons for retryable transactions to avoid double-counting
+    let mut il_exclusion_reasons: Vec<Option<&str>> = vec![None; n];
+
+    while i < n {
+        if !il_bitfield[i] {
+            i += 1;
+            continue;
+        }
+
+        // if the IL tx were not able to be decoded, then the corresponding index in the bitfield
+        // should be `false` in the check above.
+        let tx = il[i].as_ref().expect("IL tx exists b/c it was decoded");
+
+        // check if a transaction already exist in the block
+        if executed_tx_hashes.contains(tx.hash()) {
+            il_bitfield[i] = false;
+            i += 1;
+            metrics::record_inclusion_list_transaction_included();
+            continue
+        }
+
+        // transaction is a blob transaction which is not supported
+        //
+        // NOTE
+        //
+        // we should catch this earlier, so that such a transaction does not occupy memory.
+        if tx.is_eip4844() {
+            metrics::record_inclusion_list_transaction_excluded("blob_tx");
+            il_bitfield[i] = false;
+            i += 1;
+            continue;
+        }
+
+        // transaction gas limit too high
+        if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+            metrics::record_inclusion_list_transaction_excluded("gas_limit_exceeded");
+            il_bitfield[i] = false;
+            i += 1;
+            continue;
+        }
+
+        match builder.execute_transaction(tx.clone()) {
+            Ok(gas_used) => {
+                // update fees and gas used
+                let miner_fee = tx
+                    .effective_tip_per_gas(base_fee)
+                    .expect("fee is always valid; execution succeeded");
+                total_fees += U256::from(miner_fee) * U256::from(gas_used);
+                cumulative_gas_used += gas_used;
+
+                metrics::record_inclusion_list_transaction_included();
+                // Clear any stored exclusion reason since the transaction succeeded
+                il_exclusion_reasons[i] = None;
+            }
+            Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                error, ..
+            })) => {
+                let reason = if error.is_nonce_too_low() {
+                    "nonce_too_low"
+                } else if error.is_nonce_too_high() {
+                    "nonce_too_high"
+                } else if error.is_lack_of_funds_for_max_fee() {
+                    "insufficient_balance"
+                } else {
+                    "unknown"
+                };
+
+                // a transaction whose nonce is too high may become valid.
+                // a transaction whose sender lacks funds may become valid.
+                let is_retryable =
+                    error.is_nonce_too_high() || error.is_lack_of_funds_for_max_fee();
+
+                if is_retryable {
+                    // Store reason for later, don't record metric yet to avoid double-counting
+                    il_exclusion_reasons[i] = Some(reason);
+                    pass_flag = true;
+                } else {
+                    // Non-retryable error - record exclusion metric immediately
+                    il_bitfield[i] = false;
+                    if error.is_nonce_too_low() {
+                        metrics::record_inclusion_list_transaction_excluded("invalid_nonce");
+                    } else {
+                        metrics::record_inclusion_list_transaction_excluded("unknown");
+                    }
+                }
+
+                i += 1;
+                continue;
+            }
+            Err(err) => return Err(PayloadBuilderError::evm(err)),
+        }
+
+        il_bitfield[i] = false;
+        if pass_flag {
+            i = 0;
+            pass_flag = false;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Record exclusion metrics for retryable transactions that never became valid
+    for i in 0..n {
+        if il_bitfield[i] {
+            // Transaction was never included - record its final exclusion reason
+            if let Some(reason) = il_exclusion_reasons[i] {
+                if reason == "nonce_too_high" {
+                    metrics::record_inclusion_list_transaction_excluded("invalid_nonce");
+                } else if reason == "insufficient_balance" {
+                    metrics::record_inclusion_list_transaction_excluded("insufficient_balance");
+                }
+            }
         }
     }
 

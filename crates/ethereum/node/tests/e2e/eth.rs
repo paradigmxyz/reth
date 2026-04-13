@@ -221,6 +221,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        inclusion_list_transactions: None,
     };
 
     let request = TestingBuildBlockRequestV1 {

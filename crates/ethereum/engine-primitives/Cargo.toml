@@ -23,6 +23,7 @@ alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # misc
+alloy-rlp.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
@@ -41,4 +42,5 @@ std = [
     "thiserror/std",
     "reth-engine-primitives/std",
     "reth-primitives-traits/std",
+    "alloy-rlp/std",
 ]

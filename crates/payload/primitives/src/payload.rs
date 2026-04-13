@@ -56,6 +56,9 @@ pub trait ExecutionPayload:
     /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
 
+    /// Returns the (optional) inclusion list for the block.
+    fn inclusion_list(&self) -> Option<&Vec<Bytes>>;
+
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
 }
@@ -91,6 +94,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+
+    fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
+        self.sidecar.inclusion_list_transactions()
     }
 
     fn transaction_count(&self) -> usize {
@@ -156,6 +163,14 @@ where
         match self {
             Self::ExecutionPayload { .. } => MessageValidationKind::Payload,
             Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,
+        }
+    }
+
+    /// Returns the IL for the payload or attributes.
+    pub fn il(&self) -> Option<&Vec<Bytes>> {
+        match self {
+            Self::ExecutionPayload { .. } => None,
+            Self::PayloadAttributes(attributes) => attributes.il(),
         }
     }
 }
