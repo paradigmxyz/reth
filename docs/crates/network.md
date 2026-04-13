@@ -20,7 +20,8 @@ Let's take a look at what the provided interfaces are, how they're used in the p
 
 ### Use of the Network in the Node
 
-The `"node"` CLI command, used to run the node itself, does the following at a high level:
+A typical CLI flow that initializes networking and then uses it from the pipeline does the
+following at a high level:
 1. Initializes the DB
 2. Initializes the consensus API
 3. Writes the genesis block to the DB
@@ -31,9 +32,20 @@ The `"node"` CLI command, used to run the node itself, does the following at a h
 
 Steps 5-6 are of interest to us as they consume items from the `network` crate:
 
-[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs)
+[File: crates/cli/commands/src/stage/run.rs](https://github.com/paradigmxyz/reth/blob/main/crates/cli/commands/src/stage/run.rs)
 ```rust,ignore
-let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
+let network = self
+    .network
+    .network_config::<N::NetworkPrimitives>(
+        &config,
+        provider_factory.chain_spec(),
+        p2p_secret_key,
+        default_peers_path,
+        runtime.clone(),
+    )
+    .build(provider_factory.clone())
+    .start_network()
+    .await?;
 
 let fetch_client = Arc::new(network.fetch_client().await?);
 let mut pipeline = reth_stages::Pipeline::new()
@@ -82,7 +94,7 @@ pipeline.run(db.clone()).await?;
 
 Let's begin by taking a look at the line where the network is started, with the call, unsurprisingly, to `start_network`. Sounds important, doesn't it?
 
-[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs)
+[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/config.rs)
 ```rust,ignore
 // Method on NetworkConfig for starting the network with request handler
 pub async fn start_network(self) -> Result<NetworkHandle<N>, NetworkError>
@@ -100,19 +112,22 @@ where
         .split_with_handle();
 
     tokio::task::spawn(network);
-    // TODO: tokio::task::spawn(txpool); 
     tokio::task::spawn(eth);
     Ok(handle)
 }
 ```
 
-At a high level, this function is responsible for starting the tasks listed at the start of this chapter.
+At a high level, this function is responsible for starting the core networking tasks and returning
+the handle used by the rest of the pipeline.
 
-It gets the handles for the network management, transactions, and ETH requests tasks downstream of the `NetworkManager::builder` method call, and spawns them.
+It gets the handles for the network management, transactions, and ETH requests tasks downstream of
+the `NetworkManager::builder` method call, spawns the `network` and `eth` tasks, and returns the
+network handle.
 
-The `NetworkManager::builder` constructor requires a `NetworkConfig` struct to be passed in as a parameter, which can be used as the main entrypoint for setting up the entire network layer:
+The `NetworkManager::builder` constructor requires a `NetworkConfig` struct to be passed in as a
+parameter, which can be used as the main entrypoint for setting up the entire network layer:
 
-[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/config.rs)
+[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/config.rs)
 ```rust,ignore
 pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
