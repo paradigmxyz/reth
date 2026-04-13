@@ -153,10 +153,16 @@ impl RocksDBProvider {
             .unwrap_or(0);
 
         // Get the first tx after the checkpoint block from MDBX (authoritative up to checkpoint)
-        let checkpoint_next_tx = provider
-            .block_body_indices(checkpoint)?
-            .map(|indices| indices.next_tx_num())
-            .unwrap_or(0);
+        let Some(checkpoint_next_tx) =
+            provider.block_body_indices(checkpoint)?.map(|indices| indices.next_tx_num())
+        else {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                checkpoint,
+                "TransactionHashNumbers: checkpoint block body indices not found, unwind needed"
+            );
+            return Ok(None)
+        };
 
         if sf_tip_end_tx < checkpoint_next_tx {
             // This should never happen in normal operation - static files should have all
