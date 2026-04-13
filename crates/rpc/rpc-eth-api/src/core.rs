@@ -450,7 +450,7 @@ where
 
     /// Handler for: `eth_coinbase`
     async fn author(&self) -> RpcResult<Address> {
-        Err(internal_rpc_err("unimplemented"))
+        Err(internal_rpc_err("eth_coinbase is not supported"))
     }
 
     /// Handler for: `eth_accounts`
@@ -833,7 +833,7 @@ where
 
     /// Handler for: `eth_mining`
     async fn is_mining(&self) -> RpcResult<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        Err(internal_rpc_err("eth_mining is not supported"))
     }
 
     /// Handler for: `eth_hashrate`
@@ -843,7 +843,7 @@ where
 
     /// Handler for: `eth_getWork`
     async fn get_work(&self) -> RpcResult<Work> {
-        Err(internal_rpc_err("unimplemented"))
+        Err(internal_rpc_err("eth_getWork is not supported"))
     }
 
     /// Handler for: `eth_submitHashrate`
@@ -858,7 +858,7 @@ where
         _pow_hash: B256,
         _mix_digest: B256,
     ) -> RpcResult<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        Err(internal_rpc_err("eth_submitWork is not supported"))
     }
 
     /// Handler for: `eth_sendTransaction`
