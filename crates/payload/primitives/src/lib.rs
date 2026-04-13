@@ -181,7 +181,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -282,7 +283,10 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -393,6 +397,10 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Osaka hardfork.
     V5 = 5,
+    /// Version 6
+    ///
+    /// Added in the Amsterdam hardfork.
+    V6 = 6,
 }
 
 impl EngineApiMessageVersion {
@@ -421,6 +429,11 @@ impl EngineApiMessageVersion {
         matches!(self, Self::V5)
     }
 
+    /// Returns true if the version is V6.
+    pub const fn is_v6(&self) -> bool {
+        matches!(self, Self::V6)
+    }
+
     /// Returns the method name for the given version.
     pub const fn method_name(&self) -> &'static str {
         match self {
@@ -428,7 +441,7 @@ impl EngineApiMessageVersion {
             Self::V2 => "engine_newPayloadV2",
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
-            Self::V5 => "engine_newPayloadV5",
+            Self::V5 | Self::V6 => "engine_newPayloadV5",
         }
     }
 }
