@@ -373,7 +373,9 @@ where
         block_transactions_rlp_length += tx_rlp_len;
 
         // update and add to total fees
-        let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
+        let miner_fee = miner_fee.ok_or_else(|| {
+            PayloadBuilderError::Internal("missing miner fee after execution".into())
+        })?;
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
         cumulative_gas_used += gas_used;
 
