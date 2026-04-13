@@ -140,7 +140,7 @@ impl<B: Block> BlockBuffer<B> {
     fn remove_from_parent(&mut self, parent_hash: BlockHash, hash: &BlockHash) {
         // remove from parent to child connection, but only for this block parent.
         if let Some(entry) = self.parent_to_child.get_mut(&parent_hash) {
-            entry.shift_remove(hash);
+            entry.swap_remove(hash);
             // if set is empty remove block entry.
             if entry.is_empty() {
                 self.parent_to_child.remove(&parent_hash);
