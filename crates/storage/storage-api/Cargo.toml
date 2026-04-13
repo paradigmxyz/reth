@@ -36,8 +36,6 @@ serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-rocksdb = ["reth-db-api/rocksdb"]
-edge = ["rocksdb"]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",
@@ -78,9 +76,7 @@ serde = [
 
 serde-bincode-compat = [
     "reth-execution-types/serde-bincode-compat",
-    "reth-primitives-traits/serde-bincode-compat",
     "reth-trie-common/serde-bincode-compat",
-    "reth-ethereum-primitives/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
 ]

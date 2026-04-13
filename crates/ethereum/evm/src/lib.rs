@@ -28,7 +28,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    NextBlockEnvAttributes, TransactionEnv,
+    NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
@@ -127,7 +127,7 @@ impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
@@ -218,7 +218,7 @@ impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSp
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
@@ -273,6 +273,7 @@ where
             gas_limit: payload.payload.gas_limit(),
             basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
+            slot_num: 0,
         };
 
         Ok(EvmEnv { cfg_env, block_env })

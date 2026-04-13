@@ -1,0 +1,549 @@
+# Reth Development Guide for AI Agents
+
+This guide provides comprehensive instructions for AI agents working on the Reth codebase. It covers the architecture, development workflows, and critical guidelines for effective contributions.
+
+## Project Overview
+
+Reth is a high-performance Ethereum execution client written in Rust, focusing on modularity, performance, and contributor-friendliness. The codebase is organized into well-defined crates with clear boundaries and responsibilities.
+
+## Architecture Overview
+
+### Core Components
+
+1. **Consensus (`crates/consensus/`)**: Validates blocks according to Ethereum consensus rules
+2. **Storage (`crates/storage/`)**: Hybrid database using MDBX + static files for optimal performance
+3. **Networking (`crates/net/`)**: P2P networking stack with discovery, sync, and transaction propagation
+4. **RPC (`crates/rpc/`)**: JSON-RPC server supporting all standard Ethereum APIs
+5. **Execution (`crates/evm/`, `crates/ethereum/`)**: Transaction execution and state transitions
+6. **Pipeline (`crates/stages/`)**: Staged sync architecture for blockchain synchronization
+7. **Trie (`crates/trie/`)**: Merkle Patricia Trie implementation with parallel state root computation
+8. **Node Builder (`crates/node/`)**: High-level node orchestration and configuration
+9. **The Consensus Engine (`crates/engine/`)**: Handles processing blocks received from the consensus layer with the Engine API (newPayload, forkchoiceUpdated)
+
+### Key Design Principles
+
+- **Modularity**: Each crate can be used as a standalone library
+- **Performance**: Extensive use of parallelism, memory-mapped I/O, and optimized data structures
+- **Extensibility**: Traits and generic types allow for different chain implementations
+- **Type Safety**: Strong typing throughout with minimal use of dynamic dispatch
+
+## Development Workflow
+
+### Code Style and Standards
+
+1. **Formatting**: Always use nightly rustfmt
+   ```bash
+   cargo +nightly fmt --all
+   ```
+
+2. **Linting**: Run clippy with all features
+   ```bash
+   cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features 
+   ```
+
+3. **Testing**: Use nextest for faster test execution
+   ```bash
+   cargo nextest run --workspace
+   ```
+
+### Common Contribution Types
+
+Based on actual recent PRs, here are typical contribution patterns:
+
+#### 1. Small Bug Fixes (1-10 lines)
+Real example: Fixing beacon block root handling ([#16767](https://github.com/paradigmxyz/reth/pull/16767))
+```rust
+// Changed a single line to fix logic error
+- parent_beacon_block_root: parent.parent_beacon_block_root(),
++ parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+```
+
+#### 2. Integration with Upstream Changes
+Real example: Integrating revm updates ([#16752](https://github.com/paradigmxyz/reth/pull/16752))
+```rust
+// Update code to use new APIs from dependencies
+- if self.fork_tracker.is_shanghai_activated() {
+-     if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
++ if let Some(init_code_size_limit) = self.fork_tracker.max_initcode_size() {
++     if let Err(err) = transaction.ensure_max_init_code_size(init_code_size_limit) {
+```
+
+#### 3. Adding Comprehensive Tests
+Real example: ETH69 protocol tests ([#16759](https://github.com/paradigmxyz/reth/pull/16759))
+```rust
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth69_peers_can_connect() {
+    // Create test network with specific protocol versions
+    let p0 = PeerConfig::with_protocols(NoopProvider::default(), Some(EthVersion::Eth69.into()));
+    // Test connection and version negotiation
+}
+```
+
+#### 4. Making Components Generic
+Real example: Making EthEvmConfig generic over chainspec ([#16758](https://github.com/paradigmxyz/reth/pull/16758))
+```rust
+// Before: Hardcoded to ChainSpec
+- pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
+-     pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmFactory>,
+
+// After: Generic over any chain spec type
++ pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory>
++ where
++     C: EthereumHardforks,
++ {
++     pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
+```
+
+#### 5. Resource Management Improvements
+Real example: ETL directory cleanup ([#16770](https://github.com/paradigmxyz/reth/pull/16770))
+```rust
+// Add cleanup logic on startup
++ if let Err(err) = fs::remove_dir_all(&etl_path) {
++     warn!(target: "reth::cli", ?etl_path, %err, "Failed to remove ETL path on launch");
++ }
+```
+
+#### 6. Feature Additions
+Real example: Sharded mempool support ([#16756](https://github.com/paradigmxyz/reth/pull/16756))
+```rust
+// Add new filtering policies for transaction announcements
+pub struct ShardedMempoolAnnouncementFilter<T> {
+    pub inner: T,
+    pub shard_bits: u8,
+    pub node_id: Option<B256>,
+}
+```
+
+### Testing Guidelines
+
+1. **Unit Tests**: Test individual functions and components
+2. **Integration Tests**: Test interactions between components
+3. **Benchmarks**: For performance-critical code
+4. **Fuzz Tests**: For parsing and serialization code
+5. **Property Tests**: For checking component correctness on a wide variety of inputs
+
+Example test structure:
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_component_behavior() {
+        // Arrange
+        let component = Component::new();
+        
+        // Act
+        let result = component.operation();
+        
+        // Assert
+        assert_eq!(result, expected);
+    }
+}
+```
+
+### Performance Considerations
+
+1. **Avoid Allocations in Hot Paths**: Use references and borrowing
+2. **Parallel Processing**: Use rayon for CPU-bound parallel work
+3. **Async/Await**: Use tokio for I/O-bound operations
+4. **File Operations**: Use `reth_fs_util` instead of `std::fs` for better error handling
+
+### Common Pitfalls
+
+1. **Don't Block Async Tasks**: Use `spawn_blocking` for CPU-intensive work or work with lots of blocking I/O
+2. **Handle Errors Properly**: Use `?` operator and proper error types
+
+### What to Avoid
+
+Based on PR patterns, avoid:
+
+1. **Large, sweeping changes**: Keep PRs focused and reviewable
+2. **Mixing unrelated changes**: One logical change per PR
+3. **Ignoring CI failures**: All checks must pass
+4. **Incomplete implementations**: Finish features before submitting
+5. **Modifying libmdbx sources**: Never modify files in `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/` - this is vendored third-party code
+
+### CI Requirements
+
+Before submitting changes, ensure:
+
+1. **Format Check**: `cargo +nightly fmt --all --check`
+2. **Clippy**: No warnings
+3. **Tests Pass**: All unit and integration tests
+4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
+5. **CLI Docs** (if CLI changed): Run `make update-book-cli` (see below)
+6. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+
+### CLI Reference Docs (`book` CI Job)
+
+The CLI reference pages under `docs/vocs/docs/pages/cli/` are **auto-generated** from the `reth` binary's `--help` output. **Do not edit these files manually** — any hand edits will be overwritten and CI will fail regardless.
+
+When you add, remove, or modify CLI commands, subcommands, or flags, regenerate the CLI docs by running:
+
+```bash
+make update-book-cli
+```
+
+This builds `reth` in debug mode and runs `docs/cli/update.sh` to regenerate all CLI pages. Commit the resulting changes.
+
+The `book` CI job (`.github/workflows/lint.yml`) enforces this by regenerating the docs and running `git diff --exit-code`. If the committed docs don't match the generated output, CI fails. Manually editing these pages is never productive — always use `make update-book-cli`.
+
+### Opening PRs against <https://github.com/paradigmxyz/reth>
+
+#### Titles
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) with an optional scope:
+
+```
+<type>(<scope>): <short description>
+```
+
+**Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`
+
+**Scope** (optional): crate or area, e.g. `evm`, `trie`, `rpc`, `engine`, `net`
+
+Examples:
+- `fix(rpc): correct gas estimation for ERC-20 transfers`
+- `perf: batch trie updates to reduce cursor overhead`
+- `feat(engine): add new_payload_interval metric`
+
+#### Descriptions
+
+Keep it short. Say what changed and why — nothing more.
+
+**Do:**
+- Write 1–3 sentences summarizing the change
+- Explain _why_ if the diff doesn't make it obvious
+- Link related issues or EIPs
+- Include benchmark numbers for perf changes
+
+**Don't:**
+- List every file changed — that's what the diff is for
+- Repeat the title in the body
+- Add "Files changed" or "Changes" sections
+- Write walls of text that go stale when the diff is updated
+- Use filler like "This PR introduces...", "comprehensive", "robust", "enhance", "leverage"
+
+**Template:**
+
+```
+Closes #<issue>
+
+<what changed, 1-3 sentences>
+
+<why, if not obvious from the diff>
+```
+
+**Good example:**
+
+```
+Closes #16800
+
+Adds fallback for external IP resolution so node startup doesn't fail
+when STUN is unreachable. Falls back to the configured default.
+```
+
+**Bad example:**
+
+```
+## Summary
+This PR introduces comprehensive improvements to the IP resolution system.
+
+## Changes
+- Modified `crates/net/discv4/src/lib.rs` to add fallback
+- Modified `crates/net/discv4/src/config.rs` to add default IP
+- Added tests in `crates/net/discv4/src/tests/ip.rs`
+
+## Files Changed
+- crates/net/discv4/src/lib.rs
+- crates/net/discv4/src/config.rs
+- crates/net/discv4/src/tests/ip.rs
+```
+
+#### Labels and CI
+
+Label PRs appropriately, first check the available labels and then apply the relevant ones:
+* when changes are RPC related, add A-rpc label
+* when changes are docs related, add C-docs label
+* ... and so on, check the available labels for more options.
+* if being tasked to open a pr, ensure that all changes are properly formatted: `cargo +nightly fmt --all`
+
+If changes in reth include changes to dependencies, run commands `zepter` and `make lint-toml` before finalizing the pr. Assume `zepter` binary is installed.
+
+### Debugging Tips
+
+1. **Logging**: Use `tracing` crate with appropriate levels
+   ```rust
+   tracing::debug!(target: "reth::component", ?value, "description");
+   ```
+
+2. **Metrics**: Add metrics for monitoring
+   ```rust
+   metrics::counter!("reth_component_operations").increment(1);
+   ```
+
+3. **Test Isolation**: Use separate test databases/directories
+
+### Finding Where to Contribute
+
+1. **Check Issues**: Look for issues labeled `good-first-issue` or `help-wanted`
+2. **Review TODOs**: Search for `TODO` comments in the codebase
+3. **Improve Tests**: Areas with low test coverage are good targets
+4. **Documentation**: Improve code comments and documentation
+5. **Performance**: Profile and optimize hot paths (with benchmarks)
+
+### Common PR Patterns
+
+#### Small, Focused Changes
+Most PRs change only 1-5 files. Examples:
+- Single-line bug fixes
+- Adding a missing trait implementation
+- Updating error messages
+- Adding test cases for edge conditions
+
+#### Integration Work
+When dependencies update (especially revm), code needs updating:
+- Check for breaking API changes
+- Update to use new features (like EIP implementations)
+- Ensure compatibility with new versions
+
+#### Test Improvements
+Tests often need expansion for:
+- New protocol versions (ETH68, ETH69)
+- Edge cases in state transitions
+- Network behavior under specific conditions
+- Concurrent operations
+
+#### Making Code More Generic
+Common refactoring pattern:
+- Replace concrete types with generics
+- Add trait bounds for flexibility
+- Enable reuse across different chain types
+
+#### When to Comment
+
+Write comments that remain valuable after the PR is merged. Future readers won't have PR context - they only see the current code.
+
+##### ✅ DO: Add Value
+
+**Explain WHY and non-obvious behavior:**
+```rust
+// Process must handle allocations atomically to prevent race conditions
+// between dealloc on drop and concurrent limit checks
+unsafe impl GlobalAlloc for LimitedAllocator { ... }
+
+// Binary search requires sorted input. Panics on unsorted slices.
+fn find_index(items: &[Item], target: &Item) -> Option<usize>
+
+// Timeout set to 5s to match EVM block processing limits
+const TRACER_TIMEOUT: Duration = Duration::from_secs(5);
+```
+
+**Document constraints and assumptions:**
+```rust
+/// Returns heap size estimate.
+/// 
+/// Note: May undercount shared references (Rc/Arc). For precise
+/// accounting, combine with an allocator-based approach.
+fn deep_size_of(&self) -> usize
+```
+
+**Explain complex logic:**
+```rust
+// We reset limits at task start because tokio reuses threads in
+// spawn_blocking pool. Without reset, second task inherits first
+// task's allocation count and immediately hits limit.
+THREAD_ALLOCATED.with(|allocated| allocated.set(0));
+```
+
+##### ❌ DON'T: Describe Changes
+```rust
+// ❌ BAD - Describes the change, not the code
+// Changed from Vec to HashMap for O(1) lookups
+
+// ✅ GOOD - Explains the decision
+// HashMap provides O(1) symbol lookups during trace replay
+```
+```rust
+// ❌ BAD - PR-specific context
+// Fix for issue #234 where memory wasn't freed
+
+// ✅ GOOD - Documents the actual behavior
+// Explicitly drop allocations before limit check to ensure
+// accurate accounting
+```
+```rust
+// ❌ BAD - States the obvious
+// Increment counter
+counter += 1;
+
+// ✅ GOOD - Explains non-obvious purpose
+// Track allocations across all threads for global limit enforcement
+GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
+```
+
+✅ **Comment when:**
+- Non-obvious behavior or edge cases
+- Performance trade-offs
+- Safety requirements (unsafe blocks must always be documented)
+- Limitations or gotchas
+- Why simpler alternatives don't work
+
+❌ **Don't comment when:**
+- Code is self-explanatory
+- Just restating the code in English
+- Describing what changed in this PR
+
+##### The Test: "Will this make sense in 6 months?"
+
+Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
+
+
+#### Rust Style Guides
+
+##### Type Ordering in Files
+
+When defining structs, traits, and functions in a file, follow this ordering convention. The file's primary type (matching the file name) comes first, followed by supporting public types, then private types and helpers.
+
+```rust
+use ...;
+
+/// The primary type of this file (matches filename).
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// Followed by public auxiliary types that support the primary type
+
+/// Configuration for the processor.
+pub struct PayloadProcessorConfig { ... }
+
+/// Result type returned by processor operations.
+pub struct ProcessorResult { ... }
+
+// Followed by public traits related to the primary type
+
+pub trait ProcessorExt { ... }
+
+// Followed by private helper types
+
+struct InternalState { ... }
+
+// Followed by private helper functions
+
+fn validate_input() { ... }
+```
+
+❌ **Bad**: Adding new traits and auxiliary types **above** the file's primary type (see [#22133](https://github.com/paradigmxyz/reth/pull/22133)):
+
+```rust
+use ...;
+
+// ❌ BAD - new auxiliary struct added before the file's main type
+pub struct CacheWaitDurations { ... }
+
+// ❌ BAD - new trait added before the file's main type  
+pub trait WaitForCaches { ... }
+
+// The file's primary type is buried below unrelated additions
+pub struct PayloadProcessor { ... }
+```
+
+✅ **Good**: New types go **after** the primary type:
+
+```rust
+use ...;
+
+// ✅ The file's primary type stays at the top
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// ✅ Auxiliary types follow the primary type
+pub struct CacheWaitDurations { ... }
+
+pub trait WaitForCaches { ... }
+
+impl WaitForCaches for PayloadProcessor { ... }
+```
+
+### Example Contribution Workflow
+
+Let's say you want to fix a bug where external IP resolution fails on startup:
+
+1. **Create a branch**:
+   ```bash
+   git checkout -b fix-external-ip-resolution
+   ```
+
+2. **Find the relevant code**:
+   ```bash
+   # Search for IP resolution code
+   rg "external.*ip" --type rust
+   ```
+
+3. **Reason about the problem, when the problem is identified, make the fix**:
+   ```rust
+   // In crates/net/discv4/src/lib.rs
+   pub fn resolve_external_ip() -> Option<IpAddr> {
+       // Add fallback mechanism
+       nat::external_ip()
+           .or_else(|| nat::external_ip_from_stun())
+           .or_else(|| Some(DEFAULT_IP))
+   }
+   ```
+
+4. **Add a test**:
+   ```rust
+   #[test]
+   fn test_external_ip_fallback() {
+       // Test that resolution has proper fallbacks
+   }
+   ```
+
+5. **Run checks** (IMPORTANT!):
+   ```bash
+   cargo +nightly fmt --all
+   cargo clippy --workspace --all-features # Make sure WHOLE WORKSPACE compiles!
+   cargo nextest run -p reth-discv4
+   ```
+
+6. **Commit with clear message**:
+   ```bash
+   git commit -m "fix: add fallback for external IP resolution
+
+   Previously, node startup could fail if external IP resolution
+   failed. This adds fallback mechanisms to ensure the node can
+   always start with a reasonable default."
+   ```
+
+## Quick Reference
+
+### Essential Commands
+
+```bash
+# Format code
+cargo +nightly fmt --all
+
+# Run lints
+cargo +nightly clippy --workspace --all-features
+
+# Run tests
+cargo nextest run --workspace
+
+# Run specific benchmark
+cargo bench --bench bench_name
+
+# Build optimized binary
+cargo build --release
+
+# Check compilation for all features
+cargo check --workspace --all-features
+
+# Check documentation
+cargo docs --document-private-items
+
+# Regenerate CLI reference docs (after CLI changes)
+make update-book-cli
+```

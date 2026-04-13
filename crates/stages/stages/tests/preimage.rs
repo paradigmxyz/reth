@@ -1,6 +1,9 @@
 //! Preimage-specific pipeline tests for storage v2 selfdestruct behavior around Cancun.
 
-use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
+use alloy_consensus::{
+    constants::{EMPTY_WITHDRAWALS, ETH_TO_WEI},
+    Header, TxEip1559, TxReceipt,
+};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
@@ -977,6 +980,7 @@ fn execute_and_commit_block(
         parent_beacon_block_root: (timestamp >= 30).then_some(B256::ZERO),
         blob_gas_used: (timestamp >= 30).then_some(0),
         excess_blob_gas: (timestamp >= 30).then_some(0),
+        withdrawals_root: Some(EMPTY_WITHDRAWALS),
         ..Default::default()
     };
 

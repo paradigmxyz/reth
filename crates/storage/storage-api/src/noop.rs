@@ -35,8 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -402,10 +402,6 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
-    }
 }
 
 #[cfg(feature = "db-api")]
@@ -435,10 +431,6 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
     > {
         Ok(Vec::default())
-    }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
     }
 }
 
@@ -512,7 +504,12 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }

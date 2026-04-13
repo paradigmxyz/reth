@@ -80,8 +80,7 @@ where
 
     /// Returns a map of addresses to changed account balanced for a particular block.
     pub async fn balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
-        self.on_blocking_task(|this| async move { this.try_balance_changes_in_block(block_id) })
-            .await
+        self.on_blocking_task(async move |this| this.try_balance_changes_in_block(block_id)).await
     }
 
     fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
@@ -139,7 +138,7 @@ where
             .acquire_owned()
             .await
             .map_err(|_| EthApiError::InternalEthError)?;
-        self.on_blocking_task(move |this| async move {
+        self.on_blocking_task(async move |this| {
             let _permit = permit;
             this.try_block_execution_outcome(block_id, block_count)
         })

@@ -149,15 +149,24 @@ where
     ) -> Result<DecodedMultiProofV2, StateProofError> {
         let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
 
+        let storage_prefix_sets: B256Map<_> = self
+            .prefix_sets
+            .storage_prefix_sets
+            .into_iter()
+            .map(|(addr, ps)| (addr, ps.freeze()))
+            .collect();
+
         // Compute account proofs using the V2 proof calculator with sync account encoding.
         let account_trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let mut account_value_encoder = SyncAccountValueEncoder::new(
             self.trie_cursor_factory.clone(),
             self.hashed_cursor_factory.clone(),
-        );
+        )
+        .with_storage_prefix_sets(storage_prefix_sets.clone());
         let mut account_calculator =
-            proof_v2::ProofCalculator::new(account_trie_cursor, hashed_account_cursor);
+            proof_v2::ProofCalculator::new(account_trie_cursor, hashed_account_cursor)
+                .with_prefix_set(self.prefix_sets.account_prefix_set.freeze());
         let account_proofs =
             account_calculator.proof(&mut account_value_encoder, &mut account_targets)?;
 
@@ -173,6 +182,9 @@ where
                 storage_trie_cursor,
                 hashed_storage_cursor,
             );
+            if let Some(prefix_set) = storage_prefix_sets.get(&hashed_address) {
+                storage_calculator = storage_calculator.with_prefix_set(prefix_set.clone());
+            }
             let proofs = storage_calculator.storage_proof(hashed_address, &mut targets)?;
             storage_proofs.insert(hashed_address, proofs);
         }

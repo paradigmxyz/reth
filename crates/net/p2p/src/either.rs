@@ -7,6 +7,7 @@ use crate::{
     download::DownloadClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
+    receipts::client::ReceiptsClient,
 };
 use alloy_primitives::B256;
 
@@ -72,6 +73,22 @@ where
         match self {
             Self::Left(a) => Either::Left(a.get_headers_with_priority(request, priority)),
             Self::Right(b) => Either::Right(b.get_headers_with_priority(request, priority)),
+        }
+    }
+}
+
+impl<A, B> ReceiptsClient for Either<A, B>
+where
+    A: ReceiptsClient,
+    B: ReceiptsClient<Receipt = A::Receipt>,
+{
+    type Receipt = A::Receipt;
+    type Output = Either<A::Output, B::Output>;
+
+    fn get_receipts_with_priority(&self, hashes: Vec<B256>, priority: Priority) -> Self::Output {
+        match self {
+            Self::Left(a) => Either::Left(a.get_receipts_with_priority(hashes, priority)),
+            Self::Right(b) => Either::Right(b.get_receipts_with_priority(hashes, priority)),
         }
     }
 }

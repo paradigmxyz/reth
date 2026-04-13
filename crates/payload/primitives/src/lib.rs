@@ -25,8 +25,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
-    PayloadAttributesBuilder, PayloadBuilderAttributes,
+    payload_id, BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
+    PayloadAttributesBuilder,
 };
 
 mod payload;
@@ -47,15 +47,6 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
     /// These attributes typically come from external sources (e.g., consensus layer over RPC such
     /// as the Engine API) and contain parameters like timestamp, fee recipient, and randomness.
     type PayloadAttributes: PayloadAttributes + Unpin;
-
-    /// Extended attributes used internally during payload building.
-    ///
-    /// This type augments the basic payload attributes with additional information
-    /// needed during the building process, such as unique identifiers and parent
-    /// block references.
-    type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
-        + Clone
-        + Unpin;
 
     /// Converts a sealed block into the execution payload format.
     fn block_to_payload(
@@ -190,7 +181,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -291,7 +283,10 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -402,6 +397,10 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Osaka hardfork.
     V5 = 5,
+    /// Version 6
+    ///
+    /// Added in the Amsterdam hardfork.
+    V6 = 6,
 }
 
 impl EngineApiMessageVersion {
@@ -430,6 +429,11 @@ impl EngineApiMessageVersion {
         matches!(self, Self::V5)
     }
 
+    /// Returns true if the version is V6.
+    pub const fn is_v6(&self) -> bool {
+        matches!(self, Self::V6)
+    }
+
     /// Returns the method name for the given version.
     pub const fn method_name(&self) -> &'static str {
         match self {
@@ -437,7 +441,7 @@ impl EngineApiMessageVersion {
             Self::V2 => "engine_newPayloadV2",
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
-            Self::V5 => "engine_newPayloadV5",
+            Self::V5 | Self::V6 => "engine_newPayloadV5",
         }
     }
 }

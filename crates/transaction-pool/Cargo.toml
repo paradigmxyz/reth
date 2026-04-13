@@ -73,7 +73,6 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 assert_matches.workspace = true
 tempfile.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures.workspace = true
 

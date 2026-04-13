@@ -21,10 +21,7 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    context::result::ExecutionResult,
-    database::{states::bundle_state::BundleRetention, BundleState, State},
-};
+use revm::database::{states::bundle_state::BundleRetention, BundleState, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -329,9 +326,7 @@ pub trait BlockBuilder {
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(
-            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
-        ) -> CommitChanges,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError>;
 
     /// Invokes [`BlockExecutor::execute_transaction_with_result_closure`] and saves the
@@ -339,7 +334,7 @@ pub trait BlockBuilder {
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result),
     ) -> Result<u64, BlockExecutionError> {
         self.execute_transaction_with_commit_condition(tx, |res| {
             f(res);
@@ -358,9 +353,14 @@ pub trait BlockBuilder {
     }
 
     /// Completes the block building process and returns the [`BlockBuilderOutcome`].
+    ///
+    /// When `state_root_precomputed` is `None`, the state root is computed internally via
+    /// `state_root_with_updates()`. When `Some`, the provided root and trie updates are used
+    /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
     fn finish(
         self,
         state_provider: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
@@ -459,9 +459,7 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(
-            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
-        ) -> CommitChanges,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
@@ -477,6 +475,7 @@ where
     fn finish(
         self,
         state: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
@@ -484,11 +483,13 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        let (state_root, trie_updates) = match state_root_precomputed {
+            Some(precomputed) => precomputed,
+            None => state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?,
+        };
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
@@ -535,8 +536,7 @@ pub struct BasicBlockExecutor<F, DB> {
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let db = State::builder().with_database(db).with_bundle_update().build();
         Self { strategy_factory, db }
     }
 }
