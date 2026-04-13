@@ -4,7 +4,6 @@ use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
 use reth_era::common::file_ops::EraFileType;
-use reth_fs_util::FsPathError;
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
@@ -53,9 +52,18 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     const CHECKSUMS: &'static str = "checksums.txt";
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
+    ///
+    /// The file type is auto-detected from the URL. Use
+    /// [`with_era_type`](Self::with_era_type) to override.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
         let era_type = EraFileType::from_url(url.as_str());
         Self { client, url, folder: folder.into(), era_type }
+    }
+
+    /// Override the auto-detected [`EraFileType`].
+    pub const fn with_era_type(mut self, era_type: EraFileType) -> Self {
+        self.era_type = era_type;
+        self
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -137,7 +145,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
-                    remove_file_ignore_not_found(entry.path())?;
+                    reth_fs_util::remove_file_if_exists(entry.path())?;
                 }
             }
         }
@@ -322,16 +330,6 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     }
 }
 
-fn remove_file_ignore_not_found(path: impl AsRef<Path>) -> eyre::Result<()> {
-    match reth_fs_util::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(FsPathError::RemoveFile { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-            Ok(())
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
 async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
     let mut hasher = Sha256::new();
 
@@ -380,23 +378,17 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_file_ignore_not_found() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let path = temp_dir.path().join("missing.era1");
+    fn test_with_era_type_overrides_auto_detection() {
+        // URL without "era1" auto-detects as Era
+        let client = EraClient::new(
+            Client::new(),
+            Url::from_str("https://example.com/").unwrap(),
+            PathBuf::new(),
+        );
+        assert_eq!(client.era_type, EraFileType::Era);
 
-        assert!(remove_file_ignore_not_found(&path).is_ok());
-    }
-
-    #[test]
-    fn test_remove_file_ignore_not_found_preserves_other_errors() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let path = temp_dir.path().join("dir");
-        std::fs::create_dir_all(&path).unwrap();
-
-        let err = remove_file_ignore_not_found(&path).unwrap_err();
-        assert!(matches!(
-            err.downcast_ref::<FsPathError>(),
-            Some(FsPathError::RemoveFile { source, .. }) if source.kind() != io::ErrorKind::NotFound
-        ));
+        // with_era_type overrides to Era1
+        let client = client.with_era_type(EraFileType::Era1);
+        assert_eq!(client.era_type, EraFileType::Era1);
     }
 }

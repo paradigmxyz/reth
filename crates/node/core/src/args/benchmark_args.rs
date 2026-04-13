@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for benchmark configuration
 
 use clap::Args;
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 /// Parameters for benchmark configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
@@ -71,17 +71,158 @@ pub struct BenchmarkArgs {
     #[arg(long = "metrics-url", value_name = "URL", verbatim_doc_comment)]
     pub metrics_url: Option<String>,
 
+    /// Number of retries for fetching blocks from `--rpc-url` after a failure.
+    ///
+    /// Use `0` to fail immediately, or `forever` to never stop retrying.
+    #[arg(
+        long = "rpc-block-fetch-retries",
+        value_name = "RETRIES",
+        default_value = "10",
+        value_parser = parse_rpc_block_fetch_retries,
+        verbatim_doc_comment
+    )]
+    pub rpc_block_fetch_retries: RpcBlockFetchRetries,
+
     /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     ///
     /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
     /// directly, waits for persistence and cache updates to complete before processing,
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
+    ///
+    /// Cannot be used with `--wait-for-persistence` because `reth_newPayload` already
+    /// waits for persistence by default.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
+
+    /// Control when `reth_newPayload` waits for in-flight persistence.
+    ///
+    /// Accepts `always` (wait on every block), `never` (default), or a number N
+    /// to wait every N blocks and skip the rest.
+    ///
+    /// Requires `--reth-new-payload`.
+    #[arg(
+        long = "wait-for-persistence",
+        value_name = "MODE",
+        num_args = 0..=1,
+        default_missing_value = "always",
+        value_parser = clap::value_parser!(WaitForPersistence),
+        requires = "reth_new_payload",
+        verbatim_doc_comment
+    )]
+    pub wait_for_persistence: Option<WaitForPersistence>,
+
+    /// Skip waiting for execution cache and sparse trie locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_caches: false`
+    /// to the `reth_newPayload` endpoint.
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
+    pub no_wait_for_caches: bool,
 
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub rlp_blocks: bool,
+}
+
+/// Retry strategy for fetching blocks from the benchmark RPC provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpcBlockFetchRetries {
+    /// Retry up to `u32` times after the first failed attempt.
+    Finite(u32),
+    /// Retry forever.
+    Forever,
+}
+
+impl RpcBlockFetchRetries {
+    /// Returns the maximum number of retries for the `RetryBackoffLayer`.
+    pub const fn as_max_retries(self) -> u32 {
+        match self {
+            Self::Finite(n) => n,
+            Self::Forever => u32::MAX,
+        }
+    }
+}
+
+impl Default for RpcBlockFetchRetries {
+    fn default() -> Self {
+        Self::Finite(10)
+    }
+}
+
+impl FromStr for RpcBlockFetchRetries {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("forever") ||
+            s.eq_ignore_ascii_case("infinite") ||
+            s.eq_ignore_ascii_case("inf")
+        {
+            return Ok(Self::Forever)
+        }
+
+        let retries = s
+            .parse::<u32>()
+            .map_err(|_| format!("invalid retry value {s:?}, expected a number or 'forever'"))?;
+        Ok(Self::Finite(retries))
+    }
+}
+
+fn parse_rpc_block_fetch_retries(value: &str) -> Result<RpcBlockFetchRetries, String> {
+    value.parse()
+}
+
+/// Controls when `reth_newPayload` waits for in-flight persistence to complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WaitForPersistence {
+    /// Wait for persistence on every block (default `reth_newPayload` behavior).
+    #[default]
+    Always,
+    /// Never wait for persistence.
+    Never,
+    /// Wait for persistence every N blocks, skip for the rest.
+    EveryN(u64),
+}
+
+impl WaitForPersistence {
+    /// Returns the `wait_for_persistence` RPC parameter value for a given block number.
+    ///
+    /// - `None` → use the server default (true)
+    /// - `Some(false)` → skip waiting
+    /// - `Some(true)` → explicitly wait
+    pub const fn rpc_value(self, block_number: u64) -> Option<bool> {
+        match self {
+            Self::Always => None,
+            Self::Never => Some(false),
+            Self::EveryN(n) => {
+                if block_number.is_multiple_of(n) {
+                    Some(true)
+                } else {
+                    Some(false)
+                }
+            }
+        }
+    }
+}
+
+impl FromStr for WaitForPersistence {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("always") {
+            return Ok(Self::Always)
+        }
+        if s.eq_ignore_ascii_case("never") {
+            return Ok(Self::Never)
+        }
+        let n = s.parse::<u64>().map_err(|_| {
+            format!("invalid value {s:?}, expected 'always', 'never', or a block interval number")
+        })?;
+        if n == 0 {
+            return Err("block interval must be > 0, use 'never' to disable".to_string())
+        }
+        Ok(Self::EveryN(n))
+    }
 }
 
 #[cfg(test)]
@@ -104,5 +245,70 @@ mod tests {
         };
         let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_parse_rpc_block_fetch_retries_forever() {
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--rpc-block-fetch-retries",
+            "forever",
+        ])
+        .args;
+        assert_eq!(args.rpc_block_fetch_retries, RpcBlockFetchRetries::Forever);
+    }
+
+    #[test]
+    fn test_parse_rpc_block_fetch_retries_number() {
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--rpc-block-fetch-retries",
+            "7",
+        ])
+        .args;
+        assert_eq!(args.rpc_block_fetch_retries, RpcBlockFetchRetries::Finite(7));
+    }
+
+    #[test]
+    fn test_parse_wait_for_persistence() {
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--reth-new-payload",
+            "--wait-for-persistence",
+            "always",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::Always));
+
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--reth-new-payload",
+            "--wait-for-persistence",
+            "never",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::Never));
+
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--reth-new-payload",
+            "--wait-for-persistence",
+            "10",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::EveryN(10)));
+
+        // bare --wait-for-persistence (no value) defaults to Always
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--reth-new-payload",
+            "--wait-for-persistence",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::Always));
+
+        // default is None
+        let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;
+        assert_eq!(args.wait_for_persistence, None);
     }
 }

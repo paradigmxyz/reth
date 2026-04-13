@@ -42,7 +42,6 @@ function loadSamplyUrls(workDir) {
 function blocksLabel(summary) {
   const parts = [];
   if (summary.big_blocks) {
-    if (summary.gas_ramp_blocks) parts.push({ key: 'Gas Ramp', value: summary.gas_ramp_blocks });
     parts.push({ key: 'Big Blocks', value: summary.blocks });
   } else {
     const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
@@ -51,6 +50,7 @@ function blocksLabel(summary) {
   }
   const cores = process.env.BENCH_CORES || '0';
   if (cores !== '0') parts.push({ key: 'Cores', value: cores });
+  if (summary.wait_time) parts.push({ key: 'Wait time', value: summary.wait_time });
   return parts;
 }
 

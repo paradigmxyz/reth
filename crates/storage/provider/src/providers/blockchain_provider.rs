@@ -555,7 +555,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         let provider = self.consistent_provider()?;
-        provider.ensure_canonical_block(block_number)?;
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -730,10 +729,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.storage_changeset_count()
-    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
@@ -757,10 +752,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         self.consistent_provider()?.account_changesets_range(range)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.account_changeset_count()
     }
 }
 
