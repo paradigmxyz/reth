@@ -32,12 +32,17 @@ use alloy_eips::{
 };
 #[cfg(test)]
 use alloy_primitives::Address;
-use alloy_primitives::{map::AddressSet, TxHash, B256};
+use alloy_primitives::{
+    map::{AddressSet, B256Map, B256Set},
+    TxHash, B256,
+};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
+#[cfg(test)]
+use std::collections::{HashMap, HashSet};
 use std::{
     cmp::Ordering,
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
+    collections::{btree_map::Entry, hash_map, BTreeMap},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -951,8 +956,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///    of the standard limit. This is due to the possibility of the account being sweeped by an
     ///    unrelated account.
     /// 2. In case the pool is tracking a pending / queued transaction from a specific account, at
-    ///    most one in-flight transaction is allowed; any additional delegated transactions from
-    ///    that account will be rejected.
+    ///    most the configured inflight delegation slot limit of in-flight transactions is allowed;
+    ///    any additional delegated transactions from that account will be rejected.
     fn validate_auth(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -964,8 +969,13 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
-                // Ensure authority has at most 1 inflight transaction.
-                if self.all_transactions.txs_iter(*sender_id).nth(1).is_some() {
+                // Ensure authority does not exceed the configured inflight delegation slot limit.
+                if self
+                    .all_transactions
+                    .txs_iter(*sender_id)
+                    .nth(self.config.max_inflight_delegated_slot_limit)
+                    .is_some()
+                {
                     return Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
@@ -1387,7 +1397,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Max number of executable transaction slots guaranteed per account
     max_account_slots: usize,
     /// _All_ transactions identified by their hash.
-    by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
+    by_hash: B256Map<Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Contains the currently known information about the senders.
@@ -1405,7 +1415,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// All accounts with a pooled authorization
-    auths: FxHashMap<SenderId, HashSet<TxHash>>,
+    auths: FxHashMap<SenderId, B256Set>,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
 }
@@ -3101,6 +3111,35 @@ mod tests {
         let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
         assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+    }
+
+    #[test]
+    fn insert_replace_underpriced_rounds_up_minimum_bump() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions { minimal_protocol_basefee: 0, ..Default::default() };
+        let mut tx = MockTransaction::eip1559().inc_price().inc_limit();
+        tx.set_priority_fee(1);
+        tx.set_max_fee(1);
+
+        let first = f.validated(tx.clone());
+        let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        let mut replacement = f.validated(tx.rng_hash().inc_price());
+        replacement.transaction.set_priority_fee(1);
+        replacement.transaction.set_max_fee(2);
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+
+        replacement.transaction.set_priority_fee(2);
+        replacement.transaction.set_max_fee(2);
+        let replaced = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap();
+        assert!(replaced.replaced_tx.is_some());
         assert_eq!(pool.len(), 1);
     }
 

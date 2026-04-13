@@ -1,11 +1,10 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
-use alloy_primitives::B256;
 use csv::Writer;
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
-use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Serialize};
 use std::{fs, path::Path, time::Duration};
 use tracing::info;
 
@@ -18,20 +17,6 @@ pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 /// This is the suffix for new payload output csv files.
 pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
 
-/// Serialized format for gas ramp payloads on disk.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct GasRampPayloadFile {
-    /// Engine API version (1-5).
-    ///
-    /// `None` indicates that `reth_newPayload` should be used.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) version: Option<u8>,
-    /// The block hash for FCU.
-    pub(crate) block_hash: B256,
-    /// The params to pass to newPayload.
-    pub(crate) params: serde_json::Value,
-}
-
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
 /// used and the `newPayload` latency.
 #[derive(Debug)]
@@ -40,8 +25,8 @@ pub(crate) struct NewPayloadResult {
     pub(crate) gas_used: u64,
     /// The latency of the `newPayload` call.
     pub(crate) latency: Duration,
-    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
-    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting on persistence (backpressure + explicit wait).
+    pub(crate) persistence_wait: Duration,
     /// Time spent waiting for execution cache lock.
     pub(crate) execution_cache_wait: Duration,
     /// Time spent waiting for sparse trie lock.
@@ -79,7 +64,7 @@ impl Serialize for NewPayloadResult {
         let mut state = serializer.serialize_struct("NewPayloadResult", 5)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
-        state.serialize_field("persistence_wait", &self.persistence_wait.map(|d| d.as_micros()))?;
+        state.serialize_field("persistence_wait", &self.persistence_wait.as_micros())?;
         state.serialize_field("execution_cache_wait", &self.execution_cache_wait.as_micros())?;
         state.serialize_field("sparse_trie_wait", &self.sparse_trie_wait.as_micros())?;
         state.end()
@@ -114,16 +99,27 @@ impl CombinedResult {
 
 impl std::fmt::Display for CombinedResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let np = &self.new_payload_result;
         write!(
             f,
             "Block {} processed at {:.4} Ggas/s, used {} total gas. Combined: {:.4} Ggas/s. fcu: {:?}, newPayload: {:?}",
             self.block_number,
-            self.new_payload_result.gas_per_second() / GIGAGAS as f64,
-            self.new_payload_result.gas_used,
+            np.gas_per_second() / GIGAGAS as f64,
+            np.gas_used,
             self.combined_gas_per_second() / GIGAGAS as f64,
             self.fcu_latency,
-            self.new_payload_result.latency
-        )
+            np.latency,
+        )?;
+        if !np.execution_cache_wait.is_zero() {
+            write!(f, ", execution cache wait: {:?}", np.execution_cache_wait)?;
+        }
+        if !np.sparse_trie_wait.is_zero() {
+            write!(f, ", trie cache wait: {:?}", np.sparse_trie_wait)?;
+        }
+        if !np.persistence_wait.is_zero() {
+            write!(f, ", persistence wait: {:?}", np.persistence_wait)?;
+        }
+        Ok(())
     }
 }
 
@@ -150,7 +146,7 @@ impl Serialize for CombinedResult {
         state.serialize_field("total_latency", &total_latency)?;
         state.serialize_field(
             "persistence_wait",
-            &self.new_payload_result.persistence_wait.map(|d| d.as_micros()),
+            &self.new_payload_result.persistence_wait.as_micros(),
         )?;
         state.serialize_field(
             "execution_cache_wait",

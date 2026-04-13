@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader, TxReceipt,
+};
 use alloy_primitives::TxHash;
 use reth_primitives_traits::{
     Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock,
@@ -10,7 +13,7 @@ use reth_primitives_traits::{
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcTypes};
 
-use crate::utils::calculate_gas_used_and_next_log_index;
+use crate::{utils::calculate_gas_used_and_next_log_index, TransactionSource};
 
 /// Cached data for a transaction lookup.
 #[derive(Debug, Clone)]
@@ -36,6 +39,43 @@ impl<B: Block, R> CachedTransaction<B, R> {
     /// Returns the `Recovered<&T>` transaction at the cached index.
     pub fn recovered_transaction(&self) -> Option<Recovered<&<B::Body as BlockBody>::Transaction>> {
         self.block.recovered_transaction(self.tx_index)
+    }
+
+    /// Converts this cached transaction into a [`TransactionSource::Block`].
+    ///
+    /// Returns `None` if the transaction index is out of bounds.
+    pub fn to_transaction_source(
+        &self,
+    ) -> Option<TransactionSource<<B::Body as BlockBody>::Transaction>> {
+        let tx = self.recovered_transaction()?;
+        Some(TransactionSource::Block {
+            transaction: tx.cloned(),
+            index: self.tx_index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            base_fee: self.block.base_fee_per_gas(),
+        })
+    }
+
+    /// Returns the receipt at the cached transaction index, if receipts are available.
+    pub fn receipt(&self) -> Option<&R> {
+        self.receipts.as_ref()?.get(self.tx_index)
+    }
+
+    /// Constructs a [`TransactionMeta`] for this cached transaction using the given tx hash.
+    pub fn transaction_meta(&self, tx_hash: TxHash) -> TransactionMeta
+    where
+        B::Header: BlockHeader,
+    {
+        TransactionMeta {
+            tx_hash,
+            index: self.tx_index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            base_fee: self.block.base_fee_per_gas(),
+            excess_blob_gas: self.block.header().excess_blob_gas(),
+            timestamp: self.block.timestamp(),
+        }
     }
 
     /// Converts this cached transaction into an RPC receipt using the given converter.
