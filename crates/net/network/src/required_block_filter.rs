@@ -63,7 +63,7 @@ where
                 // Spawn a task to check this peer's blocks
                 let network = self.network.clone();
                 let block_num_hashes = self.block_num_hashes.clone();
-                let peer_block_number = info.status.latest_block.unwrap_or(0);
+                let peer_block_number = info.status.latest_block;
 
                 tokio::spawn(async move {
                     Self::check_peer_blocks(
@@ -85,14 +85,20 @@ where
         peer_id: reth_network_api::PeerId,
         messages: reth_network_api::PeerRequestSender<PeerRequest<N::Primitives>>,
         block_num_hashes: Vec<BlockNumHash>,
-        latest_peer_block: u64,
+        latest_peer_block: Option<u64>,
     ) {
         for block_num_hash in block_num_hashes {
             // Skip if peer's block number is lower than required, peer might also be syncing and
-            // still on the same chain.
-            if block_num_hash.number > 0 && latest_peer_block < block_num_hash.number {
-                debug!(target: "net::filter", "Skipping check for block {} - peer {} only at block {}", 
-                       block_num_hash.number, peer_id, latest_peer_block);
+            // still on the same chain. Legacy peers do not advertise a block number in status, so
+            // we must treat `None` as unknown instead of as block 0.
+            if should_skip_block_check(block_num_hash.number, latest_peer_block) {
+                debug!(
+                    target: "net::filter",
+                    latest_peer_block = latest_peer_block.unwrap_or_default(),
+                    required_block = block_num_hash.number,
+                    %peer_id,
+                    "Skipping required block check for lagging peer"
+                );
                 continue;
             }
 
@@ -156,6 +162,14 @@ where
     }
 }
 
+const fn should_skip_block_check(
+    required_block_number: u64,
+    latest_peer_block: Option<u64>,
+) -> bool {
+    required_block_number > 0 &&
+        matches!(latest_peer_block, Some(latest_peer_block) if latest_peer_block < required_block_number)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +216,16 @@ mod tests {
         let filter = RequiredBlockFilter::new(network, block_num_hashes);
         // Verify the filter can be created and basic properties are set
         assert_eq!(filter.block_num_hashes.len(), 1);
+    }
+
+    #[test]
+    fn test_should_not_skip_block_check_when_peer_height_is_unknown() {
+        assert!(!should_skip_block_check(23_115_201, None));
+    }
+
+    #[test]
+    fn test_should_skip_block_check_only_for_known_lagging_peers() {
+        assert!(should_skip_block_check(23_115_201, Some(23_115_200)));
+        assert!(!should_skip_block_check(23_115_201, Some(23_115_201)));
     }
 }
