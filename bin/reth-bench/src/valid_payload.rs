@@ -266,6 +266,22 @@ pub(crate) fn payload_to_new_payload(
         ExecutionPayload::V1(payload) => {
             (EngineApiMessageVersion::V1, serde_json::to_value((payload,))?)
         }
+        ExecutionPayload::V4(payload) => {
+            let cancun = sidecar
+                .cancun()
+                .ok_or_else(|| eyre::eyre!("missing cancun sidecar for V4 payload"))?;
+            let version = target_version.unwrap_or(EngineApiMessageVersion::V4);
+            let requests = sidecar.prague().map(|p| p.requests.clone()).unwrap_or_default();
+            (
+                version,
+                serde_json::to_value((
+                    payload,
+                    cancun.versioned_hashes.clone(),
+                    cancun.parent_beacon_block_root,
+                    requests,
+                ))?,
+            )
+        }
     };
 
     Ok((version, params, execution_data))

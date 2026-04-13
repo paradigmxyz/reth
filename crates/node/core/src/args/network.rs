@@ -82,6 +82,8 @@ pub struct DefaultNetworkArgs {
     pub tx_ingress_policy: TransactionIngressPolicy,
     /// Default transaction propagation mode.
     pub propagation_mode: TransactionPropagationMode,
+    /// Default enforce ENR fork ID setting.
+    pub enforce_enr_fork_id: bool,
 }
 
 impl DefaultNetworkArgs {
@@ -184,6 +186,12 @@ impl DefaultNetworkArgs {
         self.propagation_mode = v;
         self
     }
+
+    /// Set the default enforce ENR fork ID setting.
+    pub const fn with_enforce_enr_fork_id(mut self, v: bool) -> Self {
+        self.enforce_enr_fork_id = v;
+        self
+    }
 }
 
 impl Default for DefaultNetworkArgs {
@@ -205,6 +213,7 @@ impl Default for DefaultNetworkArgs {
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
+            enforce_enr_fork_id: false,
         }
     }
 }
@@ -403,7 +412,7 @@ pub struct NetworkArgs {
     /// When enabled, peers discovered without a confirmed fork ID are not added to the peer set
     /// until their fork ID is verified via EIP-868 ENR request. This filters out peers from other
     /// networks that pollute the discovery table.
-    #[arg(long)]
+    #[arg(long, default_value_t = DefaultNetworkArgs::get_global().enforce_enr_fork_id)]
     pub enforce_enr_fork_id: bool,
 }
 
@@ -654,6 +663,7 @@ impl Default for NetworkArgs {
             tx_propagation_policy,
             tx_ingress_policy,
             propagation_mode,
+            enforce_enr_fork_id,
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
@@ -688,7 +698,7 @@ impl Default for NetworkArgs {
             network_id: None,
             eth_max_message_size: None,
             netrestrict: None,
-            enforce_enr_fork_id: false,
+            enforce_enr_fork_id,
         }
     }
 }
