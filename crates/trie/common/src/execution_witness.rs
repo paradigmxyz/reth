@@ -16,7 +16,7 @@ pub enum ExecutionWitnessMode {
     ///     - Values are sorted lexicographically ascending.
     /// - For the `state` field:
     ///     - Avoids including empty nodes (i.e. 0x80).
-    ///     - Compared to legacy, it does not include storage trie root nodes if no storae is
+    ///     - Compared to legacy, it does not include storage trie root nodes if no storage is
     ///       accessed.
     ///     - It contains the minimum amount of siblings for post-state root calculation, since it
     ///       does updates/insertions first and then deletions. Compared to legacy which does the
