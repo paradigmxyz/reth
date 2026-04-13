@@ -257,9 +257,6 @@ where
     ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
         // Checks for tx_type
         match transaction.ty() {
-            LEGACY_TX_TYPE_ID => {
-                // Accept legacy transactions
-            }
             // Accept only legacy transactions until EIP-2718/2930 activates
             EIP2930_TX_TYPE_ID if !self.eip2718 => {
                 return Err(TransactionValidationOutcome::Invalid(
@@ -288,6 +285,9 @@ where
                     InvalidTransactionError::Eip7702Disabled.into(),
                 ))
             }
+            // Accept known transaction types when their respective fork is active
+            LEGACY_TX_TYPE_ID | EIP2930_TX_TYPE_ID | EIP1559_TX_TYPE_ID | EIP4844_TX_TYPE_ID |
+            EIP7702_TX_TYPE_ID => {}
 
             ty if !self.other_tx_types.bit(ty as usize) => {
                 return Err(TransactionValidationOutcome::Invalid(
