@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
+use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor};
 use reth_revm::{
     database::{EvmStateProvider, StateProviderDatabase},
     db::{bal::EvmDatabaseError, State},

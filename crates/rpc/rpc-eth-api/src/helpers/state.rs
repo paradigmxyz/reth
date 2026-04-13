@@ -12,9 +12,10 @@ use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::SealedHeaderFor;
-use reth_rpc_convert::RpcConvert;
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
+    error::{FromEvmError, IntoEthApiError},
+    EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
 use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
 use reth_storage_api::{
@@ -350,14 +351,22 @@ pub trait LoadState:
     /// Returns the next available nonce without gaps for the given address
     /// Next available nonce is either the on chain nonce of the account or the highest consecutive
     /// nonce in the pool + 1
-    fn next_available_nonce(
+    ///
+    /// The provided request must have a from address set.
+    fn next_available_nonce_for(
         &self,
-        address: Address,
+        request: &RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<u64, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
+        let address = request.as_ref().from;
         self.spawn_blocking_io(move |this| {
+            let address = match address {
+                Some(address) => address,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+
             // first fetch the on chain nonce of the account
             let mut next_nonce = this
                 .latest_state()?

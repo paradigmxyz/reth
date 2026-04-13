@@ -5,7 +5,7 @@ use super::*;
 /// After calling `commit_updates` with taken updates, a subsequent mutation + `root()` +
 /// `take_updates()` should only report the delta from the new baseline — it must NOT
 /// re-report branch nodes from the first round.
-pub(super) fn test_commit_updates_syncs_branch_masks<T: SparseTrie + Default>() {
+pub(super) fn test_commit_updates_syncs_branch_masks<T: SparseTrie>(new_trie: fn() -> T) {
     // 5 leaves spread across different subtrie regions.
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0x10;
@@ -27,7 +27,7 @@ pub(super) fn test_commit_updates_syncs_branch_masks<T: SparseTrie + Default>() 
     ]);
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial hashes.
     let _ = trie.root();
@@ -79,7 +79,7 @@ pub(super) fn test_commit_updates_syncs_branch_masks<T: SparseTrie + Default>() 
 /// Committing empty updated/removed sets should not change trie behavior.
 ///
 /// Build a trie, compute root, then commit empty updates. Root should be unchanged.
-pub(super) fn test_commit_updates_empty_is_noop<T: SparseTrie + Default>() {
+pub(super) fn test_commit_updates_empty_is_noop<T: SparseTrie>(new_trie: fn() -> T) {
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0x10;
     let mut key_b = B256::ZERO;
@@ -90,7 +90,7 @@ pub(super) fn test_commit_updates_empty_is_noop<T: SparseTrie + Default>() {
         BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     let hash1 = trie.root();
     assert_eq!(hash1, harness.original_root());

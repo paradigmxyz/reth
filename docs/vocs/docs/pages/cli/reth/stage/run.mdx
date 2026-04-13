@@ -112,6 +112,14 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
+      --storage.v2 [<V2>]
+          Enable V2 (hot/cold) storage layout for new databases.
+
+          When set, new databases will be initialized with the V2 storage layout that separates hot and cold data. Existing databases always use the settings persisted in their metadata regardless of this flag.
+
+          [default: true]
+          [possible values: true, false]
+
       --metrics <SOCKET>
           Enable Prometheus metrics.
 
@@ -365,6 +373,9 @@ Networking:
 
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
+
+      --eth-max-message-size <BYTES>
+          Maximum allowed ETH message size in bytes. Default is 10 MiB
 
       --netrestrict <NETRESTRICT>
           Restrict network communication to the given IP networks (CIDR masks).

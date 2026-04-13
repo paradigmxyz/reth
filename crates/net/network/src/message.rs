@@ -9,9 +9,9 @@ use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
     message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
-    NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData,
-    PooledTransactions, Receipts, SharedTransactions, Transactions,
+    EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetReceipts,
+    NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -80,6 +80,18 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
         }
     }
 
+    /// Returns `true` if this message is a broadcast (block/transaction announcement or
+    /// propagation) rather than a request/response.
+    pub const fn is_broadcast(&self) -> bool {
+        matches!(
+            self,
+            Self::NewBlockHashes(_) |
+                Self::NewBlock(_) |
+                Self::SendTransactions(_) |
+                Self::PooledTransactions(_)
+        )
+    }
+
     /// Returns the number of items in the message payload, if applicable.
     pub fn message_item_count(&self) -> usize {
         match self {
@@ -107,6 +119,10 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetBlockBodies(GetBlockBodies),
+    /// Requests block access lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists(GetBlockAccessLists),
 
     /// Requests receipts from the peer.
     ///

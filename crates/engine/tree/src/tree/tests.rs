@@ -222,7 +222,6 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
-            provider.cached_storage_settings().use_hashed_state(),
             reth_tasks::Runtime::test(),
         );
 
@@ -306,7 +305,6 @@ impl TestHarness {
                     state: fcu_state,
                     payload_attrs: None,
                     tx,
-                    version: EngineApiMessageVersion::default(),
                 }
                 .into(),
             ))
@@ -606,7 +604,6 @@ async fn test_engine_request_during_backfill() {
                 },
                 payload_attrs: None,
                 tx,
-                version: EngineApiMessageVersion::default(),
             }
             .into(),
         ))
@@ -692,6 +689,74 @@ async fn test_holesky_payload() {
 
     let resp = rx.await.unwrap().unwrap();
     assert!(resp.is_syncing());
+}
+
+#[test]
+fn test_backpressure_waits_for_persistence_before_reading_incoming() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = test_harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_persistence_backpressure_threshold(1);
+
+    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+    assert!(test_harness.tree.should_backpressure());
+
+    let (tx, mut rx) = oneshot::channel();
+    test_harness
+        .to_tree_tx
+        .send(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated {
+                state: ForkchoiceState {
+                    head_block_hash: B256::random(),
+                    safe_block_hash: B256::random(),
+                    finalized_block_hash: B256::random(),
+                },
+                payload_attrs: None,
+                tx,
+            }
+            .into(),
+        ))
+        .unwrap();
+    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
+    assert_eq!(test_harness.tree.incoming.len(), 2);
+
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(10));
+        persist_tx
+            .send(PersistenceResult {
+                last_block: Some(persisted),
+                commit_duration: Some(Duration::ZERO),
+            })
+            .unwrap();
+    });
+
+    let event = test_harness.tree.wait_for_persistence_event();
+    assert!(matches!(event, super::LoopEvent::PersistenceComplete { .. }));
+    assert_eq!(test_harness.tree.incoming.len(), 2);
+
+    let super::LoopEvent::PersistenceComplete { result, start_time } = event else {
+        unreachable!()
+    };
+    test_harness.tree.on_persistence_complete(result, start_time).unwrap();
+
+    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
+        panic!("expected queued engine message")
+    };
+    let _ = test_harness.tree.on_engine_message(message).unwrap();
+    let msg = rx.try_recv();
+    assert!(msg.is_ok());
+    assert_eq!(test_harness.tree.incoming.len(), 1);
+
+    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
+        panic!("expected queued engine message")
+    };
+    let _ = test_harness.tree.on_engine_message(message).unwrap();
+    assert_eq!(test_harness.tree.incoming.len(), 0);
 }
 
 #[tokio::test]
@@ -1092,7 +1157,6 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
                 },
                 payload_attrs: None,
                 tx,
-                version: EngineApiMessageVersion::default(),
             }
             .into(),
         ))
@@ -1808,10 +1872,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .handle_canonical_head(state, &None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.handle_canonical_head(state, &None).unwrap();
         assert!(result.is_some(), "Should return outcome for canonical head");
         let outcome = result.unwrap();
         let fcu_result = outcome.outcome.await.unwrap();
@@ -1824,10 +1885,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .handle_canonical_head(non_canonical_state, &None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.handle_canonical_head(non_canonical_state, &None).unwrap();
         assert!(result.is_none(), "Non-canonical head should return None");
     }
 
@@ -1850,10 +1908,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .apply_chain_update(state, &None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.apply_chain_update(state, &None).unwrap();
         assert!(result.is_some(), "Should apply chain update for new head");
         let outcome = result.unwrap();
         let fcu_result = outcome.outcome.await.unwrap();
@@ -1866,10 +1921,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .apply_chain_update(missing_state, &None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.apply_chain_update(missing_state, &None).unwrap();
         assert!(result.is_none(), "Missing block should return None");
     }
 
@@ -1923,10 +1975,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: canonical_head,
         };
 
-        let result = test_harness
-            .tree
-            .on_forkchoice_updated(state, None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.on_forkchoice_updated(state, None).unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_valid());
 
@@ -1937,10 +1986,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .on_forkchoice_updated(missing_state, None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.on_forkchoice_updated(missing_state, None).unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing());
         assert!(result.event.is_some(), "Should trigger download event for missing block");
@@ -1953,10 +1999,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .on_forkchoice_updated(state, None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.on_forkchoice_updated(state, None).unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing(), "Should return syncing during backfill");
     }
@@ -2004,10 +2047,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness
-            .tree
-            .handle_canonical_head(state, &None, EngineApiMessageVersion::default())
-            .unwrap();
+        let result = test_harness.tree.handle_canonical_head(state, &None).unwrap();
         assert!(result.is_some(), "OpStack should handle canonical head");
     }
 

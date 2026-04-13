@@ -62,7 +62,12 @@ where
     global::set_tracer_provider(tracer_provider.clone());
 
     let tracer = tracer_provider.tracer(otlp_config.service_name);
-    Ok(tracing_opentelemetry::layer().with_tracer(tracer))
+    Ok(tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        .with_location(false)
+        .with_tracked_inactivity(false)
+        .with_target(false)
+        .with_threads(false))
 }
 
 /// Creates a tracing layer that exports logs to an OTLP endpoint.

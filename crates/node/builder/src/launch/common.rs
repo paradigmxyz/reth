@@ -501,6 +501,7 @@ where
                 .build()?
         };
 
+        let prune_config = self.prune_config();
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -508,7 +509,8 @@ where
             rocksdb_provider,
             self.task_executor().clone(),
         )?
-        .with_prune_modes(self.prune_modes())
+        .with_prune_modes(prune_config.segments)
+        .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_changeset_cache(changeset_cache);
 
         // Check consistency between the database and static files, returning
@@ -1010,7 +1012,7 @@ where
     }
 
     /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub async fn launch_exex(
         &self,
         installed_exex: Vec<(
@@ -1032,7 +1034,7 @@ where
     ///     .launch()
     ///     .await
     /// ```
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn exex_launcher(
         &self,
         installed_exex: Vec<(
@@ -1310,6 +1312,7 @@ mod tests {
                     bodies_distance: None,
                     receipts_log_filter: None,
                     bodies_before: None,
+                    minimum_distance: None,
                 },
                 ..NodeConfig::test()
             };

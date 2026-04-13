@@ -48,6 +48,7 @@ impl SlotPreimages {
         builder.write_map();
         builder.set_flags(EnvironmentFlags {
             no_sub_dir: false,
+            no_rdahead: true,
             mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
             ..Default::default()
         });
@@ -206,7 +207,20 @@ fn inject_preimage_entry(
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
-    revert.storage.entry(plain_key).or_insert(RevertToSlot::Some(value));
+    // When a contract is selfdestructed and then re-created at the same address via
+    // CREATE2 in the same block, revm treats the new contract as fresh and never reads
+    // the slot's original DB value. Slots touched by the new contract are marked as
+    // `Destroyed` instead of `Some(previous_value)`. We must overwrite these with the
+    // actual DB value here, otherwise `to_previous_value()` resolves them to zero.
+    revert
+        .storage
+        .entry(plain_key)
+        .and_modify(|slot| {
+            if matches!(slot, RevertToSlot::Destroyed) {
+                *slot = RevertToSlot::Some(value);
+            }
+        })
+        .or_insert(RevertToSlot::Some(value));
     Ok(())
 }
 

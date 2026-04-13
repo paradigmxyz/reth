@@ -857,7 +857,12 @@ where
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: reth_trie::ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }
@@ -1009,10 +1014,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
-    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
@@ -1039,10 +1040,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
-    }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
     }
 }
 
