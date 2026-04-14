@@ -191,6 +191,7 @@ where
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: attributes.withdrawals.clone().map(Into::into),
                 extra_data: builder_config.extra_data,
+                slot_number: attributes.slot_number(),
             },
         )
         .map_err(PayloadBuilderError::other)?;

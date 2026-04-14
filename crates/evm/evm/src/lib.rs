@@ -117,6 +117,7 @@ pub use alloy_evm::{
 ///     gas_limit: 30_000_000,
 ///     withdrawals: Some(withdrawals),
 ///     parent_beacon_block_root: Some(beacon_root),
+///     slot_number: None,
 /// };
 ///
 /// // Build a new block on top of parent
@@ -501,4 +502,6 @@ pub struct NextBlockEnvAttributes {
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,
+    /// Optional slot number for post-Amsterdam payloads.
+    pub slot_number: Option<u64>,
 }

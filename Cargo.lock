@@ -312,8 +312,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.31.0"
-source = "git+https://github.com/alloy-rs/evm?rev=0331f40e9deab54edb4fe548e1b627e0f2041721#0331f40e9deab54edb4fe548e1b627e0f2041721"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f107d0e588e5d25fcf2db216390445d5804b875a22a419407ad0389b925bb4d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 2.0.0",
@@ -8090,7 +8091,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures",
- "indexmap 2.13.1",
+ "indexmap 2.13.0",
  "metrics",
  "metrics-util",
  "moka",
@@ -10533,8 +10534,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.37.0"
-source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=bf531ab5d761f95572c34289405fd2d1f1045e60#bf531ab5d761f95572c34289405fd2d1f1045e60"
+version = "0.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c60802e9f6ef7d94abeb7ed6abe7fa9883df64bcb0ab6274a2464249b6354324"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",

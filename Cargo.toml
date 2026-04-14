@@ -439,7 +439,7 @@ revm-state = { version = "11.0.0", default-features = false }
 revm-primitives = { version = "23.0.0", default-features = false }
 revm-interpreter = { version = "35.0.0", default-features = false }
 revm-database-interface = { version = "11.0.0", default-features = false }
-revm-inspectors = "0.37.0"
+revm-inspectors = "0.38.0"
 
 # eth
 alloy-dyn-abi = "1.5.6"
@@ -449,7 +449,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.31.0", default-features = false }
+alloy-evm = { version = "0.32.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -700,10 +700,6 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "0331f40e9deab54edb4fe548e1b627e0f2041721" }
-
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "bf531ab5d761f95572c34289405fd2d1f1045e60" }
-
 # reth-core with revm v37 deps
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "189f29d851766cef507ff947dd6e565800bc27ec" }
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "189f29d851766cef507ff947dd6e565800bc27ec" }
