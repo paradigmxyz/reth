@@ -762,9 +762,9 @@ const RETRY_BACKOFF_SECS: u64 = 5;
 mod tests {
     use super::*;
     use clap::{Args, Parser};
+    use extract::CompressionFormat;
     use manifest::{ComponentManifest, SingleArchive};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-    use tempfile::tempdir;
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
