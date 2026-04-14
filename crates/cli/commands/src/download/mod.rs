@@ -5,7 +5,7 @@ mod tui;
 
 use crate::common::EnvironmentArgs;
 use blake3::Hasher;
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use config_gen::{config_for_selections, write_config};
 use eyre::{Result, WrapErr};
 use futures::stream::{self, StreamExt};
@@ -59,6 +59,7 @@ pub(crate) enum SelectionPreset {
     Archive,
 }
 
+#[derive(Debug)]
 struct ResolvedComponents {
     selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
     preset: Option<SelectionPreset>,
@@ -218,17 +219,41 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["url", "manifest_url"])]
     manifest_path: Option<PathBuf>,
 
-    /// Include transaction static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include all transaction static files.
+    #[arg(long, conflicts_with_all = ["with_txs_since", "with_txs_distance", "minimal", "full", "archive"])]
     with_txs: bool,
 
-    /// Include receipt static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include transaction static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_txs", "with_txs_distance", "minimal", "full", "archive"])]
+    with_txs_since: Option<u64>,
+
+    /// Include transaction static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_txs", "with_txs_since", "minimal", "full", "archive"])]
+    with_txs_distance: Option<u64>,
+
+    /// Include all receipt static files.
+    #[arg(long, conflicts_with_all = ["with_receipts_since", "with_receipts_distance", "minimal", "full", "archive"])]
     with_receipts: bool,
 
-    /// Include account and storage history static files.
-    #[arg(long, alias = "with-changesets", conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include receipt static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_receipts", "with_receipts_distance", "minimal", "full", "archive"])]
+    with_receipts_since: Option<u64>,
+
+    /// Include receipt static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_receipts", "with_receipts_since", "minimal", "full", "archive"])]
+    with_receipts_distance: Option<u64>,
+
+    /// Include all account and storage history static files.
+    #[arg(long, alias = "with-changesets", conflicts_with_all = ["with_state_history_since", "with_state_history_distance", "minimal", "full", "archive"])]
     with_state_history: bool,
+
+    /// Include account and storage history static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_state_history", "with_state_history_distance", "minimal", "full", "archive"])]
+    with_state_history_since: Option<u64>,
+
+    /// Include account and storage history static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_state_history", "with_state_history_since", "minimal", "full", "archive"])]
+    with_state_history_distance: Option<u64>,
 
     /// Include transaction sender static files. Requires `--with-txs`.
     #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
@@ -239,15 +264,15 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     with_rocksdb: bool,
 
     /// Download all available components (archive node, no pruning).
-    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "minimal", "full"])]
+    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "minimal", "full"])]
     archive: bool,
 
     /// Download the minimal component set (same default as --non-interactive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "full"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "archive", "full"])]
     minimal: bool,
 
     /// Download the full node component set (matches default full prune settings).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "minimal"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "archive", "minimal"])]
     full: bool,
 
     /// Skip optional RocksDB indices even when archive components are selected.
@@ -348,6 +373,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let distance = match sel {
                 ComponentSelection::All => None,
                 ComponentSelection::Distance(d) => Some(*d),
+                ComponentSelection::Since(block) => Some(manifest.block - block + 1),
                 ComponentSelection::None => continue,
             };
             let descriptors = manifest.archive_descriptors_for_distance(*ty, distance);
@@ -398,6 +424,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             .map(|(ty, sel)| match sel {
                 ComponentSelection::All => manifest.size_for_distance(*ty, None),
                 ComponentSelection::Distance(d) => manifest.size_for_distance(*ty, Some(*d)),
+                ComponentSelection::Since(block) => {
+                    manifest.size_for_distance(*ty, Some(manifest.block - block + 1))
+                }
                 ComponentSelection::None => 0,
             })
             .sum();
@@ -527,13 +556,41 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let has_explicit_flags = self.with_txs ||
+            self.with_txs_since.is_some() ||
+            self.with_txs_distance.is_some() ||
             self.with_receipts ||
+            self.with_receipts_since.is_some() ||
+            self.with_receipts_distance.is_some() ||
             self.with_state_history ||
+            self.with_state_history_since.is_some() ||
+            self.with_state_history_distance.is_some() ||
             self.with_senders ||
             self.with_rocksdb;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
+            let tx_selection = explicit_component_selection(
+                "--with-txs-since",
+                self.with_txs,
+                self.with_txs_since,
+                self.with_txs_distance,
+                manifest.block,
+            )?;
+            let receipt_selection = explicit_component_selection(
+                "--with-receipts-since",
+                self.with_receipts,
+                self.with_receipts_since,
+                self.with_receipts_distance,
+                manifest.block,
+            )?;
+            let state_history_selection = explicit_component_selection(
+                "--with-state-history-since",
+                self.with_state_history,
+                self.with_state_history_since,
+                self.with_state_history_distance,
+                manifest.block,
+            )?;
+
             // Required components always All
             if available(SnapshotComponentType::State) {
                 selections.insert(SnapshotComponentType::State, ComponentSelection::All);
@@ -541,20 +598,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
-            if self.with_txs && available(SnapshotComponentType::Transactions) {
-                selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
+            if let Some(selection) = tx_selection &&
+                available(SnapshotComponentType::Transactions)
+            {
+                selections.insert(SnapshotComponentType::Transactions, selection);
             }
-            if self.with_receipts && available(SnapshotComponentType::Receipts) {
-                selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
+            if let Some(selection) = receipt_selection &&
+                available(SnapshotComponentType::Receipts)
+            {
+                selections.insert(SnapshotComponentType::Receipts, selection);
             }
-            if self.with_state_history {
+            if let Some(selection) = state_history_selection {
                 if available(SnapshotComponentType::AccountChangesets) {
-                    selections
-                        .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
+                    selections.insert(SnapshotComponentType::AccountChangesets, selection);
                 }
                 if available(SnapshotComponentType::StorageChangesets) {
-                    selections
-                        .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
+                    selections.insert(SnapshotComponentType::StorageChangesets, selection);
                 }
             }
             if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
@@ -642,9 +701,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         .ethereum_fork_activation(EthereumHardfork::Paris)
                         .block_number()
                     {
-                        Some(paris) if snapshot_block >= paris => {
-                            ComponentSelection::Distance(snapshot_block - paris + 1)
-                        }
+                        Some(paris) if snapshot_block >= paris => ComponentSelection::Since(paris),
                         Some(_) => ComponentSelection::None,
                         None => ComponentSelection::All,
                     }
@@ -691,12 +748,33 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
         Some(PruneMode::Distance(d)) => ComponentSelection::Distance(d),
         Some(PruneMode::Before(block)) => {
             if snapshot_block >= block {
-                ComponentSelection::Distance(snapshot_block - block + 1)
+                ComponentSelection::Since(block)
             } else {
                 ComponentSelection::None
             }
         }
     }
+}
+
+fn explicit_component_selection(
+    since_flag_name: &str,
+    all: bool,
+    since: Option<u64>,
+    distance: Option<u64>,
+    snapshot_block: u64,
+) -> Result<Option<ComponentSelection>> {
+    if all {
+        return Ok(Some(ComponentSelection::All));
+    }
+
+    if let Some(since) = since {
+        if since > snapshot_block {
+            eyre::bail!("{since_flag_name} {since} is beyond the snapshot block {snapshot_block}");
+        }
+        return Ok(Some(ComponentSelection::Since(since)));
+    }
+
+    Ok(distance.map(ComponentSelection::Distance))
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
@@ -1964,7 +2042,7 @@ fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Resul
 mod tests {
     use super::*;
     use clap::{Args, Parser};
-    use manifest::{ComponentManifest, SingleArchive};
+    use manifest::{ChunkedArchive, ComponentManifest, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use tempfile::tempdir;
@@ -1997,6 +2075,46 @@ mod tests {
         );
         SnapshotManifest {
             block: 0,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        }
+    }
+
+    fn manifest_with_modular_components(block: u64) -> SnapshotManifest {
+        let mut components = BTreeMap::new();
+        for ty in [
+            SnapshotComponentType::State,
+            SnapshotComponentType::Headers,
+            SnapshotComponentType::Transactions,
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ] {
+            let component = if ty.is_chunked() {
+                ComponentManifest::Chunked(ChunkedArchive {
+                    blocks_per_file: 1_000_000,
+                    total_blocks: block + 1,
+                    chunk_sizes: vec![1],
+                    chunk_output_files: vec![vec![]],
+                })
+            } else {
+                ComponentManifest::Single(SingleArchive {
+                    file: format!("{}.tar.zst", ty.key()),
+                    size: 1,
+                    blake3: None,
+                    output_files: vec![],
+                })
+            };
+
+            components.insert(ty.key().to_string(), component);
+        }
+
+        SnapshotManifest {
+            block,
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
@@ -2089,6 +2207,57 @@ mod tests {
         .args;
 
         assert!(!args.resumable);
+    }
+
+    #[test]
+    fn resolve_components_supports_since_and_distance_flags() {
+        let manifest = manifest_with_modular_components(20_000_000);
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--with-txs-since",
+            "15537394",
+            "--with-receipts-distance",
+            "10064",
+            "--with-state-history-since",
+            "15537394",
+        ])
+        .args;
+
+        let resolved = args.resolve_components(&manifest).unwrap();
+
+        assert_eq!(resolved.preset, None);
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(15_537_394))
+        );
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::Distance(10_064))
+        );
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::AccountChangesets),
+            Some(&ComponentSelection::Since(15_537_394))
+        );
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::StorageChangesets),
+            Some(&ComponentSelection::Since(15_537_394))
+        );
+    }
+
+    #[test]
+    fn resolve_components_rejects_since_after_snapshot() {
+        let manifest = manifest_with_modular_components(20_000_000);
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--with-txs-since",
+            "20000001",
+        ])
+        .args;
+
+        let err = args.resolve_components(&manifest).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("--with-txs-since 20000001 is beyond the snapshot block 20000000"));
     }
 
     #[test]
