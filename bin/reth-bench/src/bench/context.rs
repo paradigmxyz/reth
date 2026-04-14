@@ -54,12 +54,20 @@ impl BenchContext {
             }
         }
 
-        // set up alloy client for blocks, retrying on 429/503 (default) and 502
+        // set up alloy client for blocks, retrying on 429/503 (default), 502, and
+        // transport-level connection errors (e.g. ECONNRESET)
         let retry_policy =
             RateLimitRetryPolicy::default().or(|err: &alloy_transport::TransportError| -> bool {
-                err.as_transport_err()
-                    .and_then(|t| t.as_http_error())
-                    .is_some_and(|e| e.status == 502)
+                if let Some(t) = err.as_transport_err() {
+                    if t.as_http_error().is_some_and(|e| e.status == 502) {
+                        return true;
+                    }
+                    if let Some(custom) = t.as_custom() {
+                        let msg = custom.to_string().to_ascii_lowercase();
+                        return msg.contains("connection reset") || msg.contains("broken pipe");
+                    }
+                }
+                false
             });
         let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
