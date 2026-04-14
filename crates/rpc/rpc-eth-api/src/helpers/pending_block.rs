@@ -461,8 +461,7 @@ mod tests {
 
     #[test]
     fn pending_env_increments_parent_slot_number() {
-        let mut header = Header::default();
-        header.slot_number = Some(7);
+        let header = Header { slot_number: Some(7), ..Default::default() };
         let sealed = SealedHeader::new(header, B256::ZERO);
 
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
