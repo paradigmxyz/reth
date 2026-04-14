@@ -8090,6 +8090,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures",
+ "indexmap 2.13.1",
  "metrics",
  "metrics-util",
  "moka",
