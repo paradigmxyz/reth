@@ -129,7 +129,7 @@ where
                                 };
                                 std::future::ready(tx_value)
                             });
-                            return pipe_from_stream(accepted_sink, stream).await;
+                            return pipe_from_stream(accepted_sink, stream).await
                         }
                         Params::Bool(false) | Params::None => {
                             // only hashes requested
@@ -162,7 +162,7 @@ where
                 .map_err(SubscriptionSerializeError::new)?;
 
                 if accepted_sink.send(msg).await.is_err() {
-                    return Ok(());
+                    return Ok(())
                 }
 
                 while canon_state.next().await.is_some() {
@@ -182,7 +182,7 @@ where
                         .map_err(SubscriptionSerializeError::new)?;
 
                         if accepted_sink.send(msg).await.is_err() {
-                            break;
+                            break
                         }
                     }
                 }
@@ -219,43 +219,39 @@ where
                                 // (same logic as eth_getBlockReceipts HTTP endpoint)
                                 let inputs: Vec<_> = block
                                     .transactions_recovered()
-                                    .zip(receipts.iter().cloned())
+                                    .zip(receipts.iter())
                                     .enumerate()
-                                    .filter(|(_, (tx, _))| {
+                                    .filter_map(|(idx, (tx, receipt))| {
+                                        let gas_used_before = gas_used;
+                                        let next_log_index_before = next_log_index;
+                                        let cumulative_gas_used = receipt.cumulative_gas_used();
+
+                                        gas_used = cumulative_gas_used;
+                                        next_log_index += receipt.logs().len();
+
                                         // apply transaction hash filter if provided
-                                        match &filter.transaction_hashes {
+                                        let matches = match &filter.transaction_hashes {
                                             Some(hashes) if !hashes.is_empty() => {
                                                 hashes.contains(tx.tx_hash())
                                             }
                                             _ => true,
-                                        }
-                                    })
-                                    .map(|(idx, (tx, receipt))| {
-                                        let meta = TransactionMeta {
-                                            tx_hash: *tx.tx_hash(),
-                                            index: idx as u64,
-                                            block_hash,
-                                            block_number,
-                                            base_fee,
-                                            excess_blob_gas,
-                                            timestamp,
                                         };
 
-                                        let cumulative_gas_used = receipt.cumulative_gas_used();
-                                        let logs_len = receipt.logs().len();
-
-                                        let input = ConvertReceiptInput {
+                                        matches.then(|| ConvertReceiptInput {
                                             tx,
-                                            gas_used: cumulative_gas_used - gas_used,
-                                            next_log_index,
-                                            meta,
-                                            receipt,
-                                        };
-
-                                        gas_used = cumulative_gas_used;
-                                        next_log_index += logs_len;
-
-                                        input
+                                            gas_used: cumulative_gas_used - gas_used_before,
+                                            next_log_index: next_log_index_before,
+                                            meta: TransactionMeta {
+                                                tx_hash: *tx.tx_hash(),
+                                                index: idx as u64,
+                                                block_hash,
+                                                block_number,
+                                                base_fee,
+                                                excess_blob_gas,
+                                                timestamp,
+                                            },
+                                            receipt: receipt.clone(),
+                                        })
                                     })
                                     .collect();
 
