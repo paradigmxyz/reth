@@ -2820,9 +2820,8 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
-        let block_with_parent = payload.block_with_parent();
         self.insert_block_or_payload(
-            block_with_parent,
+            payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
@@ -2833,9 +2832,8 @@ where
         &mut self,
         block: SealedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
-        let block_with_parent = block.block_with_parent();
         self.insert_block_or_payload(
-            block_with_parent,
+            block.block_with_parent(),
             block,
             |validator, block, ctx| validator.validate_block(block, ctx),
             |_, block| Ok(block),
@@ -2918,7 +2916,7 @@ where
                     .map(|block| block.parent_num_hash())
                     .unwrap_or_else(|| block.parent_num_hash());
 
-                self.buffer_block(block)?;
+                self.state.buffer.insert_block(block);
 
                 return Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected {
                     head: self.state.tree_state.current_canonical_head,
