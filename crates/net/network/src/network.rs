@@ -190,6 +190,16 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     pub fn secret_key(&self) -> &SecretKey {
         &self.inner.secret_key
     }
+
+    /// Returns the [`Discv4`] handle if discv4 is enabled.
+    pub fn discv4(&self) -> Option<&Discv4> {
+        self.inner.discv4.as_ref()
+    }
+
+    /// Returns the [`Discv5`] handle if discv5 is enabled.
+    pub fn discv5(&self) -> Option<&Discv5> {
+        self.inner.discv5.as_ref()
+    }
 }
 
 // === API Implementations ===
