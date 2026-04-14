@@ -79,6 +79,13 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::Left(l) => l.slot_number(),
+            Self::Right(r) => r.slot_number(),
+        }
+    }
 }
 
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,

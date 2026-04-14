@@ -49,7 +49,6 @@ impl Command {
             block_provider,
             auth_provider,
             mut next_block,
-            is_optimism,
             use_reth_namespace,
             rlp_blocks,
             wait_for_persistence,
@@ -126,7 +125,6 @@ impl Command {
 
             let (version, params) = block_to_new_payload(
                 block,
-                is_optimism,
                 rlp,
                 use_reth_namespace,
                 wait_for_persistence,
@@ -142,7 +140,10 @@ impl Command {
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency,
-                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
                 execution_cache_wait: server_timings
                     .as_ref()
                     .map(|t| t.execution_cache_wait)

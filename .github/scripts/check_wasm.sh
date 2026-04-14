@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -uxo pipefail
 
 readarray -t crates < <(
   cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort
@@ -56,6 +56,7 @@ exclude_crates=(
   reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
+  reth-bb # binary-only, uses tokio features unsupported on wasm
   reth-storage-rpc-provider
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx

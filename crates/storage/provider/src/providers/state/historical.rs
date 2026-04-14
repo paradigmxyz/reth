@@ -23,9 +23,9 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
+    TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{
     hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
@@ -156,12 +156,15 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
+        let visible_tip = self.provider.best_block_number()?;
+
         self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
             let mut reader = EitherReader::new_accounts_history(self.provider, rocksdb_ref)?;
             reader.account_history_info(
                 address,
                 self.block_number,
                 self.lowest_available_blocks.account_history_block_number,
+                visible_tip,
             )
         })
     }
@@ -181,6 +184,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
+        let visible_tip = self.provider.best_block_number()?;
+
         self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocksdb_ref)?;
             reader.storage_history_info(
@@ -188,6 +193,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
                 lookup_key,
                 self.block_number,
                 self.lowest_available_blocks.storage_history_block_number,
+                visible_tip,
             )
         })
     }
@@ -518,13 +524,18 @@ impl<
         })
     }
 
-    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         reth_trie_db::with_adapter!(self.provider, |A| {
             let mut input = input;
             input.prepend(self.revert_state()?.into());
             let nodes_sorted = input.nodes.into_sorted();
             let state_sorted = input.state.into_sorted();
-            TrieWitness::new(
+            let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
                     &nodes_sorted,
@@ -535,10 +546,16 @@ impl<
                 ),
             )
             .with_prefix_sets_mut(input.prefix_sets)
-            .always_include_root_node()
-            .compute(target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
+            .with_execution_witness_mode(mode);
+            let witness =
+                if mode.is_canonical() { witness } else { witness.always_include_root_node() };
+            witness.compute(target).map_err(ProviderError::from).map(|hm| {
+                let mut values: Vec<_> = hm.into_values().collect();
+                if mode.is_canonical() {
+                    values.sort_unstable();
+                }
+                values
+            })
         })
     }
 }

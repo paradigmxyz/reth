@@ -5,6 +5,7 @@ pub mod signer;
 pub mod sync_listener;
 pub mod types;
 
+mod bal;
 mod block;
 mod call;
 mod fees;
