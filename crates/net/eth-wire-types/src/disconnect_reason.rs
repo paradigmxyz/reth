@@ -83,10 +83,10 @@ impl Encodable for DisconnectReason {
     /// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in
     /// a single-element RLP list.
     fn encode(&self, out: &mut dyn BufMut) {
-        [*self as u8].encode(out);
+        alloy_rlp::encode_list(&[*self as u8], out);
     }
     fn length(&self) -> usize {
-        [*self as u8].length()
+        alloy_rlp::list_length(&[*self as u8])
     }
 }
 
