@@ -180,7 +180,7 @@ where
         let result = self.precompile.call(input);
 
         match &result {
-            Ok(output) => {
+            Ok(output) if output.is_success() => {
                 let size = self.cache.insert(
                     Bytes::copy_from_slice(calldata),
                     CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
