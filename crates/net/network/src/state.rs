@@ -308,7 +308,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: Option<PeerKind>, addr: PeerAddr) {
+    pub(crate) fn add_peer_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: Option<PeerKind>,
+        addr: PeerAddr,
+    ) {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
