@@ -5,8 +5,8 @@ use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 ///
-/// With `memory_block_buffer_target = 3`, this means we accumulate 13 blocks in memory
-/// before persisting a batch of ~10, keeping 3 in memory.
+/// With `memory_block_buffer_target = 10`, this means we accumulate 13 blocks in memory
+/// before persisting a batch of ~3, keeping 10 in memory.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 12;
 
 /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
@@ -14,7 +14,7 @@ pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 24;
 
 /// How close to the canonical head we persist blocks.
 /// Keeps this many recent blocks in memory after persistence.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 3;
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 10;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;

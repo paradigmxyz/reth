@@ -793,7 +793,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{map::B256Set, BlockNumber, TxNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1007,7 +1007,7 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
+                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full, B256Set::default()).unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory

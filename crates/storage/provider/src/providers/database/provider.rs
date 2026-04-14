@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, AddressSet, B256Map, HashMap},
+    map::{hash_map, AddressSet, B256Map, B256Set, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
@@ -585,6 +585,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
         save_mode: SaveBlocksMode,
+        dirty_addresses: B256Set,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
@@ -746,17 +747,35 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             if save_mode.with_state() {
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
+                let merged_hashed_state: Arc<HashedPostStateSorted> =
+                    HashedPostStateSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                let merged_hashed_state = if !dirty_addresses.is_empty() {
+                    let mut s = Arc::try_unwrap(merged_hashed_state)
+                        .unwrap_or_else(|arc| (*arc).clone());
+                    s.accounts.retain(|(addr, _)| !dirty_addresses.contains(addr));
+                    s.storages.retain(|addr, _| !dirty_addresses.contains(addr));
+                    Arc::new(s)
+                } else {
+                    merged_hashed_state
+                };
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
+                let merged_trie: Arc<TrieUpdatesSorted> =
                     TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                let merged_trie = if !dirty_addresses.is_empty() {
+                    let mut t =
+                        Arc::try_unwrap(merged_trie).unwrap_or_else(|arc| (*arc).clone());
+                    t.filter_dirty_addresses(&dirty_addresses);
+                    Arc::new(t)
+                } else {
+                    merged_trie
+                };
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -3550,7 +3569,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         );
 
         // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
-        self.save_blocks(vec![executed_block], SaveBlocksMode::BlocksOnly)?;
+        self.save_blocks(vec![executed_block], SaveBlocksMode::BlocksOnly, B256Set::default())?;
 
         // Return the body indices
         self.block_body_indices(block_number)?
@@ -5057,7 +5076,7 @@ mod tests {
             ComputedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full, B256Set::default()).unwrap();
         provider_rw.commit().unwrap();
 
         let mut blocks: Vec<ExecutedBlock> = Vec::new();
@@ -5129,7 +5148,7 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::Full, B256Set::default()).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

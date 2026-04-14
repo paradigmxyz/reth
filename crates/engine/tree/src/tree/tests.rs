@@ -548,7 +548,7 @@ async fn test_tree_persists_blocks_to_db_tip_in_background() {
 
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
-    let PersistenceAction::SaveBlocks { blocks: saved_blocks, mode, .. } = received_action else {
+    let PersistenceAction::SaveBlocks { blocks: saved_blocks, mode, dirty_addresses: _, .. } = received_action else {
         panic!("unexpected action received {received_action:?}");
     };
     assert_eq!(mode, SaveBlocksMode::BlocksAndCheckpoint);
@@ -814,7 +814,7 @@ async fn test_tree_state_on_new_head_reorg() {
     );
 
     let received_action = test_harness.action_rx.recv().unwrap();
-    let PersistenceAction::SaveBlocks { blocks: saved_blocks, sender, mode } = received_action
+    let PersistenceAction::SaveBlocks { blocks: saved_blocks, sender, mode, dirty_addresses: _ } = received_action
     else {
         panic!("received wrong action");
     };
@@ -2143,7 +2143,7 @@ mod forkchoice_updated_tests {
                 break;
             }
 
-            if let Ok(PersistenceAction::SaveBlocks { blocks: saved_blocks, sender, .. }) =
+            if let Ok(PersistenceAction::SaveBlocks { blocks: saved_blocks, sender, dirty_addresses: _, .. }) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
                 if let Some(last) = saved_blocks.last() {

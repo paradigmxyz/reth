@@ -7,6 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_primitives::map::B256Set;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -1355,11 +1356,33 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks to db_tip");
+        // Collect hashed addresses from all in-memory blocks that are NOT being persisted
+        // (i.e., blocks that remain in memory). These are "dirty" because they will
+        // overwrite any hashed state / trie updates we'd write now, making those writes
+        // redundant.
+        let highest_persisted_number = highest_num_hash.number;
+        let mut dirty_addresses = B256Set::default();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
+        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+            if block.recovered_block().number() <= highest_persisted_number {
+                break;
+            }
+            let hashed_state = block.hashed_state();
+            for (addr, _) in hashed_state.accounts() {
+                dirty_addresses.insert(*addr);
+            }
+            for addr in hashed_state.account_storages().keys() {
+                dirty_addresses.insert(*addr);
+            }
+            current_hash = block.recovered_block().parent_hash();
+        }
+
+        debug!(target: "engine::tree", count=blocks_to_persist.len(), dirty=dirty_addresses.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks to db_tip");
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks_with_mode(
             blocks_to_persist,
             SaveBlocksMode::BlocksAndCheckpoint,
+            dirty_addresses,
             tx,
         );
 

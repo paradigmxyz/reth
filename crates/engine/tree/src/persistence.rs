@@ -1,5 +1,6 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
+use alloy_primitives::map::B256Set;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
@@ -102,8 +103,8 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
-                PersistenceAction::SaveBlocks { blocks, mode, sender } => {
-                    let result = self.on_save_blocks(blocks, mode)?;
+                PersistenceAction::SaveBlocks { blocks, mode, dirty_addresses, sender } => {
+                    let result = self.on_save_blocks(blocks, mode, dirty_addresses)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
@@ -149,6 +150,7 @@ where
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
         mode: SaveBlocksMode,
+        dirty_addresses: B256Set,
     ) -> Result<PersistenceResult, PersistenceError> {
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
@@ -164,7 +166,7 @@ where
 
         if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks(blocks, mode)?;
+            provider_rw.save_blocks(blocks, mode, dirty_addresses)?;
 
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized.min(last.number))?;
@@ -231,6 +233,10 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
         blocks: Vec<ExecutedBlock<N>>,
         /// How much of each block should be written.
         mode: SaveBlocksMode,
+        /// Hashed addresses that are still dirty in memory (i.e., will be overwritten
+        /// by blocks remaining in-memory). Hashed state and trie updates for these
+        /// addresses are skipped to avoid redundant writes.
+        dirty_addresses: B256Set,
         /// Channel used to return the result.
         sender: CrossbeamSender<PersistenceResult>,
     },
@@ -320,7 +326,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         blocks: Vec<ExecutedBlock<T>>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.save_blocks_with_mode(blocks, SaveBlocksMode::Full, tx)
+        self.save_blocks_with_mode(blocks, SaveBlocksMode::Full, B256Set::default(), tx)
     }
 
     /// Persists the given blocks with the requested save mode.
@@ -328,9 +334,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         &self,
         blocks: Vec<ExecutedBlock<T>>,
         mode: SaveBlocksMode,
+        dirty_addresses: B256Set,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks { blocks, mode, sender: tx })
+        self.send_action(PersistenceAction::SaveBlocks { blocks, mode, dirty_addresses, sender: tx })
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -574,7 +581,7 @@ mod tests {
 
         {
             let provider_rw = provider_factory.database_provider_rw().unwrap();
-            provider_rw.save_blocks(blocks_a, SaveBlocksMode::Full).unwrap();
+            provider_rw.save_blocks(blocks_a, SaveBlocksMode::Full, B256Set::default()).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -631,7 +638,7 @@ mod tests {
             provider_rw.commit().unwrap();
 
             let provider_rw = pf.database_provider_rw().unwrap();
-            provider_rw.save_blocks(vec![block_b2], SaveBlocksMode::Full).unwrap();
+            provider_rw.save_blocks(vec![block_b2], SaveBlocksMode::Full, B256Set::default()).unwrap();
             provider_rw.commit().unwrap();
         });
 
