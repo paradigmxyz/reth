@@ -11,7 +11,7 @@ use crate::{
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
@@ -30,7 +30,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
+use reth_nippy_jar::{NippyJar, NippyJarChecker};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
     dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader,
@@ -245,110 +245,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with read-only access.
     ///
-    /// Set `watch_directory` to `true` to track the most recent changes in static files. Otherwise,
-    /// new data won't be detected or queryable.
-    ///
-    /// Watching is recommended if the read-only provider is used on a directory that an active node
-    /// instance is modifying.
-    ///
-    /// See also [`StaticFileProvider::watch_directory`].
-    pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
-        let provider = Self::new(path, StaticFileAccess::RO)?;
-
-        if watch_directory {
-            provider.watch_directory();
-        }
-
-        Ok(provider)
+    /// The caller is responsible for calling [`StaticFileProvider::initialize_index`] when
+    /// underlying data changes.
+    pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RO)
     }
 
     /// Creates a new [`StaticFileProvider`] with read-write access.
     pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
         Self::new(path, StaticFileAccess::RW)
-    }
-
-    /// Watches the directory for changes and updates the in-memory index when modifications
-    /// are detected.
-    ///
-    /// This may be necessary, since a non-node process that owns a [`StaticFileProvider`] does not
-    /// receive `update_index` notifications from a node that appends/truncates data.
-    pub fn watch_directory(&self) {
-        let provider = self.clone();
-        reth_tasks::spawn_os_thread("sf-watch", move || {
-            let (tx, rx) = std::sync::mpsc::channel();
-            let mut watcher = RecommendedWatcher::new(
-                move |res| tx.send(res).unwrap(),
-                notify::Config::default(),
-            )
-            .expect("failed to create watcher");
-
-            watcher
-                .watch(&provider.path, RecursiveMode::NonRecursive)
-                .expect("failed to watch path");
-
-            // Some backends send repeated modified events
-            let mut last_event_timestamp = None;
-
-            while let Ok(res) = rx.recv() {
-                match res {
-                    Ok(event) => {
-                        // We only care about modified data events
-                        if !matches!(
-                            event.kind,
-                            notify::EventKind::Modify(_) |
-                                notify::EventKind::Create(_) |
-                                notify::EventKind::Remove(_)
-                        ) {
-                            continue;
-                        }
-
-                        // We only trigger a re-initialization if a configuration file was
-                        // modified. This means that a
-                        // static_file_provider.commit() was called on the node after
-                        // appending/truncating rows
-                        for segment in event.paths {
-                            // Ensure it's a file with the .conf extension
-                            if segment
-                                .extension()
-                                .is_none_or(|s| s.to_str() != Some(CONFIG_FILE_EXTENSION))
-                            {
-                                continue;
-                            }
-
-                            // Ensure it's well formatted static file name
-                            if StaticFileSegment::parse_filename(
-                                &segment.file_stem().expect("qed").to_string_lossy(),
-                            )
-                            .is_none()
-                            {
-                                continue;
-                            }
-
-                            // If we can read the metadata and modified timestamp, ensure this is
-                            // not an old or repeated event.
-                            if let Ok(current_modified_timestamp) =
-                                std::fs::metadata(&segment).and_then(|m| m.modified())
-                            {
-                                if last_event_timestamp.is_some_and(|last_timestamp| {
-                                    last_timestamp >= current_modified_timestamp
-                                }) {
-                                    continue;
-                                }
-                                last_event_timestamp = Some(current_modified_timestamp);
-                            }
-
-                            info!(target: "providers::static_file", updated_file = ?segment.file_stem(), "re-initializing static file provider index");
-                            if let Err(err) = provider.initialize_index() {
-                                warn!(target: "providers::static_file", "failed to re-initialize index: {err}");
-                            }
-                            break;
-                        }
-                    }
-
-                    Err(err) => warn!(target: "providers::watcher", "watch error: {err:?}"),
-                }
-            }
-        });
     }
 }
 

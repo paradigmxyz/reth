@@ -29,21 +29,6 @@ variable "VERGEN_GIT_DIRTY" {
   default = "false"
 }
 
-// Enable PGO+BOLT optimization (Linux only)
-variable "USE_PGO_BOLT" {
-  default = "false"
-}
-
-// Optional path to pre-collected merged.profdata in build context.
-variable "PGO_PROFDATA" {
-  default = ""
-}
-
-// Whether to strip debug symbols in PGO build path.
-variable "STRIP_SYMBOLS" {
-  default = "true"
-}
-
 // Common settings for all targets
 group "default" {
   targets = ["ethereum"]
@@ -58,14 +43,11 @@ target "_base" {
   dockerfile = "Dockerfile.depot"
   platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE       = "${BUILD_PROFILE}"
-    FEATURES            = "${FEATURES}"
-    VERGEN_GIT_SHA      = "${VERGEN_GIT_SHA}"
+    BUILD_PROFILE      = "${BUILD_PROFILE}"
+    FEATURES           = "${FEATURES}"
+    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
-    VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
-    USE_PGO_BOLT        = "${USE_PGO_BOLT}"
-    PGO_PROFDATA        = "${PGO_PROFDATA}"
-    STRIP_SYMBOLS       = "${STRIP_SYMBOLS}"
+    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
   }
   secret = [
     {

@@ -117,6 +117,11 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-merge blocks, `None` for pre-merge blocks.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Returns the slot number for the new payload.
+    ///
+    /// `Some` for post-Amsterdam blocks, `None` for earlier blocks.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -134,6 +139,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.slot_number
     }
 }
 
@@ -254,6 +263,7 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
+            slot_number: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -291,6 +301,7 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
+            slot_number: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -323,6 +334,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            slot_number: None,
         };
 
         // Verify that the generated payload ID matches the expected value

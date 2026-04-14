@@ -3,7 +3,7 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
-        generate_big_block::BigBlockPayload,
+        generate_big_block::{compute_payload_block_hash, BigBlockPayload},
         helpers::parse_duration,
         metrics_scraper::MetricsScraper,
         output::{
@@ -12,12 +12,14 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated_with_reth, call_new_payload_with_reth},
 };
+use alloy_eip7928::bal::Bal;
+use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar,
-    ForkchoiceState, JwtSecret, PraguePayloadFields,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadSidecar, ExecutionPayloadV4, ForkchoiceState, JwtSecret, PraguePayloadFields,
 };
 use clap::Parser;
 use eyre::Context;
@@ -83,6 +85,14 @@ pub struct Command {
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 
+    /// Forward embedded block access lists to `reth_newPayload` when payload files contain them.
+    ///
+    /// Disabled by default so the same payload set can be replayed with or without BALs.
+    ///
+    /// Requires `--reth-new-payload`.
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
+    bal: bool,
+
     /// Control when `reth_newPayload` waits for in-flight persistence.
     ///
     /// Accepts `always` (default — wait on every block), `never`, or a number N
@@ -126,6 +136,8 @@ struct LoadedPayload {
     block_hash: B256,
     /// Big block data containing environment switches and prior block hashes.
     big_block_data: BigBlockData<ExecutionData>,
+    /// Optional BAL flattened into the payload file.
+    block_access_list: Option<BlockAccessList>,
 }
 
 impl Command {
@@ -139,6 +151,9 @@ impl Command {
         }
         if self.reth_new_payload {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
+            if self.bal {
+                info!(target: "reth-bench", "Forwarding embedded block_access_list data");
+            }
         }
 
         let mut metrics_scraper = MetricsScraper::maybe_new(self.metrics_url.clone());
@@ -185,10 +200,13 @@ impl Command {
         }
         info!(target: "reth-bench", count = payloads.len(), "Loaded main payloads from disk");
 
+        let has_env_switches = payloads.iter().any(|p| !p.big_block_data.env_switches.is_empty());
+        let has_block_access_lists = payloads.iter().any(|p| {
+            p.block_access_list.as_ref().is_some_and(|bal: &BlockAccessList| !bal.is_empty())
+        });
+
         // If any payload has env_switches but we're not using reth_newPayload, warn the user
         if !self.reth_new_payload {
-            let has_env_switches =
-                payloads.iter().any(|p| !p.big_block_data.env_switches.is_empty());
             if has_env_switches {
                 warn!(
                     target: "reth-bench",
@@ -196,6 +214,18 @@ impl Command {
                      env_switches are only supported with reth_newPayload and will be ignored."
                 );
             }
+            if has_block_access_lists {
+                warn!(
+                    target: "reth-bench",
+                    "Payloads contain block_access_list data but --reth-new-payload is not set. \
+                     BALs are only forwarded with reth_newPayload and will be ignored."
+                );
+            }
+        } else if has_block_access_lists && !self.bal {
+            info!(
+                target: "reth-bench",
+                "Payloads contain block_access_list data but --bal is not set. BALs will be ignored."
+            );
         }
 
         let mut parent_hash = initial_parent_hash;
@@ -205,7 +235,7 @@ impl Command {
 
         for (i, payload) in payloads.iter().enumerate() {
             let execution_data = &payload.execution_data;
-            let block_hash = payload.block_hash;
+            let mut block_hash = payload.block_hash;
             let v1 = execution_data.payload.as_v1();
 
             let gas_used = v1.gas_used;
@@ -243,10 +273,39 @@ impl Command {
                     .wait_for_persistence
                     .unwrap_or(WaitForPersistence::Never)
                     .rpc_value(block_number);
+
+                // Inject sidecar BAL into the inline V4 payload field when --bal is set.
+                // If the payload is not already V4 we upgrade it (V3→V4) so the BAL
+                // can be carried inline. This changes the block hash, so we recompute
+                // it and patch parent_hash to maintain the chain.
+                let mut execution_data = execution_data.clone();
+                if self.bal &&
+                    let Some(bal) = &payload.block_access_list
+                {
+                    let encoded_bal: alloy_primitives::Bytes =
+                        alloy_rlp::encode(Bal::from(bal.clone())).into();
+
+                    // Upgrade to V4 if necessary, then set the BAL field.
+                    if execution_data.payload.as_v4().is_none() {
+                        execution_data.payload = upgrade_to_v4(execution_data.payload, encoded_bal);
+                    } else {
+                        execution_data.payload.as_v4_mut().unwrap().block_access_list = encoded_bal;
+                    }
+
+                    // Patch parent_hash so this block chains off the (possibly
+                    // rehashed) previous block.
+                    execution_data.payload.as_v1_mut().parent_hash = parent_hash;
+
+                    // Recompute block hash after payload modification and update
+                    // the hash stored in the payload itself.
+                    block_hash = compute_payload_block_hash(&execution_data)?;
+                    execution_data.payload.as_v1_mut().block_hash = block_hash;
+                }
+
                 (
                     None,
                     serde_json::to_value((
-                        RethNewPayloadInput::ExecutionData(execution_data.clone()),
+                        RethNewPayloadInput::ExecutionData(execution_data),
                         wait_for_persistence,
                         self.no_wait_for_caches.then_some(false),
                         big_block_data_param,
@@ -417,26 +476,27 @@ impl Command {
                 .wrap_err_with(|| format!("Failed to read {:?}", path))?;
 
             // Try BigBlockPayload first, then fall back to legacy ExecutionPayloadEnvelopeV4
-            let (execution_data, big_block_data) =
-                if let Ok(big_block) = serde_json::from_str::<BigBlockPayload>(&content) {
-                    (big_block.execution_data, big_block.big_block_data)
-                } else {
-                    let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
-                        .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
-                    let execution_data = ExecutionData {
-                        payload: envelope.envelope_inner.execution_payload.clone().into(),
-                        sidecar: ExecutionPayloadSidecar::v4(
-                            CancunPayloadFields {
-                                versioned_hashes: Vec::new(),
-                                parent_beacon_block_root: B256::ZERO,
-                            },
-                            PraguePayloadFields {
-                                requests: envelope.execution_requests.clone().into(),
-                            },
-                        ),
-                    };
-                    (execution_data, BigBlockData::default())
+            let (execution_data, big_block_data, block_access_list) = if let Ok(big_block) =
+                serde_json::from_str::<BigBlockPayload>(&content)
+            {
+                (big_block.execution_data, big_block.big_block_data, big_block.block_access_list)
+            } else {
+                let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
+                    .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
+                let execution_data = ExecutionData {
+                    payload: envelope.envelope_inner.execution_payload.clone().into(),
+                    sidecar: ExecutionPayloadSidecar::v4(
+                        CancunPayloadFields {
+                            versioned_hashes: Vec::new(),
+                            parent_beacon_block_root: B256::ZERO,
+                        },
+                        PraguePayloadFields {
+                            requests: envelope.execution_requests.clone().into(),
+                        },
+                    ),
                 };
+                (execution_data, BigBlockData::default(), None)
+            };
 
             let block_hash = execution_data.payload.as_v1().block_hash;
 
@@ -446,13 +506,48 @@ impl Command {
                 block_hash = %block_hash,
                 env_switches = big_block_data.env_switches.len(),
                 prior_block_hashes = big_block_data.prior_block_hashes.len(),
+                bal_accounts = block_access_list.as_ref().map_or(0, Vec::len),
                 path = %path.display(),
                 "Loaded payload"
             );
 
-            payloads.push(LoadedPayload { index, execution_data, block_hash, big_block_data });
+            payloads.push(LoadedPayload {
+                index,
+                execution_data,
+                block_hash,
+                big_block_data,
+                block_access_list,
+            });
         }
 
         Ok(payloads)
     }
+}
+
+/// Upgrades an [`ExecutionPayload`] to V4 by wrapping the inner V3 payload (constructing
+/// default V2/V3 layers for V1 payloads if needed) and setting the provided BAL bytes.
+fn upgrade_to_v4(
+    payload: ExecutionPayload,
+    block_access_list: alloy_primitives::Bytes,
+) -> ExecutionPayload {
+    use alloy_rpc_types_engine::{ExecutionPayloadV2, ExecutionPayloadV3};
+
+    let v3 = match payload {
+        ExecutionPayload::V4(_) => unreachable!("caller checks as_v4().is_none()"),
+        ExecutionPayload::V3(v3) => v3,
+        ExecutionPayload::V2(v2) => {
+            ExecutionPayloadV3 { payload_inner: v2, blob_gas_used: 0, excess_blob_gas: 0 }
+        }
+        ExecutionPayload::V1(v1) => ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 { payload_inner: v1, withdrawals: Vec::new() },
+            blob_gas_used: 0,
+            excess_blob_gas: 0,
+        },
+    };
+
+    ExecutionPayload::V4(ExecutionPayloadV4 {
+        payload_inner: v3,
+        block_access_list,
+        slot_number: 0,
+    })
 }
