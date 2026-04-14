@@ -748,6 +748,17 @@ fn merge_slot_changes(existing: &mut Vec<SlotChanges>, incoming: Vec<SlotChanges
     }
 }
 
+/// Computes the block hash for an [`ExecutionData`] by converting it to a raw block
+/// and hashing the header.
+pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
+    let block = data
+        .payload
+        .clone()
+        .into_block_with_sidecar_raw(&data.sidecar)
+        .wrap_err("failed to convert payload to block for hash computation")?;
+    Ok(block.header.hash_slow())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -837,15 +848,4 @@ mod tests {
         assert_eq!(other.address, Address::repeat_byte(0x22));
         assert_eq!(other.storage_changes[0].changes[0].block_access_index, 3);
     }
-}
-
-/// Computes the block hash for an [`ExecutionData`] by converting it to a raw block
-/// and hashing the header.
-pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
-    let block = data
-        .payload
-        .clone()
-        .into_block_with_sidecar_raw(&data.sidecar)
-        .wrap_err("failed to convert payload to block for hash computation")?;
-    Ok(block.header.hash_slow())
 }

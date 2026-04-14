@@ -279,29 +279,27 @@ impl Command {
                 // can be carried inline. This changes the block hash, so we recompute
                 // it and patch parent_hash to maintain the chain.
                 let mut execution_data = execution_data.clone();
-                if self.bal {
-                    if let Some(bal) = &payload.block_access_list {
-                        let encoded_bal: alloy_primitives::Bytes =
-                            alloy_rlp::encode(&Bal::from(bal.clone())).into();
+                if self.bal &&
+                    let Some(bal) = &payload.block_access_list
+                {
+                    let encoded_bal: alloy_primitives::Bytes =
+                        alloy_rlp::encode(Bal::from(bal.clone())).into();
 
-                        // Upgrade to V4 if necessary, then set the BAL field.
-                        if execution_data.payload.as_v4().is_none() {
-                            execution_data.payload =
-                                upgrade_to_v4(execution_data.payload, encoded_bal);
-                        } else {
-                            execution_data.payload.as_v4_mut().unwrap().block_access_list =
-                                encoded_bal;
-                        }
-
-                        // Patch parent_hash so this block chains off the (possibly
-                        // rehashed) previous block.
-                        execution_data.payload.as_v1_mut().parent_hash = parent_hash;
-
-                        // Recompute block hash after payload modification and update
-                        // the hash stored in the payload itself.
-                        block_hash = compute_payload_block_hash(&execution_data)?;
-                        execution_data.payload.as_v1_mut().block_hash = block_hash;
+                    // Upgrade to V4 if necessary, then set the BAL field.
+                    if execution_data.payload.as_v4().is_none() {
+                        execution_data.payload = upgrade_to_v4(execution_data.payload, encoded_bal);
+                    } else {
+                        execution_data.payload.as_v4_mut().unwrap().block_access_list = encoded_bal;
                     }
+
+                    // Patch parent_hash so this block chains off the (possibly
+                    // rehashed) previous block.
+                    execution_data.payload.as_v1_mut().parent_hash = parent_hash;
+
+                    // Recompute block hash after payload modification and update
+                    // the hash stored in the payload itself.
+                    block_hash = compute_payload_block_hash(&execution_data)?;
+                    execution_data.payload.as_v1_mut().block_hash = block_hash;
                 }
 
                 (
