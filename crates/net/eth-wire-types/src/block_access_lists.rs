@@ -61,7 +61,7 @@ impl Decodable for BlockAccessLists {
                 return Err(alloy_rlp::Error::UnexpectedString)
             }
 
-            let item_length = item_start.len() - payload.len() + item_header.payload_length;
+            let item_length = item_header.length_with_payload();
             bals.push(Bytes::copy_from_slice(&item_start[..item_length]));
             payload = &payload[item_header.payload_length..];
         }
