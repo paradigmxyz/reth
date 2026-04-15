@@ -15,7 +15,7 @@ use manifest::{
     SnapshotManifest,
 };
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_db::{init_db, Database};
@@ -127,6 +127,12 @@ impl DownloadDefaults {
             return custom_help.clone();
         }
 
+        let implicit_download_help = if self.mainnet_only_discovery() {
+            "\nIf no URL is provided, the latest archive snapshot will only be proposed\nfor Ethereum mainnet. For other chains, provide --manifest-url, --manifest-path,\nor -u explicitly."
+        } else {
+            "\nIf no URL is provided, the latest archive snapshot for the selected chain\nwill be proposed for download from "
+        };
+
         let mut help = format!(
             "Specify a snapshot URL or let the command propose a default one.\n\n\
              Browse available snapshots at {}\n\
@@ -140,16 +146,21 @@ impl DownloadDefaults {
             help.push('\n');
         }
 
+        help.push_str(implicit_download_help);
+        if !self.mainnet_only_discovery() {
+            help.push_str(
+                self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url),
+            );
+            help.push('.');
+        }
         help.push_str(
-            "\nIf no URL is provided, the latest archive snapshot for the selected chain\nwill be proposed for download from ",
-        );
-        help.push_str(
-            self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url),
-        );
-        help.push_str(
-            ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
+            "\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
         );
         help
+    }
+
+    fn mainnet_only_discovery(&self) -> bool {
+        self.snapshot_api_url == RETH_SNAPSHOTS_API_URL
     }
 
     /// Add a snapshot source to the list
@@ -736,7 +747,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         match &self.manifest_url {
             Some(url) => Ok(url.clone()),
-            None => discover_manifest_url(chain_id).await,
+            None => {
+                let defaults = DownloadDefaults::get_global();
+                if defaults.mainnet_only_discovery() && chain_id != MAINNET.chain.id() {
+                    eyre::bail!(
+                        "Snapshots are only auto-discovered for Ethereum mainnet.\n\n\
+                         Chain {chain_id} requires an explicit source:\n\
+                         \t--manifest-url <URL>\n\
+                         \t--manifest-path <PATH>\n\
+                         \t-u <SNAPSHOT-URL>\n\n\
+                         Use --list to inspect snapshots exposed by {}.",
+                        defaults.snapshot_api_url.trim_end_matches("/api/snapshots"),
+                    );
+                }
+
+                discover_manifest_url(chain_id).await
+            }
         }
     }
 }
@@ -2151,9 +2177,20 @@ mod tests {
         let help = defaults.long_help();
 
         assert!(help.contains("Available snapshot sources:"));
+        assert!(help.contains("Ethereum mainnet"));
         assert!(help.contains("snapshots.reth.rs"));
         assert!(help.contains("publicnode.com"));
         assert!(help.contains("file://"));
+    }
+
+    #[test]
+    fn test_custom_snapshot_api_keeps_selected_chain_help() {
+        let help = DownloadDefaults::default()
+            .with_snapshot_api_url("https://snapshots.tempoxyz.dev/api/snapshots")
+            .long_help();
+
+        assert!(help.contains("selected chain"));
+        assert!(!help.contains("Ethereum mainnet"));
     }
 
     #[test]
@@ -2207,6 +2244,43 @@ mod tests {
         .args;
 
         assert!(!args.resumable);
+    }
+
+    #[test]
+    fn resolve_manifest_source_requires_explicit_source_for_non_mainnet_defaults() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth", "--chain", "holesky",
+        ])
+        .args;
+
+        let err = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(args.resolve_manifest_source(HOLESKY.chain.id()))
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("only auto-discovered for Ethereum mainnet"));
+        assert!(message.contains("--manifest-url <URL>"));
+        assert!(message.contains("-u <SNAPSHOT-URL>"));
+    }
+
+    #[test]
+    fn resolve_manifest_source_allows_manifest_path_for_non_mainnet_defaults() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--chain",
+            "holesky",
+            "--manifest-path",
+            "./manifest.json",
+        ])
+        .args;
+
+        let source = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(args.resolve_manifest_source(HOLESKY.chain.id()))
+            .unwrap();
+
+        assert_eq!(source, "./manifest.json");
     }
 
     #[test]
