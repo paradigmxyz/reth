@@ -151,11 +151,11 @@ pub enum CachedStatus<T> {
 /// The source that is using the execution cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CachedStateMetricsSource {
-    /// Engine (validation / newPayload processing).
+    /// Engine (validation).
     Engine,
     /// Payload builder.
     Builder,
-    /// Test-only.
+    /// Tests.
     #[cfg(any(test, feature = "test-utils"))]
     Test,
 }
@@ -958,11 +958,6 @@ impl SavedCache {
     /// Returns the hash for this cache
     pub const fn executed_block_hash(&self) -> B256 {
         self.hash
-    }
-
-    /// Consumes the `SavedCache` and returns the inner [`ExecutionCache`].
-    pub fn into_inner(self) -> ExecutionCache {
-        self.caches
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
