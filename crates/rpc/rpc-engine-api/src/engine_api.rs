@@ -12,8 +12,7 @@ use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -255,7 +254,7 @@ where
 
     /// Handler for `engine_newPayloadV5`
     ///
-    /// Post-Amsterdam payload handler.
+    /// Post-Amsterdam payload handler. For epbs devnet compatibility validates with V4 rules
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     pub async fn new_payload_v5(
@@ -267,9 +266,10 @@ where
             PayloadT::ExecutionData,
             PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
+        // TODO: use EngineApiMessageVersion::V6
         self.inner
             .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+            .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
@@ -386,7 +386,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+        // TODO: use EngineApiMessageVersion::V6
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
     }
 
@@ -583,7 +584,8 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
-        self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
+        // TODO: use EngineApiMessageVersion::V6
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V5).await
     }
 
     /// Metrics version of `get_payload_v6`
@@ -1093,12 +1095,12 @@ where
 
     /// Handler for `engine_newPayloadV5`
     ///
-    /// Post Amsterdam payload handler.
+    /// Post Amsterdam payload handler. For epbs devnet compatibility we accept ExecutionPayloadV3
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     async fn new_payload_v5(
         &self,
-        payload: ExecutionPayloadV4,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         requests: RequestsOrHash,

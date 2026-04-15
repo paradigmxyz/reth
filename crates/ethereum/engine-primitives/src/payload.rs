@@ -10,7 +10,7 @@ use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::BuiltPayload;
@@ -152,9 +152,34 @@ impl EthBuiltPayload {
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV6`].
     ///
-    /// Note: Amsterdam fork is not yet implemented, so this conversion is not yet supported.
+    /// Note: For epbs devnet compatibility the `block_access_list` field is left empty
     pub fn try_into_v6(self) -> Result<ExecutionPayloadEnvelopeV6, BuiltPayloadConversionError> {
-        unimplemented!("ExecutionPayloadEnvelopeV6 not yet supported")
+        let Self { block, fees, sidecars, requests, .. } = self;
+
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV2::empty(),
+            BlobSidecars::Eip7594(sidecars) => BlobsBundleV2::from(sidecars),
+            BlobSidecars::Eip4844(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
+            }
+        };
+
+        Ok(ExecutionPayloadEnvelopeV6 {
+            execution_payload: ExecutionPayloadV4 {
+                payload_inner: ExecutionPayloadV3::from_block_unchecked(
+                    block.hash(),
+                    &Arc::unwrap_or_clone(block).into_block(),
+                ),
+                // TODO: compute real bal once EIP-7928 is implemented
+                block_access_list: Default::default(),
+                // TODO: populate from payload attributes once EIP-7843 is implemented
+                slot_number: 0,
+            },
+            block_value: fees,
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
     }
 }
 
