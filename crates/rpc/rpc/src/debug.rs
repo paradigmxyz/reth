@@ -1,5 +1,4 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -827,10 +826,6 @@ where
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
-    }
-
-    async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
-        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
