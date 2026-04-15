@@ -130,8 +130,9 @@ Storage:
           - https://snapshots.reth.rs (default)
           - https://publicnode.com/snapshots (full nodes & testnets)
 
-          If no URL is provided, the latest archive snapshot for the selected chain
-          will be proposed for download from https://snapshots-r2.reth.rs.
+          If no URL is provided, the latest archive snapshot will only be proposed
+          for Ethereum mainnet. For other chains, provide --manifest-url, --manifest-path,
+          or -u explicitly.
 
           Local file:// URLs are also supported for extracting snapshots from disk.
 
