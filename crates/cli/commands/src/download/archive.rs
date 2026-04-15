@@ -4,8 +4,8 @@ use super::{
     manifest::SnapshotArchive,
     planning::{PlannedArchive, PlannedDownloads},
     progress::{
-        spawn_progress_display, DownloadActivityGuard, DownloadRequestLimiter, ExtractionGuard,
-        SharedProgress,
+        spawn_progress_display, ArchiveDownloadProgress, ArchiveExtractionProgress,
+        ArchiveVerificationProgress, DownloadRequestLimiter, SharedProgress,
     },
     session::{ArchiveProcessContext, DownloadSession},
     verify::OutputVerifier,
@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 use tokio::task;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 
@@ -36,7 +36,8 @@ pub(crate) async fn run_modular_downloads(
     fs::create_dir_all(&download_cache_dir)?;
 
     let shared = SharedProgress::new(
-        planned_downloads.total_size,
+        planned_downloads.total_download_size,
+        planned_downloads.total_output_size,
         planned_downloads.total_archives() as u64,
         cancel_token.clone(),
     );
@@ -173,8 +174,7 @@ impl ArchiveProcessor {
                     }
                 }
                 ArchiveAttemptState::VerifyOutputs => {
-                    if self.verify_outputs()? {
-                        self.mark_complete();
+                    if self.verify_outputs_with_progress()? {
                         state = ArchiveAttemptState::Complete;
                     } else {
                         warn!(target: "reth::cli", file = %archive.file_name, component = %self.archive.component, attempt, "Archive extracted, but output verification failed, retrying");
@@ -243,7 +243,7 @@ impl ArchiveProcessor {
 
     /// Records archive completion in shared progress once outputs verify.
     fn mark_complete(&self) {
-        self.ctx.session().record_archive_complete(self.archive().size);
+        self.ctx.session().record_reused_archive(self.archive().size, self.archive().output_size());
     }
 
     /// Executes one archive attempt according to the selected cache-vs-stream mode.
@@ -258,9 +258,19 @@ impl ArchiveProcessor {
         let fetcher =
             ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
 
+        if self.archive.ty == super::manifest::SnapshotComponentType::State {
+            debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");
+        }
+
         let download_result = {
-            let _download_guard = DownloadActivityGuard::new(self.ctx.session().progress());
-            fetcher.download()
+            let mut download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
+            let result = fetcher.download(Some(&mut download_progress));
+            if let Ok(ref downloaded) = result &&
+                download_progress.has_tracked_bytes()
+            {
+                download_progress.complete(downloaded.size);
+            }
+            result
         };
 
         let downloaded = match download_result {
@@ -285,7 +295,7 @@ impl ArchiveProcessor {
 
     /// Streams the archive directly into extraction without keeping a cached copy.
     fn run_streaming_attempt(&self, format: CompressionFormat) -> Result<()> {
-        let _download_guard = DownloadActivityGuard::new(self.ctx.session().progress());
+        let _download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
         streaming_download_and_extract(
             &self.archive().url,
             format,
@@ -296,9 +306,30 @@ impl ArchiveProcessor {
 
     /// Extracts a cached archive file while updating shared extraction activity.
     fn extract_cached_archive(&self, archive_path: &Path, format: CompressionFormat) -> Result<()> {
-        let _extraction_guard = ExtractionGuard::new(self.ctx.session().progress());
+        let mut extraction_progress = ArchiveExtractionProgress::new(self.ctx.session().progress());
         let file = fs::open(archive_path)?;
-        extract_archive_raw(file, format, self.ctx.target_dir())
+        let result = extract_archive_raw(
+            file,
+            format,
+            self.ctx.target_dir(),
+            Some(&mut extraction_progress),
+        );
+        extraction_progress.finish();
+        result
+    }
+
+    /// Returns `true` if all declared plain outputs verify while updating shared verification
+    /// progress.
+    fn verify_outputs_with_progress(&self) -> Result<bool> {
+        let mut verification_progress =
+            ArchiveVerificationProgress::new(self.ctx.session().progress());
+        let verified = self
+            .output_verifier()
+            .verify_with_progress(&self.archive().output_files, Some(&mut verification_progress))?;
+        if verified {
+            verification_progress.complete(self.archive().output_size());
+        }
+        Ok(verified)
     }
 }
 

@@ -47,17 +47,17 @@ impl DownloadSession {
         &self.cancel_token
     }
 
-    /// Records one archive as fully complete once its outputs have verified.
-    pub(crate) fn record_archive_complete(&self, bytes: u64) {
+    /// Records one archive whose outputs were already reusable on disk.
+    pub(crate) fn record_reused_archive(&self, download_bytes: u64, output_bytes: u64) {
         if let Some(progress) = self.progress() {
-            progress.record_archive_complete(bytes);
+            progress.record_reused_archive(download_bytes, output_bytes);
         }
     }
 
-    /// Records that one archive finished without adding completed bytes.
-    pub(crate) fn record_archive_finished(&self) {
+    /// Records one archive whose extracted outputs fully verified.
+    pub(crate) fn record_archive_output_complete(&self, bytes: u64) {
         if let Some(progress) = self.progress() {
-            progress.record_archive_finished();
+            progress.record_archive_output_complete(bytes);
         }
     }
 }

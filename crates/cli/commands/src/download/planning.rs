@@ -19,8 +19,10 @@ pub(crate) struct PlannedArchive {
 pub(crate) struct PlannedDownloads {
     /// Concrete archives that still need reuse checks or processing.
     pub(crate) archives: Vec<PlannedArchive>,
-    /// Total size of all planned archives.
-    pub(crate) total_size: u64,
+    /// Total compressed download size of all planned archives.
+    pub(crate) total_download_size: u64,
+    /// Total extracted plain-output size of all planned archives.
+    pub(crate) total_output_size: u64,
 }
 
 impl PlannedDownloads {
@@ -92,11 +94,13 @@ pub(crate) fn collect_planned_archives(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> Result<PlannedDownloads> {
     let mut archives = Vec::new();
-    let mut total_size = 0;
+    let mut total_download_size = 0;
+    let mut total_output_size = 0;
 
     for (ty, selection) in selections {
         let Some(distance) = selection_archive_distance(selection) else { continue };
-        total_size += manifest.size_for_distance(*ty, distance);
+        total_download_size += manifest.size_for_distance(*ty, distance);
+        total_output_size += manifest.output_size_for_distance(*ty, distance);
 
         let snapshot_archives = manifest.snapshot_archives_for_distance(*ty, distance);
         let component = ty.display_name().to_string();
@@ -122,7 +126,7 @@ pub(crate) fn collect_planned_archives(
     }
 
     sort_planned_archives(&mut archives);
-    Ok(PlannedDownloads { archives, total_size })
+    Ok(PlannedDownloads { archives, total_download_size, total_output_size })
 }
 
 #[cfg(test)]
@@ -247,5 +251,66 @@ mod tests {
         assert_eq!(planned[0].ty, SnapshotComponentType::State);
         assert_eq!(planned[1].ty, SnapshotComponentType::RocksdbIndices);
         assert_eq!(planned[2].ty, SnapshotComponentType::Transactions);
+    }
+
+    #[test]
+    fn collect_planned_archives_tracks_download_and_output_totals() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "state".to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "state.tar.zst".to_string(),
+                size: 10,
+                decompressed_size: 100,
+                blake3: None,
+                output_files: vec![OutputFileChecksum {
+                    path: "db/mdbx.dat".to_string(),
+                    size: 100,
+                    blake3: "h0".to_string(),
+                }],
+            }),
+        );
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_000_000,
+                chunk_sizes: vec![20, 30],
+                chunk_decompressed_sizes: vec![200, 300],
+                chunk_output_files: vec![
+                    vec![OutputFileChecksum {
+                        path: "static_files/tx-0".to_string(),
+                        size: 200,
+                        blake3: "h1".to_string(),
+                    }],
+                    vec![OutputFileChecksum {
+                        path: "static_files/tx-1".to_string(),
+                        size: 300,
+                        blake3: "h2".to_string(),
+                    }],
+                ],
+            }),
+        );
+
+        let manifest = SnapshotManifest {
+            block: 1_000_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        };
+
+        let selections = BTreeMap::from([
+            (SnapshotComponentType::State, ComponentSelection::All),
+            (SnapshotComponentType::Transactions, ComponentSelection::Distance(500_000)),
+        ]);
+
+        let planned = collect_planned_archives(&manifest, &selections).unwrap();
+
+        assert_eq!(planned.total_download_size, 40);
+        assert_eq!(planned.total_output_size, 400);
+        assert_eq!(planned.archives.len(), 2);
     }
 }

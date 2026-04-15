@@ -90,22 +90,38 @@ impl DownloadProgress {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PhaseStart {
+    started_at: Instant,
+    baseline_bytes: u64,
+}
+
 /// Shared progress counters for parallel downloads.
-///
-/// Download threads increment `fetched_bytes`. Verified archives increment
-/// `completed_bytes`. A background task reads both counters and prints one
-/// progress line for the whole job.
 pub(crate) struct SharedProgress {
-    /// Bytes fetched so far across all archive attempts.
-    pub(crate) fetched_bytes: AtomicU64,
-    /// Bytes whose archives have fully verified.
-    pub(crate) completed_bytes: AtomicU64,
-    /// Total bytes expected across all planned archives.
-    pub(crate) total_size: u64,
+    /// Raw HTTP bytes fetched during this session, including retries.
+    pub(crate) session_fetched_bytes: AtomicU64,
+    /// Compressed bytes from archives that have fully downloaded.
+    pub(crate) completed_download_bytes: AtomicU64,
+    /// Compressed bytes written for currently active archive download attempts.
+    pub(crate) active_download_bytes: AtomicU64,
+    /// Total compressed bytes expected across all planned archives.
+    pub(crate) total_download_bytes: u64,
+    /// Plain-output bytes from archives that have fully verified.
+    pub(crate) completed_output_bytes: AtomicU64,
+    /// Plain-output bytes unpacked by currently active extractions.
+    pub(crate) active_extracted_output_bytes: AtomicU64,
+    /// Plain-output bytes hashed by currently active verifications.
+    pub(crate) active_verified_output_bytes: AtomicU64,
+    /// Total plain-output bytes expected across all planned archives.
+    pub(crate) total_output_bytes: u64,
     /// Total number of planned archives.
     pub(crate) total_archives: u64,
     /// Time when the modular download job started.
     pub(crate) started_at: Instant,
+    /// Time and baseline when extraction first started.
+    extraction_phase: Mutex<Option<PhaseStart>>,
+    /// Time and baseline when verification first started.
+    verification_phase: Mutex<Option<PhaseStart>>,
     /// Number of archives that have fully finished.
     pub(crate) archives_done: AtomicU64,
     /// Number of archives currently in the fetch phase.
@@ -114,6 +130,8 @@ pub(crate) struct SharedProgress {
     pub(crate) active_download_requests: AtomicU64,
     /// Number of archives currently extracting.
     pub(crate) active_extractions: AtomicU64,
+    /// Number of archives currently verifying extracted outputs.
+    pub(crate) active_verifications: AtomicU64,
     /// Signals the background progress task to exit.
     pub(crate) done: AtomicBool,
     /// Cancellation token shared by the whole command.
@@ -123,20 +141,29 @@ pub(crate) struct SharedProgress {
 impl SharedProgress {
     /// Creates the shared progress state for a modular download job.
     pub(crate) fn new(
-        total_size: u64,
+        total_download_bytes: u64,
+        total_output_bytes: u64,
         total_archives: u64,
         cancel_token: CancellationToken,
     ) -> Arc<Self> {
         Arc::new(Self {
-            fetched_bytes: AtomicU64::new(0),
-            completed_bytes: AtomicU64::new(0),
-            total_size,
+            session_fetched_bytes: AtomicU64::new(0),
+            completed_download_bytes: AtomicU64::new(0),
+            active_download_bytes: AtomicU64::new(0),
+            total_download_bytes,
+            completed_output_bytes: AtomicU64::new(0),
+            active_extracted_output_bytes: AtomicU64::new(0),
+            active_verified_output_bytes: AtomicU64::new(0),
+            total_output_bytes,
             total_archives,
             started_at: Instant::now(),
+            extraction_phase: Mutex::new(None),
+            verification_phase: Mutex::new(None),
             archives_done: AtomicU64::new(0),
             active_downloads: AtomicU64::new(0),
             active_download_requests: AtomicU64::new(0),
             active_extractions: AtomicU64::new(0),
+            active_verifications: AtomicU64::new(0),
             done: AtomicBool::new(false),
             cancel_token,
         })
@@ -147,19 +174,102 @@ impl SharedProgress {
         self.cancel_token.is_cancelled()
     }
 
-    /// Adds fetched bytes without marking any archive complete.
-    pub(crate) fn record_fetched_bytes(&self, bytes: u64) {
-        self.fetched_bytes.fetch_add(bytes, Ordering::Relaxed);
+    /// Adds raw session traffic bytes without affecting logical progress.
+    pub(crate) fn record_session_fetched_bytes(&self, bytes: u64) {
+        self.session_fetched_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Adds bytes whose archive outputs have fully verified.
-    pub(crate) fn record_completed_bytes(&self, bytes: u64) {
-        self.completed_bytes.fetch_add(bytes, Ordering::Relaxed);
+    pub(crate) fn add_active_download_bytes(&self, bytes: u64) {
+        self.active_download_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Increments the count of finished archives.
-    pub(crate) fn record_archive_finished(&self) {
+    pub(crate) fn sub_active_download_bytes(&self, bytes: u64) {
+        sub_bytes(&self.active_download_bytes, bytes);
+    }
+
+    fn add_active_extracted_output_bytes(&self, bytes: u64) {
+        self.active_extracted_output_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    fn sub_active_extracted_output_bytes(&self, bytes: u64) {
+        sub_bytes(&self.active_extracted_output_bytes, bytes);
+    }
+
+    fn add_active_verified_output_bytes(&self, bytes: u64) {
+        self.active_verified_output_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    fn sub_active_verified_output_bytes(&self, bytes: u64) {
+        sub_bytes(&self.active_verified_output_bytes, bytes);
+    }
+
+    /// Records an archive whose outputs were already present locally.
+    pub(crate) fn record_reused_archive(&self, download_bytes: u64, output_bytes: u64) {
+        self.completed_download_bytes.fetch_add(download_bytes, Ordering::Relaxed);
+        self.completed_output_bytes.fetch_add(output_bytes, Ordering::Relaxed);
         self.archives_done.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records an archive whose compressed download completed successfully.
+    pub(crate) fn record_archive_download_complete(&self, bytes: u64) {
+        self.completed_download_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Records an archive whose extracted outputs have fully verified.
+    pub(crate) fn record_archive_output_complete(&self, bytes: u64) {
+        self.completed_output_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.archives_done.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns logical compressed download progress.
+    pub(crate) fn logical_downloaded_bytes(&self) -> u64 {
+        (self.completed_download_bytes.load(Ordering::Relaxed) +
+            self.active_download_bytes.load(Ordering::Relaxed))
+        .min(self.total_download_bytes)
+    }
+
+    /// Returns verified plain-output bytes.
+    pub(crate) fn verified_output_bytes(&self) -> u64 {
+        self.completed_output_bytes.load(Ordering::Relaxed).min(self.total_output_bytes)
+    }
+
+    /// Returns plain-output bytes currently represented by extraction progress.
+    pub(crate) fn extracting_output_bytes(&self) -> u64 {
+        (self.completed_output_bytes.load(Ordering::Relaxed) +
+            self.active_extracted_output_bytes.load(Ordering::Relaxed))
+        .min(self.total_output_bytes)
+    }
+
+    /// Returns plain-output bytes currently represented by verification progress.
+    pub(crate) fn verifying_output_bytes(&self) -> u64 {
+        (self.completed_output_bytes.load(Ordering::Relaxed) +
+            self.active_verified_output_bytes.load(Ordering::Relaxed))
+        .min(self.total_output_bytes)
+    }
+
+    fn note_phase_start(slot: &Mutex<Option<PhaseStart>>, baseline_bytes: u64) {
+        let mut phase = slot.lock().unwrap();
+        phase.get_or_insert(PhaseStart { started_at: Instant::now(), baseline_bytes });
+    }
+
+    fn phase_eta(
+        slot: &Mutex<Option<PhaseStart>>,
+        current_bytes: u64,
+        total_bytes: u64,
+    ) -> Option<Duration> {
+        let phase = *slot.lock().unwrap();
+        let phase = phase?;
+        let done = current_bytes.saturating_sub(phase.baseline_bytes);
+        let total = total_bytes.saturating_sub(phase.baseline_bytes);
+        eta_from_progress(phase.started_at.elapsed(), done, total)
+    }
+
+    fn extraction_eta(&self, current_bytes: u64) -> Option<Duration> {
+        Self::phase_eta(&self.extraction_phase, current_bytes, self.total_output_bytes)
+    }
+
+    fn verification_eta(&self, current_bytes: u64) -> Option<Duration> {
+        Self::phase_eta(&self.verification_phase, current_bytes, self.total_output_bytes)
     }
 
     /// Marks one archive as actively downloading.
@@ -169,9 +279,7 @@ impl SharedProgress {
 
     /// Marks one archive download as finished.
     pub(crate) fn download_finished(&self) {
-        let _ = self
-            .active_downloads
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+        sub_bytes(&self.active_downloads, 1);
     }
 
     /// Marks one HTTP request as in flight.
@@ -181,28 +289,72 @@ impl SharedProgress {
 
     /// Marks one HTTP request as finished.
     pub(crate) fn request_finished(&self) {
-        let _ =
-            self.active_download_requests
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+        sub_bytes(&self.active_download_requests, 1);
     }
 
     /// Marks one archive as actively extracting.
     pub(crate) fn extraction_started(&self) {
+        Self::note_phase_start(
+            &self.extraction_phase,
+            self.completed_output_bytes.load(Ordering::Relaxed),
+        );
         self.active_extractions.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Marks one archive extraction as finished.
     pub(crate) fn extraction_finished(&self) {
-        let _ = self
-            .active_extractions
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+        sub_bytes(&self.active_extractions, 1);
     }
 
-    /// Records a fully verified archive and its completed byte count.
-    pub(crate) fn record_archive_complete(&self, bytes: u64) {
-        self.record_completed_bytes(bytes);
-        self.record_archive_finished();
+    /// Marks one archive as actively verifying outputs.
+    pub(crate) fn verification_started(&self) {
+        Self::note_phase_start(
+            &self.verification_phase,
+            self.completed_output_bytes.load(Ordering::Relaxed),
+        );
+        self.active_verifications.fetch_add(1, Ordering::Relaxed);
     }
+
+    /// Marks one archive verification as finished.
+    pub(crate) fn verification_finished(&self) {
+        sub_bytes(&self.active_verifications, 1);
+    }
+}
+
+fn sub_bytes(counter: &AtomicU64, bytes: u64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        Some(current.saturating_sub(bytes))
+    });
+}
+
+fn eta_from_progress(elapsed: Duration, done: u64, total: u64) -> Option<Duration> {
+    if done == 0 || done >= total {
+        return None;
+    }
+
+    let secs = elapsed.as_secs_f64();
+    if secs <= 0.0 {
+        return None;
+    }
+
+    let speed = done as f64 / secs;
+    if speed <= 0.0 {
+        return None;
+    }
+
+    Some(Duration::from_secs_f64((total - done) as f64 / speed))
+}
+
+fn format_percent(done: u64, total: u64) -> String {
+    if total == 0 {
+        return "100.0%".to_string();
+    }
+
+    format!("{:.1}%", (done as f64 / total as f64) * 100.0)
+}
+
+fn format_eta(eta: Option<Duration>) -> String {
+    eta.map(DownloadProgress::format_duration).unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Global request limit for the blocking downloader.
@@ -282,52 +434,147 @@ impl Drop for DownloadRequestPermit<'_> {
     }
 }
 
-/// Marks one archive download as active for aggregate progress logging.
-pub(crate) struct DownloadActivityGuard<'a> {
-    /// Shared progress counters updated when the guard drops.
+/// Tracks one active archive download attempt.
+pub(crate) struct ArchiveDownloadProgress<'a> {
     progress: Option<&'a Arc<SharedProgress>>,
+    downloaded: u64,
+    completed: bool,
 }
 
-impl<'a> DownloadActivityGuard<'a> {
-    /// Marks one archive download as active until the guard drops.
+impl<'a> ArchiveDownloadProgress<'a> {
+    /// Starts tracking one archive download attempt.
     pub(crate) fn new(progress: Option<&'a Arc<SharedProgress>>) -> Self {
         if let Some(progress) = progress {
             progress.download_started();
         }
-        Self { progress }
+        Self { progress, downloaded: 0, completed: false }
+    }
+
+    /// Adds logical compressed bytes written by this attempt.
+    pub(crate) fn record_downloaded(&mut self, bytes: u64) {
+        self.downloaded += bytes;
+        if let Some(progress) = self.progress {
+            progress.add_active_download_bytes(bytes);
+        }
+    }
+
+    /// Returns whether this tracker has recorded any logical bytes itself.
+    pub(crate) fn has_tracked_bytes(&self) -> bool {
+        self.downloaded > 0
+    }
+
+    /// Moves this archive from active download bytes into completed download bytes.
+    pub(crate) fn complete(&mut self, total_bytes: u64) {
+        if self.completed {
+            return;
+        }
+        if let Some(progress) = self.progress {
+            progress.sub_active_download_bytes(self.downloaded);
+            progress.record_archive_download_complete(total_bytes);
+        }
+        self.downloaded = 0;
+        self.completed = true;
     }
 }
 
-impl Drop for DownloadActivityGuard<'_> {
-    /// Clears the active download count for this guard.
+impl Drop for ArchiveDownloadProgress<'_> {
     fn drop(&mut self) {
         if let Some(progress) = self.progress {
+            progress.sub_active_download_bytes(self.downloaded);
             progress.download_finished();
         }
     }
 }
 
-/// Marks one archive extraction as active for aggregate progress logging.
-pub(crate) struct ExtractionGuard<'a> {
-    /// Shared progress counters updated when the guard drops.
+/// Tracks one active archive extraction attempt.
+pub(crate) struct ArchiveExtractionProgress<'a> {
     progress: Option<&'a Arc<SharedProgress>>,
+    extracted: u64,
+    finished: bool,
 }
 
-impl<'a> ExtractionGuard<'a> {
-    /// Marks one archive extraction as active until the guard drops.
+impl<'a> ArchiveExtractionProgress<'a> {
+    /// Starts tracking one archive extraction attempt.
     pub(crate) fn new(progress: Option<&'a Arc<SharedProgress>>) -> Self {
         if let Some(progress) = progress {
             progress.extraction_started();
         }
-        Self { progress }
+        Self { progress, extracted: 0, finished: false }
+    }
+
+    /// Adds plain-output bytes extracted by this attempt.
+    pub(crate) fn record_extracted(&mut self, bytes: u64) {
+        self.extracted += bytes;
+        if let Some(progress) = self.progress {
+            progress.add_active_extracted_output_bytes(bytes);
+        }
+    }
+
+    /// Ends extraction tracking before verification begins.
+    pub(crate) fn finish(&mut self) {
+        if self.finished {
+            return;
+        }
+        if let Some(progress) = self.progress {
+            progress.sub_active_extracted_output_bytes(self.extracted);
+        }
+        self.extracted = 0;
+        self.finished = true;
     }
 }
 
-impl Drop for ExtractionGuard<'_> {
-    /// Clears the active extraction count for this guard.
+impl Drop for ArchiveExtractionProgress<'_> {
     fn drop(&mut self) {
         if let Some(progress) = self.progress {
+            progress.sub_active_extracted_output_bytes(self.extracted);
             progress.extraction_finished();
+        }
+    }
+}
+
+/// Tracks one active archive verification attempt.
+pub(crate) struct ArchiveVerificationProgress<'a> {
+    progress: Option<&'a Arc<SharedProgress>>,
+    verified: u64,
+    completed: bool,
+}
+
+impl<'a> ArchiveVerificationProgress<'a> {
+    /// Starts tracking one archive verification attempt.
+    pub(crate) fn new(progress: Option<&'a Arc<SharedProgress>>) -> Self {
+        if let Some(progress) = progress {
+            progress.verification_started();
+        }
+        Self { progress, verified: 0, completed: false }
+    }
+
+    /// Adds plain-output bytes hashed by this verification attempt.
+    pub(crate) fn record_verified(&mut self, bytes: u64) {
+        self.verified += bytes;
+        if let Some(progress) = self.progress {
+            progress.add_active_verified_output_bytes(bytes);
+        }
+    }
+
+    /// Moves this archive from active verification bytes into completed output bytes.
+    pub(crate) fn complete(&mut self, total_bytes: u64) {
+        if self.completed {
+            return;
+        }
+        if let Some(progress) = self.progress {
+            progress.sub_active_verified_output_bytes(self.verified);
+            progress.record_archive_output_complete(total_bytes);
+        }
+        self.verified = 0;
+        self.completed = true;
+    }
+}
+
+impl Drop for ArchiveVerificationProgress<'_> {
+    fn drop(&mut self) {
+        if let Some(progress) = self.progress {
+            progress.sub_active_verified_output_bytes(self.verified);
+            progress.verification_finished();
         }
     }
 }
@@ -367,21 +614,26 @@ impl<R: Read> Read for ProgressReader<R> {
 
 /// Wrapper that bumps a shared atomic counter while writing data.
 /// Used for parallel downloads where a single display task shows aggregated progress.
-pub(crate) struct SharedProgressWriter<W> {
+pub(crate) struct SharedProgressWriter<'a, W> {
     /// Wrapped writer receiving downloaded bytes.
     pub(crate) inner: W,
     /// Shared counters updated as bytes are written.
     pub(crate) progress: Arc<SharedProgress>,
+    /// Optional callback for logical bytes written by the current archive attempt.
+    pub(crate) on_written: Option<&'a mut dyn FnMut(u64)>,
 }
 
-impl<W: Write> Write for SharedProgressWriter<W> {
+impl<W: Write> Write for SharedProgressWriter<'_, W> {
     /// Writes bytes and records them in shared progress.
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.progress.is_cancelled() {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let n = self.inner.write(buf)?;
-        self.progress.record_fetched_bytes(n as u64);
+        self.progress.record_session_fetched_bytes(n as u64);
+        if let Some(on_written) = self.on_written.as_deref_mut() {
+            on_written(n as u64);
+        }
         Ok(n)
     }
 
@@ -407,7 +659,7 @@ impl<R: Read> Read for SharedProgressReader<R> {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let n = self.inner.read(buf)?;
-        self.progress.record_fetched_bytes(n as u64);
+        self.progress.record_session_fetched_bytes(n as u64);
         Ok(n)
     }
 }
@@ -417,7 +669,6 @@ impl<R: Read> Read for SharedProgressReader<R> {
 pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3));
-        let mut in_extraction_phase = false;
         interval.tick().await;
         loop {
             interval.tick().await;
@@ -426,10 +677,9 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
                 break;
             }
 
-            let fetched = progress.fetched_bytes.load(Ordering::Relaxed);
-            let completed = progress.completed_bytes.load(Ordering::Relaxed);
-            let total = progress.total_size;
-            if total == 0 {
+            let download_total = progress.total_download_bytes;
+            let output_total = progress.total_output_bytes;
+            if download_total == 0 && output_total == 0 {
                 continue;
             }
 
@@ -438,60 +688,67 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
             let active_downloads = progress.active_downloads.load(Ordering::Relaxed);
             let active_requests = progress.active_download_requests.load(Ordering::Relaxed);
             let active_extractions = progress.active_extractions.load(Ordering::Relaxed);
-            let progress_bytes = fetched.max(completed).min(total);
-            let pct = (progress_bytes as f64 / total as f64) * 100.0;
-            let completed_display = DownloadProgress::format_size(completed);
+            let active_verifications = progress.active_verifications.load(Ordering::Relaxed);
+            let downloaded = progress.logical_downloaded_bytes();
+            let extracted = progress.extracting_output_bytes();
+            let verified = progress.verifying_output_bytes();
+            let completed_verified = progress.verified_output_bytes();
             let elapsed = DownloadProgress::format_duration(progress.started_at.elapsed());
-            let fetched_display = DownloadProgress::format_size(fetched);
-            let tot = DownloadProgress::format_size(total);
-            let extraction_phase =
-                active_downloads == 0 && active_requests == 0 && active_extractions > 0;
+            let download_total_display = DownloadProgress::format_size(download_total);
+            let output_total_display = DownloadProgress::format_size(output_total);
+            let downloaded_display = DownloadProgress::format_size(downloaded);
+            let extracted_display = DownloadProgress::format_size(extracted);
+            let verified_display = DownloadProgress::format_size(completed_verified);
+            let active_download_phase = active_downloads > 0 || active_requests > 0;
 
-            if extraction_phase && !in_extraction_phase {
-                info!(target: "reth::cli",
-                    elapsed = %elapsed,
-                    active_extractions,
-                    "All snapshot archive downloads complete, starting extraction"
-                );
-            }
-
-            in_extraction_phase = extraction_phase;
-
-            if extraction_phase {
+            if active_download_phase {
                 info!(target: "reth::cli",
                     archives = format_args!("{done}/{all}"),
-                    progress = format_args!("{pct:.1}%"),
+                    progress = %format_percent(downloaded, download_total),
                     elapsed = %elapsed,
-                    active_extractions,
-                    completed = %completed_display,
-                    total = %tot,
-                    fetched_this_session = %fetched_display,
+                    eta = %format_eta(eta_from_progress(progress.started_at.elapsed(), downloaded, download_total)),
+                    bytes = format_args!("{downloaded_display}/{download_total_display}"),
+                    "Downloading snapshot archives"
+                );
+            } else if active_extractions > 0 {
+                info!(target: "reth::cli",
+                    archives = format_args!("{done}/{all}"),
+                    progress = %format_percent(extracted, output_total),
+                    elapsed = %elapsed,
+                    eta = %format_eta(progress.extraction_eta(extracted)),
+                    bytes = format_args!("{extracted_display}/{output_total_display}"),
                     "Extracting snapshot archives"
+                );
+            } else if active_verifications > 0 {
+                info!(target: "reth::cli",
+                    archives = format_args!("{done}/{all}"),
+                    progress = %format_percent(verified, output_total),
+                    elapsed = %elapsed,
+                    eta = %format_eta(progress.verification_eta(verified)),
+                    bytes = format_args!("{}/{output_total_display}", DownloadProgress::format_size(verified)),
+                    "Verifying snapshot archives"
                 );
             } else {
                 info!(target: "reth::cli",
                     archives = format_args!("{done}/{all}"),
-                    progress = format_args!("{pct:.1}%"),
+                    progress = %format_percent(completed_verified, output_total),
                     elapsed = %elapsed,
-                    active_archive_downloads = active_downloads,
-                    active_download_requests = active_requests,
-                    completed = %completed_display,
-                    total = %tot,
-                    fetched_this_session = %fetched_display,
+                    eta = %format_eta(None),
+                    bytes = format_args!("{verified_display}/{output_total_display}"),
                     "Processing snapshot archives"
                 );
             }
         }
 
-        let fetched = progress.fetched_bytes.load(Ordering::Relaxed);
-        let completed = progress.completed_bytes.load(Ordering::Relaxed);
-        let fetched_display = DownloadProgress::format_size(fetched);
+        let completed = progress.verified_output_bytes();
         let completed_display = DownloadProgress::format_size(completed);
-        let tot = DownloadProgress::format_size(progress.total_size);
+        let output_total = DownloadProgress::format_size(progress.total_output_bytes);
         info!(target: "reth::cli",
-            completed = %completed_display,
-            total = %tot,
-            fetched_this_session = %fetched_display,
+            archives = format_args!("{}/{}", progress.total_archives, progress.total_archives),
+            progress = "100.0%",
+            elapsed = %DownloadProgress::format_duration(progress.started_at.elapsed()),
+            eta = "0s",
+            bytes = format_args!("{completed_display}/{output_total}"),
             "Snapshot archive processing complete"
         );
     })
@@ -503,15 +760,31 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     #[test]
-    fn shared_progress_keeps_retry_bytes_out_of_completion_progress() {
-        let progress = SharedProgress::new(10, 1, CancellationToken::new());
+    fn shared_progress_separates_session_fetch_from_logical_progress() {
+        let progress = SharedProgress::new(10, 20, 1, CancellationToken::new());
 
-        progress.record_fetched_bytes(10);
-        progress.record_fetched_bytes(10);
-        progress.record_archive_complete(10);
+        progress.record_session_fetched_bytes(10);
+        progress.record_session_fetched_bytes(10);
+        progress.record_archive_download_complete(10);
+        progress.record_archive_output_complete(20);
 
-        assert_eq!(progress.fetched_bytes.load(Ordering::Relaxed), 20);
-        assert_eq!(progress.completed_bytes.load(Ordering::Relaxed), 10);
+        assert_eq!(progress.session_fetched_bytes.load(Ordering::Relaxed), 20);
+        assert_eq!(progress.logical_downloaded_bytes(), 10);
+        assert_eq!(progress.verified_output_bytes(), 20);
         assert_eq!(progress.archives_done.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn archive_download_progress_rolls_back_unfinished_attempts() {
+        let progress = SharedProgress::new(10, 20, 1, CancellationToken::new());
+
+        {
+            let mut download = ArchiveDownloadProgress::new(Some(&progress));
+            download.record_downloaded(4);
+            assert_eq!(progress.logical_downloaded_bytes(), 4);
+        }
+
+        assert_eq!(progress.logical_downloaded_bytes(), 0);
+        assert_eq!(progress.active_downloads.load(Ordering::Relaxed), 0);
     }
 }

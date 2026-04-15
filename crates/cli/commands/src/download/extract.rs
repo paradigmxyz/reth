@@ -1,8 +1,8 @@
 use super::{
     fetch::{ArchiveFetcher, DownloadedArchive},
     progress::{
-        DownloadProgress, DownloadRequestLimiter, ProgressReader, SharedProgress,
-        SharedProgressReader,
+        ArchiveExtractionProgress, DownloadProgress, DownloadRequestLimiter, ProgressReader,
+        SharedProgress, SharedProgressReader,
     },
     session::DownloadSession,
     MAX_DOWNLOAD_RETRIES, RETRY_BACKOFF_SECS,
@@ -85,19 +85,44 @@ pub(crate) fn extract_archive_raw<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
+    progress: Option<&mut ArchiveExtractionProgress<'_>>,
 ) -> Result<()> {
     match format {
         CompressionFormat::Lz4 => {
-            Archive::new(Decoder::new(reader)?).unpack(target_dir).wrap_err_with(|| {
-                format!("failed to extract archive into `{}`", target_dir.display())
-            })?;
+            unpack_archive(Archive::new(Decoder::new(reader)?), target_dir, progress)?;
         }
         CompressionFormat::Zstd => {
-            Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir).wrap_err_with(|| {
-                format!("failed to extract archive into `{}`", target_dir.display())
-            })?;
+            unpack_archive(Archive::new(ZstdDecoder::new(reader)?), target_dir, progress)?;
         }
     }
+
+    Ok(())
+}
+
+fn unpack_archive<R: Read>(
+    mut archive: Archive<R>,
+    target_dir: &Path,
+    mut progress: Option<&mut ArchiveExtractionProgress<'_>>,
+) -> Result<()> {
+    let entries = archive.entries().wrap_err_with(|| {
+        format!("failed to read archive entries for `{}`", target_dir.display())
+    })?;
+
+    for entry in entries {
+        let mut entry = entry.wrap_err_with(|| {
+            format!("failed to read archive entry for `{}`", target_dir.display())
+        })?;
+        let size = entry.header().entry_size().unwrap_or(0);
+        entry.unpack_in(target_dir).wrap_err_with(|| {
+            format!("failed to extract archive into `{}`", target_dir.display())
+        })?;
+        if size > 0 &&
+            let Some(progress) = progress.as_deref_mut()
+        {
+            progress.record_extracted(size);
+        }
+    }
+
     Ok(())
 }
 
@@ -180,7 +205,7 @@ pub(crate) fn streaming_download_and_extract(
 
         let result = if let Some(progress) = shared {
             let reader = SharedProgressReader { inner: response, progress: Arc::clone(progress) };
-            extract_archive_raw(reader, format, target_dir)
+            extract_archive_raw(reader, format, target_dir, None)
         } else {
             let total_size = response.content_length().unwrap_or(0);
             extract_archive(
@@ -226,7 +251,7 @@ fn download_and_extract(
 ) -> Result<()> {
     let quiet = session.progress().is_some();
     let fetcher = ArchiveFetcher::new(url.to_string(), target_dir, session.clone());
-    let DownloadedArchive { path: downloaded_path, size: total_size } = fetcher.download()?;
+    let DownloadedArchive { path: downloaded_path, size: total_size } = fetcher.download(None)?;
 
     let file_name =
         downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
@@ -241,7 +266,7 @@ fn download_and_extract(
     let file = fs::open(&downloaded_path)?;
 
     if quiet {
-        extract_archive_raw(file, format, target_dir)?;
+        extract_archive_raw(file, format, target_dir, None)?;
     } else {
         extract_archive(file, total_size, format, target_dir, session.cancel_token().clone())?;
         info!(target: "reth::cli",
@@ -251,7 +276,7 @@ fn download_and_extract(
     }
 
     fetcher.cleanup_downloaded_files();
-    session.record_archive_complete(total_size);
+    session.record_archive_output_complete(total_size);
 
     Ok(())
 }
@@ -280,7 +305,7 @@ fn blocking_download_and_extract(
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
         let result = extract_from_file(&file_path, format, target_dir);
         if result.is_ok() {
-            session.record_archive_complete(file_path.metadata()?.len());
+            session.record_archive_output_complete(file_path.metadata()?.len());
         }
         result
     } else if let Some(request_limiter) = request_limiter {
@@ -298,7 +323,7 @@ fn blocking_download_and_extract(
         let session = DownloadSession::new(shared, None, cancel_token);
         let result = streaming_download_and_extract(url, format, target_dir, &session);
         if result.is_ok() {
-            session.record_archive_finished();
+            session.record_archive_output_complete(0);
         }
         result
     }

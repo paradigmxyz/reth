@@ -1,5 +1,8 @@
 use super::{
-    progress::{DownloadProgress, DownloadRequestLimiter, SharedProgress, SharedProgressWriter},
+    progress::{
+        ArchiveDownloadProgress, DownloadProgress, DownloadRequestLimiter, SharedProgress,
+        SharedProgressWriter,
+    },
     session::DownloadSession,
     RETRY_BACKOFF_SECS,
 };
@@ -14,7 +17,7 @@ use std::{
     io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -118,9 +121,12 @@ impl ArchiveFetcher {
     }
 
     /// Downloads the archive using the best strategy supported by the remote source.
-    pub(crate) fn download(&self) -> Result<DownloadedArchive> {
+    pub(crate) fn download(
+        &self,
+        download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
+    ) -> Result<DownloadedArchive> {
         let Some(request_limiter) = self.session.request_limiter() else {
-            return self.download_sequential(super::MAX_DOWNLOAD_RETRIES)
+            return self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
         };
 
         let client = BlockingClient::builder().connect_timeout(Duration::from_secs(30)).build()?;
@@ -129,9 +135,11 @@ impl ArchiveFetcher {
         match choose_fetch_strategy(probe, request_limiter.max_concurrency()) {
             FetchStrategy::Sequential(reason) => {
                 self.log_sequential_fallback(reason, probe.total_size);
-                self.download_sequential(super::MAX_DOWNLOAD_RETRIES)
+                self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
             }
-            FetchStrategy::Segmented(plan) => self.download_segmented(probe.total_size, plan),
+            FetchStrategy::Segmented(plan) => {
+                self.download_segmented(probe.total_size, plan, download_progress)
+            }
         }
     }
 
@@ -171,7 +179,11 @@ impl ArchiveFetcher {
     }
 
     /// Downloads the archive as a single resumable stream using one request at a time.
-    fn download_sequential(&self, max_download_retries: u32) -> Result<DownloadedArchive> {
+    fn download_sequential(
+        &self,
+        max_download_retries: u32,
+        mut download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
+    ) -> Result<DownloadedArchive> {
         let quiet = self.quiet();
 
         if !quiet {
@@ -274,9 +286,15 @@ impl ArchiveFetcher {
             let flush_result;
 
             if let Some(progress) = self.session.progress() {
+                let mut on_written = |bytes| {
+                    if let Some(download_progress) = download_progress.as_deref_mut() {
+                        download_progress.record_downloaded(bytes);
+                    }
+                };
                 let mut writer = SharedProgressWriter {
                     inner: BufWriter::new(file),
                     progress: Arc::clone(progress),
+                    on_written: Some(&mut on_written),
                 };
                 copy_result = io::copy(&mut reader, &mut writer);
                 flush_result = writer.inner.flush();
@@ -318,6 +336,7 @@ impl ArchiveFetcher {
         &self,
         total_size: u64,
         plan: SegmentedDownloadPlan,
+        download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
     ) -> Result<DownloadedArchive> {
         let request_limiter = self.session.require_request_limiter()?;
         info!(target: "reth::cli",
@@ -335,6 +354,7 @@ impl ArchiveFetcher {
             total_size,
             plan,
             self.session.clone(),
+            download_progress,
         )
         .run()
     }
@@ -355,11 +375,7 @@ impl ArchiveFetcher {
                 );
             }
             SequentialDownloadFallback::TooSmall => {
-                info!(target: "reth::cli",
-                    file = %self.paths.file_name(),
-                    total_size = %DownloadProgress::format_size(total_size),
-                    "Archive too small for segmented download, falling back to single-stream download"
-                );
+                let _ = total_size;
             }
         }
     }
@@ -519,6 +535,7 @@ impl SegmentedDownload {
         total_size: u64,
         plan: SegmentedDownloadPlan,
         session: DownloadSession,
+        _download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
     ) -> Self {
         Self { url, paths, total_size, plan, session }
     }
@@ -534,6 +551,7 @@ impl SegmentedDownload {
         let worker_count = plan.worker_count;
         let state = Arc::new(SegmentedDownloadState::new(plan.pieces));
         let terminal_failure = Arc::new(TerminalFailure::default());
+        let piece_progress_bytes = Arc::new(AtomicU64::new(0));
         let worker_client = BlockingClient::builder()
             .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(SEGMENTED_DOWNLOAD_REQUEST_TIMEOUT_SECS))
@@ -556,10 +574,17 @@ impl SegmentedDownload {
             for _ in 0..worker_count {
                 let state = Arc::clone(&state);
                 let terminal_failure = Arc::clone(&terminal_failure);
+                let piece_progress_bytes = Arc::clone(&piece_progress_bytes);
                 let client = worker_client.clone();
 
                 handles.push(scope.spawn(move || {
-                    Self::worker_loop(&client, worker_context, state, terminal_failure);
+                    Self::worker_loop(
+                        &client,
+                        worker_context,
+                        state,
+                        terminal_failure,
+                        piece_progress_bytes,
+                    );
                 }));
             }
 
@@ -575,8 +600,16 @@ impl SegmentedDownload {
         });
 
         if let Some(error) = terminal_failure.take() {
+            if let Some(shared) = shared {
+                shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
+            }
             paths.cleanup_partial();
             return Err(error.wrap_err("Parallel download failed"))
+        }
+
+        if let Some(shared) = shared {
+            shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
+            shared.record_archive_download_complete(total_size);
         }
 
         paths.finalize()?;
@@ -590,6 +623,7 @@ impl SegmentedDownload {
         context: SegmentedWorkerContext<'_>,
         state: Arc<SegmentedDownloadState>,
         terminal_failure: Arc<TerminalFailure>,
+        piece_progress_bytes: Arc<AtomicU64>,
     ) {
         let file = match OpenOptions::new().write(true).open(context.part_path) {
             Ok(file) => file,
@@ -607,6 +641,7 @@ impl SegmentedDownload {
                 &file,
                 piece,
                 context.shared,
+                &piece_progress_bytes,
                 context.request_limiter,
                 context.cancel_token,
             ) {
@@ -627,6 +662,7 @@ impl SegmentedDownload {
         file: &std::fs::File,
         piece: DownloadPiece,
         shared: Option<&Arc<SharedProgress>>,
+        piece_progress_bytes: &AtomicU64,
         request_limiter: &DownloadRequestLimiter,
         cancel_token: &CancellationToken,
     ) -> Result<()> {
@@ -636,7 +672,15 @@ impl SegmentedDownload {
             }
 
             let _request_permit = request_limiter.acquire(shared, cancel_token)?;
-            match Self::download_piece_once(client, url, file, piece, shared, cancel_token) {
+            match Self::download_piece_once(
+                client,
+                url,
+                file,
+                piece,
+                shared,
+                piece_progress_bytes,
+                cancel_token,
+            ) {
                 Ok(()) => return Ok(()),
                 Err(PieceAttemptFailure::Retryable { error: _, throttled })
                     if attempt < SEGMENT_RETRY_ATTEMPTS =>
@@ -658,6 +702,7 @@ impl SegmentedDownload {
         file: &std::fs::File,
         piece: DownloadPiece,
         shared: Option<&Arc<SharedProgress>>,
+        piece_progress_bytes: &AtomicU64,
         cancel_token: &CancellationToken,
     ) -> std::result::Result<(), PieceAttemptFailure> {
         use std::os::unix::fs::FileExt;
@@ -711,7 +756,7 @@ impl SegmentedDownload {
                         .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
                     offset += n as u64;
                     if let Some(progress) = shared {
-                        progress.record_fetched_bytes(n as u64);
+                        progress.record_session_fetched_bytes(n as u64);
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -726,6 +771,10 @@ impl SegmentedDownload {
 
         let downloaded_len = offset - piece.start;
         if downloaded_len == expected_len {
+            if let Some(progress) = shared {
+                progress.add_active_download_bytes(expected_len);
+            }
+            piece_progress_bytes.fetch_add(expected_len, Ordering::Relaxed);
             return Ok(())
         }
 

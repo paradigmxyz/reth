@@ -423,7 +423,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         info!(target: "reth::cli",
             archives = planned_downloads.total_archives(),
-            total = %DownloadProgress::format_size(planned_downloads.total_size),
+            download_total = %DownloadProgress::format_size(planned_downloads.total_download_size),
+            output_total = %DownloadProgress::format_size(planned_downloads.total_output_size),
             "Downloading all archives"
         );
 
@@ -843,6 +844,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "transaction_senders.tar.zst".to_string(),
                 size: 1,
+                decompressed_size: 0,
                 blake3: None,
                 output_files: vec![],
             }),
@@ -852,6 +854,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 1,
+                decompressed_size: 0,
                 blake3: None,
                 output_files: vec![],
             }),

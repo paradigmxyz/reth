@@ -1,4 +1,4 @@
-use super::manifest::OutputFileChecksum;
+use super::{manifest::OutputFileChecksum, progress::ArchiveVerificationProgress};
 use blake3::Hasher;
 use eyre::Result;
 use reth_fs_util as fs;
@@ -19,6 +19,16 @@ impl<'a> OutputVerifier<'a> {
     /// Returns `true` only when every declared output file exists and matches size and BLAKE3.
     /// Returns `false` if any file is missing, mismatched, or no outputs were declared.
     pub(crate) fn verify(&self, output_files: &[OutputFileChecksum]) -> Result<bool> {
+        self.verify_with_progress(output_files, None)
+    }
+
+    /// Returns `true` only when every declared output file exists and matches size and BLAKE3,
+    /// updating the optional verification progress as file bytes are hashed.
+    pub(crate) fn verify_with_progress(
+        &self,
+        output_files: &[OutputFileChecksum],
+        mut progress: Option<&mut ArchiveVerificationProgress<'_>>,
+    ) -> Result<bool> {
         if output_files.is_empty() {
             return Ok(false);
         }
@@ -33,7 +43,7 @@ impl<'a> OutputVerifier<'a> {
                 return Ok(false);
             }
 
-            let actual = Self::file_blake3_hex(&output_path)?;
+            let actual = Self::file_blake3_hex(&output_path, progress.as_deref_mut())?;
             if !actual.eq_ignore_ascii_case(&expected.blake3) {
                 return Ok(false);
             }
@@ -50,7 +60,10 @@ impl<'a> OutputVerifier<'a> {
     }
 
     /// Computes the hex-encoded BLAKE3 checksum for one plain output file.
-    fn file_blake3_hex(path: &Path) -> Result<String> {
+    fn file_blake3_hex(
+        path: &Path,
+        mut progress: Option<&mut ArchiveVerificationProgress<'_>>,
+    ) -> Result<String> {
         let mut file = fs::open(path)?;
         let mut hasher = Hasher::new();
         let mut buf = [0_u8; 64 * 1024];
@@ -61,6 +74,9 @@ impl<'a> OutputVerifier<'a> {
                 break;
             }
             hasher.update(&buf[..n]);
+            if let Some(progress) = progress.as_deref_mut() {
+                progress.record_verified(n as u64);
+            }
         }
 
         Ok(hasher.finalize().to_hex().to_string())
