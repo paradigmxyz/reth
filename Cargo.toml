@@ -325,8 +325,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { version = "0.2.0", default-features = false }
-reth-codecs-derive = "0.2.0"
+reth-codecs = { version = "0.3.0", default-features = false }
+reth-codecs-derive = "0.3.0"
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -394,7 +394,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives-traits = { version = "0.2.0", default-features = false }
+reth-primitives-traits = { version = "0.3.0", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -410,7 +410,7 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
-reth-rpc-traits = { version = "0.2.0", default-features = false }
+reth-rpc-traits = { version = "0.3.0", default-features = false }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -429,17 +429,17 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { version = "0.2.0", default-features = false }
+reth-zstd-compressors = { version = "0.3.0", default-features = false }
 
 # revm
-revm = { version = "36.0.0", default-features = false }
-revm-bytecode = { version = "9.0.0", default-features = false }
-revm-database = { version = "12.0.0", default-features = false }
-revm-state = { version = "10.0.0", default-features = false }
-revm-primitives = { version = "22.1.0", default-features = false }
-revm-interpreter = { version = "34.0.0", default-features = false }
-revm-database-interface = { version = "10.0.0", default-features = false }
-revm-inspectors = "0.37.0"
+revm = { version = "37.0.0", default-features = false }
+revm-bytecode = { version = "10.0.0", default-features = false }
+revm-database = { version = "13.0.0", default-features = false }
+revm-state = { version = "11.0.0", default-features = false }
+revm-primitives = { version = "23.0.0", default-features = false }
+revm-interpreter = { version = "35.0.0", default-features = false }
+revm-database-interface = { version = "11.0.0", default-features = false }
+revm-inspectors = "0.38.0"
 
 # eth
 alloy-dyn-abi = "1.5.6"
@@ -449,7 +449,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.31.0", default-features = false }
+alloy-evm = { version = "0.32.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 

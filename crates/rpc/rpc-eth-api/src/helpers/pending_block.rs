@@ -435,6 +435,7 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
             extra_data: parent.extra_data().clone(),
+            slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         }
     }
 }
@@ -456,5 +457,15 @@ mod tests {
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
 
         assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
+    }
+
+    #[test]
+    fn pending_env_increments_parent_slot_number() {
+        let header = Header { slot_number: Some(7), ..Default::default() };
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+
+        assert_eq!(attrs.slot_number, Some(8));
     }
 }

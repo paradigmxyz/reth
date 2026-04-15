@@ -6,7 +6,12 @@
 //! [`ExecutionData`] and environment switches at each block boundary.
 
 use alloy_consensus::{TxEnvelope, TxReceipt};
-use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams, Typed2718};
+use alloy_eips::{
+    eip1559::BaseFeeParams,
+    eip7840::BlobParams,
+    eip7928::{AccountChanges, BlockAccessList, SlotChanges},
+    BlockNumberOrTag, Typed2718,
+};
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
@@ -24,7 +29,7 @@ use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::proofs;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
+use std::{collections::HashMap, future::Future};
 use tracing::{info, warn};
 
 /// A single transaction with its gas used and raw encoded bytes.
@@ -215,6 +220,9 @@ pub struct BigBlockPayload {
     /// Big block data containing environment switches and prior block hashes.
     #[serde(default)]
     pub big_block_data: BigBlockData<ExecutionData>,
+    /// Flattened BAL across all constituent blocks, if requested during generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_access_list: Option<BlockAccessList>,
 }
 
 /// `reth bench generate-big-block` command
@@ -252,6 +260,11 @@ pub struct Command {
     /// Output directory for generated payloads.
     #[arg(long, value_name = "OUTPUT_DIR")]
     output_dir: std::path::PathBuf,
+
+    /// Query `eth_getBlockAccessListByBlockNumber` for each fetched block and persist
+    /// the flattened BAL on the stored payload.
+    #[arg(long, default_value_t = false)]
+    bal: bool,
 }
 
 impl Command {
@@ -273,6 +286,7 @@ impl Command {
             from_block = self.from_block,
             target_gas = self.target_gas,
             num_big_blocks = self.num_big_blocks,
+            include_bal = self.bal,
             chain = %chain_spec.chain(),
             output_dir = %self.output_dir.display(),
             "Generating big block payloads"
@@ -312,6 +326,7 @@ impl Command {
             // Fetch consecutive blocks until the gas target is reached.
             let mut blocks = Vec::new();
             let mut block_receipts: Vec<Vec<Receipt>> = Vec::new();
+            let mut block_access_lists: Vec<Option<BlockAccessList>> = Vec::new();
             let mut accumulated_block_gas: u64 = 0;
 
             let mut reached_chain_tip = false;
@@ -336,6 +351,14 @@ impl Command {
                         break;
                     }
                     Err(e) => return Err(e.into()),
+                };
+
+                let block_access_list = if self.bal {
+                    Some(fetch_block_access_list(&provider, block_number).await.wrap_err_with(
+                        || format!("Failed to fetch BAL for block {block_number}"),
+                    )?)
+                } else {
+                    None
                 };
 
                 // Convert RPC receipts to consensus receipts
@@ -375,10 +398,14 @@ impl Command {
                 let execution_data = ExecutionData { payload, sidecar };
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
+                let block_blob_gas =
+                    execution_data.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0);
+
                 info!(
                     target: "reth-bench",
                     block_number,
                     gas_used = block_gas,
+                    blob_gas_used = block_blob_gas,
                     tx_count = execution_data.payload.transactions().len(),
                     receipts = consensus_receipts.len(),
                     "Fetched block"
@@ -387,6 +414,7 @@ impl Command {
                 accumulated_block_gas += block_gas;
                 blocks.push(execution_data);
                 block_receipts.push(consensus_receipts);
+                block_access_lists.push(block_access_list);
                 next_block += 1;
             }
 
@@ -404,6 +432,7 @@ impl Command {
             // Block 0 is the base
             let mut base = blocks.remove(0);
             let base_receipts = block_receipts.remove(0);
+            let mut merged_block_access_list = block_access_lists.remove(0);
             let mut env_switches = Vec::new();
 
             // Accumulate all receipts with corrected cumulative_gas_used.
@@ -439,11 +468,21 @@ impl Command {
                 let mut total_gas_limit = base.payload.as_v1().gas_limit;
 
                 // Concatenate transactions from subsequent blocks and build env_switches
-                for (block_data, receipts) in blocks.into_iter().zip(block_receipts) {
+                for ((block_data, receipts), block_access_list) in
+                    blocks.into_iter().zip(block_receipts).zip(block_access_lists)
+                {
                     let block_v1 = block_data.payload.as_v1();
                     let block_gas = block_v1.gas_used;
                     total_gas_used += block_gas;
                     total_gas_limit += block_v1.gas_limit;
+
+                    if let Some(block_access_list) = block_access_list {
+                        merge_block_access_list(
+                            merged_block_access_list.get_or_insert_with(Default::default),
+                            block_access_list,
+                            cumulative_tx_count as u64,
+                        );
+                    }
 
                     // Accumulate receipts with corrected cumulative_gas_used
                     all_receipts.extend(receipts.into_iter().map(|mut r| {
@@ -579,6 +618,7 @@ impl Command {
                     env_switches,
                     prior_block_hashes: accumulated_block_hashes.clone(),
                 },
+                block_access_list: merged_block_access_list,
             };
 
             // Accumulate real block hashes from this big block's env_switches for
@@ -610,6 +650,7 @@ impl Command {
                 total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
                 env_switches = big_block.big_block_data.env_switches.len(),
                 prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
+                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
                 "Big block payload saved"
             );
 
@@ -628,6 +669,85 @@ impl Command {
     }
 }
 
+async fn fetch_block_access_list(
+    provider: &RootProvider<AnyNetwork>,
+    block_number: u64,
+) -> eyre::Result<BlockAccessList> {
+    provider
+        .client()
+        .request("eth_getBlockAccessListByBlockNumber", (BlockNumberOrTag::Number(block_number),))
+        .await
+        .map_err(Into::into)
+        .and_then(|block_access_list: Option<BlockAccessList>| {
+            block_access_list.ok_or_else(|| eyre::eyre!("BAL not found for block {block_number}"))
+        })
+}
+
+fn merge_block_access_list(
+    merged: &mut BlockAccessList,
+    incoming: BlockAccessList,
+    tx_index_offset: u64,
+) {
+    let mut account_positions = merged
+        .iter()
+        .enumerate()
+        .map(|(idx, account)| (account.address, idx))
+        .collect::<HashMap<_, _>>();
+
+    for mut account_changes in incoming {
+        shift_account_changes(&mut account_changes, tx_index_offset);
+
+        if let Some(&idx) = account_positions.get(&account_changes.address) {
+            merge_account_changes(&mut merged[idx], account_changes);
+        } else {
+            account_positions.insert(account_changes.address, merged.len());
+            merged.push(account_changes);
+        }
+    }
+}
+
+fn shift_account_changes(account_changes: &mut AccountChanges, tx_index_offset: u64) {
+    for slot_changes in &mut account_changes.storage_changes {
+        for change in &mut slot_changes.changes {
+            change.block_access_index += tx_index_offset;
+        }
+    }
+    for change in &mut account_changes.balance_changes {
+        change.block_access_index += tx_index_offset;
+    }
+    for change in &mut account_changes.nonce_changes {
+        change.block_access_index += tx_index_offset;
+    }
+    for change in &mut account_changes.code_changes {
+        change.block_access_index += tx_index_offset;
+    }
+}
+
+fn merge_account_changes(existing: &mut AccountChanges, incoming: AccountChanges) {
+    merge_slot_changes(&mut existing.storage_changes, incoming.storage_changes);
+    existing.storage_reads.extend(incoming.storage_reads);
+    existing.balance_changes.extend(incoming.balance_changes);
+    existing.nonce_changes.extend(incoming.nonce_changes);
+    existing.code_changes.extend(incoming.code_changes);
+}
+
+fn merge_slot_changes(existing: &mut Vec<SlotChanges>, incoming: Vec<SlotChanges>) {
+    let mut slot_positions = existing
+        .iter()
+        .enumerate()
+        .map(|(idx, slot_changes)| (slot_changes.slot, idx))
+        .collect::<HashMap<_, _>>();
+
+    for slot_changes in incoming {
+        if let Some(&idx) = slot_positions.get(&slot_changes.slot) {
+            existing[idx].changes.extend(slot_changes.changes);
+        } else {
+            slot_positions.insert(slot_changes.slot, existing.len());
+            existing.push(slot_changes);
+        }
+    }
+}
+
 /// Computes the block hash for an [`ExecutionData`] by converting it to a raw block
 /// and hashing the header.
 pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
@@ -637,4 +757,95 @@ pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
         .into_block_with_sidecar_raw(&data.sidecar)
         .wrap_err("failed to convert payload to block for hash computation")?;
     Ok(block.header.hash_slow())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip7928::{BalanceChange, CodeChange, NonceChange, StorageChange};
+    use alloy_primitives::{Address, U256};
+
+    #[test]
+    fn merge_block_access_list_offsets_and_merges_accounts() {
+        let shared = Address::repeat_byte(0x11);
+        let other = Address::repeat_byte(0x22);
+
+        let mut merged = vec![AccountChanges {
+            address: shared,
+            storage_changes: vec![SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(0, U256::from(10))],
+            )],
+            storage_reads: vec![U256::from(3)],
+            balance_changes: vec![BalanceChange::new(1, U256::from(100))],
+            nonce_changes: vec![NonceChange::new(2, 7)],
+            code_changes: vec![],
+        }];
+
+        let incoming = vec![
+            AccountChanges {
+                address: shared,
+                storage_changes: vec![
+                    SlotChanges::new(U256::from(1), vec![StorageChange::new(1, U256::from(20))]),
+                    SlotChanges::new(U256::from(2), vec![StorageChange::new(2, U256::from(30))]),
+                ],
+                storage_reads: vec![U256::from(4)],
+                balance_changes: vec![BalanceChange::new(0, U256::from(150))],
+                nonce_changes: vec![NonceChange::new(2, 8)],
+                code_changes: vec![CodeChange::new(1, Bytes::from_static(&[0xaa]))],
+            },
+            AccountChanges {
+                address: other,
+                storage_changes: vec![SlotChanges::new(
+                    U256::from(9),
+                    vec![StorageChange::new(0, U256::from(90))],
+                )],
+                storage_reads: vec![],
+                balance_changes: vec![],
+                nonce_changes: vec![],
+                code_changes: vec![],
+            },
+        ];
+
+        merge_block_access_list(&mut merged, incoming, 3);
+
+        assert_eq!(merged.len(), 2);
+
+        let shared = &merged[0];
+        assert_eq!(shared.storage_reads, vec![U256::from(3), U256::from(4)]);
+        assert_eq!(
+            shared
+                .balance_changes
+                .iter()
+                .map(|change| change.block_access_index)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert_eq!(
+            shared.nonce_changes.iter().map(|change| change.block_access_index).collect::<Vec<_>>(),
+            vec![2, 5]
+        );
+        assert_eq!(shared.code_changes[0].block_access_index, 4);
+
+        let slot_one = shared
+            .storage_changes
+            .iter()
+            .find(|slot_changes| slot_changes.slot == U256::from(1))
+            .unwrap();
+        assert_eq!(
+            slot_one.changes.iter().map(|change| change.block_access_index).collect::<Vec<_>>(),
+            vec![0, 4]
+        );
+
+        let slot_two = shared
+            .storage_changes
+            .iter()
+            .find(|slot_changes| slot_changes.slot == U256::from(2))
+            .unwrap();
+        assert_eq!(slot_two.changes[0].block_access_index, 5);
+
+        let other = &merged[1];
+        assert_eq!(other.address, Address::repeat_byte(0x22));
+        assert_eq!(other.storage_changes[0].changes[0].block_access_index, 3);
+    }
 }
