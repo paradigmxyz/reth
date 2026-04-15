@@ -4,8 +4,8 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
-    CacheWaitDurations, CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache,
-    StateProviderBuilder, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
+    PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig, WaitForCaches,
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -96,6 +96,8 @@ where
     executor: Runtime,
     /// The most recent cache used for execution.
     execution_cache: PayloadExecutionCache,
+    /// Metrics for the execution cache.
+    cache_metrics: CachedStateMetrics,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -156,6 +158,7 @@ where
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            cache_metrics: CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine),
         }
     }
 }
@@ -482,6 +485,7 @@ where
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
+            cache_metrics: self.cache_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
@@ -509,7 +513,12 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task), executed_tx_index }
+        CacheTaskHandle {
+            saved_cache,
+            to_prewarm_task: Some(to_prewarm_task),
+            executed_tx_index,
+            cache_metrics: self.cache_metrics.clone(),
+        }
     }
 
     /// Returns the cache for the given parent hash.
@@ -525,9 +534,8 @@ where
             debug!("creating new execution cache on cache miss");
             let start = Instant::now();
             let cache = ExecutionCache::new(self.cross_block_cache_size);
-            let metrics = CachedStateMetrics::zeroed();
-            metrics.record_cache_creation(start.elapsed());
-            SavedCache::new(parent_hash, cache, metrics)
+            self.cache_metrics.record_cache_creation(start.elapsed());
+            SavedCache::new(parent_hash, cache)
                 .with_disable_cache_metrics(self.disable_cache_metrics)
         }
     }
@@ -676,6 +684,7 @@ where
         bundle_state: &BundleState,
     ) {
         let disable_cache_metrics = self.disable_cache_metrics;
+        let cache_metrics = self.cache_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
@@ -687,25 +696,24 @@ where
             }
 
             // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics, _) = match cached.take() {
-                Some(existing) => existing.split(),
-                None => (
-                    ExecutionCache::new(self.cross_block_cache_size),
-                    CachedStateMetrics::zeroed(),
-                    false,
-                ),
+            let caches = match cached.take() {
+                Some(existing) => {
+                    let (caches, _) = existing.split();
+                    caches
+                }
+                None => ExecutionCache::new(self.cross_block_cache_size),
             };
 
             // Insert the block's bundle state into cache
             let new_cache =
-                SavedCache::new(block_with_parent.block.hash, caches, cache_metrics)
+                SavedCache::new(block_with_parent.block.hash, caches)
                     .with_disable_cache_metrics(disable_cache_metrics);
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return
             }
-            new_cache.update_metrics();
+            new_cache.update_metrics(&cache_metrics);
 
             // Replace with the updated cache
             *cached = Some(new_cache);
@@ -799,9 +807,9 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
-    /// Returns a clone of the cache metrics used by prewarming
+    /// Returns engine cache metrics if a cache exists for prewarming.
     pub fn cache_metrics(&self) -> Option<CachedStateMetrics> {
-        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
+        self.prewarm_handle.saved_cache.is_some().then(|| self.prewarm_handle.cache_metrics.clone())
     }
 
     /// Returns a reference to the shared executed transaction index counter.
@@ -852,6 +860,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Metrics for the execution cache.
+    cache_metrics: CachedStateMetrics,
 }
 
 impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
@@ -946,8 +956,7 @@ mod tests {
     use crate::tree::{
         payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
-        CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache,
-        StateProviderBuilder, TreeConfig,
+        ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
@@ -973,7 +982,7 @@ mod tests {
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
-        SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
+        SavedCache::new(hash, execution_cache)
     }
 
     #[test]
