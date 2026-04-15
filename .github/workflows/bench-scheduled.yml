@@ -54,6 +54,12 @@ env:
 
 name: bench-scheduled
 
+concurrency:
+  # Hard constraint: serialize runs per benchmark mode to avoid overlap races.
+  # Mapping must stay aligned with the "Detect mode" step below.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.mode || 'nightly') || github.event.schedule == '30 5 * * *' && 'nightly' || github.event.schedule == '0 9 * * *' && 'release' || 'hourly' }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   actions: read
