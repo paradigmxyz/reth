@@ -1328,7 +1328,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Appends a block changeset to the static file.
     ///
-    /// It **CALLS** `increment_block()`.
+    /// It **CALLS** `increment_block()` if the writer is not already at the given block.
+    /// This allows multiple batches of changesets to be appended to the same block.
     ///
     /// Returns the current number of changesets in the file, if any.
     pub fn append_account_changeset(
@@ -1339,7 +1340,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
         let start = Instant::now();
 
-        self.increment_block(block_number)?;
+        if self.current_block_number() != Some(block_number) {
+            self.increment_block(block_number)?;
+        }
         self.ensure_no_queued_prune()?;
 
         // first sort the changeset by address
@@ -1366,7 +1369,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Appends a block storage changeset to the static file.
     ///
-    /// It **CALLS** `increment_block()`.
+    /// It **CALLS** `increment_block()` if the writer is not already at the given block.
+    /// This allows multiple batches of changesets to be appended to the same block.
     pub fn append_storage_changeset(
         &mut self,
         mut changeset: Vec<StorageBeforeTx>,
@@ -1375,7 +1379,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
         let start = Instant::now();
 
-        self.increment_block(block_number)?;
+        if self.current_block_number() != Some(block_number) {
+            self.increment_block(block_number)?;
+        }
         self.ensure_no_queued_prune()?;
 
         // sort by address + storage key
