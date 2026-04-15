@@ -1,8 +1,8 @@
 use super::{
     fetch::{ArchiveFetcher, DownloadedArchive},
     progress::{
-        ArchiveExtractionProgress, DownloadProgress, DownloadRequestLimiter, ProgressReader,
-        SharedProgress, SharedProgressReader,
+        ArchiveExtractionProgress, ArchiveExtractionProgressHandle, DownloadProgress,
+        DownloadRequestLimiter, ProgressReader, SharedProgress, SharedProgressReader,
     },
     session::DownloadSession,
     MAX_DOWNLOAD_RETRIES, RETRY_BACKOFF_SECS,
@@ -14,8 +14,12 @@ use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
     io::Read,
-    path::Path,
-    sync::Arc,
+    path::{Component, Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
     time::{Duration, Instant},
 };
 use tar::Archive;
@@ -26,6 +30,8 @@ use zstd::stream::read::Decoder as ZstdDecoder;
 
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
+const STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE: u64 = 64 * 1024 * 1024;
+const EXTRACTION_PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Supported compression formats for snapshots
 #[derive(Debug, Clone, Copy)]
@@ -85,7 +91,7 @@ pub(crate) fn extract_archive_raw<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
-    progress: Option<&mut ArchiveExtractionProgress<'_>>,
+    progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
     match format {
         CompressionFormat::Lz4 => {
@@ -102,7 +108,7 @@ pub(crate) fn extract_archive_raw<R: Read>(
 fn unpack_archive<R: Read>(
     mut archive: Archive<R>,
     target_dir: &Path,
-    mut progress: Option<&mut ArchiveExtractionProgress<'_>>,
+    mut progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
     let entries = archive.entries().wrap_err_with(|| {
         format!("failed to read archive entries for `{}`", target_dir.display())
@@ -112,18 +118,118 @@ fn unpack_archive<R: Read>(
         let mut entry = entry.wrap_err_with(|| {
             format!("failed to read archive entry for `{}`", target_dir.display())
         })?;
-        let size = entry.header().entry_size().unwrap_or(0);
-        entry.unpack_in(target_dir).wrap_err_with(|| {
-            format!("failed to extract archive into `{}`", target_dir.display())
-        })?;
-        if size > 0 &&
-            let Some(progress) = progress.as_deref_mut()
-        {
-            progress.record_extracted(size);
-        }
+        extract_entry_with_progress(&mut entry, target_dir, progress.as_deref_mut())?;
     }
 
     Ok(())
+}
+
+fn extract_entry_with_progress<R: Read>(
+    entry: &mut tar::Entry<'_, R>,
+    target_dir: &Path,
+    progress: Option<&mut ArchiveExtractionProgress>,
+) -> Result<()> {
+    let size = entry.header().entry_size().unwrap_or(0);
+    let entry_type = entry.header().entry_type();
+
+    if !entry_type.is_file() || size == 0 {
+        entry.unpack_in(target_dir).wrap_err_with(|| {
+            format!("failed to extract archive into `{}`", target_dir.display())
+        })?;
+        return Ok(())
+    }
+
+    if size < STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE {
+        entry.unpack_in(target_dir).wrap_err_with(|| {
+            format!("failed to extract archive into `{}`", target_dir.display())
+        })?;
+        if let Some(progress) = progress {
+            progress.record_extracted(size);
+        }
+        return Ok(())
+    }
+
+    let Some(progress_handle) = progress.as_ref().and_then(|progress| progress.handle()) else {
+        entry.unpack_in(target_dir).wrap_err_with(|| {
+            format!("failed to extract archive into `{}`", target_dir.display())
+        })?;
+        return Ok(())
+    };
+
+    let Some(entry_path) = entry_destination_path(entry, target_dir)? else {
+        entry.unpack_in(target_dir).wrap_err_with(|| {
+            format!("failed to extract archive into `{}`", target_dir.display())
+        })?;
+        return Ok(())
+    };
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let monitor = spawn_extraction_progress_monitor(entry_path, progress_handle, Arc::clone(&stop));
+    let unpack_result = entry
+        .unpack_in(target_dir)
+        .wrap_err_with(|| format!("failed to extract archive into `{}`", target_dir.display()));
+    stop.store(true, Ordering::Relaxed);
+
+    let monitor_result = monitor.join();
+    if let Err(error) = unpack_result {
+        return Err(error)
+    }
+
+    monitor_result.map_err(|_| eyre::eyre!("extraction progress monitor panicked"))?;
+    Ok(())
+}
+
+fn entry_destination_path<R: Read>(
+    entry: &tar::Entry<'_, R>,
+    target_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    let mut file_dst = target_dir.to_path_buf();
+    let path = entry.path().wrap_err("invalid path in archive entry")?;
+
+    for part in path.components() {
+        match part {
+            Component::Prefix(..) | Component::RootDir | Component::CurDir => continue,
+            Component::ParentDir => return Ok(None),
+            Component::Normal(part) => file_dst.push(part),
+        }
+    }
+
+    if file_dst == target_dir {
+        return Ok(None)
+    }
+
+    Ok(Some(file_dst))
+}
+
+fn spawn_extraction_progress_monitor(
+    entry_path: PathBuf,
+    progress: ArchiveExtractionProgressHandle,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut extracted = 0_u64;
+
+        loop {
+            record_extracted_file_bytes(&entry_path, &progress, &mut extracted);
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            thread::sleep(EXTRACTION_PROGRESS_POLL_INTERVAL);
+        }
+    })
+}
+
+fn record_extracted_file_bytes(
+    entry_path: &Path,
+    progress: &ArchiveExtractionProgressHandle,
+    extracted: &mut u64,
+) {
+    let Ok(meta) = fs::metadata(entry_path) else { return };
+    let len = meta.len();
+    if len > *extracted {
+        progress.record_extracted(len - *extracted);
+        *extracted = len;
+    }
 }
 
 /// Extracts a snapshot from a local file.

@@ -487,26 +487,44 @@ impl Drop for ArchiveDownloadProgress<'_> {
 }
 
 /// Tracks one active archive extraction attempt.
-pub(crate) struct ArchiveExtractionProgress<'a> {
-    progress: Option<&'a Arc<SharedProgress>>,
-    extracted: u64,
+pub(crate) struct ArchiveExtractionProgress {
+    progress: Option<Arc<SharedProgress>>,
+    extracted: Arc<AtomicU64>,
     finished: bool,
 }
 
-impl<'a> ArchiveExtractionProgress<'a> {
+/// Cloneable handle for reporting extracted bytes from background monitoring.
+#[derive(Clone)]
+pub(crate) struct ArchiveExtractionProgressHandle {
+    progress: Arc<SharedProgress>,
+    extracted: Arc<AtomicU64>,
+}
+
+impl ArchiveExtractionProgress {
     /// Starts tracking one archive extraction attempt.
-    pub(crate) fn new(progress: Option<&'a Arc<SharedProgress>>) -> Self {
+    pub(crate) fn new(progress: Option<&Arc<SharedProgress>>) -> Self {
         if let Some(progress) = progress {
             progress.extraction_started();
         }
-        Self { progress, extracted: 0, finished: false }
+        Self {
+            progress: progress.cloned(),
+            extracted: Arc::new(AtomicU64::new(0)),
+            finished: false,
+        }
+    }
+
+    /// Returns a cloneable handle that can report extraction progress from another thread.
+    pub(crate) fn handle(&self) -> Option<ArchiveExtractionProgressHandle> {
+        Some(ArchiveExtractionProgressHandle {
+            progress: Arc::clone(self.progress.as_ref()?),
+            extracted: Arc::clone(&self.extracted),
+        })
     }
 
     /// Adds plain-output bytes extracted by this attempt.
     pub(crate) fn record_extracted(&mut self, bytes: u64) {
-        self.extracted += bytes;
-        if let Some(progress) = self.progress {
-            progress.add_active_extracted_output_bytes(bytes);
+        if let Some(handle) = self.handle() {
+            handle.record_extracted(bytes);
         }
     }
 
@@ -515,20 +533,27 @@ impl<'a> ArchiveExtractionProgress<'a> {
         if self.finished {
             return;
         }
-        if let Some(progress) = self.progress {
-            progress.sub_active_extracted_output_bytes(self.extracted);
+        if let Some(progress) = &self.progress {
+            progress.sub_active_extracted_output_bytes(self.extracted.swap(0, Ordering::Relaxed));
         }
-        self.extracted = 0;
         self.finished = true;
     }
 }
 
-impl Drop for ArchiveExtractionProgress<'_> {
+impl Drop for ArchiveExtractionProgress {
     fn drop(&mut self) {
-        if let Some(progress) = self.progress {
-            progress.sub_active_extracted_output_bytes(self.extracted);
+        if let Some(progress) = &self.progress {
+            progress.sub_active_extracted_output_bytes(self.extracted.swap(0, Ordering::Relaxed));
             progress.extraction_finished();
         }
+    }
+}
+
+impl ArchiveExtractionProgressHandle {
+    /// Adds plain-output bytes extracted by this attempt.
+    pub(crate) fn record_extracted(&self, bytes: u64) {
+        self.extracted.fetch_add(bytes, Ordering::Relaxed);
+        self.progress.add_active_extracted_output_bytes(bytes);
     }
 }
 

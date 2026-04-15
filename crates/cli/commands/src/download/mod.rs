@@ -438,8 +438,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         self.finalize_modular_download(&selections, &manifest, preset, target_dir, &data_dir.db())?;
 
-        info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
-
         Ok(())
     }
 
