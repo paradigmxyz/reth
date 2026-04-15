@@ -486,7 +486,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             tx.commit()?;
         }
 
-        info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
+        let start_command = startup_node_command::<C>(self.env.chain.as_ref());
+        info!(target: "reth::cli", "Snapshot download complete. Run `{}` to start syncing.", start_command);
 
         Ok(())
     }
@@ -734,6 +735,66 @@ fn should_reset_index_stage_checkpoints(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> bool {
     !matches!(selections.get(&SnapshotComponentType::RocksdbIndices), Some(ComponentSelection::All))
+}
+
+fn startup_node_command<C>(chain_spec: &C::ChainSpec) -> String
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec,
+{
+    startup_node_command_for_binary::<C>(&current_binary_name(), chain_spec)
+}
+
+fn startup_node_command_for_binary<C>(binary_name: &str, chain_spec: &C::ChainSpec) -> String
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec,
+{
+    let mut command = format!("{binary_name} node");
+
+    if let Some(chain_arg) = startup_chain_arg::<C>(chain_spec) {
+        command.push_str(" --chain ");
+        command.push_str(&chain_arg);
+    }
+
+    command
+}
+
+fn current_binary_name() -> String {
+    std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .and_then(|path| path.file_stem().map(|name| name.to_owned()))
+        .and_then(|name| name.into_string().ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "reth".to_string())
+}
+
+fn startup_chain_arg<C>(chain_spec: &C::ChainSpec) -> Option<String>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec,
+{
+    let current_chain = chain_spec.chain();
+    let current_genesis_hash = chain_spec.genesis_hash();
+    let default_chain = C::default_value().and_then(|chain_name| C::parse(chain_name).ok());
+
+    if default_chain.as_ref().is_some_and(|default_chain| {
+        default_chain.chain() == current_chain &&
+            default_chain.genesis_hash() == current_genesis_hash
+    }) {
+        return None;
+    }
+
+    C::SUPPORTED_CHAINS
+        .iter()
+        .find_map(|chain_name| {
+            let parsed_chain = C::parse(chain_name).ok()?;
+            (parsed_chain.chain() == current_chain &&
+                parsed_chain.genesis_hash() == current_genesis_hash)
+                .then(|| (*chain_name).to_string())
+        })
+        .or_else(|| Some("<chain-or-chainspec>".to_string()))
 }
 
 impl<C: ChainSpecParser> DownloadCommand<C> {
@@ -1904,6 +1965,7 @@ mod tests {
     use super::*;
     use clap::{Args, Parser};
     use manifest::{ComponentManifest, SingleArchive};
+    use reth_chainspec::{HOLESKY, MAINNET};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use tempfile::tempdir;
 
@@ -2216,5 +2278,29 @@ mod tests {
         assert_eq!(planned[0].ty, SnapshotComponentType::State);
         assert_eq!(planned[1].ty, SnapshotComponentType::RocksdbIndices);
         assert_eq!(planned[2].ty, SnapshotComponentType::Transactions);
+    }
+
+    #[test]
+    fn startup_node_command_omits_default_chain_arg() {
+        let command =
+            startup_node_command_for_binary::<EthereumChainSpecParser>("reth", MAINNET.as_ref());
+
+        assert_eq!(command, "reth node");
+    }
+
+    #[test]
+    fn startup_node_command_includes_non_default_chain_arg() {
+        let command =
+            startup_node_command_for_binary::<EthereumChainSpecParser>("reth", HOLESKY.as_ref());
+
+        assert_eq!(command, "reth node --chain holesky");
+    }
+
+    #[test]
+    fn startup_node_command_uses_running_binary_name() {
+        let command =
+            startup_node_command_for_binary::<EthereumChainSpecParser>("tempo", HOLESKY.as_ref());
+
+        assert_eq!(command, "tempo node --chain holesky");
     }
 }
