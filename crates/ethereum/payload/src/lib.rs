@@ -432,7 +432,7 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests)
+    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 

@@ -28,11 +28,15 @@ on:
         required: false
         default: false
         type: boolean
-      no_slack:
-        description: "Suppress Slack notifications"
+      slack:
+        description: "Slack notification policy"
         required: false
-        default: true
-        type: boolean
+        default: "never"
+        type: choice
+        options:
+          - always
+          - on-error
+          - never
       mode:
         description: "Benchmark mode"
         required: false
@@ -106,7 +110,7 @@ jobs:
           .github/scripts/bench-scheduled-refs.sh "$FORCE" "$MODE"
 
       - name: Alert on long-running hourly
-        if: steps.mode.outputs.mode == 'hourly' && steps.refs.outputs.long-running == 'true'
+        if: steps.mode.outputs.mode == 'hourly' && steps.refs.outputs.long-running == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
@@ -148,7 +152,7 @@ jobs:
             });
 
       - name: Alert on stale nightly
-        if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true'
+        if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
@@ -256,7 +260,7 @@ jobs:
       BENCH_FEATURE_ARGS: ""
       BENCH_ABBA: "true"
       BENCH_COMMENT_ID: ""
-      BENCH_NO_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.no_slack == true && 'true' || 'false' }}
+      BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
       BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
@@ -753,7 +757,7 @@ jobs:
             await core.summary.addRaw(md).write();
 
       - name: Send Slack notification (success)
-        if: success() && env.BENCH_NO_SLACK != 'true'
+        if: success() && env.BENCH_SLACK == 'always'
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
@@ -900,7 +904,7 @@ jobs:
             }
 
       - name: Send Slack notification (failure)
-        if: failure()
+        if: failure() && env.BENCH_SLACK != 'never'
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
