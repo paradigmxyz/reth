@@ -49,7 +49,6 @@ impl<T: SignedTransaction> TransactionSource<T> {
         match self {
             Self::Pool(tx) => resp_builder.fill_pending(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
-                #[expect(clippy::needless_update)]
                 let tx_info = TransactionInfo {
                     hash: Some(transaction.trie_hash()),
                     index: Some(index),
@@ -71,7 +70,6 @@ impl<T: SignedTransaction> TransactionSource<T> {
                 let hash = tx.trie_hash();
                 (tx, TransactionInfo { hash: Some(hash), ..Default::default() })
             }
-            #[expect(clippy::needless_update)]
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let hash = transaction.trie_hash();
                 (

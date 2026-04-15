@@ -857,7 +857,12 @@ where
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: reth_trie::ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }

@@ -7,6 +7,7 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
+#               BENCH_BAL (false/true/feature/baseline; only used with big blocks)
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
@@ -249,11 +250,33 @@ fi
 if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
+  BENCH_BAL_MODE="${BENCH_BAL:-false}"
 
   BB_BENCH_ARGS=(--reth-new-payload)
   if [ -n "${BENCH_WAIT_TIME:-}" ]; then
     BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
   fi
+  case "$BENCH_BAL_MODE" in
+    false)
+      ;;
+    true)
+      BB_BENCH_ARGS+=(--bal)
+      ;;
+    baseline)
+      if [[ "$LABEL" == baseline* ]]; then
+        BB_BENCH_ARGS+=(--bal)
+      fi
+      ;;
+    feature)
+      if [[ "$LABEL" == feature* ]]; then
+        BB_BENCH_ARGS+=(--bal)
+      fi
+      ;;
+    *)
+      echo "::error::Unknown BENCH_BAL value: $BENCH_BAL_MODE"
+      exit 1
+      ;;
+  esac
 
   # Warmup
   WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
