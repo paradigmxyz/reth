@@ -969,7 +969,7 @@ Engine:
           [default: 5]
 
       --engine.reserved-cpu-cores <RESERVED_CPU_CORES>
-          Configure the number of reserved CPU cores for non-reth processes
+          Number of CPU cores to reserve for non-reth processes (e.g. consensus client). Thread pool sizes are reduced by this amount, leaving headroom for other workloads
 
           [default: 1]
 

@@ -336,7 +336,8 @@ pub struct EngineArgs {
     #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
     pub multiproof_chunk_size: usize,
 
-    /// Configure the number of reserved CPU cores for non-reth processes
+    /// Number of CPU cores to reserve for non-reth processes (e.g. consensus client). Thread
+    /// pool sizes are reduced by this amount, leaving headroom for other workloads.
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
     pub reserved_cpu_cores: usize,
 

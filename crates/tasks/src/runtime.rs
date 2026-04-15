@@ -37,7 +37,7 @@ use tokio::runtime::Runtime as TokioRuntime;
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
 
 /// Default reserved CPU cores for OS and other processes.
-pub const DEFAULT_RESERVED_CPU_CORES: usize = 2;
+pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
 /// Default number of threads for the storage I/O pool.
 pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
@@ -193,10 +193,12 @@ impl RayonConfig {
 
     /// Compute the default number of threads based on available parallelism.
     fn default_thread_count(&self) -> usize {
-        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
-        // sizes doesn't actually reserve CPU cores for other processes.
-        let _ = self.reserved_cpu_cores;
-        self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
+        self.cpu_threads.unwrap_or_else(|| {
+            available_parallelism()
+                .map_or(1, NonZeroUsize::get)
+                .saturating_sub(self.reserved_cpu_cores)
+                .max(1)
+        })
     }
 }
 
@@ -949,6 +951,30 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_reserved_cpu_cores_reduces_thread_count() {
+        let parallelism = available_parallelism().map_or(1, NonZeroUsize::get);
+
+        let config = RayonConfig { reserved_cpu_cores: 0, ..Default::default() };
+        assert_eq!(config.default_thread_count(), parallelism);
+
+        let config = RayonConfig { reserved_cpu_cores: 2, ..Default::default() };
+        assert_eq!(config.default_thread_count(), parallelism.saturating_sub(2).max(1));
+
+        // Never goes below 1.
+        let config = RayonConfig { reserved_cpu_cores: usize::MAX, ..Default::default() };
+        assert_eq!(config.default_thread_count(), 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_explicit_cpu_threads_ignores_reserved_cores() {
+        let config =
+            RayonConfig { cpu_threads: Some(8), reserved_cpu_cores: 4, ..Default::default() };
+        assert_eq!(config.default_thread_count(), 8);
     }
 
     #[test]
