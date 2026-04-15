@@ -713,44 +713,88 @@ where
         return Ok(())
     }
 
-    let pool_transactions: Vec<(TransactionOrigin, <P as TransactionPool>::Transaction)> =
-        if let Ok(tx_backups) = serde_json::from_slice::<Vec<TxBackup>>(&data) {
-            tx_backups
+    let (total, pool_transactions): (
+        usize,
+        Vec<(TransactionOrigin, <P as TransactionPool>::Transaction)>,
+    ) = if let Ok(tx_backups) = serde_json::from_slice::<Vec<TxBackup>>(&data) {
+        let total = tx_backups.len();
+        let mut failed = 0usize;
+        let txs = tx_backups
                 .into_iter()
                 .filter_map(|backup| {
                     let tx_signed =
                         <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(
                             backup.rlp.as_ref(),
                         )
+                        .inspect_err(|err| {
+                            warn!(target: "txpool", %err, "Failed to decode backed-up transaction");
+                            failed += 1;
+                        })
                         .ok()?;
-                    let recovered = tx_signed.try_into_recovered().ok()?;
+                    let recovered = tx_signed.try_into_recovered()
+                        .inspect_err(|_| {
+                            warn!(target: "txpool", "Failed to recover signer for backed-up transaction");
+                            failed += 1;
+                        })
+                        .ok()?;
                     let pool_tx =
-                        <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
+                        <P::Transaction as PoolTransaction>::try_from_consensus(recovered)
+                        .inspect_err(|_| {
+                            warn!(target: "txpool", "Failed to convert backed-up transaction to pool format");
+                            failed += 1;
+                        })
+                        .ok()?;
 
                     Some((backup.origin, pool_tx))
                 })
-                .collect()
-        } else {
-            let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
-                alloy_rlp::Decodable::decode(&mut data.as_slice())?;
+                .collect::<Vec<_>>();
+        if failed > 0 {
+            warn!(target: "txpool", txs_file=?file_path, total, failed, "Some backed-up transactions could not be decoded");
+        }
+        (total, txs)
+    } else {
+        let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
+            alloy_rlp::Decodable::decode(&mut data.as_slice())?;
 
-            txs_signed
+        let total = txs_signed.len();
+        let mut failed = 0usize;
+        let txs = txs_signed
                 .into_iter()
-                .filter_map(|tx| tx.try_into_recovered().ok())
                 .filter_map(|tx| {
-                    <P::Transaction as PoolTransaction>::try_from_consensus(tx)
-                        .ok()
-                        .map(|pool_tx| (TransactionOrigin::Local, pool_tx))
+                    let recovered = tx.try_into_recovered()
+                        .inspect_err(|_| {
+                            warn!(target: "txpool", "Failed to recover signer for backed-up transaction");
+                            failed += 1;
+                        })
+                        .ok()?;
+                    let pool_tx = <P::Transaction as PoolTransaction>::try_from_consensus(recovered)
+                        .inspect_err(|_| {
+                            warn!(target: "txpool", "Failed to convert backed-up transaction to pool format");
+                            failed += 1;
+                        })
+                        .ok()?;
+                    Some((TransactionOrigin::Local, pool_tx))
                 })
-                .collect()
-        };
+                .collect::<Vec<_>>();
+        if failed > 0 {
+            warn!(target: "txpool", txs_file=?file_path, total, failed, "Some backed-up transactions could not be decoded");
+        }
+        (total, txs)
+    };
 
-    let inserted = futures_util::future::join_all(
+    let results = futures_util::future::join_all(
         pool_transactions.into_iter().map(|(origin, tx)| pool.add_transaction(origin, tx)),
     )
     .await;
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%inserted.len(), "Successfully reinserted local transactions from file");
+    let succeeded = results.iter().filter(|res| res.is_ok()).count();
+    let failed = results.len() - succeeded;
+    if failed > 0 {
+        warn!(target: "txpool", txs_file=?file_path, succeeded, failed, total, "Some backed-up transactions failed to reinsert into pool");
+    } else {
+        info!(target: "txpool", txs_file=?file_path, succeeded, total, "Reinserted local transactions from backup file");
+    }
+
     reth_fs_util::remove_file(file_path)?;
     Ok(())
 }
