@@ -118,9 +118,9 @@ pub(crate) struct SharedProgress {
     pub(crate) total_archives: u64,
     /// Time when the modular download job started.
     pub(crate) started_at: Instant,
-    /// Time and baseline when extraction first started.
+    /// Time and baseline when the current extraction phase started.
     extraction_phase: Mutex<Option<PhaseStart>>,
-    /// Time and baseline when verification first started.
+    /// Time and baseline when the current verification phase started.
     verification_phase: Mutex<Option<PhaseStart>>,
     /// Number of archives that have fully finished.
     pub(crate) archives_done: AtomicU64,
@@ -247,9 +247,8 @@ impl SharedProgress {
         .min(self.total_output_bytes)
     }
 
-    fn note_phase_start(slot: &Mutex<Option<PhaseStart>>, baseline_bytes: u64) {
-        let mut phase = slot.lock().unwrap();
-        phase.get_or_insert(PhaseStart { started_at: Instant::now(), baseline_bytes });
+    fn restart_phase(slot: &Mutex<Option<PhaseStart>>, baseline_bytes: u64) {
+        *slot.lock().unwrap() = Some(PhaseStart { started_at: Instant::now(), baseline_bytes });
     }
 
     fn phase_eta(
@@ -294,11 +293,12 @@ impl SharedProgress {
 
     /// Marks one archive as actively extracting.
     pub(crate) fn extraction_started(&self) {
-        Self::note_phase_start(
-            &self.extraction_phase,
-            self.completed_output_bytes.load(Ordering::Relaxed),
-        );
-        self.active_extractions.fetch_add(1, Ordering::Relaxed);
+        if self.active_extractions.fetch_add(1, Ordering::Relaxed) == 0 {
+            Self::restart_phase(
+                &self.extraction_phase,
+                self.completed_output_bytes.load(Ordering::Relaxed),
+            );
+        }
     }
 
     /// Marks one archive extraction as finished.
@@ -308,11 +308,12 @@ impl SharedProgress {
 
     /// Marks one archive as actively verifying outputs.
     pub(crate) fn verification_started(&self) {
-        Self::note_phase_start(
-            &self.verification_phase,
-            self.completed_output_bytes.load(Ordering::Relaxed),
-        );
-        self.active_verifications.fetch_add(1, Ordering::Relaxed);
+        if self.active_verifications.fetch_add(1, Ordering::Relaxed) == 0 {
+            Self::restart_phase(
+                &self.verification_phase,
+                self.completed_output_bytes.load(Ordering::Relaxed),
+            );
+        }
     }
 
     /// Marks one archive verification as finished.
@@ -717,13 +718,11 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
             let downloaded = progress.logical_downloaded_bytes();
             let extracted = progress.extracting_output_bytes();
             let verified = progress.verifying_output_bytes();
-            let completed_verified = progress.verified_output_bytes();
             let elapsed = DownloadProgress::format_duration(progress.started_at.elapsed());
             let download_total_display = DownloadProgress::format_size(download_total);
             let output_total_display = DownloadProgress::format_size(output_total);
             let downloaded_display = DownloadProgress::format_size(downloaded);
             let extracted_display = DownloadProgress::format_size(extracted);
-            let verified_display = DownloadProgress::format_size(completed_verified);
             let active_download_phase = active_downloads > 0 || active_requests > 0;
 
             if active_download_phase {
@@ -754,14 +753,7 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
                     "Verifying snapshot archives"
                 );
             } else {
-                info!(target: "reth::cli",
-                    archives = format_args!("{done}/{all}"),
-                    progress = %format_percent(completed_verified, output_total),
-                    elapsed = %elapsed,
-                    eta = %format_eta(None),
-                    bytes = format_args!("{verified_display}/{output_total_display}"),
-                    "Processing snapshot archives"
-                );
+                continue;
             }
         }
 
@@ -811,5 +803,42 @@ mod tests {
 
         assert_eq!(progress.logical_downloaded_bytes(), 0);
         assert_eq!(progress.active_downloads.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn extraction_phase_baseline_restarts_after_idle() {
+        let progress = SharedProgress::new(10, 100, 1, CancellationToken::new());
+
+        progress.extraction_started();
+        assert_eq!(progress.extraction_phase.lock().unwrap().as_ref().unwrap().baseline_bytes, 0);
+
+        progress.completed_output_bytes.store(25, Ordering::Relaxed);
+        progress.extraction_started();
+        assert_eq!(progress.extraction_phase.lock().unwrap().as_ref().unwrap().baseline_bytes, 0);
+
+        progress.extraction_finished();
+        progress.extraction_finished();
+        progress.extraction_started();
+        assert_eq!(progress.extraction_phase.lock().unwrap().as_ref().unwrap().baseline_bytes, 25);
+    }
+
+    #[test]
+    fn verification_phase_baseline_restarts_after_idle() {
+        let progress = SharedProgress::new(10, 100, 1, CancellationToken::new());
+
+        progress.verification_started();
+        assert_eq!(progress.verification_phase.lock().unwrap().as_ref().unwrap().baseline_bytes, 0);
+
+        progress.completed_output_bytes.store(40, Ordering::Relaxed);
+        progress.verification_started();
+        assert_eq!(progress.verification_phase.lock().unwrap().as_ref().unwrap().baseline_bytes, 0);
+
+        progress.verification_finished();
+        progress.verification_finished();
+        progress.verification_started();
+        assert_eq!(
+            progress.verification_phase.lock().unwrap().as_ref().unwrap().baseline_bytes,
+            40
+        );
     }
 }
