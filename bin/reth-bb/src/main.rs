@@ -14,10 +14,10 @@ use async_trait::async_trait;
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{ChainSpec, EthereumHardforks, Hardforks};
+use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
-use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeTypes, PayloadTypes};
@@ -333,19 +333,12 @@ pub struct BbConsensusBuilder;
 
 impl<Node> ConsensusBuilder<Node> for BbConsensusBuilder
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks, Primitives = EthPrimitives>,
-    >,
+    Node: FullNodeTypes<Types: NodeTypes<Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
+    type Consensus = NoopConsensus;
 
-    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(
-            EthBeaconConsensus::new(ctx.chain_spec())
-                .with_skip_gas_limit_ramp_check(true)
-                .with_skip_blob_gas_used_check(true)
-                .with_skip_requests_hash_check(true),
-        ))
+    async fn build_consensus(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        Ok(NoopConsensus::default())
     }
 }
 

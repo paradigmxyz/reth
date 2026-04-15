@@ -389,8 +389,7 @@ mod tests {
             > = ProviderFactory::new(
                 db,
                 chain_spec.clone(),
-                reth_provider::providers::StaticFileProvider::read_only(static_files_path, false)
-                    .unwrap(),
+                reth_provider::providers::StaticFileProvider::read_only(static_files_path).unwrap(),
                 reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
                     .with_default_tables()
                     .build()

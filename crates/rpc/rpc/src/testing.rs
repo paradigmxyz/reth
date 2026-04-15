@@ -212,7 +212,7 @@ where
 
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(sealed_block, total_fees, requests)
+                EthBuiltPayload::new(sealed_block, total_fees, requests, None)
                     .try_into_v5()
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)

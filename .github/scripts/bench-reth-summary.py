@@ -290,6 +290,14 @@ def fmt_s(v: float) -> str:
     return f"{v:.2f}s"
 
 
+def display_bal_mode(bal_mode: str | None) -> str | None:
+    if not bal_mode or bal_mode == "false":
+        return None
+    if bal_mode == "both":
+        return "true"
+    return bal_mode
+
+
 def significance(pct: float, ci_pct: float, lower_is_better: bool) -> str:
     """Return significance label: 'good', 'bad', or 'neutral'."""
     significant = abs(pct) > ci_pct
@@ -353,6 +361,7 @@ def generate_comparison_table(
     big_blocks: bool = False,
     warmup_blocks: str | None = None,
     wait_time: str | None = None,
+    bal_mode: str | None = None,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
     n = paired["blocks"]
@@ -399,6 +408,9 @@ def generate_comparison_table(
         meta_parts.append(f"{warmup_blocks} warmup")
     if wait_time:
         meta_parts.append(f"wait time: {wait_time}")
+    display_mode = display_bal_mode(bal_mode)
+    if big_blocks and display_mode:
+        meta_parts.append(f"BAL: {display_mode}")
     lines.append(f"*{', '.join(meta_parts)}*")
     return "\n".join(lines)
 
@@ -481,6 +493,7 @@ def main():
     parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
     parser.add_argument("--warmup-blocks", default=None, help="Number of warmup blocks")
     parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
+    parser.add_argument("--bal-mode", default=None, help="BAL mode (true, feature, baseline)")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
@@ -520,6 +533,7 @@ def main():
     baseline_name = args.baseline_name or "baseline"
     feature_name = args.feature_name or "feature"
     feature_sha = args.feature_ref or "unknown"
+    bal_mode = display_bal_mode(args.bal_mode)
 
     comparison_table = generate_comparison_table(
         baseline_stats,
@@ -533,6 +547,7 @@ def main():
         big_blocks=args.big_blocks,
         warmup_blocks=args.warmup_blocks,
         wait_time=args.wait_time,
+        bal_mode=bal_mode,
     )
     print(f"Generated comparison ({paired_stats['n']} paired blocks, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
@@ -566,6 +581,7 @@ def main():
         "big_blocks": args.big_blocks,
         "warmup_blocks": args.warmup_blocks,
         "wait_time": args.wait_time,
+        "bal_mode": bal_mode,
         "baseline": {
             "name": baseline_name,
             "ref": baseline_ref,

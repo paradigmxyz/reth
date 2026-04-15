@@ -14,6 +14,8 @@ ignore = [
     "RUSTSEC-2023-0089",
     # https://rustsec.org/advisories/RUSTSEC-2026-0002 lru upgrade requires a discv5 bump first
     "RUSTSEC-2026-0002",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0097 rand is unsound with a custom logger
+    "RUSTSEC-2026-0097",
 ]
 
 # This section is considered when running `cargo deny check bans`.

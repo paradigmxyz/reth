@@ -19,7 +19,7 @@ pub use cached_state::*;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::{sync::Arc, time::Duration};
@@ -41,7 +41,7 @@ use tracing::{debug, instrument, warn};
 #[derive(Clone, Debug, Default)]
 pub struct PayloadExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
-    inner: Arc<RwLock<Option<SavedCache>>>,
+    inner: Arc<Mutex<Option<SavedCache>>>,
     /// Metrics for cache operations.
     metrics: PayloadExecutionCacheMetrics,
 }
@@ -55,7 +55,7 @@ impl PayloadExecutionCache {
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let start = Instant::now();
-        let mut cache = self.inner.write();
+        let mut cache = self.inner.lock();
 
         let elapsed = start.elapsed();
         self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
@@ -109,8 +109,8 @@ impl PayloadExecutionCache {
     /// Returns the time spent waiting for the lock.
     pub fn wait_for_availability(&self) -> Duration {
         let start = Instant::now();
-        // Acquire write lock to wait for any current holders to finish
-        let _guard = self.inner.write();
+        // Acquire lock to wait for any current holders to finish
+        let _guard = self.inner.lock();
         let elapsed = start.elapsed();
         if elapsed.as_millis() > 5 {
             debug!(
@@ -139,7 +139,7 @@ impl PayloadExecutionCache {
     where
         F: FnOnce(&mut Option<SavedCache>),
     {
-        let mut guard = self.inner.write();
+        let mut guard = self.inner.lock();
         update_fn(&mut guard);
     }
 }

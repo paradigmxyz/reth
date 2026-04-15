@@ -135,16 +135,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     .with_genesis_block_number(genesis_block_number)
                     .build()?,
             ),
-            AccessRights::RO | AccessRights::RoInconsistent => {
-                (open_db_read_only(&db_path, self.db.database_args())?, {
-                    let provider = StaticFileProviderBuilder::read_only(sf_path)
-                        .with_metrics()
-                        .with_genesis_block_number(genesis_block_number)
-                        .build()?;
-                    provider.watch_directory();
-                    provider
-                })
-            }
+            AccessRights::RO | AccessRights::RoInconsistent => (
+                open_db_read_only(&db_path, self.db.database_args())?,
+                StaticFileProviderBuilder::read_only(sf_path)
+                    .with_metrics()
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?,
+            ),
         };
         let rocksdb_provider = if !access.is_read_write() && !RocksDBProvider::exists(&rocksdb_path)
         {

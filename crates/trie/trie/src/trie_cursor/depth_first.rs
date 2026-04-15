@@ -1,7 +1,7 @@
 use super::TrieCursor;
 use crate::{BranchNodeCompact, Nibbles};
 use reth_storage_errors::db::DatabaseError;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, iter::FusedIterator};
 use tracing::trace;
 
 /// Compares two Nibbles in depth-first order.
@@ -118,11 +118,14 @@ impl<C: TrieCursor> Iterator for DepthFirstTrieIterator<C> {
             }
 
             if let Err(err) = self.fill_next() {
+                self.complete = true;
                 return Some(Err(err))
             }
         }
     }
 }
+
+impl<C: TrieCursor> FusedIterator for DepthFirstTrieIterator<C> {}
 
 #[cfg(test)]
 mod tests {
@@ -130,6 +133,35 @@ mod tests {
     use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
     use alloy_trie::TrieMask;
     use std::{collections::BTreeMap, sync::Arc};
+
+    /// A trie cursor that always returns an error on seek/next.
+    struct FailingTrieCursor;
+
+    impl TrieCursor for FailingTrieCursor {
+        fn seek_exact(
+            &mut self,
+            _key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn seek(
+            &mut self,
+            _key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn reset(&mut self) {}
+    }
 
     fn create_test_node(state_nibbles: &[u8], tree_nibbles: &[u8]) -> BranchNodeCompact {
         let mut state_mask = TrieMask::default();
@@ -370,5 +402,15 @@ mod tests {
         }
 
         assert_eq!(actual_order, expected_order);
+    }
+
+    #[test]
+    fn test_iterator_terminates_on_error() {
+        let mut iter = DepthFirstTrieIterator::new(FailingTrieCursor);
+
+        // First call should return the error.
+        assert!(iter.next().unwrap().is_err());
+        // Iterator must be fused after the error — no infinite error loop.
+        assert!(iter.next().is_none());
     }
 }

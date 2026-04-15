@@ -175,10 +175,13 @@ Storage:
   -y, --non-interactive
           Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
 
-      --resumable
-          Use resumable two-phase downloads (download to disk first, then extract).
+      --resumable [<RESUMABLE>]
+          Enable resumable two-phase downloads (download to disk first, then extract).
 
-          Archives are downloaded to a .part file with HTTP Range resume support before extraction. Slower but tolerates network interruptions without restarting. By default, archives stream directly into the extractor.
+          Archives are downloaded to a `.part` file with HTTP Range resume support before extraction. This is enabled by default because it tolerates network interruptions without restarting. Pass `--resumable=false` to stream archives directly into the extractor instead.
+
+          [default: true]
+          [possible values: true, false]
 
       --download-concurrency <DOWNLOAD_CONCURRENCY>
           Maximum number of concurrent modular archive workers

@@ -313,6 +313,10 @@ impl RocksDBBuilder {
 
     /// Sets read-only mode.
     ///
+    /// Opens the database as a secondary instance, which supports catching up
+    /// with the primary via [`RocksDBProvider::try_catch_up_with_primary`].
+    /// A temporary directory is created automatically for the secondary's LOG files.
+    ///
     /// Note: Write operations on a read-only provider will panic at runtime.
     pub const fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
@@ -340,14 +344,35 @@ impl RocksDBBuilder {
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
         if self.read_only {
-            let db = DB::open_cf_descriptors_read_only(&options, &self.path, cf_descriptors, false)
-                .map_err(|e| {
-                    ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly { db, metrics })))
+            // Open as secondary instance for catch-up capability.
+            // Secondary needs max_open_files = -1 to keep all FDs open.
+            let mut options = options;
+            options.set_max_open_files(-1);
+
+            let secondary_path = self
+                .path
+                .parent()
+                .unwrap_or(&self.path)
+                .join(format!("rocksdb-secondary-tmp-{}", std::process::id()));
+            reth_fs_util::create_dir_all(&secondary_path).map_err(ProviderError::other)?;
+
+            let db = DB::open_cf_descriptors_as_secondary(
+                &options,
+                &self.path,
+                &secondary_path,
+                cf_descriptors,
+            )
+            .map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::Secondary {
+                db,
+                metrics,
+                secondary_path,
+            })))
         } else {
             // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
             // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
@@ -393,13 +418,16 @@ enum RocksDBProviderInner {
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
     },
-    /// Read-only mode using `DB` opened with `open_cf_descriptors_read_only`.
-    /// This doesn't acquire an exclusive lock, allowing concurrent reads.
-    ReadOnly {
-        /// Read-only `RocksDB` database instance.
+    /// Secondary mode using `DB` opened with `open_cf_descriptors_as_secondary`.
+    /// Supports catching up with the primary via `try_catch_up_with_primary`.
+    /// Does not support snapshots; consistency is guaranteed externally.
+    Secondary {
+        /// Secondary `RocksDB` database instance.
         db: DB,
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
+        /// Temporary directory for secondary LOG files, removed on drop.
+        secondary_path: PathBuf,
     },
 }
 
@@ -407,7 +435,7 @@ impl RocksDBProviderInner {
     /// Returns the metrics for this provider.
     const fn metrics(&self) -> Option<&RocksDBMetrics> {
         match self {
-            Self::ReadWrite { metrics, .. } | Self::ReadOnly { metrics, .. } => metrics.as_ref(),
+            Self::ReadWrite { metrics, .. } | Self::Secondary { metrics, .. } => metrics.as_ref(),
         }
     }
 
@@ -415,8 +443,8 @@ impl RocksDBProviderInner {
     fn db_rw(&self) -> &OptimisticTransactionDB {
         match self {
             Self::ReadWrite { db, .. } => db,
-            Self::ReadOnly { .. } => {
-                panic!("Cannot perform write operation on read-only RocksDB provider")
+            Self::Secondary { .. } => {
+                panic!("Cannot perform write operation on secondary RocksDB provider")
             }
         }
     }
@@ -425,7 +453,7 @@ impl RocksDBProviderInner {
     fn cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         let cf = match self {
             Self::ReadWrite { db, .. } => db.cf_handle(T::NAME),
-            Self::ReadOnly { db, .. } => db.cf_handle(T::NAME),
+            Self::Secondary { db, .. } => db.cf_handle(T::NAME),
         };
         cf.ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
     }
@@ -438,7 +466,7 @@ impl RocksDBProviderInner {
     ) -> Result<Option<Vec<u8>>, rocksdb::Error> {
         match self {
             Self::ReadWrite { db, .. } => db.get_cf(cf, key),
-            Self::ReadOnly { db, .. } => db.get_cf(cf, key),
+            Self::Secondary { db, .. } => db.get_cf(cf, key),
         }
     }
 
@@ -479,7 +507,7 @@ impl RocksDBProviderInner {
     ) -> RocksDBIterEnum<'_> {
         match self {
             Self::ReadWrite { db, .. } => RocksDBIterEnum::ReadWrite(db.iterator_cf(cf, mode)),
-            Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
+            Self::Secondary { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
 
@@ -490,7 +518,7 @@ impl RocksDBProviderInner {
     fn raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'_> {
         match self {
             Self::ReadWrite { db, .. } => RocksDBRawIterEnum::ReadWrite(db.raw_iterator_cf(cf)),
-            Self::ReadOnly { db, .. } => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
+            Self::Secondary { db, .. } => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
         }
     }
 
@@ -498,7 +526,7 @@ impl RocksDBProviderInner {
     fn snapshot(&self) -> RocksReadSnapshotInner<'_> {
         match self {
             Self::ReadWrite { db, .. } => RocksReadSnapshotInner::ReadWrite(db.snapshot()),
-            Self::ReadOnly { db, .. } => RocksReadSnapshotInner::ReadOnly(db.snapshot()),
+            Self::Secondary { db, .. } => RocksReadSnapshotInner::Secondary(db),
         }
     }
 
@@ -506,7 +534,7 @@ impl RocksDBProviderInner {
     fn path(&self) -> &Path {
         match self {
             Self::ReadWrite { db, .. } => db.path(),
-            Self::ReadOnly { db, .. } => db.path(),
+            Self::Secondary { db, .. } => db.path(),
         }
     }
 
@@ -580,7 +608,7 @@ impl RocksDBProviderInner {
 
         match self {
             Self::ReadWrite { db, .. } => collect_stats!(db),
-            Self::ReadOnly { db, .. } => collect_stats!(db),
+            Self::Secondary { db, .. } => collect_stats!(db),
         }
 
         stats
@@ -600,9 +628,9 @@ impl fmt::Debug for RocksDBProviderInner {
                 .field("db", &"<OptimisticTransactionDB>")
                 .field("metrics", metrics)
                 .finish(),
-            Self::ReadOnly { metrics, .. } => f
-                .debug_struct("RocksDBProviderInner::ReadOnly")
-                .field("db", &"<DB (read-only)>")
+            Self::Secondary { metrics, .. } => f
+                .debug_struct("RocksDBProviderInner::Secondary")
+                .field("db", &"<DB (secondary)>")
                 .field("metrics", metrics)
                 .finish(),
         }
@@ -627,7 +655,10 @@ impl Drop for RocksDBProviderInner {
                 }
                 db.cancel_all_background_work(true);
             }
-            Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
+            Self::Secondary { db, secondary_path, .. } => {
+                db.cancel_all_background_work(true);
+                let _ = std::fs::remove_dir_all(secondary_path);
+            }
         }
     }
 }
@@ -698,7 +729,25 @@ impl RocksDBProvider {
 
     /// Returns `true` if this provider is in read-only mode.
     pub fn is_read_only(&self) -> bool {
-        matches!(self.0.as_ref(), RocksDBProviderInner::ReadOnly { .. })
+        matches!(self.0.as_ref(), RocksDBProviderInner::Secondary { .. })
+    }
+
+    /// Tries to catch up with the primary instance by reading new WAL and MANIFEST entries.
+    ///
+    /// This is a no-op for read-write and read-only providers.
+    /// For secondary providers, this incrementally syncs with the primary's latest state.
+    pub fn try_catch_up_with_primary(&self) -> ProviderResult<()> {
+        match self.0.as_ref() {
+            RocksDBProviderInner::Secondary { db, .. } => {
+                db.try_catch_up_with_primary().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Returns a read-only, point-in-time snapshot of the database.
@@ -1383,12 +1432,12 @@ pub struct RocksReadSnapshot<'db> {
     provider: &'db RocksDBProvider,
 }
 
-/// Inner enum to hold the snapshot for either read-write or read-only mode.
+/// Inner enum to hold the snapshot for either read-write or secondary mode.
 enum RocksReadSnapshotInner<'db> {
     /// Snapshot from read-write `OptimisticTransactionDB`.
     ReadWrite(SnapshotWithThreadMode<'db, OptimisticTransactionDB>),
-    /// Snapshot from read-only `DB`.
-    ReadOnly(SnapshotWithThreadMode<'db, DB>),
+    /// Direct reads from a secondary `DB` instance (no snapshot).
+    Secondary(&'db DB),
 }
 
 impl<'db> RocksReadSnapshotInner<'db> {
@@ -1396,7 +1445,7 @@ impl<'db> RocksReadSnapshotInner<'db> {
     fn raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'_> {
         match self {
             Self::ReadWrite(snap) => RocksDBRawIterEnum::ReadWrite(snap.raw_iterator_cf(cf)),
-            Self::ReadOnly(snap) => RocksDBRawIterEnum::ReadOnly(snap.raw_iterator_cf(cf)),
+            Self::Secondary(db) => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
         }
     }
 }
@@ -1421,7 +1470,7 @@ impl<'db> RocksReadSnapshot<'db> {
         let cf = self.cf_handle::<T>()?;
         let result = match &self.inner {
             RocksReadSnapshotInner::ReadWrite(snap) => snap.get_cf(cf, encoded_key.as_ref()),
-            RocksReadSnapshotInner::ReadOnly(snap) => snap.get_cf(cf, encoded_key.as_ref()),
+            RocksReadSnapshotInner::Secondary(db) => db.get_cf(cf, encoded_key.as_ref()),
         }
         .map_err(|e| {
             ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
@@ -3030,23 +3079,20 @@ mod tests {
         assert_eq!(result, HistoryInfo::InChangeset(100));
     }
 
-    /// Verifies that history lookups work on a read-only `RocksDB` provider.
-    /// This was the original bug — read-only mode panicked on `account_history_info`.
+    /// Verifies that a read-only (secondary) provider can catch up with primary writes.
     #[test]
-    fn test_account_history_info_read_only() {
+    fn test_account_history_info_read_only_and_catch_up() {
         let temp_dir = TempDir::new().unwrap();
         let address = Address::from([0x42; 20]);
         let chunk = IntegerList::new([100, 200, 300]).unwrap();
         let shard_key = ShardedKey::new(address, u64::MAX);
 
-        // Write data with a read-write provider, then drop it.
-        {
-            let provider =
-                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-            provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
-        }
+        // Write data with a read-write provider
+        let rw_provider =
+            RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        rw_provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
 
-        // Reopen in read-only mode and verify the lookup succeeds (no panic).
+        // Open read-only provider — it sees the initial data.
         let ro_provider = RocksDBBuilder::new(temp_dir.path())
             .with_default_tables()
             .with_read_only(true)
@@ -3064,6 +3110,24 @@ mod tests {
         let result =
             ro_provider.snapshot().account_history_info(address, 400, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::InPlainState);
+
+        // Write new data via the primary.
+        let address2 = Address::from([0x43; 20]);
+        let chunk2 = IntegerList::new([500, 600]).unwrap();
+        let shard_key2 = ShardedKey::new(address2, u64::MAX);
+        rw_provider.put::<tables::AccountsHistory>(shard_key2, &chunk2).unwrap();
+
+        // Read-only doesn't see the new data yet.
+        let result =
+            ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        // Catch up — now it sees the new data.
+        ro_provider.try_catch_up_with_primary().unwrap();
+
+        let result =
+            ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(500));
     }
 
     #[test]

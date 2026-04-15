@@ -261,12 +261,13 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
-    /// Use resumable two-phase downloads (download to disk first, then extract).
+    /// Enable resumable two-phase downloads (download to disk first, then extract).
     ///
-    /// Archives are downloaded to a .part file with HTTP Range resume support
-    /// before extraction. Slower but tolerates network interruptions without
-    /// restarting. By default, archives stream directly into the extractor.
-    #[arg(long)]
+    /// Archives are downloaded to a `.part` file with HTTP Range resume support
+    /// before extraction. This is enabled by default because it tolerates
+    /// network interruptions without restarting. Pass `--resumable=false` to
+    /// stream archives directly into the extractor instead.
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true")]
     resumable: bool,
 
     /// Maximum number of concurrent modular archive workers.
@@ -485,7 +486,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             tx.commit()?;
         }
 
-        info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
+        let start_command = startup_node_command::<C>(self.env.chain.as_ref());
+        info!(target: "reth::cli", "Snapshot download complete. Run `{}` to start syncing.", start_command);
 
         Ok(())
     }
@@ -735,6 +737,66 @@ fn should_reset_index_stage_checkpoints(
     !matches!(selections.get(&SnapshotComponentType::RocksdbIndices), Some(ComponentSelection::All))
 }
 
+fn startup_node_command<C>(chain_spec: &C::ChainSpec) -> String
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec,
+{
+    startup_node_command_for_binary::<C>(&current_binary_name(), chain_spec)
+}
+
+fn startup_node_command_for_binary<C>(binary_name: &str, chain_spec: &C::ChainSpec) -> String
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec,
+{
+    let mut command = format!("{binary_name} node");
+
+    if let Some(chain_arg) = startup_chain_arg::<C>(chain_spec) {
+        command.push_str(" --chain ");
+        command.push_str(&chain_arg);
+    }
+
+    command
+}
+
+fn current_binary_name() -> String {
+    std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .and_then(|path| path.file_stem().map(|name| name.to_owned()))
+        .and_then(|name| name.into_string().ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "reth".to_string())
+}
+
+fn startup_chain_arg<C>(chain_spec: &C::ChainSpec) -> Option<String>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec,
+{
+    let current_chain = chain_spec.chain();
+    let current_genesis_hash = chain_spec.genesis_hash();
+    let default_chain = C::default_value().and_then(|chain_name| C::parse(chain_name).ok());
+
+    if default_chain.as_ref().is_some_and(|default_chain| {
+        default_chain.chain() == current_chain &&
+            default_chain.genesis_hash() == current_genesis_hash
+    }) {
+        return None;
+    }
+
+    C::SUPPORTED_CHAINS
+        .iter()
+        .find_map(|chain_name| {
+            let parsed_chain = C::parse(chain_name).ok()?;
+            (parsed_chain.chain() == current_chain &&
+                parsed_chain.genesis_hash() == current_genesis_hash)
+                .then(|| (*chain_name).to_string())
+        })
+        .or_else(|| Some("<chain-or-chainspec>".to_string()))
+}
+
 impl<C: ChainSpecParser> DownloadCommand<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
@@ -898,6 +960,8 @@ impl SharedProgress {
 fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let started_at = Instant::now();
+        let mut prev_downloaded = 0u64;
+        let mut prev_time = started_at;
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await; // first tick is immediate, skip it
         loop {
@@ -919,7 +983,6 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
             let dl = DownloadProgress::format_size(downloaded);
             let tot = DownloadProgress::format_size(total);
 
-            let elapsed = started_at.elapsed();
             let remaining = total.saturating_sub(downloaded);
 
             if remaining == 0 {
@@ -930,15 +993,20 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
                     "Extracting remaining archives"
                 );
             } else {
-                let eta = if downloaded > 0 {
-                    let speed = downloaded as f64 / elapsed.as_secs_f64();
-                    if speed > 0.0 {
-                        DownloadProgress::format_duration(Duration::from_secs_f64(
-                            remaining as f64 / speed,
-                        ))
-                    } else {
-                        "??".to_string()
-                    }
+                let now = Instant::now();
+                let dt = now.duration_since(prev_time).as_secs_f64();
+                let speed = if dt > 0.0 {
+                    (downloaded.saturating_sub(prev_downloaded)) as f64 / dt
+                } else {
+                    0.0
+                };
+                prev_downloaded = downloaded;
+                prev_time = now;
+
+                let eta = if speed > 0.0 {
+                    DownloadProgress::format_duration(Duration::from_secs_f64(
+                        remaining as f64 / speed,
+                    ))
                 } else {
                     "??".to_string()
                 };
@@ -1177,7 +1245,7 @@ fn resumable_download(
     let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
 
     let mut total_size: Option<u64> = None;
-    let mut last_error: Option<eyre::Error> = None;
+    let mut retries: u32 = 0;
 
     let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
         fs::rename(&part_path, &final_path)?;
@@ -1187,7 +1255,7 @@ fn resumable_download(
         Ok((final_path.clone(), size))
     };
 
-    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+    loop {
         let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
 
         if let Some(total) = total_size &&
@@ -1196,18 +1264,18 @@ fn resumable_download(
             return finalize_download(total);
         }
 
-        if attempt > 1 {
+        if retries > 0 {
             info!(target: "reth::cli",
                 file = %file_name,
-                "Retry attempt {}/{} - resuming from {} bytes",
-                attempt, MAX_DOWNLOAD_RETRIES, existing_size
+                retries,
+                "Resuming download from {} bytes", existing_size
             );
         }
 
         let mut request = client.get(url);
         if existing_size > 0 {
             request = request.header(RANGE, format!("bytes={existing_size}-"));
-            if !quiet && attempt == 1 {
+            if !quiet && retries == 0 {
                 info!(target: "reth::cli", file = %file_name, "Resuming from {} bytes", existing_size);
             }
         }
@@ -1215,14 +1283,16 @@ fn resumable_download(
         let response = match request.send().and_then(|r| r.error_for_status()) {
             Ok(r) => r,
             Err(e) => {
-                last_error = Some(e.into());
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    info!(target: "reth::cli",
-                        file = %file_name,
-                        "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
-                    );
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                retries += 1;
+                if retries >= MAX_DOWNLOAD_RETRIES {
+                    return Err(e.into());
                 }
+                warn!(target: "reth::cli",
+                    file = %file_name,
+                    %e,
+                    "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
+                );
+                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 continue;
             }
         };
@@ -1293,23 +1363,33 @@ fn resumable_download(
             println!();
         }
 
-        if let Err(e) = copy_result.and(flush_result) {
-            last_error = Some(e.into());
-            if attempt < MAX_DOWNLOAD_RETRIES {
-                info!(target: "reth::cli",
+        match copy_result.and(flush_result) {
+            Err(e) => {
+                // Check if any new data was written since we started this attempt.
+                // If so, the connection was productive — reset the consecutive failure
+                // counter so transient mid-stream errors don't exhaust retries.
+                let new_size = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+                if new_size > existing_size {
+                    retries = 0;
+                } else {
+                    retries += 1;
+                }
+
+                if retries >= MAX_DOWNLOAD_RETRIES {
+                    return Err(e.into());
+                }
+
+                warn!(target: "reth::cli",
                     file = %file_name,
+                    %e,
                     "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
                 );
                 std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                continue;
             }
-            continue;
+            Ok(_) => return finalize_download(current_total),
         }
-
-        return finalize_download(current_total);
     }
-
-    Err(last_error
-        .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
 }
 
 /// Streams a remote archive directly into the extractor without writing to disk.
@@ -1883,8 +1963,17 @@ fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::{Args, Parser};
     use manifest::{ComponentManifest, SingleArchive};
+    use reth_chainspec::{HOLESKY, MAINNET};
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use tempfile::tempdir;
+
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
 
     fn manifest_with_archive_only_components() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -1970,6 +2059,36 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_download_resumable_defaults_to_true() {
+        let args =
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from(["reth"]).args;
+
+        assert!(args.resumable);
+    }
+
+    #[test]
+    fn test_download_resumable_implicit_true() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--resumable",
+        ])
+        .args;
+
+        assert!(args.resumable);
+    }
+
+    #[test]
+    fn test_download_resumable_explicit_false() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--resumable=false",
+        ])
+        .args;
+
+        assert!(!args.resumable);
     }
 
     #[test]
@@ -2159,5 +2278,29 @@ mod tests {
         assert_eq!(planned[0].ty, SnapshotComponentType::State);
         assert_eq!(planned[1].ty, SnapshotComponentType::RocksdbIndices);
         assert_eq!(planned[2].ty, SnapshotComponentType::Transactions);
+    }
+
+    #[test]
+    fn startup_node_command_omits_default_chain_arg() {
+        let command =
+            startup_node_command_for_binary::<EthereumChainSpecParser>("reth", MAINNET.as_ref());
+
+        assert_eq!(command, "reth node");
+    }
+
+    #[test]
+    fn startup_node_command_includes_non_default_chain_arg() {
+        let command =
+            startup_node_command_for_binary::<EthereumChainSpecParser>("reth", HOLESKY.as_ref());
+
+        assert_eq!(command, "reth node --chain holesky");
+    }
+
+    #[test]
+    fn startup_node_command_uses_running_binary_name() {
+        let command =
+            startup_node_command_for_binary::<EthereumChainSpecParser>("tempo", HOLESKY.as_ref());
+
+        assert_eq!(command, "tempo node --chain holesky");
     }
 }
