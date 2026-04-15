@@ -73,7 +73,9 @@ where
     }
 }
 
-/// Cache entry, precompile successful output.
+/// Cache entry for a successful precompile output.
+///
+/// We intentionally do not cache non-successful statuses or errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry<S> {
     output: PrecompileOutput,
@@ -180,6 +182,8 @@ where
         let result = self.precompile.call(input);
 
         match &result {
+            // Only successful outputs are cacheable. Non-success statuses and errors must execute
+            // again instead of poisoning the cache for subsequent calls.
             Ok(output) if output.is_success() => {
                 let size = self.cache.insert(
                     Bytes::copy_from_slice(calldata),
