@@ -19,13 +19,13 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
+    fmt,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
 };
-use std::fmt;
 use tracing::{debug_span, instrument, trace, warn};
 
 /// Alignment in bytes for entries in the fixed-cache.
@@ -947,21 +947,12 @@ pub struct SavedCache {
     /// A guard to track in-flight usage of this cache.
     /// The cache is considered available if the strong count is 1.
     usage_guard: Arc<()>,
-
-    /// Whether to skip cache metrics recording (can be expensive with large cached state).
-    disable_cache_metrics: bool,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
     pub fn new(hash: B256, caches: ExecutionCache) -> Self {
-        Self { hash, caches, usage_guard: Arc::new(()), disable_cache_metrics: false }
-    }
-
-    /// Sets whether to disable cache metrics recording.
-    pub const fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
-        self.disable_cache_metrics = disable;
-        self
+        Self { hash, caches, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
@@ -969,9 +960,9 @@ impl SavedCache {
         self.hash
     }
 
-    /// Splits the cache into its caches and `disable_cache_metrics` flag, consuming it.
-    pub fn split(self) -> (ExecutionCache, bool) {
-        (self.caches, self.disable_cache_metrics)
+    /// Consumes the `SavedCache` and returns the inner [`ExecutionCache`].
+    pub fn into_inner(self) -> ExecutionCache {
+        self.caches
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
@@ -990,14 +981,10 @@ impl SavedCache {
     }
 
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
-    ///
-    /// Note: This can be expensive with large cached state. Use
-    /// `with_disable_cache_metrics(true)` to skip.
-    pub fn update_metrics(&self, metrics: &CachedStateMetrics) {
-        if self.disable_cache_metrics {
-            return
+    pub fn update_metrics(&self, metrics: Option<&CachedStateMetrics>) {
+        if let Some(metrics) = metrics {
+            self.caches.update_metrics(metrics);
         }
-        self.caches.update_metrics(metrics);
     }
 
     /// Clears all caches, resetting them to empty state,
@@ -1034,8 +1021,11 @@ mod tests {
         provider.extend_accounts(vec![(address, account)]);
 
         let caches = ExecutionCache::new(1000);
-        let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed(CachedStateMetricsSource::Test));
+        let state_provider = CachedStateProvider::new(
+            provider,
+            caches,
+            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+        );
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -1054,8 +1044,11 @@ mod tests {
         provider.extend_accounts(vec![(address, account)]);
 
         let caches = ExecutionCache::new(1000);
-        let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed(CachedStateMetricsSource::Test));
+        let state_provider = CachedStateProvider::new(
+            provider,
+            caches,
+            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+        );
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -1104,8 +1097,7 @@ mod tests {
     #[test]
     fn test_saved_cache_multiple_references() {
         let execution_cache = ExecutionCache::new(1000);
-        let cache =
-            SavedCache::new(B256::from([2u8; 32]), execution_cache);
+        let cache = SavedCache::new(B256::from([2u8; 32]), execution_cache);
 
         let guard1 = cache.clone_guard_for_test();
         let guard2 = cache.clone_guard_for_test();

@@ -289,9 +289,8 @@ where
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
                 // guard
-                let (caches, disable_cache_metrics) = saved_cache.split();
-                let new_cache =
-                    SavedCache::new(hash, caches).with_disable_cache_metrics(disable_cache_metrics);
+                let caches = saved_cache.into_inner();
+                let new_cache = SavedCache::new(hash, caches);
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
@@ -302,7 +301,7 @@ where
                     return;
                 }
 
-                new_cache.update_metrics(&cache_metrics);
+                new_cache.update_metrics(cache_metrics.as_ref());
 
                 if valid_block_rx.recv().is_ok() {
                     // Replace the shared cache with the new one; the previous cache (if any) is
@@ -525,7 +524,8 @@ where
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
-    pub cache_metrics: CachedStateMetrics,
+    /// Metrics for the execution cache. `None` disables metrics recording.
+    pub cache_metrics: Option<CachedStateMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -570,7 +570,7 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(
                 state_provider,
                 caches,
-                self.cache_metrics.clone(),
+                self.cache_metrics.clone().unwrap_or_default(),
             ));
         }
 
@@ -675,7 +675,7 @@ where
                 Box::new(CachedStateProvider::new_prewarm(
                     inner,
                     caches,
-                    self.cache_metrics.clone(),
+                    self.cache_metrics.clone().unwrap_or_default(),
                 ))
             } else {
                 Box::new(inner)
@@ -774,7 +774,7 @@ where
                 slot.insert(CachedStateProvider::new_prewarm(
                     built,
                     caches,
-                    self.cache_metrics.clone(),
+                    self.cache_metrics.clone().unwrap_or_default(),
                 ))
             }
         };
