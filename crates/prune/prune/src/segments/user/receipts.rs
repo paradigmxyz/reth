@@ -1,15 +1,17 @@
 use crate::{
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, Segment},
     PrunerError,
 };
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
-    PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache, TransactionsProvider,
+    errors::provider::ProviderResult, BlockReader, DBProvider, EitherWriter,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
+    TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
-use tracing::instrument;
+use reth_static_file_types::StaticFileSegment;
+use tracing::{debug, instrument};
 
 #[derive(Debug)]
 pub struct Receipts {
@@ -51,6 +53,15 @@ where
         ret(level = "trace")
     )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        if EitherWriter::receipts_destination(provider).is_static_file() && self.mode.is_full() {
+            debug!(target: "pruner", "PruneMode::Full: deleting all receipts static files.");
+            return segments::delete_static_files_segment(
+                provider,
+                input,
+                StaticFileSegment::Receipts,
+            )
+        }
+
         crate::segments::receipts::prune(provider, input)
     }
 
