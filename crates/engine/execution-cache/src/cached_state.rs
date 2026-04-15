@@ -911,8 +911,17 @@ impl ExecutionCache {
 
 /// A saved cache that has been used for executing a specific block, which has been updated for its
 /// execution.
+///
+/// Wraps [`SavedCacheInner`] in an [`Arc`] so that cloning is cheap and the
+/// [`Arc::strong_count`] serves as the usage guard: the cache is considered
+/// available when the strong count is 1 (only the [`PayloadExecutionCache`] holds
+/// a reference).
 #[derive(Debug, Clone)]
-pub struct SavedCache {
+pub struct SavedCache(Arc<SavedCacheInner>);
+
+/// Inner state of a [`SavedCache`], wrapped in a single [`Arc`].
+#[derive(Debug)]
+struct SavedCacheInner {
     /// The hash of the block these caches were used to execute.
     hash: B256,
 
@@ -922,10 +931,6 @@ pub struct SavedCache {
     /// Metrics for the cached state provider (includes size/capacity/collisions from fixed-cache)
     metrics: CachedStateMetrics,
 
-    /// A guard to track in-flight usage of this cache.
-    /// The cache is considered available if the strong count is 1.
-    usage_guard: Arc<()>,
-
     /// Whether to skip cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
 }
@@ -933,43 +938,50 @@ pub struct SavedCache {
 impl SavedCache {
     /// Creates a new instance with the internals
     pub fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
-        Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
+        Self(Arc::new(SavedCacheInner { hash, caches, metrics, disable_cache_metrics: false }))
     }
 
     /// Sets whether to disable cache metrics recording.
-    pub const fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
-        self.disable_cache_metrics = disable;
+    ///
+    /// # Panics
+    ///
+    /// Panics if other clones of this `SavedCache` exist. Must be called on a
+    /// freshly created or uniquely owned instance.
+    pub fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
+        Arc::get_mut(&mut self.0)
+            .expect("with_disable_cache_metrics requires a unique SavedCache")
+            .disable_cache_metrics = disable;
         self
     }
 
     /// Returns the hash for this cache
-    pub const fn executed_block_hash(&self) -> B256 {
-        self.hash
+    pub fn executed_block_hash(&self) -> B256 {
+        self.0.hash
     }
 
     /// Splits the cache into its caches, metrics, and `disable_cache_metrics` flag, consuming it.
     pub fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
-        (self.caches, self.metrics, self.disable_cache_metrics)
+        (self.0.caches.clone(), self.0.metrics.clone(), self.0.disable_cache_metrics)
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
     pub fn is_available(&self) -> bool {
-        Arc::strong_count(&self.usage_guard) == 1
+        Arc::strong_count(&self.0) == 1
     }
 
     /// Returns the current strong count of the usage guard.
     pub fn usage_count(&self) -> usize {
-        Arc::strong_count(&self.usage_guard)
+        Arc::strong_count(&self.0)
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
-    pub const fn cache(&self) -> &ExecutionCache {
-        &self.caches
+    pub fn cache(&self) -> &ExecutionCache {
+        &self.0.caches
     }
 
     /// Returns the metrics associated with this cache.
-    pub const fn metrics(&self) -> &CachedStateMetrics {
-        &self.metrics
+    pub fn metrics(&self) -> &CachedStateMetrics {
+        &self.0.metrics
     }
 
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
@@ -977,25 +989,33 @@ impl SavedCache {
     /// Note: This can be expensive with large cached state. Use
     /// `with_disable_cache_metrics(true)` to skip.
     pub fn update_metrics(&self) {
-        if self.disable_cache_metrics {
+        if self.0.disable_cache_metrics {
             return
         }
-        self.caches.update_metrics(&self.metrics);
+        self.0.caches.update_metrics(&self.0.metrics);
     }
 
     /// Clears all caches, resetting them to empty state,
     /// and updates the hash of the block this cache belongs to.
+    ///
+    /// # Panics
+    ///
+    /// Panics if other clones of this `SavedCache` exist (i.e. the cache is not
+    /// available). Callers must ensure [`is_available`](Self::is_available)
+    /// returns `true` before calling this method.
     pub fn clear_with_hash(&mut self, hash: B256) {
-        self.hash = hash;
-        self.caches.clear();
+        let inner = Arc::get_mut(&mut self.0)
+            .expect("SavedCache::clear_with_hash requires exclusive access (strong_count == 1)");
+        inner.hash = hash;
+        inner.caches.clear();
     }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
 impl SavedCache {
-    /// Clones the usage guard for testing availability tracking.
-    pub fn clone_guard_for_test(&self) -> Arc<()> {
-        self.usage_guard.clone()
+    /// Returns a clone of this cache for testing availability tracking.
+    pub fn clone_guard_for_test(&self) -> Self {
+        self.clone()
     }
 }
 

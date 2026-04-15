@@ -1261,7 +1261,7 @@ mod tests {
     /// 2. Fork block (parent = block 2) checks out the cache via `get_cache_for`, simulating what
     ///    `PrewarmCacheTask` does when it receives a `SavedCache`.
     /// 3. Prewarm populates the shared cache with fork-specific state.
-    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_guard` > 1).
+    /// 4. While the prewarm clone is alive, the cache is unavailable (strong count > 1).
     /// 5. Prewarm drops without calling `save_cache` (fork block was invalid).
     /// 6. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
     ///    data.
@@ -1287,7 +1287,7 @@ mod tests {
         let fork_key = B256::from([0xCC; 32]);
         prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
-        // While prewarm holds the clone, the usage_guard count > 1 → cache is in use.
+        // While prewarm holds the clone, the strong count > 1 → cache is in use.
         let during_prewarm = execution_cache.get_cache_for(block4_hash);
         assert!(
             during_prewarm.is_none(),
