@@ -119,6 +119,9 @@ pub enum ComponentSelection {
     /// Download only the most recent chunks covering at least `distance` blocks.
     /// Maps to `PruneMode::Distance(distance)` in the generated config.
     Distance(u64),
+    /// Download chunks starting at the specified block number.
+    /// Maps to `PruneMode::Before(block)` in the generated config.
+    Since(u64),
     /// Don't download this component at all.
     /// Maps to `PruneMode::Full` for tx-based segments, or a minimal distance for others.
     None,
@@ -129,6 +132,7 @@ impl std::fmt::Display for ComponentSelection {
         match self {
             Self::All => write!(f, "All"),
             Self::Distance(d) => write!(f, "Last {d} blocks"),
+            Self::Since(block) => write!(f, "Since block {block}"),
             Self::None => write!(f, "None"),
         }
     }
@@ -936,6 +940,7 @@ mod tests {
     fn component_selection_display() {
         assert_eq!(ComponentSelection::All.to_string(), "All");
         assert_eq!(ComponentSelection::Distance(10_064).to_string(), "Last 10064 blocks");
+        assert_eq!(ComponentSelection::Since(15_537_394).to_string(), "Since block 15537394");
         assert_eq!(ComponentSelection::None.to_string(), "None");
     }
 

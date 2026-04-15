@@ -566,8 +566,9 @@ impl<S: StateProofProvider, const PREWARM: bool> StateProofProvider
         &self,
         input: TrieInput,
         target: HashedPostState,
+        mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
-        self.state_provider.witness(input, target)
+        self.state_provider.witness(input, target, mode)
     }
 }
 

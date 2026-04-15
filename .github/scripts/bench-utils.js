@@ -39,10 +39,25 @@ function loadSamplyUrls(workDir) {
   return urls;
 }
 
+function balModeLabel(mode) {
+  switch (mode) {
+    case 'true':
+    case 'feature':
+    case 'baseline':
+      return mode;
+    case 'both':
+      return 'true';
+    default:
+      return '';
+  }
+}
+
 function blocksLabel(summary) {
   const parts = [];
   if (summary.big_blocks) {
     parts.push({ key: 'Big Blocks', value: summary.blocks });
+    const balMode = balModeLabel(summary.bal_mode || summary.bal || process.env.BENCH_BAL || 'false');
+    if (balMode) parts.push({ key: 'BAL', value: balMode });
   } else {
     const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
     if (warmup) parts.push({ key: 'Warmup', value: warmup });
@@ -68,6 +83,7 @@ function metricRows(summary) {
     { label: 'P99',        baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
     { label: 'Mgas/s',     baseline: fmtMgas(b.mean_mgas_s), feature: fmtMgas(f.mean_mgas_s), change: fmtChange(c.mgas_s) },
     { label: 'Wall Clock', baseline: fmtS(b.wall_clock_s),   feature: fmtS(f.wall_clock_s),   change: fmtChange(c.wall_clock) },
+    { label: 'Persist Wait', baseline: fmtMs(b.mean_persist_ms || 0), feature: fmtMs(f.mean_persist_ms || 0), change: fmtChange(c.persist_wait) },
   ];
 }
 

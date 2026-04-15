@@ -115,14 +115,14 @@ pub trait Peers: PeersInfo {
     ///
     /// If the peer already exists, then this will update its tracked info.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
+        self.add_peer_kind(peer, Some(PeerKind::Static), tcp_addr, None);
     }
 
     /// Adds a peer to the peer set with TCP and UDP `SocketAddr`.
     ///
     /// If the peer already exists, then this will update its tracked info.
     fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, Some(udp_addr));
+        self.add_peer_kind(peer, Some(PeerKind::Static), tcp_addr, Some(udp_addr));
     }
 
     /// Adds a trusted [`PeerId`] to the peer set.
@@ -132,12 +132,12 @@ pub trait Peers: PeersInfo {
 
     /// Adds a trusted peer to the peer set with TCP `SocketAddr`.
     fn add_trusted_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, None);
+        self.add_peer_kind(peer, Some(PeerKind::Trusted), tcp_addr, None);
     }
 
     /// Adds a trusted peer with TCP and UDP `SocketAddr` to the peer set.
     fn add_trusted_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, Some(udp_addr));
+        self.add_peer_kind(peer, Some(PeerKind::Trusted), tcp_addr, Some(udp_addr));
     }
 
     /// Adds a peer to the known peer set, with the given kind.
@@ -146,7 +146,7 @@ pub trait Peers: PeersInfo {
     fn add_peer_kind(
         &self,
         peer: PeerId,
-        kind: PeerKind,
+        kind: Option<PeerKind>,
         tcp_addr: SocketAddr,
         udp_addr: Option<SocketAddr>,
     );

@@ -48,7 +48,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{bal::Bal, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -2100,10 +2100,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 
-    /// Returns the block access list if available.
-    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        // TODO decode and return `BlockAccessList`
-        None
+    /// Returns the block access list embedded in a payload, if present.
+    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
+        match self {
+            Self::Payload(payload) => payload.block_access_list().map(|block_access_list| {
+                alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
+            }),
+            Self::Block(_) => None,
+        }
     }
 
     /// Returns the number of transactions in the payload or block.
