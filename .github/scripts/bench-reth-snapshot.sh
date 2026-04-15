@@ -31,31 +31,26 @@ BUCKET="minio/reth-snapshots"
 if [ -n "${BENCH_SNAPSHOT_NAME:-}" ]; then
   SNAPSHOT_NAME="$BENCH_SNAPSHOT_NAME"
 else
-  # Resolve the previous week's snapshot by listing all weekly snapshots,
-  # sorting by name (which sorts chronologically since names contain
-  # ISO week numbers, e.g. reth-1-minimal-stable-weekly-2026-W15),
-  # and picking the second-to-last entry.
+  # Resolve the previous week's snapshot by listing all weekly snapshot
+  # folders, sorting by name (chronological since names contain ISO week
+  # numbers, e.g. reth-1-minimal-stable-weekly-2026-W15), and picking
+  # the second-to-last entry.
   WEEKLY_PREFIX="reth-1-minimal-stable-weekly-"
 
-  LIST_OUTPUT=$($MC ls "${BUCKET}/" 2>&1) || {
-    echo "::error::Failed to list ${BUCKET}: ${LIST_OUTPUT}"
-    exit 2
-  }
-
-  mapfile -t WEEKLY_SNAPSHOTS < <(
-    printf '%s\n' "$LIST_OUTPUT" \
-      | awk '$NF ~ /\/$/ { print $NF }' \
-      | sed 's:/$::' \
+  WEEKLY_LIST=$(
+    $MC ls --json "${BUCKET}/" 2>&1 \
+      | jq -r 'select(.type == "folder") | .key | rtrimstr("/")' \
       | grep -E "^${WEEKLY_PREFIX}[0-9]{4}-W[0-9]{2}$" \
       | LC_ALL=C sort
   )
+  WEEKLY_COUNT=$(echo "$WEEKLY_LIST" | grep -c .)
 
-  if [ "${#WEEKLY_SNAPSHOTS[@]}" -lt 2 ]; then
-    echo "::error::Expected at least 2 weekly snapshots matching ${WEEKLY_PREFIX}* in ${BUCKET}, found ${#WEEKLY_SNAPSHOTS[@]}"
+  if [ "$WEEKLY_COUNT" -lt 2 ]; then
+    echo "::error::Expected at least 2 weekly snapshots matching ${WEEKLY_PREFIX}* in ${BUCKET}, found ${WEEKLY_COUNT}"
     exit 2
   fi
 
-  SNAPSHOT_NAME="${WEEKLY_SNAPSHOTS[${#WEEKLY_SNAPSHOTS[@]}-2]}"
+  SNAPSHOT_NAME=$(echo "$WEEKLY_LIST" | tail -2 | head -1)
   echo "Resolved previous-week snapshot: $SNAPSHOT_NAME"
 fi
 MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
