@@ -204,7 +204,7 @@ pub trait EstimateCall: Call {
 
         // NOTE: this is the gas the transaction used, which is less than the
         // transaction requires to succeed.
-        let mut gas_used = res.result.gas_used();
+        let mut gas_used = res.result.tx_gas_used();
         // the lowest value is capped by the gas used by the unconstrained transaction
         let mut lowest_gas_limit = gas_used.saturating_sub(1);
 
@@ -225,7 +225,7 @@ pub trait EstimateCall: Call {
             res = evm.transact(optimistic_tx_env).map_err(Self::Error::from_evm_err)?;
 
             // Update the gas used based on the new result.
-            gas_used = res.result.gas_used();
+            gas_used = res.result.tx_gas_used();
             // Update the gas limit estimates (highest and lowest) based on the execution result.
             update_estimated_gas_range(
                 res.result,

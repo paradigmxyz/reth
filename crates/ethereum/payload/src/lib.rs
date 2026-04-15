@@ -191,6 +191,7 @@ where
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: attributes.withdrawals.clone().map(Into::into),
                 extra_data: builder_config.extra_data,
+                slot_number: attributes.slot_number(),
             },
         )
         .map_err(PayloadBuilderError::other)?;
@@ -431,7 +432,7 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests)
+    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 

@@ -284,14 +284,22 @@ where
 
     /// Handles [`GetBlockAccessLists`] queries.
     ///
-    /// For now this returns one empty BAL per requested hash.
+    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
+    /// <https://eips.ethereum.org/EIPS/eip-8159>
     fn on_block_access_lists_request(
         &self,
         _peer_id: PeerId,
         request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
-        let access_lists = request.0.into_iter().map(|_| Bytes::new()).collect();
+        // TODO: BAL serving is not fully implemented yet. Per EIP-8159, unavailable BALs are
+        // returned as empty BAL entries while preserving request order, so we currently return
+        // one RLP-encoded empty BAL (`0xc0`) per requested hash.
+        let access_lists = request
+            .0
+            .into_iter()
+            .map(|_| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]))
+            .collect();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 

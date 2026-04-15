@@ -39,10 +39,25 @@ function loadSamplyUrls(workDir) {
   return urls;
 }
 
+function balModeLabel(mode) {
+  switch (mode) {
+    case 'true':
+    case 'feature':
+    case 'baseline':
+      return mode;
+    case 'both':
+      return 'true';
+    default:
+      return '';
+  }
+}
+
 function blocksLabel(summary) {
   const parts = [];
   if (summary.big_blocks) {
     parts.push({ key: 'Big Blocks', value: summary.blocks });
+    const balMode = balModeLabel(summary.bal_mode || summary.bal || process.env.BENCH_BAL || 'false');
+    if (balMode) parts.push({ key: 'BAL', value: balMode });
   } else {
     const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
     if (warmup) parts.push({ key: 'Warmup', value: warmup });
