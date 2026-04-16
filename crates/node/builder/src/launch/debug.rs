@@ -307,6 +307,7 @@ where
 
             let dev_mining_mode =
                 mining_mode.unwrap_or_else(|| handle.node.config.dev_mining_mode(pool));
+            let payload_wait_time = config.dev.payload_wait_time;
             handle.node.task_executor.spawn_critical_task("local engine", async move {
                 LocalMiner::new(
                     blockchain_db,
@@ -315,6 +316,7 @@ where
                     dev_mining_mode,
                     payload_builder_handle,
                 )
+                .with_payload_wait_time_opt(payload_wait_time)
                 .run()
                 .await
             });
