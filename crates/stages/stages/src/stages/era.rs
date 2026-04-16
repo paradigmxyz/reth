@@ -338,7 +338,7 @@ mod tests {
         assert_matches!(
             output,
             Ok(ExecOutput {
-                checkpoint: StageCheckpoint { block_number, stage_checkpoint: None },
+                checkpoint: StageCheckpoint { block_number, stage_checkpoint: None, .. },
                 done: false
             }) if block_number == era_cap
         );
@@ -358,7 +358,7 @@ mod tests {
         assert_matches!(
             output,
             Ok(ExecOutput {
-                checkpoint: StageCheckpoint { block_number, stage_checkpoint: None },
+                checkpoint: StageCheckpoint { block_number, stage_checkpoint: None, .. },
                 done: true
             }) if block_number == target
         );

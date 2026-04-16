@@ -801,6 +801,7 @@ mod tests {
         let previous_checkpoint = StageCheckpoint {
             block_number: 0,
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
+            partial_state_trie: None,
         };
 
         let stage_checkpoint = execution_checkpoint(
@@ -841,6 +842,7 @@ mod tests {
         let previous_checkpoint = StageCheckpoint {
             block_number: 1,
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
+            partial_state_trie: None,
         };
 
         let stage_checkpoint =
@@ -882,6 +884,7 @@ mod tests {
         let previous_checkpoint = StageCheckpoint {
             block_number: 1,
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
+            partial_state_trie: None,
         };
 
         let stage_checkpoint =
@@ -916,7 +919,8 @@ mod tests {
             .unwrap();
         provider.commit().unwrap();
 
-        let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
+        let previous_checkpoint =
+            StageCheckpoint { block_number: 1, stage_checkpoint: None, partial_state_trie: None };
 
         let stage_checkpoint =
             execution_checkpoint(&factory.static_file_provider(), 1, 1, previous_checkpoint);
@@ -1017,7 +1021,8 @@ mod tests {
                             processed,
                             total
                         }
-                    }))
+                    })),
+                    ..
                 },
                 done: true
             } if processed == total && total == block.gas_used);
@@ -1172,7 +1177,8 @@ mod tests {
                             processed: 0,
                             total
                         }
-                    }))
+                    })),
+                    ..
                 }
             } if total == block.gas_used);
 

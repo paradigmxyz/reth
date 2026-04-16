@@ -369,7 +369,6 @@ impl From<&RangeInclusive<BlockNumber>> for CheckpointBlockRange {
 /// Saves the progress of a stage.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StageCheckpoint {
@@ -377,12 +376,20 @@ pub struct StageCheckpoint {
     pub block_number: BlockNumber,
     /// Stage-specific checkpoint. None if stage uses only block-based checkpoints.
     pub stage_checkpoint: Option<StageUnitCheckpoint>,
+    /// The highest block with a partially persisted state trie for the Finish stage.
+    pub partial_state_trie: Option<BlockNumber>,
 }
 
 impl StageCheckpoint {
     /// Creates a new [`StageCheckpoint`] with only `block_number` set.
     pub fn new(block_number: BlockNumber) -> Self {
         Self { block_number, ..Default::default() }
+    }
+
+    /// Used bytes by the compact-encoding bitflags.
+    #[cfg(any(test, feature = "reth-codec"))]
+    pub const fn bitflag_encoded_bytes() -> usize {
+        1
     }
 
     /// Sets the block number.
@@ -437,7 +444,65 @@ impl StageCheckpoint {
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StageCheckpoint {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let mut len = StageCheckpointLegacy {
+            block_number: self.block_number,
+            stage_checkpoint: self.stage_checkpoint,
+        }
+        .to_compact(buf);
+
+        match self.partial_state_trie {
+            Some(block_number) => {
+                buf.put_u8(1);
+                buf.put_u64(block_number);
+                len += 9;
+            }
+            None => {
+                buf.put_u8(0);
+                len += 1;
+            }
+        }
+
+        len
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        let (legacy, mut rest) = StageCheckpointLegacy::from_compact(buf, len);
+        let partial_state_trie = if rest.is_empty() {
+            None
+        } else {
+            match rest.get_u8() {
+                1 => Some(rest.get_u64()),
+                _ => None,
+            }
+        };
+
+        (
+            Self {
+                block_number: legacy.block_number,
+                stage_checkpoint: legacy.stage_checkpoint,
+                partial_state_trie,
+            },
+            rest,
+        )
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
 reth_codecs::impl_compression_for_compact!(StageCheckpoint);
+
+#[cfg(any(test, feature = "reth-codec"))]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, reth_codecs::Compact)]
+struct StageCheckpointLegacy {
+    block_number: BlockNumber,
+    stage_checkpoint: Option<StageUnitCheckpoint>,
+}
 
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
@@ -663,5 +728,25 @@ mod tests {
         let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn stage_checkpoint_decodes_legacy_compact_without_partial_state_trie() {
+        let legacy = StageCheckpointLegacy {
+            block_number: 42,
+            stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                processed: 10,
+                total: 20,
+            })),
+        };
+
+        let mut buf = Vec::new();
+        let encoded = legacy.to_compact(&mut buf);
+        let (decoded, rest) = StageCheckpoint::from_compact(&buf, encoded);
+
+        assert!(rest.is_empty());
+        assert_eq!(decoded.block_number, legacy.block_number);
+        assert_eq!(decoded.stage_checkpoint, legacy.stage_checkpoint);
+        assert_eq!(decoded.partial_state_trie, None);
     }
 }

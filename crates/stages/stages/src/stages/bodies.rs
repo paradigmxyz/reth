@@ -295,7 +295,8 @@ mod tests {
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed, // 1 seeded block body + batch size
                     total // seeded headers
-                }))
+                })),
+                ..
             }, done: false }) if block_number < 200 &&
                 processed == batch_size + 1 && total == previous_stage + 1
         );
@@ -333,7 +334,8 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    }))
+                    })),
+                    ..
                 },
                 done: true
             }) if processed + 1 == total && total == previous_stage + 1
@@ -370,7 +372,8 @@ mod tests {
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed,
                     total
-                }))
+                })),
+                ..
             }, done: false }) if block_number >= 10 &&
                 processed - 1 == batch_size && total == previous_stage + 1
         );
@@ -391,7 +394,8 @@ mod tests {
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed,
                     total
-                }))
+                })),
+                ..
             }, done: true }) if block_number > first_run_checkpoint.block_number &&
                 processed + 1 == total && total == previous_stage + 1
         );
@@ -432,7 +436,8 @@ mod tests {
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed,
                     total
-                }))
+                })),
+                ..
             }, done: true }) if block_number == previous_stage &&
                 processed + 1 == total && total == previous_stage + 1
         );
@@ -460,7 +465,8 @@ mod tests {
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed: 1,
                     total
-                }))
+                })),
+                ..
             }}) if total == previous_stage + 1
         );
 
