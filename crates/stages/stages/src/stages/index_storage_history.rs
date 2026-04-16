@@ -258,11 +258,8 @@ mod tests {
     fn run(db: &TestStageDB, run_to: u64, input_checkpoint: Option<BlockNumber>) {
         let input = ExecInput {
             target: Some(run_to),
-            checkpoint: input_checkpoint.map(|block_number| StageCheckpoint {
-                block_number,
-                stage_checkpoint: None,
-                partial_state_trie: None,
-            }),
+            checkpoint: input_checkpoint
+                .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
         };
         let mut stage = IndexStorageHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
