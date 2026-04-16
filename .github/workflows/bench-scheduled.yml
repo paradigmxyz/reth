@@ -112,7 +112,7 @@ jobs:
 
       - name: Alert on long-running hourly
         if: steps.mode.outputs.mode == 'hourly' && steps.refs.outputs.long-running == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -154,7 +154,7 @@ jobs:
 
       - name: Alert on stale nightly
         if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -278,7 +278,7 @@ jobs:
 
       - name: Resolve job URL
         id: job-url
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
@@ -680,7 +680,7 @@ jobs:
 
       - name: Write job summary
         if: success()
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -759,7 +759,7 @@ jobs:
 
       - name: Send Slack notification (success)
         if: success() && (env.BENCH_SLACK == 'always' || env.BENCH_SLACK == 'on-win')
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -914,7 +914,7 @@ jobs:
 
       - name: Send Slack notification (failure)
         if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
