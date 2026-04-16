@@ -1009,7 +1009,13 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
+                provider_rw
+                    .save_blocks(
+                        std::slice::from_ref(&lowest_memory_block),
+                        0..0,
+                        SaveBlocksMode::Full,
+                    )
+                    .unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory
