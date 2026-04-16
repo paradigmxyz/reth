@@ -22,9 +22,9 @@ pub struct TrieUpdates {
 impl TrieUpdates {
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
-        self.account_nodes.is_empty() &&
-            self.removed_nodes.is_empty() &&
-            self.storage_tries.is_empty()
+        self.account_nodes.is_empty()
+            && self.removed_nodes.is_empty()
+            && self.storage_tries.is_empty()
     }
 
     /// Returns reference to updated account nodes.
@@ -376,6 +376,86 @@ impl TrieUpdatesSorted {
     pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
+
+    /// Returns the merged left-hand updates with any keys present on the right removed.
+    pub fn disjoint_by_keys(left: Vec<&Self>, right: Vec<&Self>) -> Self {
+        let mut account_nodes =
+            Vec::with_capacity(left.iter().map(|updates| updates.account_nodes.len()).sum());
+        let mut cursors = vec![0; left.len()];
+
+        loop {
+            let Some(key) = left
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, updates)| {
+                    updates.account_nodes.get(cursors[idx]).map(|(key, _)| key.clone())
+                })
+                .min()
+            else {
+                break;
+            };
+
+            let mut winning_index = None;
+            let mut winning_node = None;
+            for (idx, updates) in left.iter().enumerate() {
+                if updates
+                    .account_nodes
+                    .get(cursors[idx])
+                    .is_some_and(|(candidate, _)| candidate == &key)
+                {
+                    winning_index = Some(idx);
+                    winning_node = Some(updates.account_nodes[cursors[idx]].1.clone());
+                    cursors[idx] += 1;
+                }
+            }
+
+            let Some(winning_index) = winning_index else {
+                continue;
+            };
+
+            if left[winning_index + 1..].iter().any(|updates| updates.removed_nodes.contains(&key))
+                || contains_trie_account_key(&right, &key)
+            {
+                continue;
+            }
+
+            account_nodes.push((key, winning_node.expect("winning node exists")));
+        }
+
+        let mut removed_nodes = HashSet::default();
+        for updates in &left {
+            for key in &updates.removed_nodes {
+                if contains_trie_account_key(&right, key) {
+                    continue;
+                }
+
+                removed_nodes.insert(key.clone());
+            }
+        }
+
+        let mut storage_tries = B256Map::with_capacity_and_hasher(
+            left.iter().map(|updates| updates.storage_tries.len()).sum(),
+            Default::default(),
+        );
+        for updates in left.iter().rev() {
+            for (hashed_address, storage) in &updates.storage_tries {
+                if right.iter().any(|other| other.storage_tries.contains_key(hashed_address)) {
+                    continue;
+                }
+
+                match storage_tries.entry(*hashed_address) {
+                    alloy_primitives::map::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(storage.clone());
+                    }
+                    alloy_primitives::map::hash_map::Entry::Occupied(mut entry) => {
+                        merge_storage_trie_updates_sorted(entry.get_mut(), storage);
+                    }
+                }
+            }
+        }
+
+        Self { account_nodes, removed_nodes, storage_tries }
+    }
 }
 
 /// Sorted trie updates used for lookups and insertions.
@@ -403,6 +483,36 @@ impl StorageTrieUpdatesSorted {
     /// Returns reference to removed storage nodes.
     pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
         &self.removed_nodes
+    }
+}
+
+fn contains_trie_account_key(states: &[&TrieUpdatesSorted], key: &Nibbles) -> bool {
+    states.iter().any(|state| {
+        state.removed_nodes.contains(key)
+            || state.account_nodes.binary_search_by(|(candidate, _)| candidate.cmp(key)).is_ok()
+    })
+}
+
+fn merge_storage_trie_updates_sorted(
+    dst: &mut StorageTrieUpdatesSorted,
+    src: &StorageTrieUpdatesSorted,
+) {
+    if dst.is_deleted {
+        return;
+    }
+
+    dst.is_deleted |= src.is_deleted;
+    dst.removed_nodes.extend(src.removed_nodes.iter().cloned());
+
+    for (key, node) in &src.storage_nodes {
+        if dst.removed_nodes.contains(key) {
+            continue;
+        }
+
+        match dst.storage_nodes.binary_search_by(|(candidate, _)| candidate.cmp(key)) {
+            Ok(_) => {}
+            Err(position) => dst.storage_nodes.insert(position, (key.clone(), node.clone())),
+        }
     }
 }
 
@@ -678,5 +788,95 @@ mod tests {
         let updates_deserialized: StorageTrieUpdates =
             serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
+    }
+}
+
+#[cfg(test)]
+mod sorted_tests {
+    use super::*;
+
+    #[test]
+    fn trie_updates_sorted_disjoint_by_keys() {
+        let key1 = Nibbles::from_vec(vec![0x1]);
+        let key2 = Nibbles::from_vec(vec![0x2]);
+        let key3 = Nibbles::from_vec(vec![0x3]);
+        let key4 = Nibbles::from_vec(vec![0x4]);
+        let slot1 = Nibbles::from_vec(vec![0xa]);
+        let slot2 = Nibbles::from_vec(vec![0xb]);
+        let slot3 = Nibbles::from_vec(vec![0xc]);
+        let addr1 = B256::with_last_byte(1);
+        let addr2 = B256::with_last_byte(2);
+
+        let left1 = TrieUpdatesSorted {
+            account_nodes: vec![
+                (key1.clone(), BranchNodeCompact::default()),
+                (key2.clone(), BranchNodeCompact::default()),
+            ],
+            removed_nodes: HashSet::from_iter([key3.clone(), key4.clone()]),
+            storage_tries: B256Map::from_iter([
+                (
+                    addr1,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(slot1.clone(), BranchNodeCompact::default())],
+                        removed_nodes: HashSet::from_iter([slot2.clone()]),
+                    },
+                ),
+                (
+                    addr2,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: true,
+                        storage_nodes: Vec::default(),
+                        removed_nodes: HashSet::default(),
+                    },
+                ),
+            ]),
+        };
+        let left2 = TrieUpdatesSorted {
+            account_nodes: vec![
+                (key2.clone(), BranchNodeCompact::default()),
+                (key3.clone(), BranchNodeCompact::default()),
+            ],
+            removed_nodes: HashSet::from_iter([key1.clone()]),
+            storage_tries: B256Map::from_iter([
+                (
+                    addr1,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(slot2.clone(), BranchNodeCompact::default())],
+                        removed_nodes: HashSet::from_iter([slot1.clone()]),
+                    },
+                ),
+                (
+                    addr2,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(slot3.clone(), BranchNodeCompact::default())],
+                        removed_nodes: HashSet::default(),
+                    },
+                ),
+            ]),
+        };
+        let right = TrieUpdatesSorted {
+            account_nodes: vec![(key2.clone(), BranchNodeCompact::default())],
+            removed_nodes: HashSet::from_iter([key4.clone()]),
+            storage_tries: B256Map::from_iter([(addr1, StorageTrieUpdatesSorted::default())]),
+        };
+
+        let disjoint = TrieUpdatesSorted::disjoint_by_keys(vec![&left1, &left2], vec![&right]);
+
+        assert_eq!(
+            disjoint.account_nodes.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>(),
+            vec![key3.clone()]
+        );
+        assert_eq!(disjoint.removed_nodes, HashSet::from_iter([key1, key3]));
+
+        let addr2_storage = disjoint.storage_tries.get(&addr2).unwrap();
+        assert!(addr2_storage.is_deleted);
+        assert_eq!(
+            addr2_storage.storage_nodes.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>(),
+            vec![slot3]
+        );
+        assert!(!disjoint.storage_tries.contains_key(&addr1));
     }
 }

@@ -216,7 +216,7 @@ impl HashedPostState {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
                         if storage_in_targets.contains(&slot) {
-                            return true
+                            return true;
                         }
 
                         storage_not_in_targets.storage.insert(slot, *value);
@@ -251,7 +251,7 @@ impl HashedPostState {
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
-                return true
+                return true;
             }
 
             state_updates_not_in_targets.accounts.insert(address, *account);
@@ -440,6 +440,34 @@ impl HashedPostStateSorted {
     pub const fn account_storages(&self) -> &B256Map<HashedStorageSorted> {
         &self.storages
     }
+
+    /// Returns the merged left-hand states with any addresses present on the right removed.
+    pub fn disjoint_by_keys(left: Vec<&Self>, right: Vec<&Self>) -> Self {
+        let accounts = HashedAccountsSorted::disjoint_by_keys(&left, &right);
+        let mut storages = B256Map::with_capacity_and_hasher(
+            left.iter().map(|state| state.storages.len()).sum(),
+            Default::default(),
+        );
+
+        for state in left.iter().rev() {
+            for (hashed_address, storage) in &state.storages {
+                if contains_hashed_post_state_key(&right, hashed_address) {
+                    continue;
+                }
+
+                match storages.entry(*hashed_address) {
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(storage.clone());
+                    }
+                    hash_map::Entry::Occupied(mut entry) => {
+                        merge_hashed_storage_sorted(entry.get_mut(), storage);
+                    }
+                }
+            }
+        }
+
+        Self { accounts, storages }
+    }
 }
 
 /// Sorted account state optimized for iterating during state trie calculation.
@@ -459,6 +487,76 @@ impl HashedAccountsSorted {
             .map(|(address, account)| (*address, Some(*account)))
             .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    fn disjoint_by_keys(left: &[&HashedPostStateSorted], right: &[&HashedPostStateSorted]) -> Self {
+        let mut accounts =
+            Vec::with_capacity(left.iter().map(|state| state.accounts.accounts.len()).sum());
+        let mut cursors = vec![0; left.len()];
+
+        loop {
+            let Some(hashed_address) = left
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, state)| {
+                    state
+                        .accounts
+                        .accounts
+                        .get(cursors[idx])
+                        .map(|(hashed_address, _)| *hashed_address)
+                })
+                .min()
+            else {
+                break;
+            };
+
+            let mut winning_index = None;
+            let mut winning_account = None;
+            for (idx, state) in left.iter().enumerate() {
+                if state
+                    .accounts
+                    .accounts
+                    .get(cursors[idx])
+                    .is_some_and(|(candidate, _)| candidate == &hashed_address)
+                {
+                    winning_index = Some(idx);
+                    winning_account = Some(state.accounts.accounts[cursors[idx]].1);
+                    cursors[idx] += 1;
+                }
+            }
+
+            let Some(winning_index) = winning_index else {
+                continue;
+            };
+
+            if left[winning_index + 1..]
+                .iter()
+                .any(|state| state.accounts.destroyed_accounts.contains(&hashed_address))
+                || contains_hashed_post_state_key(right, &hashed_address)
+            {
+                continue;
+            }
+
+            accounts.push((hashed_address, winning_account.expect("winning account exists")));
+        }
+
+        let mut destroyed_accounts = HashSet::default();
+        for state in left.iter().rev() {
+            for hashed_address in &state.accounts.destroyed_accounts {
+                if destroyed_accounts.contains(hashed_address)
+                    || accounts
+                        .binary_search_by_key(hashed_address, |(candidate, _)| *candidate)
+                        .is_ok()
+                    || contains_hashed_post_state_key(right, hashed_address)
+                {
+                    continue;
+                }
+
+                destroyed_accounts.insert(*hashed_address);
+            }
+        }
+
+        Self { accounts, destroyed_accounts }
     }
 }
 
@@ -486,6 +584,54 @@ impl HashedStorageSorted {
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
             .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
             .sorted_by_key(|entry| *entry.0)
+    }
+}
+
+fn contains_hashed_post_state_key(
+    states: &[&HashedPostStateSorted],
+    hashed_address: &B256,
+) -> bool {
+    states.iter().any(|state| {
+        state.accounts.destroyed_accounts.contains(hashed_address)
+            || state
+                .accounts
+                .accounts
+                .binary_search_by_key(hashed_address, |(candidate, _)| *candidate)
+                .is_ok()
+            || state.storages.contains_key(hashed_address)
+    })
+}
+
+fn merge_hashed_storage_sorted(dst: &mut HashedStorageSorted, src: &HashedStorageSorted) {
+    if dst.wiped {
+        return;
+    }
+
+    dst.wiped |= src.wiped;
+
+    for hashed_slot in &src.zero_valued_slots {
+        if dst
+            .non_zero_valued_slots
+            .binary_search_by_key(hashed_slot, |(candidate, _)| *candidate)
+            .is_err()
+            && !dst.zero_valued_slots.contains(hashed_slot)
+        {
+            dst.zero_valued_slots.insert(*hashed_slot);
+        }
+    }
+
+    for (hashed_slot, value) in &src.non_zero_valued_slots {
+        if dst.zero_valued_slots.contains(hashed_slot) {
+            continue;
+        }
+
+        match dst
+            .non_zero_valued_slots
+            .binary_search_by_key(hashed_slot, |(candidate, _)| *candidate)
+        {
+            Ok(_) => {}
+            Err(position) => dst.non_zero_valued_slots.insert(position, (*hashed_slot, *value)),
+        }
     }
 }
 
@@ -756,6 +902,97 @@ mod tests {
         let non_empty_state = HashedPostState::default()
             .with_accounts(vec![(keccak256(Address::random()), Some(Account::default()))]);
         assert!(!non_empty_state.is_empty());
+    }
+
+    #[test]
+    fn hashed_post_state_sorted_disjoint_by_keys() {
+        let addr1 = B256::with_last_byte(1);
+        let addr2 = B256::with_last_byte(2);
+        let addr3 = B256::with_last_byte(3);
+        let addr4 = B256::with_last_byte(4);
+        let addr5 = B256::with_last_byte(5);
+        let slot1 = B256::with_last_byte(11);
+        let slot2 = B256::with_last_byte(12);
+
+        let left1 = HashedPostStateSorted::new(
+            HashedAccountsSorted {
+                accounts: vec![
+                    (addr1, Account { nonce: 1, ..Default::default() }),
+                    (addr4, Account { nonce: 4, ..Default::default() }),
+                ],
+                destroyed_accounts: HashSet::from_iter([addr2]),
+            },
+            B256Map::from_iter([
+                (
+                    addr3,
+                    HashedStorageSorted {
+                        non_zero_valued_slots: vec![(slot1, U256::from(1))],
+                        zero_valued_slots: HashSet::default(),
+                        wiped: false,
+                    },
+                ),
+                (
+                    addr5,
+                    HashedStorageSorted {
+                        non_zero_valued_slots: vec![(slot1, U256::from(11))],
+                        zero_valued_slots: HashSet::default(),
+                        wiped: true,
+                    },
+                ),
+            ]),
+        );
+        let left2 = HashedPostStateSorted::new(
+            HashedAccountsSorted {
+                accounts: vec![(addr2, Account { nonce: 2, ..Default::default() })],
+                destroyed_accounts: HashSet::from_iter([addr1]),
+            },
+            B256Map::from_iter([
+                (
+                    addr3,
+                    HashedStorageSorted {
+                        non_zero_valued_slots: vec![(slot2, U256::from(2))],
+                        zero_valued_slots: HashSet::from_iter([slot1]),
+                        wiped: false,
+                    },
+                ),
+                (
+                    addr5,
+                    HashedStorageSorted {
+                        non_zero_valued_slots: vec![(slot2, U256::from(22))],
+                        zero_valued_slots: HashSet::from_iter([slot1]),
+                        wiped: false,
+                    },
+                ),
+            ]),
+        );
+        let right = HashedPostStateSorted::new(
+            HashedAccountsSorted {
+                accounts: vec![(addr2, Account { nonce: 9, ..Default::default() })],
+                destroyed_accounts: HashSet::default(),
+            },
+            B256Map::from_iter([(
+                addr3,
+                HashedStorageSorted {
+                    non_zero_valued_slots: vec![(slot1, U256::from(99))],
+                    zero_valued_slots: HashSet::default(),
+                    wiped: false,
+                },
+            )]),
+        );
+
+        let disjoint = HashedPostStateSorted::disjoint_by_keys(vec![&left1, &left2], vec![&right]);
+
+        assert_eq!(
+            disjoint.accounts.accounts,
+            vec![(addr4, Account { nonce: 4, ..Default::default() })]
+        );
+        assert_eq!(disjoint.accounts.destroyed_accounts, HashSet::from_iter([addr1]));
+        assert!(!disjoint.storages.contains_key(&addr3));
+
+        let addr5_storage = disjoint.storages.get(&addr5).unwrap();
+        assert!(addr5_storage.wiped);
+        assert_eq!(addr5_storage.non_zero_valued_slots, vec![(slot2, U256::from(22))]);
+        assert_eq!(addr5_storage.zero_valued_slots, HashSet::from_iter([slot1]));
     }
 
     fn create_state_for_multi_proof_targets() -> HashedPostState {
