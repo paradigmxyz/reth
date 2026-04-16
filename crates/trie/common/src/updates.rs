@@ -1,5 +1,5 @@
 use crate::{
-    utils::{extend_sorted_vec, kway_merge_sorted},
+    utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     BranchNodeCompact, HashBuilder, Nibbles,
 };
 use alloc::{
@@ -710,6 +710,42 @@ impl TrieUpdatesSorted {
 
         Self { account_nodes, storage_tries }
     }
+
+    /// Merges the left-hand updates and removes any top-level keys present on the right.
+    ///
+    /// For duplicate keys on the left, later items take precedence over earlier ones. The order of
+    /// the right-hand side does not matter.
+    pub fn disjoint_by_keys<'a>(left: Vec<&'a Self>, right: Vec<&'a Self>) -> Self {
+        let account_nodes = kway_merge_disjoint_sorted(
+            left.iter().map(|item| item.account_nodes.len()).sum(),
+            left.iter().rev().map(|item| item.account_nodes.as_slice()),
+            right.iter().map(|item| item.account_nodes.as_slice()),
+        );
+
+        let mut storage_tries = B256Map::with_capacity_and_hasher(
+            left.iter().map(|item| item.storage_tries.len()).sum(),
+            Default::default(),
+        );
+
+        for item in left {
+            for (hashed_address, storage_trie) in &item.storage_tries {
+                storage_tries
+                    .entry(*hashed_address)
+                    .and_modify(|existing: &mut StorageTrieUpdatesSorted| {
+                        existing.extend_ref(storage_trie)
+                    })
+                    .or_insert_with(|| storage_trie.clone());
+            }
+        }
+
+        for item in right {
+            for hashed_address in item.storage_tries.keys() {
+                storage_tries.remove(hashed_address);
+            }
+        }
+
+        Self::new(account_nodes, storage_tries)
+    }
 }
 
 impl AsRef<Self> for TrieUpdatesSorted {
@@ -975,6 +1011,107 @@ mod tests {
         assert_eq!(storage3.storage_nodes.len(), 2);
         assert_eq!(storage3.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x06]));
         assert_eq!(storage3.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x07]));
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_disjoint_by_keys() {
+        let kept_node = Nibbles::from_nibbles_unchecked([0x01]);
+        let removed_node = Nibbles::from_nibbles_unchecked([0x02]);
+        let kept_storage = B256::from([3; 32]);
+        let removed_storage = B256::from([4; 32]);
+        let slot1 = Nibbles::from_nibbles_unchecked([0x0a]);
+        let slot2 = Nibbles::from_nibbles_unchecked([0x0b]);
+
+        let older = TrieUpdatesSorted::new(
+            vec![(kept_node, Some(BranchNodeCompact::default())), (removed_node, None)],
+            B256Map::from_iter([
+                (
+                    kept_storage,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(slot1, None)],
+                    },
+                ),
+                (
+                    removed_storage,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(slot1, Some(BranchNodeCompact::default()))],
+                    },
+                ),
+            ]),
+        );
+
+        let newer = TrieUpdatesSorted::new(
+            vec![(kept_node, None)],
+            B256Map::from_iter([(
+                kept_storage,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(slot1, Some(BranchNodeCompact::default())), (slot2, None)],
+                },
+            )]),
+        );
+
+        let remove_a = TrieUpdatesSorted::new(
+            vec![(removed_node, Some(BranchNodeCompact::default()))],
+            B256Map::from_iter([(removed_storage, StorageTrieUpdatesSorted::default())]),
+        );
+
+        let remove_b = TrieUpdatesSorted::new(
+            vec![(Nibbles::from_nibbles_unchecked([0x0f]), Some(BranchNodeCompact::default()))],
+            B256Map::default(),
+        );
+
+        let result =
+            TrieUpdatesSorted::disjoint_by_keys(vec![&older, &newer], vec![&remove_b, &remove_a]);
+
+        assert_eq!(result.account_nodes, vec![(kept_node, None)]);
+        assert_eq!(result.storage_tries.len(), 1);
+        assert_eq!(
+            result.storage_tries.get(&kept_storage),
+            Some(&StorageTrieUpdatesSorted {
+                is_deleted: false,
+                storage_nodes: vec![(slot1, Some(BranchNodeCompact::default())), (slot2, None)],
+            })
+        );
+        assert!(!result.storage_tries.contains_key(&removed_storage));
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_disjoint_by_keys_removes_overlapping_left_key() {
+        let overlapping_node = Nibbles::from_nibbles_unchecked([0x03]);
+        let overlapping_storage = B256::from([5; 32]);
+        let slot = Nibbles::from_nibbles_unchecked([0x0c]);
+
+        let older = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(BranchNodeCompact::default()))],
+            B256Map::from_iter([(
+                overlapping_storage,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(slot, Some(BranchNodeCompact::default()))],
+                },
+            )]),
+        );
+
+        let newer = TrieUpdatesSorted::new(
+            vec![(overlapping_node, None)],
+            B256Map::from_iter([(
+                overlapping_storage,
+                StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: vec![(slot, None)] },
+            )]),
+        );
+
+        let remove = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(BranchNodeCompact::default()))],
+            B256Map::from_iter([(overlapping_storage, StorageTrieUpdatesSorted::default())]),
+        );
+
+        let result = TrieUpdatesSorted::disjoint_by_keys(vec![&older, &newer], vec![&remove]);
+
+        assert!(result.account_nodes.is_empty());
+        assert!(result.storage_tries.is_empty());
     }
 
     /// Test extending with storage tries adds both nodes and removed nodes correctly

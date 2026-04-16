@@ -26,6 +26,51 @@ where
         .collect()
 }
 
+/// Merge sorted left slices into a sorted `Vec`, excluding keys present in any right slice.
+///
+/// Callers pass left slices in priority order (index 0 = highest priority), so the first
+/// left slice's value for a key takes precedence over later slices. Right slice order is ignored;
+/// the right-hand side only contributes keys to exclude.
+pub(crate) fn kway_merge_disjoint_sorted<'a, K, V>(
+    capacity: usize,
+    left_slices: impl IntoIterator<Item = &'a [(K, V)]>,
+    right_slices: impl IntoIterator<Item = &'a [(K, V)]>,
+) -> Vec<(K, V)>
+where
+    K: Ord + Clone + 'a,
+    V: Clone + 'a,
+{
+    let mut right_keys = right_slices
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.iter().map(|(k, _)| k))
+        .kmerge()
+        .dedup()
+        .peekable();
+
+    let mut out = Vec::with_capacity(capacity);
+    for (_, key, value) in left_slices
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .enumerate()
+        .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
+        .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
+        .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
+    {
+        while right_keys.peek().is_some_and(|right_key| *right_key < key) {
+            right_keys.next();
+        }
+
+        if right_keys.peek().is_some_and(|right_key| *right_key == key) {
+            continue;
+        }
+
+        out.push((key.clone(), value.clone()));
+    }
+
+    out
+}
+
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
 /// Values from `other` take precedence for duplicate keys.
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
@@ -182,5 +227,21 @@ mod tests {
     fn test_kway_merge_sorted_no_slices() {
         let result: Vec<(i32, &str)> = kway_merge_sorted(Vec::<&[(i32, &str)]>::new());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_kway_merge_disjoint_sorted() {
+        let left_old = vec![(1, "old"), (2, "drop"), (4, "keep")];
+        let left_new = vec![(1, "new"), (3, "new_only")];
+        let right_a = vec![(2, "ignored"), (5, "ignored")];
+        let right_b = vec![(3, "ignored")];
+
+        let result = kway_merge_disjoint_sorted(
+            left_old.len() + left_new.len(),
+            [left_new.as_slice(), left_old.as_slice()],
+            [right_a.as_slice(), right_b.as_slice()],
+        );
+
+        assert_eq!(result, vec![(1, "new"), (4, "keep")]);
     }
 }
