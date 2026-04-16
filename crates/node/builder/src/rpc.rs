@@ -1,9 +1,15 @@
 //! Builder support for rpc components.
 
-pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
+pub use jsonrpsee::{
+    core::middleware::layer::Either,
+    server::middleware::rpc::{RpcService, RpcServiceBuilder},
+};
 use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
-pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
+pub use reth_rpc_builder::{
+    middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
+    Identity, Stack,
+};
 pub use reth_trie_db::ChangesetCache;
 
 use crate::{
@@ -12,7 +18,7 @@ use crate::{
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use jsonrpsee::{core::middleware::layer::Either, RpcModule};
+use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
@@ -517,6 +523,7 @@ pub struct RpcAddOns<
     EB = BasicEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
+    AuthHttpMiddleware = Identity,
 > {
     /// Additional RPC add-ons.
     pub hooks: RpcHooks<Node, EthB::EthApi>,
@@ -533,12 +540,17 @@ pub struct RpcAddOns<
     /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
     /// See [`RpcAddOns::with_rpc_middleware`] for more details.
     rpc_middleware: RpcMiddleware,
+    /// Configurable HTTP transport middleware for the auth server.
+    ///
+    /// This middleware is applied after JWT authentication and before JSON-RPC parsing on the
+    /// auth / Engine API server, giving access to the raw HTTP request.
+    auth_http_middleware: AuthHttpMiddleware,
     /// Optional custom tokio runtime for the RPC server.
     tokio_runtime: Option<tokio::runtime::Handle>,
 }
 
-impl<Node, EthB, PVB, EB, EVB, RpcMiddleware> Debug
-    for RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<Node, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> Debug
+    for RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -558,7 +570,8 @@ where
     }
 }
 
-impl<Node, EthB, PVB, EB, EVB, RpcMiddleware> RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<Node, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
+    RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -570,6 +583,7 @@ where
         engine_api_builder: EB,
         engine_validator_builder: EVB,
         rpc_middleware: RpcMiddleware,
+        auth_http_middleware: AuthHttpMiddleware,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
@@ -578,6 +592,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime: None,
         }
     }
@@ -586,13 +601,14 @@ where
     pub fn with_engine_api<T>(
         self,
         engine_api_builder: T,
-    ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware> {
+    ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
         let Self {
             hooks,
             eth_api_builder,
             payload_validator_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
             ..
         } = self;
@@ -603,6 +619,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         }
     }
@@ -611,13 +628,14 @@ where
     pub fn with_payload_validator<T>(
         self,
         payload_validator_builder: T,
-    ) -> RpcAddOns<Node, EthB, T, EB, EVB, RpcMiddleware> {
+    ) -> RpcAddOns<Node, EthB, T, EB, EVB, RpcMiddleware, AuthHttpMiddleware> {
         let Self {
             hooks,
             eth_api_builder,
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
             ..
         } = self;
@@ -628,6 +646,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         }
     }
@@ -636,13 +655,14 @@ where
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
-    ) -> RpcAddOns<Node, EthB, PVB, EB, T, RpcMiddleware> {
+    ) -> RpcAddOns<Node, EthB, PVB, EB, T, RpcMiddleware, AuthHttpMiddleware> {
         let Self {
             hooks,
             eth_api_builder,
             payload_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
             ..
         } = self;
@@ -653,6 +673,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         }
     }
@@ -698,13 +719,14 @@ where
     pub fn with_rpc_middleware<T>(
         self,
         rpc_middleware: T,
-    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, T> {
+    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, T, AuthHttpMiddleware> {
         let Self {
             hooks,
             eth_api_builder,
             payload_validator_builder,
             engine_api_builder,
             engine_validator_builder,
+            auth_http_middleware,
             tokio_runtime,
             ..
         } = self;
@@ -715,8 +737,85 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         }
+    }
+
+    /// Configures the HTTP transport middleware for the auth / Engine API server.
+    ///
+    /// This middleware is applied after JWT authentication and before JSON-RPC parsing,
+    /// giving access to the raw HTTP request (headers, body, etc.).
+    pub fn with_auth_http_middleware<T>(
+        self,
+        auth_http_middleware: T,
+    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware, T> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            tokio_runtime,
+            ..
+        } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        }
+    }
+
+    /// Stacks an additional HTTP transport middleware layer for the auth / Engine API server.
+    pub fn layer_auth_http_middleware<T>(
+        self,
+        layer: T,
+    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware, Stack<AuthHttpMiddleware, T>> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        } = self;
+        let auth_http_middleware = Stack::new(auth_http_middleware, layer);
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        }
+    }
+
+    /// Conditionally stacks an HTTP transport middleware layer for the auth / Engine API server.
+    #[expect(clippy::type_complexity)]
+    pub fn option_layer_auth_http_middleware<T>(
+        self,
+        layer: Option<T>,
+    ) -> RpcAddOns<
+        Node,
+        EthB,
+        PVB,
+        EB,
+        EVB,
+        RpcMiddleware,
+        Stack<AuthHttpMiddleware, Either<T, Identity>>,
+    > {
+        let layer = layer.map(Either::Left).unwrap_or(Either::Right(Identity::new()));
+        self.layer_auth_http_middleware(layer)
     }
 
     /// Sets the tokio runtime for the RPC servers.
@@ -730,6 +829,7 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            auth_http_middleware,
             ..
         } = self;
         Self {
@@ -739,6 +839,7 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         }
     }
@@ -747,7 +848,7 @@ where
     pub fn layer_rpc_middleware<T>(
         self,
         layer: T,
-    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, Stack<RpcMiddleware, T>> {
+    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, Stack<RpcMiddleware, T>, AuthHttpMiddleware> {
         let Self {
             hooks,
             eth_api_builder,
@@ -755,6 +856,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         } = self;
         let rpc_middleware = Stack::new(rpc_middleware, layer);
@@ -765,6 +867,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            auth_http_middleware,
             tokio_runtime,
         }
     }
@@ -774,7 +877,15 @@ where
     pub fn option_layer_rpc_middleware<T>(
         self,
         layer: Option<T>,
-    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, Stack<RpcMiddleware, Either<T, Identity>>> {
+    ) -> RpcAddOns<
+        Node,
+        EthB,
+        PVB,
+        EB,
+        EVB,
+        Stack<RpcMiddleware, Either<T, Identity>>,
+        AuthHttpMiddleware,
+    > {
         let layer = layer.map(Either::Left).unwrap_or(Either::Right(Identity::new()));
         self.layer_rpc_middleware(layer)
     }
@@ -800,7 +911,8 @@ where
     }
 }
 
-impl<Node, EthB, EV, EB, Engine> Default for RpcAddOns<Node, EthB, EV, EB, Engine, Identity>
+impl<Node, EthB, EV, EB, Engine> Default
+    for RpcAddOns<Node, EthB, EV, EB, Engine, Identity, Identity>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -815,11 +927,13 @@ where
             EB::default(),
             Engine::default(),
             Default::default(),
+            Identity::new(),
         )
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
+    RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -827,6 +941,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
     /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
     /// server.
@@ -913,6 +1028,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
+        let auth_http_middleware = self.auth_http_middleware.clone();
         let tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
@@ -933,6 +1049,8 @@ where
             .set_rpc_middleware(rpc_middleware)
             .with_tokio_runtime(tokio_runtime);
 
+        let auth_config = auth_config.with_http_middleware(auth_http_middleware);
+
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle
             let rpc = Self::launch_rpc_server_internal(server_config, &modules).await?;
@@ -942,7 +1060,7 @@ where
             // launch servers concurrently
             let (rpc, auth) = futures::future::try_join(
                 Self::launch_rpc_server_internal(server_config, &modules),
-                Self::launch_auth_server_internal(auth_module_clone, auth_config),
+                Self::launch_auth_server_internal(auth_config.start(auth_module_clone)),
             )
             .await?;
             (rpc, auth)
@@ -1087,10 +1205,9 @@ where
 
     /// Helper to launch the auth server
     async fn launch_auth_server_internal(
-        auth_module: AuthRpcModule,
-        auth_config: reth_rpc_builder::auth::AuthServerConfig,
+        start_fut: impl Future<Output = Result<AuthServerHandle, reth_rpc_builder::error::RpcError>>,
     ) -> eyre::Result<AuthServerHandle> {
-        auth_module.start_server(auth_config)
+        start_fut
             .await
             .map_err(Into::into)
             .inspect(|handle| {
@@ -1120,8 +1237,8 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
-    for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> NodeAddOns<N>
+    for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -1130,6 +1247,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -1150,8 +1268,8 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
 }
 
-impl<N: FullNodeComponents, EthB, EV, EB, Engine, RpcMiddleware> RethRpcAddOns<N>
-    for RpcAddOns<N, EthB, EV, EB, Engine, RpcMiddleware>
+impl<N: FullNodeComponents, EthB, EV, EB, Engine, RpcMiddleware, AuthHttpMiddleware>
+    RethRpcAddOns<N> for RpcAddOns<N, EthB, EV, EB, Engine, RpcMiddleware, AuthHttpMiddleware>
 where
     Self: NodeAddOns<N, Handle = RpcHandle<N, EthB::EthApi>>,
     EthB: EthApiBuilder<N>,
@@ -1221,8 +1339,8 @@ pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder;
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
-    for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> EngineValidatorAddOn<N>
+    for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
@@ -1230,6 +1348,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: Send,
+    AuthHttpMiddleware: Send,
 {
     type ValidatorBuilder = EVB;
 

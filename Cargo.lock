@@ -9649,6 +9649,7 @@ dependencies = [
  "jsonrpsee",
  "metrics",
  "pin-project",
+ "reqwest 0.13.2",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
