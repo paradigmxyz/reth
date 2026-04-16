@@ -3,7 +3,7 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    utils::{extend_sorted_vec, kway_merge_sorted},
+    utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
@@ -687,6 +687,40 @@ impl HashedPostStateSorted {
                 (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
             })
             .collect();
+
+        Self { accounts, storages }
+    }
+
+    /// Merges the left-hand states and removes any top-level keys present on the right.
+    ///
+    /// For duplicate keys on the left, later items take precedence over earlier ones. The order of
+    /// the right-hand side does not matter.
+    pub fn disjoint_by_keys<'a>(left: Vec<&'a Self>, right: Vec<&'a Self>) -> Self {
+        let accounts = kway_merge_disjoint_sorted(
+            left.iter().map(|item| item.accounts.len()).sum(),
+            left.iter().rev().map(|item| item.accounts.as_slice()),
+            right.iter().map(|item| item.accounts.as_slice()),
+        );
+
+        let mut storages = B256Map::with_capacity_and_hasher(
+            left.iter().map(|item| item.storages.len()).sum(),
+            Default::default(),
+        );
+
+        for item in left {
+            for (hashed_address, storage) in &item.storages {
+                storages
+                    .entry(*hashed_address)
+                    .and_modify(|existing: &mut HashedStorageSorted| existing.extend_ref(storage))
+                    .or_insert_with(|| storage.clone());
+            }
+        }
+
+        for item in right {
+            for hashed_address in item.storages.keys() {
+                storages.remove(hashed_address);
+            }
+        }
 
         Self { accounts, storages }
     }
@@ -1532,6 +1566,120 @@ mod tests {
 
         assert!(state.accounts.contains_key(&addr1));
         assert_eq!(state.accounts.get(&addr1), Some(&None));
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjoint_by_keys() {
+        fn account(nonce: u64) -> Account {
+            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+        }
+
+        let kept_account = B256::with_last_byte(1);
+        let removed_account = B256::with_last_byte(2);
+        let kept_storage = B256::with_last_byte(3);
+        let removed_storage = B256::with_last_byte(4);
+        let slot1 = B256::with_last_byte(11);
+        let slot2 = B256::with_last_byte(12);
+
+        let older = HashedPostStateSorted::new(
+            vec![(kept_account, Some(account(1))), (removed_account, Some(account(10)))],
+            B256Map::from_iter([
+                (
+                    kept_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot1, U256::from(1))],
+                    },
+                ),
+                (
+                    removed_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot1, U256::from(2))],
+                    },
+                ),
+            ]),
+        );
+
+        let newer = HashedPostStateSorted::new(
+            vec![(kept_account, Some(account(2)))],
+            B256Map::from_iter([(
+                kept_storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(slot1, U256::from(3)), (slot2, U256::from(4))],
+                },
+            )]),
+        );
+
+        let remove_a = HashedPostStateSorted::new(
+            vec![(removed_account, None)],
+            B256Map::from_iter([(
+                removed_storage,
+                HashedStorageSorted { wiped: true, storage_slots: vec![] },
+            )]),
+        );
+
+        let remove_b = HashedPostStateSorted::new(
+            vec![(B256::with_last_byte(255), Some(account(99)))],
+            B256Map::default(),
+        );
+
+        let result = HashedPostStateSorted::disjoint_by_keys(
+            vec![&older, &newer],
+            vec![&remove_b, &remove_a],
+        );
+
+        assert_eq!(result.accounts, vec![(kept_account, Some(account(2)))]);
+        assert_eq!(result.storages.len(), 1);
+        assert_eq!(
+            result.storages.get(&kept_storage),
+            Some(&HashedStorageSorted {
+                wiped: false,
+                storage_slots: vec![(slot1, U256::from(3)), (slot2, U256::from(4))],
+            })
+        );
+        assert!(!result.storages.contains_key(&removed_storage));
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjoint_by_keys_removes_overlapping_left_key() {
+        fn account(nonce: u64) -> Account {
+            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+        }
+
+        let overlapping_account = B256::with_last_byte(21);
+        let overlapping_storage = B256::with_last_byte(22);
+        let slot = B256::with_last_byte(23);
+
+        let older = HashedPostStateSorted::new(
+            vec![(overlapping_account, Some(account(1)))],
+            B256Map::from_iter([(
+                overlapping_storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] },
+            )]),
+        );
+
+        let newer = HashedPostStateSorted::new(
+            vec![(overlapping_account, Some(account(2)))],
+            B256Map::from_iter([(
+                overlapping_storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(2))] },
+            )]),
+        );
+
+        let remove = HashedPostStateSorted::new(
+            vec![(overlapping_account, None)],
+            B256Map::from_iter([(
+                overlapping_storage,
+                HashedStorageSorted { wiped: true, storage_slots: vec![] },
+            )]),
+        );
+
+        let result = HashedPostStateSorted::disjoint_by_keys(vec![&older, &newer], vec![&remove]);
+
+        assert!(result.accounts.is_empty());
+        assert!(result.storages.is_empty());
     }
 
     /// Test non-wiped storage merges both zero and non-zero valued slots
