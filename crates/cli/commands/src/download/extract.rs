@@ -171,9 +171,7 @@ fn extract_entry_with_progress<R: Read>(
     stop.store(true, Ordering::Relaxed);
 
     let monitor_result = monitor.join();
-    if let Err(error) = unpack_result {
-        return Err(error)
-    }
+    unpack_result?;
 
     monitor_result.map_err(|_| eyre::eyre!("extraction progress monitor panicked"))?;
     Ok(())

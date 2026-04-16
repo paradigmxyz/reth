@@ -656,6 +656,7 @@ impl SegmentedDownload {
     ///
     /// Each attempt acquires a permit from the shared request limit so whole-file and
     /// piece downloads use the same fixed number of HTTP request slots.
+    #[expect(clippy::too_many_arguments)]
     fn download_piece_with_retries(
         client: &BlockingClient,
         url: &str,
