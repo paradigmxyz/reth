@@ -427,19 +427,3 @@ impl Default for GasCap {
         RPC_DEFAULT_GAS_CAP
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn max_price_sanity() {
-        assert_eq!(DEFAULT_MAX_GAS_PRICE, U256::from(500_000_000_000u64));
-        assert_eq!(DEFAULT_MAX_GAS_PRICE, U256::from(500 * GWEI_TO_WEI))
-    }
-
-    #[test]
-    fn ignore_price_sanity() {
-        assert_eq!(DEFAULT_IGNORE_GAS_PRICE, U256::from(2u64));
-    }
-}

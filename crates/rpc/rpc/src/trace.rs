@@ -419,7 +419,7 @@ where
                 block_traces.push(traces);
             }
 
-            #[allow(clippy::iter_with_drain)]
+            #[expect(clippy::iter_with_drain)]
             let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
             all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
                 traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
@@ -454,14 +454,16 @@ where
                 after = None;
             }
 
-            // Return at most `count` of traces
-            if let Some(count) = count {
+            // Return at most `count` traces after `after` has been consumed.
+            if after.is_none() &&
+                let Some(count) = count
+            {
                 let count = count as usize;
                 if count < all_traces.len() {
                     all_traces.truncate(count);
                     return Ok(all_traces)
                 }
-            };
+            }
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an
@@ -603,12 +605,14 @@ where
                 block_id,
                 Some(block.clone()),
                 StorageInspector::default,
-                move |tx_info, ctx| {
+                move |tx_info, mut ctx| {
+                    let unique_loads = ctx.inspector.unique_loads();
+                    let warm_loads = ctx.inspector.warm_loads();
                     let trace = TransactionStorageAccess {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        storage_access: ctx.inspector.accessed_slots().clone(),
-                        unique_loads: ctx.inspector.unique_loads(),
-                        warm_loads: ctx.inspector.warm_loads(),
+                        storage_access: ctx.take_inspector().into_accessed_slots(),
+                        unique_loads,
+                        warm_loads,
                     };
                     Ok(trace)
                 },

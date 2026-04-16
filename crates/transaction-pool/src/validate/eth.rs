@@ -8,7 +8,7 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask},
+    validate::ValidTransaction,
     Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
     LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -44,7 +44,6 @@ use std::{
     },
     time::{Instant, SystemTime},
 };
-use tokio::sync::Mutex;
 
 /// Additional stateless validation function signature.
 ///
@@ -180,6 +179,11 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     /// Returns the tracks activated forks relevant for transaction validation
     pub const fn fork_tracker(&self) -> &ForkTracker {
         &self.fork_tracker
+    }
+
+    /// Returns the EVM config used for transaction validation.
+    pub const fn evm_config(&self) -> &Evm {
+        &self.evm_config
     }
 
     /// Returns if there are EIP-2718 type transactions
@@ -1324,26 +1328,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     {
         let additional_tasks = self.additional_tasks;
         let validator = self.build::<Tx, S>(blob_store);
-
-        let (tx, task) = ValidationTask::new();
-
-        // Spawn validation tasks, they are blocking because they perform db lookups
-        for _ in 0..additional_tasks {
-            let task = task.clone();
-            tasks.spawn_blocking_task(async move {
-                task.run().await;
-            });
-        }
-
-        // we spawn them on critical tasks because validation, especially for EIP-4844 can be quite
-        // heavy
-        tasks.spawn_critical_blocking_task("transaction-validation-service", async move {
-            task.run().await;
-        });
-
-        let to_validation_task = Arc::new(Mutex::new(tx));
-
-        TransactionValidationTaskExecutor { validator: Arc::new(validator), to_validation_task }
+        TransactionValidationTaskExecutor::spawn(validator, &tasks, additional_tasks)
     }
 }
 
@@ -1429,7 +1414,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     );
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas.initial_gas || gas_limit < gas.floor_gas {
+    if gas_limit < gas.initial_total_gas || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())

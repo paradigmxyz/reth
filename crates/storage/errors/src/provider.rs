@@ -3,6 +3,7 @@ use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
+use reth_codecs::DecompressError;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
@@ -242,6 +243,12 @@ impl From<RecoveryError> for ProviderError {
 impl From<ProviderError> for EvmDatabaseError<ProviderError> {
     fn from(error: ProviderError) -> Self {
         Self::Database(error)
+    }
+}
+
+impl From<DecompressError> for ProviderError {
+    fn from(error: DecompressError) -> Self {
+        Self::Database(error.into())
     }
 }
 

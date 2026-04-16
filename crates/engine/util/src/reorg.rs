@@ -14,7 +14,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
@@ -25,6 +25,7 @@ use std::{
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Instant,
 };
 use tokio::sync::oneshot;
 use tracing::*;
@@ -143,7 +144,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, tx }),
+                    Some(BeaconEngineMessage::NewPayload { payload, tx, enqueued_at }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -173,6 +174,7 @@ where
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
                                 payload,
                                 tx,
+                                enqueued_at,
                             }))
                         }
                     };
@@ -191,43 +193,30 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, tx },
+                        BeaconEngineMessage::NewPayload { payload, tx, enqueued_at },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             payload: T::block_to_payload(reorg_block),
                             tx: reorg_payload_tx,
+                            enqueued_at: Instant::now(),
                         },
                         // Reorg forkchoice state
                         BeaconEngineMessage::ForkchoiceUpdated {
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
-                            version: EngineApiMessageVersion::default(),
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        tx,
-                        version,
-                    }),
-                    _,
-                ) => {
+                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        tx,
-                        version,
-                    })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 (item, _) => item,
             };
@@ -316,7 +305,7 @@ where
         cumulative_gas_used += gas_used;
     }
 
-    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider)?;
+    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider, None)?;
 
     Ok(block.into_sealed_block())
 }

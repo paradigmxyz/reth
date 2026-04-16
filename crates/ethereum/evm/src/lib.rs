@@ -28,7 +28,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    NextBlockEnvAttributes, TransactionEnv,
+    NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
@@ -127,7 +127,7 @@ impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
@@ -175,6 +175,7 @@ where
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
                 prev_randao: attributes.prev_randao,
                 gas_limit: attributes.gas_limit,
+                slot_number: attributes.slot_number,
             },
             self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
             self.chain_spec(),
@@ -218,7 +219,7 @@ impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSp
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,

@@ -262,7 +262,9 @@ pub trait LoadPendingBlock:
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_env = builder.evm_mut().block().clone();
+        let block_gas_limit: u64 = builder.evm().block().gas_limit();
+        let basefee = builder.evm().block().basefee();
+        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
 
         let blob_params = self
             .provider()
@@ -271,15 +273,14 @@ pub trait LoadPendingBlock:
             .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
             let mut best_txs = self
                 .pool()
                 .best_transactions_with_attributes(BestTransactionsAttributes::new(
-                    block_env.basefee(),
-                    block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                    basefee,
+                    blob_gasprice,
                 ))
                 // freeze to get a block as fast as possible
                 .without_updates();
@@ -377,7 +378,7 @@ pub trait LoadPendingBlock:
         }
 
         let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
-            builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
+            builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =
             BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
@@ -434,6 +435,7 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
             extra_data: parent.extra_data().clone(),
+            slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         }
     }
 }
@@ -455,5 +457,15 @@ mod tests {
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
 
         assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
+    }
+
+    #[test]
+    fn pending_env_increments_parent_slot_number() {
+        let header = Header { slot_number: Some(7), ..Default::default() };
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+
+        assert_eq!(attrs.slot_number, Some(8));
     }
 }

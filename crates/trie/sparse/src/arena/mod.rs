@@ -9,7 +9,7 @@ use nodes::{
 };
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{B256Map, HashMap, HashSet},
@@ -22,7 +22,7 @@ use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
-use slotmap::{DefaultKey, Key as _, SlotMap};
+use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
@@ -58,6 +58,66 @@ fn prefix_range(
         end += 1;
     }
     begin..end
+}
+
+/// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
+/// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
+const fn slotmap_slot_size<T>() -> usize {
+    // Slot<T> = { u: SlotUnion<T>, version: u32 }
+    // SlotUnion<T> = union { value: ManuallyDrop<T>, next_free: u32 }
+    // size = max(size_of::<T>(), 4) + 4, rounded up to align_of::<T>() (or 4)
+    let union_size = if core::mem::size_of::<T>() > 4 { core::mem::size_of::<T>() } else { 4 };
+    let raw = union_size + 4;
+    let align = if core::mem::align_of::<T>() > 4 { core::mem::align_of::<T>() } else { 4 };
+    (raw + align - 1) & !(align - 1)
+}
+
+/// Compacts an arena by BFS-copying all reachable nodes into a fresh `SlotMap`, dropping
+/// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
+/// traversal.
+fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
+    let mut new_arena = SlotMap::with_capacity(arena.len());
+    let mut queue = VecDeque::new();
+
+    let root_node = arena.remove(*root).expect("root exists");
+    let new_root = new_arena.insert(root_node);
+    queue.push_back(new_root);
+
+    while let Some(new_idx) = queue.pop_front() {
+        // Invariant: any node popped from `queue` has been moved into `new_arena` but
+        // its Branch.children have not been rewritten yet — every Revealed(idx) here is
+        // still an old-arena index, and the child is still present in `arena` because
+        // only this parent's iteration can remove it (each child has exactly one parent).
+        let old_children: SmallVec<[(usize, Index); 16]> = match &new_arena[new_idx] {
+            ArenaSparseNode::Branch(b) => b
+                .children
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| match c {
+                    ArenaSparseNodeBranchChild::Revealed(old_idx) => Some((i, *old_idx)),
+                    _ => None,
+                })
+                .collect(),
+            _ => continue,
+        };
+
+        for (child_pos, old_child_idx) in old_children {
+            let child_node = arena.remove(old_child_idx).expect("child exists");
+            let new_child_idx = new_arena.insert(child_node);
+            let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
+            b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+            queue.push_back(new_child_idx);
+        }
+    }
+
+    debug_assert!(
+        arena.is_empty(),
+        "compact_arena: {} orphaned nodes remaining after BFS drain",
+        arena.len(),
+    );
+
+    *arena = new_arena;
+    *root = new_root;
 }
 
 /// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
@@ -105,9 +165,40 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Cached total memory footprint of this subtrie in bytes. Computed during prune;
+    /// starts at 0 before the first prune.
+    cached_memory_size: usize,
 }
 
 impl ArenaSparseSubtrie {
+    /// Creates a new subtrie with a pre-allocated root slot containing
+    /// [`ArenaSparseNode::EmptyRoot`]. The caller must overwrite `subtrie.arena[subtrie.root]`
+    /// before use.
+    fn new(record_updates: bool) -> Box<Self> {
+        let mut arena = SlotMap::new();
+        let root = arena.insert(ArenaSparseNode::EmptyRoot);
+        let buffers = ArenaTrieBuffers {
+            updates: record_updates.then(SparseTrieUpdates::default),
+            ..Default::default()
+        };
+        Box::new(Self {
+            arena,
+            root,
+            path: Nibbles::default(),
+            buffers,
+            required_proofs: Vec::new(),
+            num_leaves: 0,
+            num_dirty_leaves: 0,
+            cached_memory_size: 0,
+        })
+    }
+
+    /// Returns the cached total memory footprint of this subtrie in bytes.
+    /// Accurate after prune; returns 0 before the first prune.
+    const fn memory_size(&self) -> usize {
+        self.cached_memory_size
+    }
+
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
     #[cfg(debug_assertions)]
     fn debug_assert_counters(&self) {
@@ -125,21 +216,13 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    fn clear(&mut self) {
-        self.arena.clear();
-        self.buffers.clear();
-        self.required_proofs.clear();
-        self.num_leaves = 0;
-        self.num_dirty_leaves = 0;
-    }
-
-    /// Prunes revealed subtrees that are not ancestors of any retained leaf.
+    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the
+    /// arena in a single BFS pass.
     ///
-    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. The method
-    /// walks all nodes depth-first with the cursor, removing non-retained nodes bottom-up.
-    /// Only the boundary nodes (direct children of retained branches) have their parent's
-    /// child slot replaced with `Blinded`; deeper nodes are simply removed since their parent
-    /// will also be removed.
+    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. Builds a fresh
+    /// arena by BFS-copying only retained nodes from the root, blinding non-retained children
+    /// at the boundary. Non-retained subtrees are never visited — they are dropped with the
+    /// old arena.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
@@ -152,64 +235,103 @@ impl ArenaSparseSubtrie {
             retained_leaves.windows(2).all(|w| w[0] <= w[1]),
             "retained_leaves must be sorted"
         );
+        debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
-        let mut pruned: usize = 0;
-        let mut pruned_leaves: u64 = 0;
+        let old_count = self.arena.len();
+        // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
+        // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
+        // avoids most reallocations without over-allocating when pruning is heavy.
+        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
+        // Queue: (new_idx, path TO the node — excluding its own short_key)
+        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        let mut new_num_leaves = 0u64;
+        let mut new_nodes_heap_size = 0usize;
 
-        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        // Root is always retained.
+        let root_node = self.arena.remove(self.root).expect("root exists");
+        let new_root = new_arena.insert(root_node);
+        queue.push_back((new_root, self.path));
 
-        loop {
-            let result = self.buffers.cursor.next(&mut self.arena, |_, node| {
-                matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
-            });
+        while let Some((new_idx, node_path)) = queue.pop_front() {
+            new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {
-                    // Don't prune the root.
-                    if self.buffers.cursor.depth() == 0 {
-                        continue;
+            let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
+                if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
+                    new_num_leaves += 1;
+                }
+                continue;
+            };
+
+            // Logical path of this branch (path TO node + its extension/short_key).
+            let mut branch_logical_path = node_path;
+            branch_logical_path.extend(&b.short_key);
+
+            // Collect (dense_pos, nibble, old_child_idx) for revealed children.
+            let children: SmallVec<[(usize, u8, Index); 16]> = BranchChildIter::new(b.state_mask)
+                .filter_map(|(dense_idx, nibble)| match &b.children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(old_idx) => {
+                        Some((dense_idx.get(), nibble, *old_idx))
                     }
+                    _ => None,
+                })
+                .collect();
 
-                    let head = self.buffers.cursor.head().expect("cursor is non-empty");
-                    let head_idx = head.index;
-                    let nibble = head.path.last();
+            for (child_pos, nibble, old_child_idx) in children {
+                // Child's path in the trie (edges to reach it, excluding its own short_key).
+                let mut child_path = branch_logical_path;
+                child_path.push(nibble);
 
-                    // Compute the node's key prefix for the retention check. We use
-                    // `short_key()` directly rather than `head_logical_branch_path()`
-                    // because the head can be a leaf.
-                    let short_key =
-                        self.arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head.path;
-                    node_prefix.extend(short_key);
+                // Child's full prefix for the retention check.
+                let child_short_key = match &self.arena[old_child_idx] {
+                    ArenaSparseNode::Branch(b) => &b.short_key,
+                    ArenaSparseNode::Leaf { key, .. } => key,
+                    other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
+                };
+                let mut child_prefix = child_path;
+                child_prefix.extend(child_short_key);
 
-                    // Check if this node (or any descendant) is retained. Always search
-                    // from 0 because DFS order is not lexicographic — backtracking can
-                    // revisit prefixes earlier than previously visited subtrees.
-                    let range = prefix_range(retained_leaves, 0, &node_prefix);
-                    if !range.is_empty() {
-                        continue;
-                    }
-
-                    if matches!(self.arena[head_idx], ArenaSparseNode::Leaf { .. }) {
-                        pruned_leaves += 1;
-                    }
-
-                    ArenaParallelSparseTrie::remove_pruned_node(
-                        &mut self.arena,
-                        &self.buffers.cursor,
-                        head_idx,
-                        nibble,
-                    );
-                    pruned += 1;
+                if has_prefix(retained_leaves, &child_prefix) {
+                    // Retained — move child to new arena.
+                    let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                    let new_child_idx = new_arena.insert(child_node);
+                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
+                        unreachable!()
+                    };
+                    b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+                    queue.push_back((new_child_idx, child_path));
+                } else {
+                    // Not retained — blind the child slot in the new arena.
+                    let rlp_node = self.arena[old_child_idx]
+                        .state_ref()
+                        .expect("child must have state")
+                        .cached_rlp_node()
+                        .cloned()
+                        .expect("pruned child must have cached RLP (prune runs after hashing)");
+                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
+                        unreachable!()
+                    };
+                    b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
                 }
             }
         }
 
-        self.num_leaves -= pruned_leaves;
+        let pruned = old_count - new_arena.len();
+        self.num_leaves = new_num_leaves;
+        self.num_dirty_leaves = 0;
+        self.arena = new_arena;
+        self.root = new_root;
+        self.cached_memory_size =
+            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
+
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
-        pruned
+        return pruned;
+
+        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
+        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
+            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
+            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
+        }
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
@@ -495,11 +617,6 @@ impl Default for ArenaParallelismThresholds {
 /// Pruned nodes are replaced with `ArenaSparseNodeBranchChild::Blinded` entries using their
 /// cached RLP. Subtries are pruned in parallel when their leaf count exceeds
 /// [`ArenaParallelismThresholds::min_leaves_for_prune`].
-///
-/// ## Subtrie Recycling
-///
-/// Cleared subtries are pooled in `cleared_subtries` and reused by
-/// `take_or_create_cleared_subtrie` to avoid repeated arena allocations.
 #[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
@@ -510,9 +627,6 @@ pub struct ArenaParallelSparseTrie {
     updates: Option<SparseTrieUpdates>,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
-    /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
-    #[allow(clippy::vec_box)]
-    cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
     /// Debug recorder for tracking mutating operations.
@@ -528,14 +642,6 @@ impl ArenaParallelSparseTrie {
     ) -> Self {
         self.parallelism_thresholds = thresholds;
         self
-    }
-
-    /// Returns the arena indexes of all [`ArenaSparseNode::Subtrie`] nodes in the upper arena.
-    fn all_subtries(&self) -> SmallVec<[Index; 16]> {
-        self.upper_arena
-            .iter()
-            .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
-            .collect()
     }
 
     /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
@@ -686,31 +792,6 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Takes a cleared [`ArenaSparseSubtrie`] from the pool (or creates a new one) and
-    /// pre-allocates a root slot with a placeholder. The caller must overwrite
-    /// `subtrie.arena[subtrie.root]` before use.
-    fn take_or_create_cleared_subtrie(&mut self) -> Box<ArenaSparseSubtrie> {
-        let mut subtrie = if let Some(s) = self.cleared_subtries.pop() {
-            debug_assert!(s.arena.is_empty());
-            s
-        } else {
-            Box::new(ArenaSparseSubtrie {
-                arena: SlotMap::new(),
-                root: Index::null(),
-                path: Nibbles::default(),
-                buffers: ArenaTrieBuffers::default(),
-                required_proofs: Vec::new(),
-                num_leaves: 0,
-                num_dirty_leaves: 0,
-            })
-        };
-        subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
-        if self.updates.is_some() {
-            subtrie.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
-        }
-        subtrie
-    }
-
     /// Returns `true` if a node at the given path length should be placed in a subtrie rather
     /// than the upper arena.
     const fn should_be_subtrie(path_len: usize) -> bool {
@@ -735,7 +816,7 @@ impl ArenaParallelSparseTrie {
         }
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
-        let mut subtrie = self.take_or_create_cleared_subtrie();
+        let mut subtrie = ArenaSparseSubtrie::new(self.updates.is_some());
         subtrie.path = *child_path;
         let mut root_node =
             mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
@@ -838,8 +919,7 @@ impl ArenaParallelSparseTrie {
         self.maybe_collapse_or_remove_branch(cursor);
     }
 
-    /// Merges buffered updates from a [`ArenaSparseNode::Subtrie`], clears it, and pushes it
-    /// onto `cleared_subtries` for reuse.
+    /// Merges buffered updates from a [`ArenaSparseNode::Subtrie`] and drops it.
     ///
     /// # Panics
     ///
@@ -849,8 +929,6 @@ impl ArenaParallelSparseTrie {
             unreachable!("recycle_subtrie called on non-Subtrie node")
         };
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
-        subtrie.clear();
-        self.cleared_subtries.push(subtrie);
     }
 
     /// Removes a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx` and recycles it.
@@ -976,8 +1054,6 @@ impl ArenaParallelSparseTrie {
                     &mut self.buffers.updates,
                     &mut subtrie.buffers.updates,
                 );
-                subtrie.clear();
-                self.cleared_subtries.push(subtrie);
 
                 // The migrated subtrie root may be a branch whose children now live in
                 // the upper arena at or beyond the subtrie boundary depth. Re-wrap any
@@ -2117,7 +2193,6 @@ impl Default for ArenaParallelSparseTrie {
             root,
             updates: None,
             buffers: ArenaTrieBuffers::default(),
-            cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
             #[cfg(feature = "trie-debug")]
             debug_recorder: Default::default(),
@@ -2533,15 +2608,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
 
-        for idx in self.all_subtries() {
-            if let ArenaSparseNode::Subtrie(mut subtrie) =
-                self.upper_arena.remove(idx).expect("subtrie exists in arena")
-            {
-                subtrie.clear();
-                self.cleared_subtries.push(subtrie);
-            }
-        }
-        self.upper_arena.clear();
+        self.upper_arena = SlotMap::new();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
@@ -2549,16 +2616,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.clear();
     }
 
-    fn shrink_nodes_to(&mut self, size: usize) {
-        self.upper_arena.shrink_to(size);
-        for (_, node) in &mut self.upper_arena {
-            if let ArenaSparseNode::Subtrie(s) = node {
-                s.arena.shrink_to(size);
-            }
-        }
-        for s in &mut self.cleared_subtries {
-            s.arena.shrink_to(size);
-        }
+    fn shrink_nodes_to(&mut self, _size: usize) {
+        // Subtries are recreated from scratch on each block, so there is nothing to shrink.
     }
 
     fn shrink_values_to(&mut self, _size: usize) {
@@ -2577,30 +2636,26 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn memory_size(&self) -> usize {
-        let node_size = core::mem::size_of::<ArenaSparseNode>();
+        let slot_size = slotmap_slot_size::<ArenaSparseNode>();
 
-        // Upper arena: capacity × node size.
-        let upper = self.upper_arena.capacity() * node_size;
+        // Upper arena: capacity × slot size.
+        let upper = self.upper_arena.capacity() * slot_size;
 
-        // Active subtries: capacity × node size per subtrie arena.
+        // Active subtries: cached total memory from last prune.
         let subtrie_size: usize = self
             .upper_arena
             .iter()
             .filter_map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => Some(s.arena.capacity() * node_size),
+                ArenaSparseNode::Subtrie(s) => Some(s.memory_size()),
                 _ => None,
             })
             .sum();
-
-        // Cleared subtries still hold allocated arena capacity.
-        let cleared_size: usize =
-            self.cleared_subtries.iter().map(|s| s.arena.capacity() * node_size).sum();
 
         // RLP buffers.
         let buffer_size = self.buffers.rlp_buf.capacity() +
             self.buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
 
-        upper + subtrie_size + cleared_size + buffer_size
+        upper + subtrie_size + buffer_size
     }
 
     #[instrument(
@@ -2733,6 +2788,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             for (child_idx, subtrie, _) in taken {
                 self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
             }
+        }
+
+        if pruned > 0 {
+            compact_arena(&mut self.upper_arena, &mut self.root);
         }
 
         #[cfg(feature = "trie-debug")]

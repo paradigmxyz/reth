@@ -346,6 +346,15 @@ impl Discv4 {
         self.send_to_service(cmd);
     }
 
+    /// Adds the node as a bootnode.
+    ///
+    /// This registers the node in the configured bootstrap set and inserts it into the routing
+    /// table, pinging it to establish the endpoint proof, same as the nodes provided at startup.
+    pub fn add_boot_node(&self, node_record: NodeRecord) {
+        let cmd = Discv4Command::AddBootNode(node_record);
+        self.send_to_service(cmd);
+    }
+
     /// Adds the peer and id to the ban list.
     ///
     /// This will prevent any future inclusion in the table
@@ -717,6 +726,15 @@ impl Discv4Service {
                 }
             }
         }
+    }
+
+    /// Adds the node to the bootstrap set and to the routing table.
+    ///
+    /// Behaves like [`Self::add_node`] but also registers the node in the configured bootstrap
+    /// set so it is used for subsequent bootstrap attempts.
+    pub fn add_boot_node(&mut self, record: NodeRecord) -> bool {
+        self.config.bootstrap_nodes.insert(record);
+        self.add_node(record)
     }
 
     /// Spawns this services onto a new task
@@ -1650,7 +1668,7 @@ impl Discv4Service {
             .filter(|entry| entry.node.value.is_expired())
             .map(|n| n.node.value)
             .collect::<Vec<_>>();
-        nodes.sort_by_key(|a| a.last_seen);
+        nodes.sort_unstable_by_key(|a| a.last_seen);
         let to_ping = nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING).collect::<Vec<_>>();
         for node in to_ping {
             self.try_ping(node, PingReason::RePing)
@@ -1749,6 +1767,9 @@ impl Discv4Service {
                 match cmd {
                     Discv4Command::Add(enr) => {
                         self.add_node(enr);
+                    }
+                    Discv4Command::AddBootNode(record) => {
+                        self.add_boot_node(record);
                     }
                     Discv4Command::Lookup { node_id, tx } => {
                         let node_id = node_id.unwrap_or(self.local_node_record.id);
@@ -2066,6 +2087,7 @@ impl Default for ReceiveCache {
 /// The commands sent from the frontend [Discv4] to the service [`Discv4Service`].
 enum Discv4Command {
     Add(NodeRecord),
+    AddBootNode(NodeRecord),
     SetTcpPort(u16),
     SetEIP868RLPPair { key: Vec<u8>, rlp: Bytes },
     Ban(PeerId, IpAddr),

@@ -4,12 +4,12 @@ mod invalidation;
 use invalidation::InvalidationConfig;
 
 use super::helpers::{load_jwt_secret, read_input};
+use alloy_consensus::TxEnvelope;
 use alloy_primitives::{Address, B256};
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
-use op_alloy_consensus::OpTxEnvelope;
 use reth_cli_runner::CliContext;
 use std::io::Write;
 
@@ -222,7 +222,9 @@ impl Command {
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
             .into_inner()
             .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-            .try_map_transactions(|tx| tx.try_into_either::<OpTxEnvelope>())?
+            .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+            })?
             .into_consensus();
 
         let config = self.build_invalidation_config();
@@ -240,6 +242,7 @@ impl Command {
             ExecutionPayload::V1(p) => config.apply_to_payload_v1(p),
             ExecutionPayload::V2(p) => config.apply_to_payload_v2(p),
             ExecutionPayload::V3(p) => config.apply_to_payload_v3(p),
+            ExecutionPayload::V4(p) => config.apply_to_payload_v3(&mut p.payload_inner),
         };
 
         let skip_recalc = self.skip_hash_recalc || config.should_skip_hash_recalc();
@@ -254,6 +257,9 @@ impl Command {
                         ExecutionPayload::V1(p) => p.block_hash,
                         ExecutionPayload::V2(p) => p.payload_inner.block_hash,
                         ExecutionPayload::V3(p) => p.payload_inner.payload_inner.block_hash,
+                        ExecutionPayload::V4(p) => {
+                            p.payload_inner.payload_inner.payload_inner.block_hash
+                        }
                     }
                 }
             };
@@ -262,6 +268,9 @@ impl Command {
                 ExecutionPayload::V1(p) => p.block_hash = new_hash,
                 ExecutionPayload::V2(p) => p.payload_inner.block_hash = new_hash,
                 ExecutionPayload::V3(p) => p.payload_inner.payload_inner.block_hash = new_hash,
+                ExecutionPayload::V4(p) => {
+                    p.payload_inner.payload_inner.payload_inner.block_hash = new_hash
+                }
             }
         }
 

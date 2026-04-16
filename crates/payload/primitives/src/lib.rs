@@ -25,8 +25,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
-    PayloadAttributesBuilder, PayloadBuilderAttributes,
+    payload_id, BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
+    PayloadAttributesBuilder,
 };
 
 mod payload;
@@ -47,15 +47,6 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
     /// These attributes typically come from external sources (e.g., consensus layer over RPC such
     /// as the Engine API) and contain parameters like timestamp, fee recipient, and randomness.
     type PayloadAttributes: PayloadAttributes + Unpin;
-
-    /// Extended attributes used internally during payload building.
-    ///
-    /// This type augments the basic payload attributes with additional information
-    /// needed during the building process, such as unique identifiers and parent
-    /// block references.
-    type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
-        + Clone
-        + Unpin;
 
     /// Converts a sealed block into the execution payload format.
     fn block_to_payload(
@@ -165,6 +156,97 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
+    let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+    if version.is_v6() && !is_amsterdam {
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
+        //
+        // For `engine_getPayloadV6`
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    built payload does not fall within the time frame of the Amsterdam fork.
+
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
+    Ok(())
+}
+
+/// Validates the presence of the `block access lists` field according to the payload timestamp.
+/// After Amsterdam, block access list field must be [Some].
+/// Before Amsterdam, block access list field must be [None];
+pub fn validate_block_access_list_presence<T: EthereumHardforks>(
+    chain_spec: &T,
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    timestamp: u64,
+    has_block_access_list: bool,
+) -> Result<(), EngineObjectValidationError> {
+    let is_amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+
+    match version {
+        EngineApiMessageVersion::V1 |
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
+            if has_block_access_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::BlockAccessListNotSupportedBeforeV6))
+            }
+        }
+
+        EngineApiMessageVersion::V6 => {
+            if is_amsterdam_active && !has_block_access_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoBlockAccessListPostAmsterdam))
+            }
+            if !is_amsterdam_active && has_block_access_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::HasBlockAccessListPreAmsterdam))
+            }
+        }
+    };
+
+    Ok(())
+}
+
+/// Validates the presence of the `slot number` field according to the payload timestamp.
+/// After Amsterdam, slot number field must be [Some].
+/// Before Amsterdam, slot number field must be [None];
+pub fn validate_slot_number_presence<T: EthereumHardforks>(
+    chain_spec: &T,
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    timestamp: u64,
+    has_slot_number: bool,
+) -> Result<(), EngineObjectValidationError> {
+    let is_amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+
+    match version {
+        EngineApiMessageVersion::V1 |
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
+            if has_slot_number {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::SlotNumberNotSupportedBeforeV6))
+            }
+        }
+
+        EngineApiMessageVersion::V6 => {
+            if is_amsterdam_active && !has_slot_number {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
+            }
+            if !is_amsterdam_active && has_slot_number {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::HasSlotNumberPreAmsterdam))
+            }
+        }
+    };
+
     Ok(())
 }
 
@@ -190,7 +272,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -291,7 +374,10 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -364,6 +450,25 @@ where
     Type: PayloadAttributes,
     T: EthereumHardforks,
 {
+    // BAL only exists in ExecutionPayload, not PayloadAttributes (EIP-7928)
+    if let PayloadOrAttributes::ExecutionPayload(_) = payload_or_attrs {
+        validate_block_access_list_presence(
+            chain_spec,
+            version,
+            payload_or_attrs.message_validation_kind(),
+            payload_or_attrs.timestamp(),
+            payload_or_attrs.block_access_list().is_some(),
+        )?;
+    }
+
+    validate_slot_number_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.timestamp(),
+        payload_or_attrs.slot_number().is_some(),
+    )?;
+
     validate_withdrawals_presence(
         chain_spec,
         version,
@@ -402,6 +507,10 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Osaka hardfork.
     V5 = 5,
+    /// Version 6
+    ///
+    /// Added in the Amsterdam hardfork.
+    V6 = 6,
 }
 
 impl EngineApiMessageVersion {
@@ -430,6 +539,11 @@ impl EngineApiMessageVersion {
         matches!(self, Self::V5)
     }
 
+    /// Returns true if the version is V6.
+    pub const fn is_v6(&self) -> bool {
+        matches!(self, Self::V6)
+    }
+
     /// Returns the method name for the given version.
     pub const fn method_name(&self) -> &'static str {
         match self {
@@ -437,7 +551,7 @@ impl EngineApiMessageVersion {
             Self::V2 => "engine_newPayloadV2",
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
-            Self::V5 => "engine_newPayloadV5",
+            Self::V5 | Self::V6 => "engine_newPayloadV5",
         }
     }
 }

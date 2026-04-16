@@ -238,6 +238,7 @@ sparse_trie_tests! {
     test_reveal_nodes_with_branch_masks,
     test_reveal_nodes_skips_on_empty_root,
     test_reveal_nodes_filters_unreachable_boundary_leaves,
+    test_reveal_boundary_node_with_missing_upper_parent_branch,
     test_reveal_insert_reveal_preserves_branch_state,
     test_remove_then_reveal_does_not_overwrite_collapsed_node,
     test_insert_then_reveal_does_not_overwrite_branch,
