@@ -1556,20 +1556,35 @@ where
     }
 }
 
-impl<Node, EthB, PVB, EVB, RpcMiddleware>
-    RpcAddOns<Node, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware>
+impl<Node, EthB, PVB, EVB, RpcMiddleware, AuthHttpMiddleware>
+    RpcAddOns<Node, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
-    PVB: Clone,
 {
     /// Sets the BAL store used by the default engine API builder.
-    pub fn with_bal_store(
-        self,
-        bal_store: BalStoreHandle,
-    ) -> RpcAddOns<Node, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware> {
-        let Self { engine_api_builder, .. } = &self;
-        self.with_engine_api(engine_api_builder.clone().with_bal_store(bal_store))
+    pub fn with_bal_store(self, bal_store: BalStoreHandle) -> Self {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        } = self;
+
+        Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder: engine_api_builder.with_bal_store(bal_store),
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        }
     }
 }
 

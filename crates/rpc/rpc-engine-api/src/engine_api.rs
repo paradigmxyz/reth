@@ -1888,7 +1888,7 @@ mod tests {
                 block_hash: BlockHash,
                 block_number: BlockNumber,
                 bal: Bytes,
-            ) -> reth_storage_errors::provider::ProviderResult<()> {
+            ) -> reth_storage_api::errors::provider::ProviderResult<()> {
                 self.entries.lock().unwrap().insert(block_hash, bal);
                 self.range_index.lock().unwrap().insert(block_number, block_hash);
                 Ok(())
@@ -1897,7 +1897,8 @@ mod tests {
             fn get_by_hashes(
                 &self,
                 block_hashes: &[BlockHash],
-            ) -> reth_storage_errors::provider::ProviderResult<Vec<Option<Bytes>>> {
+            ) -> reth_storage_api::errors::provider::ProviderResult<Vec<Option<Bytes>>>
+            {
                 let entries = self.entries.lock().unwrap();
                 Ok(block_hashes.iter().map(|hash| entries.get(hash).cloned()).collect())
             }
@@ -1906,7 +1907,7 @@ mod tests {
                 &self,
                 start: BlockNumber,
                 count: u64,
-            ) -> reth_storage_errors::provider::ProviderResult<Vec<Bytes>> {
+            ) -> reth_storage_api::errors::provider::ProviderResult<Vec<Bytes>> {
                 let entries = self.entries.lock().unwrap();
                 let range_index = self.range_index.lock().unwrap();
 
