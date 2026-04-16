@@ -436,9 +436,12 @@ impl NewPayloadStatusMetrics {
         latest_forkchoice_updated_at: &mut Option<Instant>,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
+        latency_override: Option<Duration>,
     ) {
         let finish = Instant::now();
-        let elapsed = finish - start;
+        // When a latency_override is provided (from enqueued_at-based timing that
+        // includes backpressure), use it instead of measuring from `start`.
+        let elapsed = latency_override.unwrap_or(finish - start);
 
         if let Some(prev_finish) = self.latest_finish_at {
             self.time_between_new_payloads.record(start - prev_finish);
