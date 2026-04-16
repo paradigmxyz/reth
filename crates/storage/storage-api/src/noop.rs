@@ -1,5 +1,7 @@
 //! Various noop implementations for traits.
 
+pub use crate::bal::NoopBalStore;
+
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,

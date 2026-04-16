@@ -38,6 +38,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_storage_api::BalsStore;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -1364,9 +1365,29 @@ where
 /// This provides a basic default implementation for opstack and ethereum engine API via
 /// [`EngineTypes`] and uses the general purpose [`EngineApi`] implementation as the builder's
 /// output.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct BasicEngineApiBuilder<PVB> {
     payload_validator_builder: PVB,
+    bals_store: BalsStore,
+}
+
+impl<PVB> BasicEngineApiBuilder<PVB> {
+    /// Creates a new instance from the payload validator builder.
+    pub fn new(payload_validator_builder: PVB) -> Self {
+        Self { payload_validator_builder, bals_store: BalsStore::default() }
+    }
+
+    /// Sets the BAL store injected into the engine API.
+    pub fn with_bals_store(mut self, bals_store: BalsStore) -> Self {
+        self.bals_store = bals_store;
+        self
+    }
+}
+
+impl<PVB: Default> Default for BasicEngineApiBuilder<PVB> {
+    fn default() -> Self {
+        Self::new(PVB::default())
+    }
 }
 
 impl<N, PVB> EngineApiBuilder<N> for BasicEngineApiBuilder<PVB>
@@ -1389,7 +1410,7 @@ where
     >;
 
     async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
-        let Self { payload_validator_builder } = self;
+        let Self { payload_validator_builder, bals_store } = self;
 
         let engine_validator = payload_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
@@ -1399,7 +1420,7 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        Ok(EngineApi::new(
+        Ok(EngineApi::with_bals_store(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
             ctx.beacon_engine_handle.clone(),
@@ -1411,7 +1432,25 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
+            bals_store,
         ))
+    }
+}
+
+impl<Node, EthB, PVB, EVB, RpcMiddleware>
+    RpcAddOns<Node, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware>
+where
+    Node: FullNodeComponents,
+    EthB: EthApiBuilder<Node>,
+    PVB: Clone,
+{
+    /// Sets the BAL store used by the default engine API builder.
+    pub fn with_bals_store(
+        self,
+        bals_store: BalsStore,
+    ) -> RpcAddOns<Node, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware> {
+        let Self { engine_api_builder, .. } = &self;
+        self.with_engine_api(engine_api_builder.clone().with_bals_store(bals_store))
     }
 }
 

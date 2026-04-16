@@ -7,7 +7,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -22,12 +22,12 @@ use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTy
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
+    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{BalsStore, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -98,6 +98,38 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
+        Self::with_bals_store(
+            provider,
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            tx_pool,
+            task_spawner,
+            client,
+            capabilities,
+            validator,
+            accept_execution_requests_hash,
+            network,
+            BalsStore::default(),
+        )
+    }
+
+    /// Create new instance of [`EngineApi`] with a custom BAL store.
+    #[expect(clippy::too_many_arguments)]
+    pub fn with_bals_store(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
+        tx_pool: Pool,
+        task_spawner: Runtime,
+        client: ClientVersionV1,
+        capabilities: EngineCapabilities,
+        validator: Validator,
+        accept_execution_requests_hash: bool,
+        network: impl NetworkInfo + 'static,
+        bals_store: BalsStore,
+    ) -> Self {
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -112,8 +144,62 @@ where
             validator,
             accept_execution_requests_hash,
             is_syncing,
+            bals_store,
         });
         Self { inner }
+    }
+
+    /// Returns the configured BAL store.
+    pub const fn bals_store(&self) -> &BalsStore {
+        &self.inner.bals_store
+    }
+
+    fn maybe_store_valid_bal(&self, payload: &PayloadT::ExecutionData, status: &PayloadStatus)
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
+        if !status.is_valid() {
+            return;
+        }
+
+        let Some(bal) = payload.block_access_list().cloned() else {
+            return;
+        };
+
+        let num_hash = payload.num_hash();
+        if let Err(err) = self.inner.bals_store.insert(num_hash.hash, num_hash.number, bal) {
+            warn!(
+                target: "rpc::engine",
+                %err,
+                block_hash = ?num_hash.hash,
+                block_number = num_hash.number,
+                "failed to persist BAL into store"
+            );
+        }
+    }
+
+    fn bals_by_hashes_or_empty(&self, hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
+        self.inner.bals_store.get_by_hashes(hashes).unwrap_or_else(|err| {
+            warn!(target: "rpc::engine", %err, "failed to fetch BALs by hash");
+            hashes.iter().map(|_| None).collect()
+        })
+    }
+
+    fn bals_by_range_or_empty(&self, start: BlockNumber, count: u64) -> Vec<Option<Bytes>> {
+        self.inner
+            .bals_store
+            .get_by_range(start, count)
+            .map(|bals| bals.into_iter().map(Some).collect())
+            .unwrap_or_else(|err| {
+                warn!(
+                    target: "rpc::engine",
+                    %err,
+                    start,
+                    count,
+                    "failed to fetch BALs by range"
+                );
+                Vec::new()
+            })
     }
 
     /// Fetches the client version.
@@ -139,7 +225,10 @@ where
     pub async fn new_payload_v1(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -150,14 +239,19 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_store_valid_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v1`.
     pub async fn new_payload_v1_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let start = Instant::now();
         let res = Self::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
@@ -169,7 +263,10 @@ where
     pub async fn new_payload_v2(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -178,14 +275,19 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_store_valid_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v2`.
     pub async fn new_payload_v2_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let start = Instant::now();
         let res = Self::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
@@ -197,7 +299,10 @@ where
     pub async fn new_payload_v3(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -207,14 +312,19 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_store_valid_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v3`
     pub async fn new_payload_v3_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let start = Instant::now();
 
         let res = Self::new_payload_v3(self, payload).await;
@@ -227,7 +337,10 @@ where
     pub async fn new_payload_v4(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -237,14 +350,19 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_store_valid_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v4`
     pub async fn new_payload_v4_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let start = Instant::now();
         let res = Self::new_payload_v4(self, payload).await;
 
@@ -261,7 +379,10 @@ where
     pub async fn new_payload_v5(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -270,14 +391,19 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_store_valid_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v5`
     pub async fn new_payload_v5_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<PayloadStatus>
+    where
+        PayloadT::ExecutionData: ExecutionPayload,
+    {
         let start = Instant::now();
         let res = Self::new_payload_v5(self, payload).await;
         let elapsed = start.elapsed();
@@ -606,7 +732,7 @@ where
         f: F,
     ) -> EngineApiResult<Vec<Option<R>>>
     where
-        F: Fn(Provider::Block) -> R + Send + 'static,
+        F: Fn(usize, Provider::Block) -> R + Send + 'static,
         R: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
@@ -637,7 +763,7 @@ where
 
             // Check if the requested range starts before the earliest available block due to pruning/expiry
             let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
-            for num in start..=end {
+            for (idx, num) in (start..=end).enumerate() {
                 if num < earliest_block {
                     result.push(None);
                     continue;
@@ -645,7 +771,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(&f));
+                        result.push(block.map(|block| f(idx, block)));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -674,7 +800,7 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV1 {
+        self.get_payload_bodies_by_range_with(start, count, |_idx, block| ExecutionPayloadBodyV1 {
             transactions: block.body().encoded_2718_transactions(),
             withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
         })
@@ -701,10 +827,14 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
+        let bals = self.bals_by_range_or_empty(start, count);
+
+        self.get_payload_bodies_by_range_with(start, count, move |idx, block| {
+            ExecutionPayloadBodyV2 {
+                transactions: block.body().encoded_2718_transactions(),
+                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+                block_access_list: bals.get(idx).cloned().flatten(),
+            }
         })
         .await
     }
@@ -728,7 +858,7 @@ where
         f: F,
     ) -> EngineApiResult<Vec<Option<R>>>
     where
-        F: Fn(Provider::Block) -> R + Send + 'static,
+        F: Fn(usize, Provider::Block) -> R + Send + 'static,
         R: Send + 'static,
     {
         let len = hashes.len() as u64;
@@ -741,11 +871,11 @@ where
 
         self.inner.task_spawner.spawn_blocking_task(async move {
             let mut result = Vec::with_capacity(hashes.len());
-            for hash in hashes {
+            for (idx, hash) in hashes.into_iter().enumerate() {
                 let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(&f));
+                        result.push(block.map(|block| f(idx, block)));
                     }
                     Err(err) => {
                         let _ = tx.send(Err(EngineApiError::Internal(Box::new(err))));
@@ -764,7 +894,7 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV1 {
+        self.get_payload_bodies_by_hash_with(hashes, |_idx, block| ExecutionPayloadBodyV1 {
             transactions: block.body().encoded_2718_transactions(),
             withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
         })
@@ -789,10 +919,12 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
+        let bals = self.bals_by_hashes_or_empty(&hashes);
+
+        self.get_payload_bodies_by_hash_with(hashes, move |idx, block| ExecutionPayloadBodyV2 {
             transactions: block.body().encoded_2718_transactions(),
             withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
+            block_access_list: bals.get(idx).cloned().flatten(),
         })
         .await
     }
@@ -1433,6 +1565,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     accept_execution_requests_hash: bool,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Store for Block Access Lists (BALs).
+    bals_store: BalsStore,
 }
 
 #[cfg(test)]
@@ -1453,11 +1587,27 @@ mod tests {
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_storage_api::{BalStore, BalsStore};
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (
+        EngineApiTestHandle,
+        EngineApi<
+            Arc<MockEthProvider>,
+            EthEngineTypes,
+            NoopTransactionPool,
+            EthereumEngineValidator,
+            ChainSpec,
+        >,
+    ) {
+        setup_engine_api_with_bals_store(BalsStore::default())
+    }
+
+    fn setup_engine_api_with_bals_store(
+        bals_store: BalsStore,
+    ) -> (
         EngineApiTestHandle,
         EngineApi<
             Arc<MockEthProvider>,
@@ -1479,7 +1629,7 @@ mod tests {
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
         let task_executor = Runtime::test();
-        let api = EngineApi::new(
+        let api = EngineApi::with_bals_store(
             provider.clone(),
             chain_spec.clone(),
             ConsensusEngineHandle::new(to_engine),
@@ -1491,6 +1641,7 @@ mod tests {
             EthereumEngineValidator::new(chain_spec.clone()),
             false,
             NoopNetwork::default(),
+            bals_store,
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -1718,8 +1869,56 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
-        use alloy_rpc_types_engine::ExecutionPayloadBodyV1;
+        use alloy_rpc_types_engine::{ExecutionPayloadBodyV1, ExecutionPayloadBodyV2};
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+        use std::{
+            collections::{BTreeMap, HashMap},
+            sync::Mutex,
+        };
+
+        #[derive(Default)]
+        struct TestBalStore {
+            entries: Mutex<HashMap<BlockHash, Bytes>>,
+            range_index: Mutex<BTreeMap<BlockNumber, BlockHash>>,
+        }
+
+        impl BalStore for TestBalStore {
+            fn insert(
+                &self,
+                block_hash: BlockHash,
+                block_number: BlockNumber,
+                bal: Bytes,
+            ) -> reth_storage_errors::provider::ProviderResult<()> {
+                self.entries.lock().unwrap().insert(block_hash, bal);
+                self.range_index.lock().unwrap().insert(block_number, block_hash);
+                Ok(())
+            }
+
+            fn get_by_hashes(
+                &self,
+                block_hashes: &[BlockHash],
+            ) -> reth_storage_errors::provider::ProviderResult<Vec<Option<Bytes>>> {
+                let entries = self.entries.lock().unwrap();
+                Ok(block_hashes.iter().map(|hash| entries.get(hash).cloned()).collect())
+            }
+
+            fn get_by_range(
+                &self,
+                start: BlockNumber,
+                count: u64,
+            ) -> reth_storage_errors::provider::ProviderResult<Vec<Bytes>> {
+                let entries = self.entries.lock().unwrap();
+                let range_index = self.range_index.lock().unwrap();
+
+                let mut result = Vec::new();
+                for number in start..start.saturating_add(count) {
+                    let Some(hash) = range_index.get(&number) else { break };
+                    let Some(bal) = entries.get(hash) else { break };
+                    result.push(bal.clone());
+                }
+                Ok(result)
+            }
+        }
 
         #[tokio::test]
         async fn invalid_params() {
@@ -1771,6 +1970,50 @@ mod tests {
 
             let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
             assert_eq!(res, expected);
+        }
+
+        #[tokio::test]
+        async fn returns_payload_bodies_v2_with_bal_store_data() {
+            let mut rng = generators::rng();
+            let bal_store = BalsStore::new(TestBalStore::default());
+            let (handle, api) = setup_engine_api_with_bals_store(bal_store.clone());
+
+            let (start, count) = (1, 5);
+            let blocks = random_block_range(
+                &mut rng,
+                start..=start + count - 1,
+                BlockRangeParams { tx_count: 0..2, ..Default::default() },
+            );
+
+            handle
+                .provider
+                .extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.into_block())));
+
+            let expected = blocks
+                .iter()
+                .enumerate()
+                .map(|(idx, block)| {
+                    let bal = Bytes::from(format!("bal-{idx}").into_bytes());
+                    bal_store.insert(block.hash(), block.number, bal.clone()).unwrap();
+
+                    Some(ExecutionPayloadBodyV2 {
+                        transactions: block.body().encoded_2718_transactions(),
+                        withdrawals: block
+                            .body()
+                            .withdrawals()
+                            .cloned()
+                            .map(Withdrawals::into_inner),
+                        block_access_list: Some(bal),
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            let by_range = api.get_payload_bodies_by_range_v2(start, count).await.unwrap();
+            assert_eq!(by_range, expected);
+
+            let hashes = blocks.iter().map(|block| block.hash()).collect::<Vec<_>>();
+            let by_hash = api.get_payload_bodies_by_hash_v2(hashes).await.unwrap();
+            assert_eq!(by_hash, expected);
         }
 
         #[tokio::test]
