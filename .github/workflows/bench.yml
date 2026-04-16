@@ -14,7 +14,7 @@ on:
       blocks:
         description: "Number of blocks to benchmark"
         required: false
-        default: "200"
+        default: "500"
         type: string
       big_blocks:
         description: "Use big blocks mode (pre-generated merged payloads with reth-bb)"
@@ -34,7 +34,7 @@ on:
       warmup:
         description: "Number of warmup blocks"
         required: false
-        default: "100"
+        default: "200"
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
@@ -78,6 +78,7 @@ on:
         type: choice
         options:
           - always
+          - on-win
           - on-error
           - never
       abba:
@@ -132,7 +133,7 @@ jobs:
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -151,21 +152,21 @@ jobs:
 
       - name: Parse arguments
         id: args
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
-            const validSlackModes = new Set(['always', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
             let explicitWarmup = false;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
-              blocks = '${{ github.event.inputs.blocks }}' || '200';
-              warmup = '${{ github.event.inputs.warmup }}' || '100';
-              if (warmup !== '100') explicitWarmup = true;
+              blocks = '${{ github.event.inputs.blocks }}' || '500';
+              warmup = '${{ github.event.inputs.warmup }}' || '200';
+              if (warmup !== '200') explicitWarmup = true;
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
@@ -204,7 +205,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '200', warmup: '100', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -358,7 +359,7 @@ jobs:
 
       - name: Acknowledge request
         id: ack
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -444,7 +445,7 @@ jobs:
 
       - name: Poll queue position
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -559,7 +560,7 @@ jobs:
 
       - name: Resolve checkout ref
         id: checkout-ref
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             if (!process.env.BENCH_PR) {
@@ -585,7 +586,7 @@ jobs:
 
       - name: Resolve job URL and update status
         if: env.BENCH_COMMENT_ID
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -701,7 +702,7 @@ jobs:
       # Build binaries
       - name: Resolve PR head branch
         id: pr-info
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             if (process.env.BENCH_PR) {
@@ -719,7 +720,7 @@ jobs:
 
       - name: Resolve refs
         id: refs
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { execSync } = require('child_process');
@@ -814,7 +815,7 @@ jobs:
 
       - name: Update status (snapshot needed)
         if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -909,8 +910,11 @@ jobs:
           for p in /sys/kernel/mm/transparent_hugepage /sys/kernel/mm/transparent_hugepages; do
             [ -d "$p" ] && echo never | sudo tee "$p/enabled" && echo never | sudo tee "$p/defrag" && break
           done || true
+          # Replace any stale PM QoS holders left behind by earlier benchmark jobs.
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
           # Prevent deep C-states (avoids wake-up latency jitter)
-          sudo sh -c 'exec 3<>/dev/cpu_dma_latency; echo -ne "\x00\x00\x00\x00" >&3; sleep infinity' &
+          sudo bash -c 'exec 3<>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; exec -a bench-cpu-dma-latency sleep infinity' &
+          echo "BENCH_CPU_DMA_LATENCY_PID=$!" >> "$GITHUB_ENV"
           # Move all IRQs to core 0 (housekeeping core)
           for irq in /proc/irq/*/smp_affinity_list; do
             echo 0 | sudo tee "$irq" 2>/dev/null || true
@@ -998,7 +1002,7 @@ jobs:
 
       - name: Update status (running benchmarks)
         if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -1260,7 +1264,7 @@ jobs:
 
       - name: Compare & comment
         if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -1340,7 +1344,7 @@ jobs:
 
       - name: Write job summary
         if: success()
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const jobSummary = require('./.github/scripts/bench-job-summary.js');
@@ -1353,8 +1357,8 @@ jobs:
             });
 
       - name: Send Slack notification (success)
-        if: success() && env.BENCH_SLACK == 'always'
-        uses: actions/github-script@v8
+        if: success() && (env.BENCH_SLACK == 'always' || env.BENCH_SLACK == 'on-win')
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -1365,7 +1369,7 @@ jobs:
 
       - name: Update status (failed)
         if: failure() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -1398,8 +1402,8 @@ jobs:
             });
 
       - name: Send Slack notification (failure)
-        if: failure() && env.BENCH_SLACK != 'never'
-        uses: actions/github-script@v8
+        if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -1421,7 +1425,7 @@ jobs:
 
       - name: Update status (cancelled)
         if: cancelled() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -1444,5 +1448,9 @@ jobs:
           done
           # Restore amd-pstate to active (EPP) mode with powersave governor
           echo active | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
+          if [ -n "${BENCH_CPU_DMA_LATENCY_PID:-}" ]; then
+            sudo kill "$BENCH_CPU_DMA_LATENCY_PID" 2>/dev/null || true
+          fi
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
           sudo cpupower frequency-set -g powersave 2>/dev/null || true
           sudo systemctl start irqbalance cron atd 2>/dev/null || true

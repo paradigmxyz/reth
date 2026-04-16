@@ -56,6 +56,9 @@ pub trait ExecutionPayload:
     /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
 
+    /// Returns the total gas limit for this block.
+    fn gas_limit(&self) -> u64;
+
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
     /// Returns the slot number included in this payload.
@@ -95,6 +98,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.payload.as_v1().gas_limit
     }
 
     fn transaction_count(&self) -> usize {

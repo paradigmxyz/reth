@@ -111,6 +111,14 @@ def compute_stats(combined: list[dict]) -> dict:
     wall_clock_s = sum(total_latencies_ms) / 1_000
     mean_total_lat_ms = sum(total_latencies_ms) / n
 
+    # Persistence wait mean (for main table)
+    persist_values_ms = []
+    for r in combined:
+        v = r.get("persistence_wait_us")
+        if v is not None:
+            persist_values_ms.append(v / 1_000)
+    mean_persist_ms = sum(persist_values_ms) / len(persist_values_ms) if persist_values_ms else 0.0
+
     return {
         "n": n,
         "mean_ms": mean_lat,
@@ -121,6 +129,7 @@ def compute_stats(combined: list[dict]) -> dict:
         "mean_mgas_s": mean_mgas_s,
         "wall_clock_s": wall_clock_s,
         "mean_total_lat_ms": mean_total_lat_ms,
+        "mean_persist_ms": mean_persist_ms,
     }
 
 
@@ -145,7 +154,7 @@ def compute_wait_stats(combined: list[dict], field: str) -> dict:
 
 def _paired_data(
     baseline: list[dict], feature: list[dict]
-) -> tuple[list[tuple[float, float]], list[float], list[float], list[float]]:
+) -> tuple[list[tuple[float, float]], list[float], list[float], list[float], list[float]]:
     """Match blocks and return paired latencies and per-block diffs.
 
     Returns:
@@ -153,6 +162,7 @@ def _paired_data(
         lat_diffs_ms: list of feature − baseline latency diffs in ms
         mgas_diffs: list of feature − baseline Mgas/s diffs
         total_lat_diffs_ms: list of feature − baseline total latency diffs in ms
+        persist_diffs_ms: list of feature − baseline persistence wait diffs in ms
     """
     baseline_by_block = {r["block_number"]: r for r in baseline}
     feature_by_block = {r["block_number"]: r for r in feature}
@@ -162,6 +172,7 @@ def _paired_data(
     lat_diffs_ms = []
     mgas_diffs = []
     total_lat_diffs_ms = []
+    persist_diffs_ms = []
     for bn in common_blocks:
         b = baseline_by_block[bn]
         f = feature_by_block[bn]
@@ -179,7 +190,10 @@ def _paired_data(
         total_lat_diffs_ms.append(
             f["total_latency_us"] / 1_000 - b["total_latency_us"] / 1_000
         )
-    return pairs, lat_diffs_ms, mgas_diffs, total_lat_diffs_ms
+        b_persist = (b.get("persistence_wait_us") or 0) / 1_000
+        f_persist = (f.get("persistence_wait_us") or 0) / 1_000
+        persist_diffs_ms.append(f_persist - b_persist)
+    return pairs, lat_diffs_ms, mgas_diffs, total_lat_diffs_ms, persist_diffs_ms
 
 
 def compute_paired_stats(
@@ -195,13 +209,15 @@ def compute_paired_stats(
     all_lat_diffs = []
     all_mgas_diffs = []
     all_total_lat_diffs = []
+    all_persist_diffs = []
     blocks_per_pair = []
     for baseline, feature in zip(baseline_runs, feature_runs):
-        pairs, lat_diffs, mgas_diffs, total_lat_diffs = _paired_data(baseline, feature)
+        pairs, lat_diffs, mgas_diffs, total_lat_diffs, persist_diffs = _paired_data(baseline, feature)
         all_pairs.extend(pairs)
         all_lat_diffs.extend(lat_diffs)
         all_mgas_diffs.extend(mgas_diffs)
         all_total_lat_diffs.extend(total_lat_diffs)
+        all_persist_diffs.extend(persist_diffs)
         blocks_per_pair.append(len(pairs))
 
     if not all_lat_diffs:
@@ -245,6 +261,11 @@ def compute_paired_stats(
     total_se = std_total_diff / math.sqrt(len(all_total_lat_diffs)) if all_total_lat_diffs else 0.0
     wall_clock_ci_ms = T_CRITICAL * total_se
 
+    mean_persist_diff = sum(all_persist_diffs) / len(all_persist_diffs) if all_persist_diffs else 0.0
+    std_persist_diff = stddev(all_persist_diffs, mean_persist_diff) if len(all_persist_diffs) > 1 else 0.0
+    persist_se = std_persist_diff / math.sqrt(len(all_persist_diffs)) if all_persist_diffs else 0.0
+    persist_ci_ms = T_CRITICAL * persist_se
+
     return {
         "n": n,
         "mean_diff_ms": mean_diff,
@@ -258,6 +279,7 @@ def compute_paired_stats(
         "mean_mgas_diff": mean_mgas_diff,
         "mgas_ci": mgas_ci,
         "wall_clock_ci_ms": wall_clock_ci_ms,
+        "persist_ci_ms": persist_ci_ms,
         "blocks": max(blocks_per_pair),
     }
 
@@ -336,6 +358,7 @@ def compute_changes(
         ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
         ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
         ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True),
+        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True),
     ]
     changes = {}
     for name, stat_key, ci_key, base_key, lower_is_better in metrics:
@@ -377,6 +400,8 @@ def generate_comparison_table(
     p90_pct = pct(run1["p90_ms"], run2["p90_ms"])
     p99_pct = pct(run1["p99_ms"], run2["p99_ms"])
 
+    persist_pct = pct(run1["mean_persist_ms"], run2["mean_persist_ms"])
+
     # Bootstrap CIs as % of baseline percentile
     p50_ci_pct = paired["p50_ci_ms"] / run1["p50_ms"] * 100.0 if run1["p50_ms"] > 0 else 0.0
     p90_ci_pct = paired["p90_ci_ms"] / run1["p90_ms"] * 100.0 if run1["p90_ms"] > 0 else 0.0
@@ -386,6 +411,7 @@ def generate_comparison_table(
     lat_ci_pct = paired["ci_ms"] / run1["mean_ms"] * 100.0 if run1["mean_ms"] > 0 else 0.0
     mgas_ci_pct = paired["mgas_ci"] / run1["mean_mgas_s"] * 100.0 if run1["mean_mgas_s"] > 0 else 0.0
     wall_ci_pct = paired["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
+    persist_ci_pct = paired["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
 
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -401,6 +427,7 @@ def generate_comparison_table(
         f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True)} |",
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False)} |",
         f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True)} |",
+        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, lower_is_better=True)} |",
         "",
     ]
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]

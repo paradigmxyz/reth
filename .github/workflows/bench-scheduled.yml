@@ -35,6 +35,7 @@ on:
         type: choice
         options:
           - always
+          - on-win
           - on-error
           - never
       mode:
@@ -111,7 +112,7 @@ jobs:
 
       - name: Alert on long-running hourly
         if: steps.mode.outputs.mode == 'hourly' && steps.refs.outputs.long-running == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -153,7 +154,7 @@ jobs:
 
       - name: Alert on stale nightly
         if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -277,7 +278,7 @@ jobs:
 
       - name: Resolve job URL
         id: job-url
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
@@ -679,7 +680,7 @@ jobs:
 
       - name: Write job summary
         if: success()
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -757,8 +758,8 @@ jobs:
             await core.summary.addRaw(md).write();
 
       - name: Send Slack notification (success)
-        if: success() && env.BENCH_SLACK == 'always'
-        uses: actions/github-script@v8
+        if: success() && (env.BENCH_SLACK == 'always' || env.BENCH_SLACK == 'on-win')
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -785,7 +786,15 @@ jobs:
             // Filter notifications based on mode
             const changes = summary.changes || {};
             const mode = process.env.BENCH_MODE || 'nightly';
+            const slackMode = process.env.BENCH_SLACK || 'always';
             const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
+            const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
+
+            // on-win mode: only notify on improvements
+            if (slackMode === 'on-win' && !hasImprovement) {
+              core.info('on-win mode: no improvement detected, skipping Slack notification');
+              return;
+            }
 
             // Hourly mode: only notify on regressions
             if (mode === 'hourly' && !hasRegression) {
@@ -904,8 +913,8 @@ jobs:
             }
 
       - name: Send Slack notification (failure)
-        if: failure() && env.BENCH_SLACK != 'never'
-        uses: actions/github-script@v8
+        if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
+        uses: actions/github-script@v9
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
@@ -939,7 +948,7 @@ jobs:
               },
               {
                 type: 'section',
-                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>` },
+                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>\n@ai investigate this` },
               },
               {
                 type: 'actions',

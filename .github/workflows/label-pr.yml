@@ -16,7 +16,7 @@ jobs:
           fetch-depth: 0
 
       - name: Label PRs
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const label_pr = require('./.github/scripts/label_pr.js')

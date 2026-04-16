@@ -250,6 +250,8 @@ async function success({ core, context }) {
     }
   }
 
+  const slackMode = process.env.BENCH_SLACK || 'always';
+
   // Post to public channel if any metric shows significant improvement or regression
   const channel = process.env.SLACK_BENCH_CHANNEL;
   let postedToChannel = false;
@@ -262,6 +264,14 @@ async function success({ core, context }) {
     } else {
       core.info('No significant improvement, skipping public channel notification');
     }
+  }
+
+  // In on-win mode, only notify on improvement — skip DM fallback entirely
+  if (slackMode === 'on-win') {
+    if (!postedToChannel) {
+      core.info('on-win mode: no improvement detected, skipping all notifications');
+    }
+    return;
   }
 
   // DM the actor only when results were not posted to the public channel
