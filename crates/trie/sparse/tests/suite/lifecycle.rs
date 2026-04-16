@@ -585,6 +585,23 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie>(new_tri
         harness.original_root(),
         "root should match reference after get→decode→re-encode→update"
     );
+
+    // Step 6: Remove the same key (simulates stateless delete path via empty leaf value).
+    let mut remove_updates: B256Map<LeafUpdate> =
+        once((key1, LeafUpdate::Changed(Vec::new()))).collect();
+    trie.update_leaves(&mut remove_updates, |_, _| {}).expect("remove update should succeed");
+    assert!(remove_updates.is_empty(), "remove update should be drained");
+
+    // Step 7: Root after delete should also match reference.
+    let root_after_remove = trie.root();
+    let mut remove_changeset = BTreeMap::new();
+    remove_changeset.insert(key1, U256::ZERO);
+    harness.apply_changeset(remove_changeset);
+    assert_eq!(
+        root_after_remove,
+        harness.original_root(),
+        "root should match reference after update→remove lifecycle"
+    );
 }
 
 /// Before updating, check existence via `find_leaf`, then
