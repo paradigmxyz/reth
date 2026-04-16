@@ -840,6 +840,16 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
+      --dev.payload-wait-time <PAYLOAD_WAIT_TIME>
+          Time to wait after initiating payload building before resolving.
+
+          Introduces a sleep between `fork_choice_updated` and `resolve_kind` in the
+          local miner, giving the payload job time for multiple rebuild attempts with
+          new transactions from the pool.
+
+          Parses strings using [`humantime::parse_duration`]
+          --dev.payload-wait-time 450ms
+
       --dev.mnemonic <MNEMONIC>
           Derive dev accounts from a fixed mnemonic instead of random ones.
 

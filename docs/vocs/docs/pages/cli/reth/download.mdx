@@ -203,7 +203,9 @@ Storage:
           [possible values: true, false]
 
       --download-concurrency <DOWNLOAD_CONCURRENCY>
-          Maximum number of concurrent modular archive workers
+          Maximum number of simultaneous HTTP downloads.
+
+          Applies across the entire snapshot download. Small files use one slot, while large files may use multiple slots by splitting into fixed-size pieces.
 
           [default: 8]
 

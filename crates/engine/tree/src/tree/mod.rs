@@ -71,7 +71,8 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateMetrics, CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+    CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
+    PayloadExecutionCache, SavedCache,
 };
 
 pub mod state;

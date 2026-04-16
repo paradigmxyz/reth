@@ -3556,6 +3556,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-auth-http-middleware"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "http",
+ "jsonrpsee",
+ "reth-ethereum",
+ "serde_json",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
@@ -9649,6 +9662,7 @@ dependencies = [
  "jsonrpsee",
  "metrics",
  "pin-project",
+ "reqwest 0.13.2",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",

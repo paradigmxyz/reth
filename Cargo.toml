@@ -129,6 +129,7 @@ members = [
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
     "examples/custom-rlpx-subprotocol",
+    "examples/custom-auth-http-middleware",
     "examples/custom-rpc-middleware",
     "examples/db-access",
     "examples/exex-subscription",
