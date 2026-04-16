@@ -92,7 +92,7 @@ mod verify;
 
 use crate::common::EnvironmentArgs;
 use archive::run_modular_downloads;
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use config_gen::{config_for_selections, write_config};
 use extract::stream_and_extract;
 use eyre::Result;
@@ -297,17 +297,41 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["url", "manifest_url"])]
     manifest_path: Option<PathBuf>,
 
-    /// Include transaction static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include all transaction static files.
+    #[arg(long, conflicts_with_all = ["with_txs_since", "with_txs_distance", "minimal", "full", "archive"])]
     with_txs: bool,
 
-    /// Include receipt static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include transaction static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_txs", "with_txs_distance", "minimal", "full", "archive"])]
+    with_txs_since: Option<u64>,
+
+    /// Include transaction static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_txs", "with_txs_since", "minimal", "full", "archive"])]
+    with_txs_distance: Option<u64>,
+
+    /// Include all receipt static files.
+    #[arg(long, conflicts_with_all = ["with_receipts_since", "with_receipts_distance", "minimal", "full", "archive"])]
     with_receipts: bool,
 
-    /// Include account and storage history static files.
-    #[arg(long, alias = "with-changesets", conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include receipt static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_receipts", "with_receipts_distance", "minimal", "full", "archive"])]
+    with_receipts_since: Option<u64>,
+
+    /// Include receipt static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_receipts", "with_receipts_since", "minimal", "full", "archive"])]
+    with_receipts_distance: Option<u64>,
+
+    /// Include all account and storage history static files.
+    #[arg(long, alias = "with-changesets", conflicts_with_all = ["with_state_history_since", "with_state_history_distance", "minimal", "full", "archive"])]
     with_state_history: bool,
+
+    /// Include account and storage history static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_state_history", "with_state_history_distance", "minimal", "full", "archive"])]
+    with_state_history_since: Option<u64>,
+
+    /// Include account and storage history static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_state_history", "with_state_history_since", "minimal", "full", "archive"])]
+    with_state_history_distance: Option<u64>,
 
     /// Include transaction sender static files. Requires `--with-txs`.
     #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
@@ -318,15 +342,15 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     with_rocksdb: bool,
 
     /// Download all available components (archive node, no pruning).
-    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "minimal", "full"])]
+    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "minimal", "full"])]
     archive: bool,
 
     /// Download the minimal component set (same default as --non-interactive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "full"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "archive", "full"])]
     minimal: bool,
 
     /// Download the full node component set (matches default full prune settings).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "minimal"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "archive", "minimal"])]
     full: bool,
 
     /// Skip optional RocksDB indices even when archive components are selected.
@@ -534,13 +558,38 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let has_explicit_flags = self.with_txs ||
+            self.with_txs_since.is_some() ||
+            self.with_txs_distance.is_some() ||
             self.with_receipts ||
+            self.with_receipts_since.is_some() ||
+            self.with_receipts_distance.is_some() ||
             self.with_state_history ||
+            self.with_state_history_since.is_some() ||
+            self.with_state_history_distance.is_some() ||
             self.with_senders ||
             self.with_rocksdb;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
+            let tx_selection = explicit_component_selection(
+                self.with_txs,
+                self.with_txs_since,
+                self.with_txs_distance,
+                manifest.block,
+            );
+            let receipt_selection = explicit_component_selection(
+                self.with_receipts,
+                self.with_receipts_since,
+                self.with_receipts_distance,
+                manifest.block,
+            );
+            let state_history_selection = explicit_component_selection(
+                self.with_state_history,
+                self.with_state_history_since,
+                self.with_state_history_distance,
+                manifest.block,
+            );
+
             // Required components always All
             if available(SnapshotComponentType::State) {
                 selections.insert(SnapshotComponentType::State, ComponentSelection::All);
@@ -548,20 +597,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
-            if self.with_txs && available(SnapshotComponentType::Transactions) {
-                selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
+            if let Some(selection) = tx_selection &&
+                available(SnapshotComponentType::Transactions)
+            {
+                selections.insert(SnapshotComponentType::Transactions, selection);
             }
-            if self.with_receipts && available(SnapshotComponentType::Receipts) {
-                selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
+            if let Some(selection) = receipt_selection &&
+                available(SnapshotComponentType::Receipts)
+            {
+                selections.insert(SnapshotComponentType::Receipts, selection);
             }
-            if self.with_state_history {
+            if let Some(selection) = state_history_selection {
                 if available(SnapshotComponentType::AccountChangesets) {
-                    selections
-                        .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
+                    selections.insert(SnapshotComponentType::AccountChangesets, selection);
                 }
                 if available(SnapshotComponentType::StorageChangesets) {
-                    selections
-                        .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
+                    selections.insert(SnapshotComponentType::StorageChangesets, selection);
                 }
             }
             if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
@@ -652,9 +703,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         .ethereum_fork_activation(EthereumHardfork::Paris)
                         .block_number()
                     {
-                        Some(paris) if snapshot_block >= paris => {
-                            ComponentSelection::Distance(snapshot_block - paris + 1)
-                        }
+                        Some(paris) if snapshot_block >= paris => ComponentSelection::Since(paris),
                         Some(_) => ComponentSelection::None,
                         None => ComponentSelection::All,
                     }
@@ -695,6 +744,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     }
 }
 
+/// Resolves explicit `--with-*` / `--with-*-since` / `--with-*-distance` flags
+/// into a component selection.
+fn explicit_component_selection(
+    all: bool,
+    since: Option<u64>,
+    distance: Option<u64>,
+    snapshot_block: u64,
+) -> Option<ComponentSelection> {
+    if all {
+        Some(ComponentSelection::All)
+    } else if let Some(block) = since {
+        (block <= snapshot_block).then_some(ComponentSelection::Since(block))
+    } else {
+        distance.map(ComponentSelection::Distance)
+    }
+}
+
 /// Converts a prune mode into the matching component selection.
 fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> ComponentSelection {
     match mode {
@@ -703,7 +769,7 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
         Some(PruneMode::Distance(d)) => ComponentSelection::Distance(d),
         Some(PruneMode::Before(block)) => {
             if snapshot_block >= block {
-                ComponentSelection::Distance(snapshot_block - block + 1)
+                ComponentSelection::Since(block)
             } else {
                 ComponentSelection::None
             }

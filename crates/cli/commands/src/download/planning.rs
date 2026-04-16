@@ -70,10 +70,14 @@ pub(crate) fn summarize_download_startup(
 }
 
 /// Converts a selection into the manifest distance form used for archive lookup.
-fn selection_archive_distance(selection: &ComponentSelection) -> Option<Option<u64>> {
+fn selection_archive_distance(
+    selection: &ComponentSelection,
+    snapshot_block: u64,
+) -> Option<Option<u64>> {
     match selection {
         ComponentSelection::All => Some(None),
         ComponentSelection::Distance(distance) => Some(Some(*distance)),
+        ComponentSelection::Since(block) => Some(Some(snapshot_block.saturating_sub(*block) + 1)),
         ComponentSelection::None => None,
     }
 }
@@ -98,7 +102,9 @@ pub(crate) fn collect_planned_archives(
     let mut total_output_size = 0;
 
     for (ty, selection) in selections {
-        let Some(distance) = selection_archive_distance(selection) else { continue };
+        let Some(distance) = selection_archive_distance(selection, manifest.block) else {
+            continue;
+        };
         total_download_size += manifest.size_for_distance(*ty, distance);
         total_output_size += manifest.output_size_for_distance(*ty, distance);
 

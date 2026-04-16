@@ -144,13 +144,31 @@ Storage:
           Local path to a snapshot manifest.json for modular component downloads
 
       --with-txs
-          Include transaction static files
+          Include all transaction static files
+
+      --with-txs-since <BLOCK_NUMBER>
+          Include transaction static files starting at the specified block
+
+      --with-txs-distance <BLOCKS>
+          Include transaction static files covering the last N blocks
 
       --with-receipts
-          Include receipt static files
+          Include all receipt static files
+
+      --with-receipts-since <BLOCK_NUMBER>
+          Include receipt static files starting at the specified block
+
+      --with-receipts-distance <BLOCKS>
+          Include receipt static files covering the last N blocks
 
       --with-state-history
-          Include account and storage history static files
+          Include all account and storage history static files
+
+      --with-state-history-since <BLOCK_NUMBER>
+          Include account and storage history static files starting at the specified block
+
+      --with-state-history-distance <BLOCKS>
+          Include account and storage history static files covering the last N blocks
 
       --with-senders
           Include transaction sender static files. Requires `--with-txs`
