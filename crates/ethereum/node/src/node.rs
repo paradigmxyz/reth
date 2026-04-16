@@ -297,15 +297,7 @@ where
 }
 
 impl<N, EthB, PVB, EVB, RpcMiddleware, AuthHttpMiddleware>
-    EthereumAddOns<
-        N,
-        EthB,
-        PVB,
-        BasicEngineApiBuilder<PVB>,
-        EVB,
-        RpcMiddleware,
-        AuthHttpMiddleware,
-    >
+    EthereumAddOns<N, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
