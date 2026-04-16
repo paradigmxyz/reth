@@ -14,7 +14,7 @@ on:
       blocks:
         description: "Number of blocks to benchmark"
         required: false
-        default: "200"
+        default: "500"
         type: string
       big_blocks:
         description: "Use big blocks mode (pre-generated merged payloads with reth-bb)"
@@ -34,7 +34,7 @@ on:
       warmup:
         description: "Number of warmup blocks"
         required: false
-        default: "100"
+        default: "200"
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
@@ -164,9 +164,9 @@ jobs:
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
-              blocks = '${{ github.event.inputs.blocks }}' || '200';
-              warmup = '${{ github.event.inputs.warmup }}' || '100';
-              if (warmup !== '100') explicitWarmup = true;
+              blocks = '${{ github.event.inputs.blocks }}' || '500';
+              warmup = '${{ github.event.inputs.warmup }}' || '200';
+              if (warmup !== '200') explicitWarmup = true;
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
@@ -205,7 +205,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '200', warmup: '100', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
