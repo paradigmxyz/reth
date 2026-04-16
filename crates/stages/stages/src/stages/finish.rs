@@ -1,5 +1,6 @@
 use reth_stages_api::{
-    ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, FinishCheckpoint, Stage, StageCheckpoint, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 
 /// The finish stage.
@@ -20,7 +21,13 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        let block_number = input.target();
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(block_number).with_finish_stage_checkpoint(
+                FinishCheckpoint { partial_state_trie: Some(block_number) },
+            ),
+            done: true,
+        })
     }
 
     fn unwind(
@@ -28,7 +35,12 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        let block_number = input.unwind_to;
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(block_number).with_finish_stage_checkpoint(
+                FinishCheckpoint { partial_state_trie: Some(block_number) },
+            ),
+        })
     }
 }
 
@@ -78,7 +90,7 @@ mod tests {
             let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default())
+                return Ok(Vec::default());
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
@@ -98,6 +110,11 @@ mod tests {
                     output.checkpoint.block_number,
                     input.target(),
                     "stage progress should always match progress of previous stage"
+                );
+                assert_eq!(
+                    output.checkpoint.finish_stage_checkpoint(),
+                    Some(FinishCheckpoint { partial_state_trie: Some(input.target()) }),
+                    "finish stage should emit its typed checkpoint payload"
                 );
             }
             Ok(())

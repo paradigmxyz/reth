@@ -144,6 +144,17 @@ pub struct IndexHistoryCheckpoint {
     pub progress: EntitiesCheckpoint,
 }
 
+/// Saves the progress of Finish stage.
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FinishCheckpoint {
+    /// Highest block number for which the partial state trie is available.
+    pub partial_state_trie: Option<BlockNumber>,
+}
+
 /// Saves the progress of abstract stage iterating over or downloading entities.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
@@ -163,7 +174,7 @@ impl EntitiesCheckpoint {
     /// Return [None] if `total == 0`.
     pub fn fmt_percentage(&self) -> Option<String> {
         if self.total == 0 {
-            return None
+            return None;
         }
 
         // Calculate percentage with 2 decimal places.
@@ -257,17 +268,18 @@ impl StageCheckpoint {
         match stage_checkpoint {
             StageUnitCheckpoint::Account(AccountHashingCheckpoint {
                 progress: entities, ..
-            }) |
-            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+            })
+            | StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                 progress: entities, ..
-            }) |
-            StageUnitCheckpoint::Entities(entities) |
-            StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
-            StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
-            StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+            })
+            | StageUnitCheckpoint::Entities(entities)
+            | StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. })
+            | StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. })
+            | StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
                 progress: entities,
                 ..
             }) => Some(entities),
+            StageUnitCheckpoint::Finish(_) => None,
         }
     }
 }
@@ -293,6 +305,8 @@ pub enum StageUnitCheckpoint {
     Headers(HeadersCheckpoint),
     /// Saves the progress of Index History stage.
     IndexHistory(IndexHistoryCheckpoint),
+    /// Saves the progress of Finish stage.
+    Finish(FinishCheckpoint),
 }
 
 impl StageUnitCheckpoint {
@@ -300,10 +314,10 @@ impl StageUnitCheckpoint {
     /// range.
     pub const fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
         match self {
-            Self::Account(AccountHashingCheckpoint { block_range, .. }) |
-            Self::Storage(StorageHashingCheckpoint { block_range, .. }) |
-            Self::Execution(ExecutionCheckpoint { block_range, .. }) |
-            Self::IndexHistory(IndexHistoryCheckpoint { block_range, .. }) => {
+            Self::Account(AccountHashingCheckpoint { block_range, .. })
+            | Self::Storage(StorageHashingCheckpoint { block_range, .. })
+            | Self::Execution(ExecutionCheckpoint { block_range, .. })
+            | Self::IndexHistory(IndexHistoryCheckpoint { block_range, .. }) => {
                 let old_range = *block_range;
                 *block_range = CheckpointBlockRange { from, to };
 
@@ -401,6 +415,15 @@ stage_unit_checkpoints!(
         index_history_stage_checkpoint,
         /// Sets the stage checkpoint to index history.
         with_index_history_stage_checkpoint
+    ),
+    (
+        6,
+        Finish,
+        FinishCheckpoint,
+        /// Returns the finish stage checkpoint, if any.
+        finish_stage_checkpoint,
+        /// Sets the stage checkpoint to finish.
+        with_finish_stage_checkpoint
     )
 );
 
@@ -428,5 +451,17 @@ mod tests {
         let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn finish_checkpoint_builder_roundtrip() {
+        let checkpoint = StageCheckpoint::new(10)
+            .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(7) });
+
+        assert_eq!(
+            checkpoint.finish_stage_checkpoint(),
+            Some(FinishCheckpoint { partial_state_trie: Some(7) })
+        );
+        assert_eq!(checkpoint.entities(), None);
     }
 }

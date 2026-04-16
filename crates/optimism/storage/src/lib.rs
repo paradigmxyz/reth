@@ -25,8 +25,8 @@ mod tests {
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
-        HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint,
-        StorageHashingCheckpoint,
+        FinishCheckpoint, HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint,
+        StageUnitCheckpoint, StorageHashingCheckpoint,
     };
 
     #[test]
@@ -39,6 +39,7 @@ mod tests {
         assert_eq!(CompactU64::bitflag_encoded_bytes(), 1);
         assert_eq!(EntitiesCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(ExecutionCheckpoint::bitflag_encoded_bytes(), 0);
+        assert_eq!(FinishCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(HeadersCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(IndexHistoryCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
@@ -61,6 +62,7 @@ mod tests {
         validate_bitflag_backwards_compat!(CompactU64, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(EntitiesCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(ExecutionCheckpoint, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(FinishCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(HeadersCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(IndexHistoryCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
