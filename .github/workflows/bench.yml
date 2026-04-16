@@ -78,6 +78,7 @@ on:
         type: choice
         options:
           - always
+          - on-win
           - on-error
           - never
       abba:
@@ -156,8 +157,8 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
-            const validSlackModes = new Set(['always', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
             let explicitWarmup = false;
 
@@ -1353,7 +1354,7 @@ jobs:
             });
 
       - name: Send Slack notification (success)
-        if: success() && env.BENCH_SLACK == 'always'
+        if: success() && (env.BENCH_SLACK == 'always' || env.BENCH_SLACK == 'on-win')
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
@@ -1398,7 +1399,7 @@ jobs:
             });
 
       - name: Send Slack notification (failure)
-        if: failure() && env.BENCH_SLACK != 'never'
+        if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}

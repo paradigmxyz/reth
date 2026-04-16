@@ -5,7 +5,7 @@ mod tui;
 
 use crate::common::EnvironmentArgs;
 use blake3::Hasher;
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use config_gen::{config_for_selections, write_config};
 use eyre::{Result, WrapErr};
 use futures::stream::{self, StreamExt};
@@ -48,6 +48,7 @@ const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
+const STATIC_FILES_PREFIX: &str = "static_files/";
 
 /// Maximum number of concurrent archive downloads.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -59,6 +60,7 @@ pub(crate) enum SelectionPreset {
     Archive,
 }
 
+#[derive(Debug)]
 struct ResolvedComponents {
     selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
     preset: Option<SelectionPreset>,
@@ -218,17 +220,41 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["url", "manifest_url"])]
     manifest_path: Option<PathBuf>,
 
-    /// Include transaction static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include all transaction static files.
+    #[arg(long, conflicts_with_all = ["with_txs_since", "with_txs_distance", "minimal", "full", "archive"])]
     with_txs: bool,
 
-    /// Include receipt static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include transaction static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_txs", "with_txs_distance", "minimal", "full", "archive"])]
+    with_txs_since: Option<u64>,
+
+    /// Include transaction static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_txs", "with_txs_since", "minimal", "full", "archive"])]
+    with_txs_distance: Option<u64>,
+
+    /// Include all receipt static files.
+    #[arg(long, conflicts_with_all = ["with_receipts_since", "with_receipts_distance", "minimal", "full", "archive"])]
     with_receipts: bool,
 
-    /// Include account and storage history static files.
-    #[arg(long, alias = "with-changesets", conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include receipt static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_receipts", "with_receipts_distance", "minimal", "full", "archive"])]
+    with_receipts_since: Option<u64>,
+
+    /// Include receipt static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_receipts", "with_receipts_since", "minimal", "full", "archive"])]
+    with_receipts_distance: Option<u64>,
+
+    /// Include all account and storage history static files.
+    #[arg(long, alias = "with-changesets", conflicts_with_all = ["with_state_history_since", "with_state_history_distance", "minimal", "full", "archive"])]
     with_state_history: bool,
+
+    /// Include account and storage history static files starting at the specified block.
+    #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_state_history", "with_state_history_distance", "minimal", "full", "archive"])]
+    with_state_history_since: Option<u64>,
+
+    /// Include account and storage history static files covering the last N blocks.
+    #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_state_history", "with_state_history_since", "minimal", "full", "archive"])]
+    with_state_history_distance: Option<u64>,
 
     /// Include transaction sender static files. Requires `--with-txs`.
     #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
@@ -239,15 +265,15 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     with_rocksdb: bool,
 
     /// Download all available components (archive node, no pruning).
-    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "minimal", "full"])]
+    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "minimal", "full"])]
     archive: bool,
 
     /// Download the minimal component set (same default as --non-interactive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "full"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "archive", "full"])]
     minimal: bool,
 
     /// Download the full node component set (matches default full prune settings).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "minimal"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "archive", "minimal"])]
     full: bool,
 
     /// Skip optional RocksDB indices even when archive components are selected.
@@ -299,6 +325,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
+        // Resolve custom static files directory (None when using the default).
+        let default_sf = data_dir.data_dir().join("static_files");
+        let custom_sf = data_dir.static_files();
+        let static_files_dir = if custom_sf != default_sf { Some(custom_sf) } else { None };
+
         // Legacy single-URL mode: download one archive and extract it
         if let Some(ref url) = self.url {
             info!(target: "reth::cli",
@@ -310,6 +341,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             stream_and_extract(
                 url,
                 data_dir.data_dir(),
+                static_files_dir,
                 None,
                 self.resumable,
                 cancel_token.clone(),
@@ -348,6 +380,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let distance = match sel {
                 ComponentSelection::All => None,
                 ComponentSelection::Distance(d) => Some(*d),
+                ComponentSelection::Since(block) => Some(manifest.block - block + 1),
                 ComponentSelection::None => continue,
             };
             let descriptors = manifest.archive_descriptors_for_distance(*ty, distance);
@@ -398,11 +431,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             .map(|(ty, sel)| match sel {
                 ComponentSelection::All => manifest.size_for_distance(*ty, None),
                 ComponentSelection::Distance(d) => manifest.size_for_distance(*ty, Some(*d)),
+                ComponentSelection::Since(block) => {
+                    manifest.size_for_distance(*ty, Some(manifest.block - block + 1))
+                }
                 ComponentSelection::None => 0,
             })
             .sum();
 
-        let startup_summary = summarize_download_startup(&all_downloads, target_dir)?;
+        let startup_summary =
+            summarize_download_startup(&all_downloads, target_dir, static_files_dir.as_deref())?;
         info!(target: "reth::cli",
             reusable = startup_summary.reusable,
             needs_download = startup_summary.needs_download,
@@ -419,12 +456,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
 
         let target = target_dir.to_path_buf();
+        let sf_dir = static_files_dir;
         let cache_dir = download_cache_dir;
         let resumable = self.resumable;
         let download_concurrency = self.download_concurrency.max(1);
         let results: Vec<Result<()>> = stream::iter(all_downloads)
             .map(|planned| {
                 let dir = target.clone();
+                let sf = sf_dir.clone();
                 let cache = cache_dir.clone();
                 let sp = Arc::clone(&shared);
                 let ct = cancel_token.clone();
@@ -432,6 +471,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                     process_modular_archive(
                         planned,
                         &dir,
+                        sf.as_deref(),
                         cache.as_deref(),
                         Some(sp),
                         resumable,
@@ -527,13 +567,41 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let has_explicit_flags = self.with_txs ||
+            self.with_txs_since.is_some() ||
+            self.with_txs_distance.is_some() ||
             self.with_receipts ||
+            self.with_receipts_since.is_some() ||
+            self.with_receipts_distance.is_some() ||
             self.with_state_history ||
+            self.with_state_history_since.is_some() ||
+            self.with_state_history_distance.is_some() ||
             self.with_senders ||
             self.with_rocksdb;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
+            let tx_selection = explicit_component_selection(
+                "--with-txs-since",
+                self.with_txs,
+                self.with_txs_since,
+                self.with_txs_distance,
+                manifest.block,
+            )?;
+            let receipt_selection = explicit_component_selection(
+                "--with-receipts-since",
+                self.with_receipts,
+                self.with_receipts_since,
+                self.with_receipts_distance,
+                manifest.block,
+            )?;
+            let state_history_selection = explicit_component_selection(
+                "--with-state-history-since",
+                self.with_state_history,
+                self.with_state_history_since,
+                self.with_state_history_distance,
+                manifest.block,
+            )?;
+
             // Required components always All
             if available(SnapshotComponentType::State) {
                 selections.insert(SnapshotComponentType::State, ComponentSelection::All);
@@ -541,20 +609,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
-            if self.with_txs && available(SnapshotComponentType::Transactions) {
-                selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
+            if let Some(selection) = tx_selection &&
+                available(SnapshotComponentType::Transactions)
+            {
+                selections.insert(SnapshotComponentType::Transactions, selection);
             }
-            if self.with_receipts && available(SnapshotComponentType::Receipts) {
-                selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
+            if let Some(selection) = receipt_selection &&
+                available(SnapshotComponentType::Receipts)
+            {
+                selections.insert(SnapshotComponentType::Receipts, selection);
             }
-            if self.with_state_history {
+            if let Some(selection) = state_history_selection {
                 if available(SnapshotComponentType::AccountChangesets) {
-                    selections
-                        .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
+                    selections.insert(SnapshotComponentType::AccountChangesets, selection);
                 }
                 if available(SnapshotComponentType::StorageChangesets) {
-                    selections
-                        .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
+                    selections.insert(SnapshotComponentType::StorageChangesets, selection);
                 }
             }
             if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
@@ -642,9 +712,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         .ethereum_fork_activation(EthereumHardfork::Paris)
                         .block_number()
                     {
-                        Some(paris) if snapshot_block >= paris => {
-                            ComponentSelection::Distance(snapshot_block - paris + 1)
-                        }
+                        Some(paris) if snapshot_block >= paris => ComponentSelection::Since(paris),
                         Some(_) => ComponentSelection::None,
                         None => ComponentSelection::All,
                     }
@@ -691,12 +759,33 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
         Some(PruneMode::Distance(d)) => ComponentSelection::Distance(d),
         Some(PruneMode::Before(block)) => {
             if snapshot_block >= block {
-                ComponentSelection::Distance(snapshot_block - block + 1)
+                ComponentSelection::Since(block)
             } else {
                 ComponentSelection::None
             }
         }
     }
+}
+
+fn explicit_component_selection(
+    since_flag_name: &str,
+    all: bool,
+    since: Option<u64>,
+    distance: Option<u64>,
+    snapshot_block: u64,
+) -> Result<Option<ComponentSelection>> {
+    if all {
+        return Ok(Some(ComponentSelection::All));
+    }
+
+    if let Some(since) = since {
+        if since > snapshot_block {
+            eyre::bail!("{since_flag_name} {since} is beyond the snapshot block {snapshot_block}");
+        }
+        return Ok(Some(ComponentSelection::Since(since)));
+    }
+
+    Ok(distance.map(ComponentSelection::Distance))
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
@@ -836,11 +925,12 @@ struct DownloadStartupSummary {
 fn summarize_download_startup(
     all_downloads: &[PlannedArchive],
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
 ) -> Result<DownloadStartupSummary> {
     let mut summary = DownloadStartupSummary::default();
 
     for planned in all_downloads {
-        if verify_output_files(target_dir, &planned.archive.output_files)? {
+        if verify_output_files(target_dir, static_files_dir, &planned.archive.output_files)? {
             summary.reusable += 1;
         } else {
             summary.needs_download += 1;
@@ -1090,12 +1180,73 @@ impl CompressionFormat {
     }
 }
 
+/// Resolves the filesystem path for an output file, remapping `static_files/`
+/// entries to the custom static files directory when one is configured.
+fn resolve_output_path(
+    target_dir: &Path,
+    relative_path: &str,
+    static_files_dir: Option<&Path>,
+) -> PathBuf {
+    if let Some(sf_dir) = static_files_dir &&
+        let Some(rest) = relative_path.strip_prefix(STATIC_FILES_PREFIX)
+    {
+        return sf_dir.join(rest);
+    }
+    target_dir.join(relative_path)
+}
+
+/// Unpacks a tar archive entry-by-entry, remapping `static_files/` paths to
+/// the custom static files directory when one is configured.
+fn unpack_archive_with_remap<R: Read>(
+    archive: &mut Archive<R>,
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+) -> Result<()> {
+    // Fast path: no remapping needed, use standard unpack.
+    let Some(sf_dir) = static_files_dir else {
+        archive.unpack(target_dir)?;
+        return Ok(());
+    };
+
+    fs::create_dir_all(sf_dir)?;
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.into_owned();
+        let path_str = path.to_string_lossy();
+
+        if let Some(rest) = path_str.strip_prefix(STATIC_FILES_PREFIX) {
+            if rest.is_empty() {
+                // Directory entry for `static_files/` itself — skip, we
+                // already created the custom directory above.
+                continue;
+            }
+            let dest = sf_dir.join(rest);
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            entry.unpack(&dest)?;
+        } else if path_str == "static_files" {
+            // Bare directory entry without trailing slash.
+            continue;
+        } else {
+            let dest = target_dir.join(&path);
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            entry.unpack(&dest)?;
+        }
+    }
+    Ok(())
+}
+
 /// Extracts a compressed tar archive to the target directory with progress tracking.
 fn extract_archive<R: Read>(
     reader: R,
     total_size: u64,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let progress_reader = ProgressReader::new(reader, total_size, cancel_token);
@@ -1103,11 +1254,11 @@ fn extract_archive<R: Read>(
     match format {
         CompressionFormat::Lz4 => {
             let decoder = Decoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive_with_remap(&mut Archive::new(decoder), target_dir, static_files_dir)?;
         }
         CompressionFormat::Zstd => {
             let decoder = ZstdDecoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive_with_remap(&mut Archive::new(decoder), target_dir, static_files_dir)?;
         }
     }
 
@@ -1120,20 +1271,34 @@ fn extract_archive_raw<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
 ) -> Result<()> {
     match format {
         CompressionFormat::Lz4 => {
-            Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
+            unpack_archive_with_remap(
+                &mut Archive::new(Decoder::new(reader)?),
+                target_dir,
+                static_files_dir,
+            )?;
         }
         CompressionFormat::Zstd => {
-            Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir)?;
+            unpack_archive_with_remap(
+                &mut Archive::new(ZstdDecoder::new(reader)?),
+                target_dir,
+                static_files_dir,
+            )?;
         }
     }
     Ok(())
 }
 
 /// Extracts a snapshot from a local file.
-fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+fn extract_from_file(
+    path: &Path,
+    format: CompressionFormat,
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+) -> Result<()> {
     let file = std::fs::File::open(path)?;
     let total_size = file.metadata()?.len();
     info!(target: "reth::cli",
@@ -1142,7 +1307,14 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
         "Extracting local archive"
     );
     let start = Instant::now();
-    extract_archive(file, total_size, format, target_dir, CancellationToken::new())?;
+    extract_archive(
+        file,
+        total_size,
+        format,
+        target_dir,
+        static_files_dir,
+        CancellationToken::new(),
+    )?;
     info!(target: "reth::cli",
         file = %path.display(),
         elapsed = %DownloadProgress::format_duration(start.elapsed()),
@@ -1399,6 +1571,7 @@ fn streaming_download_and_extract(
     url: &str,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     shared: Option<&Arc<SharedProgress>>,
     cancel_token: CancellationToken,
 ) -> Result<()> {
@@ -1448,10 +1621,17 @@ fn streaming_download_and_extract(
 
         let result = if let Some(sp) = shared {
             let reader = SharedProgressReader { inner: response, progress: Arc::clone(sp) };
-            extract_archive_raw(reader, format, target_dir)
+            extract_archive_raw(reader, format, target_dir, static_files_dir)
         } else {
             let total_size = response.content_length().unwrap_or(0);
-            extract_archive(response, total_size, format, target_dir, cancel_token.clone())
+            extract_archive(
+                response,
+                total_size,
+                format,
+                target_dir,
+                static_files_dir,
+                cancel_token.clone(),
+            )
         };
 
         match result {
@@ -1484,6 +1664,7 @@ fn download_and_extract(
     url: &str,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     shared: Option<&Arc<SharedProgress>>,
     cancel_token: CancellationToken,
 ) -> Result<()> {
@@ -1505,9 +1686,9 @@ fn download_and_extract(
 
     if quiet {
         // Skip progress tracking for extraction in parallel mode
-        extract_archive_raw(file, format, target_dir)?;
+        extract_archive_raw(file, format, target_dir, static_files_dir)?;
     } else {
-        extract_archive(file, total_size, format, target_dir, cancel_token)?;
+        extract_archive(file, total_size, format, target_dir, static_files_dir, cancel_token)?;
         info!(target: "reth::cli",
             file = %file_name,
             "Extraction complete"
@@ -1531,6 +1712,7 @@ fn download_and_extract(
 fn blocking_download_and_extract(
     url: &str,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
     cancel_token: CancellationToken,
@@ -1543,7 +1725,7 @@ fn blocking_download_and_extract(
         let file_path = parsed_url
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
-        let result = extract_from_file(&file_path, format, target_dir);
+        let result = extract_from_file(&file_path, format, target_dir, static_files_dir);
         if result.is_ok() &&
             let Some(sp) = shared
         {
@@ -1551,10 +1733,23 @@ fn blocking_download_and_extract(
         }
         result
     } else if resumable {
-        download_and_extract(url, format, target_dir, shared.as_ref(), cancel_token)
+        download_and_extract(
+            url,
+            format,
+            target_dir,
+            static_files_dir,
+            shared.as_ref(),
+            cancel_token,
+        )
     } else {
-        let result =
-            streaming_download_and_extract(url, format, target_dir, shared.as_ref(), cancel_token);
+        let result = streaming_download_and_extract(
+            url,
+            format,
+            target_dir,
+            static_files_dir,
+            shared.as_ref(),
+            cancel_token,
+        );
         if result.is_ok() &&
             let Some(sp) = shared
         {
@@ -1572,6 +1767,7 @@ fn blocking_download_and_extract(
 async fn stream_and_extract(
     url: &str,
     target_dir: &Path,
+    static_files_dir: Option<PathBuf>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
     cancel_token: CancellationToken,
@@ -1579,7 +1775,14 @@ async fn stream_and_extract(
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
     task::spawn_blocking(move || {
-        blocking_download_and_extract(&url, &target_dir, shared, resumable, cancel_token)
+        blocking_download_and_extract(
+            &url,
+            &target_dir,
+            static_files_dir.as_deref(),
+            shared,
+            resumable,
+            cancel_token,
+        )
     })
     .await??;
 
@@ -1589,18 +1792,21 @@ async fn stream_and_extract(
 async fn process_modular_archive(
     planned: PlannedArchive,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     cache_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
+    let static_files_dir = static_files_dir.map(Path::to_path_buf);
     let cache_dir = cache_dir.map(Path::to_path_buf);
 
     task::spawn_blocking(move || {
         blocking_process_modular_archive(
             &planned,
             &target_dir,
+            static_files_dir.as_deref(),
             cache_dir.as_deref(),
             shared,
             resumable,
@@ -1615,13 +1821,14 @@ async fn process_modular_archive(
 fn blocking_process_modular_archive(
     planned: &PlannedArchive,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     cache_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let archive = &planned.archive;
-    if verify_output_files(target_dir, &archive.output_files)? {
+    if verify_output_files(target_dir, static_files_dir, &archive.output_files)? {
         if let Some(sp) = &shared {
             sp.add(archive.size);
             sp.archive_done();
@@ -1633,7 +1840,7 @@ fn blocking_process_modular_archive(
     let format = CompressionFormat::from_url(&archive.file_name)?;
     let mut last_error: Option<eyre::Error> = None;
     for attempt in 1..=MAX_DOWNLOAD_RETRIES {
-        cleanup_output_files(target_dir, &archive.output_files);
+        cleanup_output_files(target_dir, static_files_dir, &archive.output_files);
 
         if resumable {
             let cache_dir = cache_dir.ok_or_else(|| eyre::eyre!("Missing cache directory"))?;
@@ -1643,7 +1850,7 @@ fn blocking_process_modular_archive(
                 resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())
                     .and_then(|(downloaded_path, _)| {
                         let file = fs::open(&downloaded_path)?;
-                        extract_archive_raw(file, format, target_dir)
+                        extract_archive_raw(file, format, target_dir, static_files_dir)
                     });
             let _ = fs::remove_file(&archive_path);
             let _ = fs::remove_file(&part_path);
@@ -1668,12 +1875,13 @@ fn blocking_process_modular_archive(
                 &archive.url,
                 format,
                 target_dir,
+                static_files_dir,
                 shared.as_ref(),
                 cancel_token.clone(),
             )?;
         }
 
-        if verify_output_files(target_dir, &archive.output_files)? {
+        if verify_output_files(target_dir, static_files_dir, &archive.output_files)? {
             if let Some(sp) = &shared {
                 sp.archive_done();
             }
@@ -1697,13 +1905,17 @@ fn blocking_process_modular_archive(
     )
 }
 
-fn verify_output_files(target_dir: &Path, output_files: &[OutputFileChecksum]) -> Result<bool> {
+fn verify_output_files(
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+    output_files: &[OutputFileChecksum],
+) -> Result<bool> {
     if output_files.is_empty() {
         return Ok(false);
     }
 
     for expected in output_files {
-        let output_path = target_dir.join(&expected.path);
+        let output_path = resolve_output_path(target_dir, &expected.path, static_files_dir);
         let meta = match fs::metadata(&output_path) {
             Ok(meta) => meta,
             Err(_) => return Ok(false),
@@ -1721,9 +1933,13 @@ fn verify_output_files(target_dir: &Path, output_files: &[OutputFileChecksum]) -
     Ok(true)
 }
 
-fn cleanup_output_files(target_dir: &Path, output_files: &[OutputFileChecksum]) {
+fn cleanup_output_files(
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+    output_files: &[OutputFileChecksum],
+) {
     for output in output_files {
-        let _ = fs::remove_file(target_dir.join(&output.path));
+        let _ = fs::remove_file(resolve_output_path(target_dir, &output.path, static_files_dir));
     }
 }
 
@@ -1964,7 +2180,7 @@ fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Resul
 mod tests {
     use super::*;
     use clap::{Args, Parser};
-    use manifest::{ComponentManifest, SingleArchive};
+    use manifest::{ChunkedArchive, ComponentManifest, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use tempfile::tempdir;
@@ -1997,6 +2213,46 @@ mod tests {
         );
         SnapshotManifest {
             block: 0,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        }
+    }
+
+    fn manifest_with_modular_components(block: u64) -> SnapshotManifest {
+        let mut components = BTreeMap::new();
+        for ty in [
+            SnapshotComponentType::State,
+            SnapshotComponentType::Headers,
+            SnapshotComponentType::Transactions,
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ] {
+            let component = if ty.is_chunked() {
+                ComponentManifest::Chunked(ChunkedArchive {
+                    blocks_per_file: 1_000_000,
+                    total_blocks: block + 1,
+                    chunk_sizes: vec![1],
+                    chunk_output_files: vec![vec![]],
+                })
+            } else {
+                ComponentManifest::Single(SingleArchive {
+                    file: format!("{}.tar.zst", ty.key()),
+                    size: 1,
+                    blake3: None,
+                    output_files: vec![],
+                })
+            };
+
+            components.insert(ty.key().to_string(), component);
+        }
+
+        SnapshotManifest {
+            block,
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
@@ -2089,6 +2345,57 @@ mod tests {
         .args;
 
         assert!(!args.resumable);
+    }
+
+    #[test]
+    fn resolve_components_supports_since_and_distance_flags() {
+        let manifest = manifest_with_modular_components(20_000_000);
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--with-txs-since",
+            "15537394",
+            "--with-receipts-distance",
+            "10064",
+            "--with-state-history-since",
+            "15537394",
+        ])
+        .args;
+
+        let resolved = args.resolve_components(&manifest).unwrap();
+
+        assert_eq!(resolved.preset, None);
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(15_537_394))
+        );
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::Distance(10_064))
+        );
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::AccountChangesets),
+            Some(&ComponentSelection::Since(15_537_394))
+        );
+        assert_eq!(
+            resolved.selections.get(&SnapshotComponentType::StorageChangesets),
+            Some(&ComponentSelection::Since(15_537_394))
+        );
+    }
+
+    #[test]
+    fn resolve_components_rejects_since_after_snapshot() {
+        let manifest = manifest_with_modular_components(20_000_000);
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--with-txs-since",
+            "20000001",
+        ])
+        .args;
+
+        let err = args.resolve_components(&manifest).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("--with-txs-since 20000001 is beyond the snapshot block 20000000"));
     }
 
     #[test]
@@ -2213,7 +2520,7 @@ mod tests {
             },
         ];
 
-        let summary = summarize_download_startup(&planned, target_dir).unwrap();
+        let summary = summarize_download_startup(&planned, target_dir, None).unwrap();
         assert_eq!(summary.reusable, 1);
         assert_eq!(summary.needs_download, 2);
     }

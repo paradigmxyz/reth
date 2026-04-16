@@ -109,13 +109,8 @@ where
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
-        let res = validate_block_post_execution(
-            block,
-            &self.chain_spec,
-            &result.receipts,
-            &result.requests,
-            receipt_root_bloom,
-        );
+        let res =
+            validate_block_post_execution(block, &self.chain_spec, result, receipt_root_bloom);
 
         if self.skip_requests_hash_check &&
             let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res

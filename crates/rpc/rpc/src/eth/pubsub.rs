@@ -447,10 +447,10 @@ where
 
     /// Returns a stream that yields all logs that match the given filter.
     fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
-        BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
-            .map(move |canon_state| {
-                canon_state.expect("new block subscription never ends").block_receipts()
-            })
+        self.eth_api
+            .provider()
+            .canonical_state_stream()
+            .map(move |canon_state| canon_state.block_receipts())
             .flat_map(futures::stream::iter)
             .flat_map(move |(block_receipts, removed)| {
                 let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
