@@ -416,12 +416,6 @@ where
 
         let db_tip_block = self.get_db_tip_block_number(provider)?;
 
-        // Fast path: read lock only.
-        if let Some(entry) = self.overlay_cache.get(&db_tip_block) {
-            return Ok(entry.value().clone());
-        }
-
-        // Slow path: acquire write lock via entry API (handles races internally).
         let overlay = match self.overlay_cache.entry(db_tip_block) {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
