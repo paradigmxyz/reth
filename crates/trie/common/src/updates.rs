@@ -432,6 +432,9 @@ impl TrieUpdatesSorted {
                 removed_nodes.insert(key.clone());
             }
         }
+        removed_nodes.retain(|key| {
+            account_nodes.binary_search_by(|(candidate, _)| candidate.cmp(key)).is_err()
+        });
 
         let mut storage_tries = B256Map::with_capacity_and_hasher(
             left.iter().map(|updates| updates.storage_tries.len()).sum(),
@@ -869,7 +872,7 @@ mod sorted_tests {
             disjoint.account_nodes.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>(),
             vec![key3.clone()]
         );
-        assert_eq!(disjoint.removed_nodes, HashSet::from_iter([key1, key3]));
+        assert_eq!(disjoint.removed_nodes, HashSet::from_iter([key1]));
 
         let addr2_storage = disjoint.storage_tries.get(&addr2).unwrap();
         assert!(addr2_storage.is_deleted);
