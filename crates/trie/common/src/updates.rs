@@ -2,10 +2,7 @@ use crate::{
     utils::{extend_sorted_vec, kway_merge_sorted},
     BranchNodeCompact, HashBuilder, Nibbles,
 };
-use alloc::{
-    collections::{btree_map::BTreeMap, btree_set::BTreeSet},
-    vec::Vec,
-};
+use alloc::{collections::btree_map::BTreeMap, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
@@ -207,11 +204,18 @@ impl TrieUpdates {
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
     pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
-        let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
+        let mut account_nodes =
+            self.account_nodes.iter().map(|(path, node)| (path, Some(node))).collect::<Vec<_>>();
+
+        account_nodes.extend(
+            self.removed_nodes
+                .iter()
+                .filter(|path| !self.account_nodes.contains_key(*path))
+                .map(|path| (path, None)),
+        );
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         TrieUpdatesSortedRef {
-            removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             account_nodes,
             storage_tries: self
                 .storage_tries
@@ -401,11 +405,18 @@ impl StorageTrieUpdates {
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].
     pub fn into_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
-        StorageTrieUpdatesSortedRef {
-            is_deleted: self.is_deleted,
-            removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
-            storage_nodes: self.storage_nodes.iter().collect::<BTreeMap<_, _>>(),
-        }
+        let mut storage_nodes =
+            self.storage_nodes.iter().map(|(path, node)| (path, Some(node))).collect::<Vec<_>>();
+
+        storage_nodes.extend(
+            self.removed_nodes
+                .iter()
+                .filter(|path| !self.storage_nodes.contains_key(*path))
+                .map(|path| (path, None)),
+        );
+        storage_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+        StorageTrieUpdatesSortedRef { is_deleted: self.is_deleted, storage_nodes }
     }
 }
 
@@ -536,10 +547,9 @@ mod serde_nibbles_map {
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct TrieUpdatesSortedRef<'a> {
-    /// Sorted collection of updated state nodes with corresponding paths.
-    pub account_nodes: Vec<(&'a Nibbles, &'a BranchNodeCompact)>,
-    /// The set of removed state node keys.
-    pub removed_nodes: BTreeSet<&'a Nibbles>,
+    /// Sorted collection of state node updates with corresponding paths. `None` indicates that a
+    /// node was removed.
+    pub account_nodes: Vec<(&'a Nibbles, Option<&'a BranchNodeCompact>)>,
     /// Storage tries stored by hashed address of the account the trie belongs to.
     pub storage_tries: BTreeMap<FixedBytes<32>, StorageTrieUpdatesSortedRef<'a>>,
 }
@@ -747,10 +757,9 @@ impl From<TrieUpdatesSorted> for TrieUpdates {
 pub struct StorageTrieUpdatesSortedRef<'a> {
     /// Flag indicating whether the trie has been deleted/wiped.
     pub is_deleted: bool,
-    /// Sorted collection of updated storage nodes with corresponding paths.
-    pub storage_nodes: BTreeMap<&'a Nibbles, &'a BranchNodeCompact>,
-    /// The set of removed storage node keys.
-    pub removed_nodes: BTreeSet<&'a Nibbles>,
+    /// Sorted collection of storage node updates with corresponding paths. `None` indicates that a
+    /// node was removed.
+    pub storage_nodes: Vec<(&'a Nibbles, Option<&'a BranchNodeCompact>)>,
 }
 
 /// Sorted trie updates used for lookups and insertions.
@@ -1099,6 +1108,47 @@ mod tests {
         // Old nodes should be cleared when deleted
         assert_eq!(storage.storage_nodes.len(), 1);
         assert!(storage.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x0a])));
+    }
+
+    #[test]
+    fn test_trie_updates_into_sorted_ref_merges_removed_nodes() {
+        let updated_path = Nibbles::from_nibbles_unchecked([0x02]);
+        let removed_path = Nibbles::from_nibbles_unchecked([0x01]);
+
+        let updates = TrieUpdates {
+            account_nodes: HashMap::from_iter([(updated_path, BranchNodeCompact::default())]),
+            removed_nodes: HashSet::from_iter([removed_path, updated_path]),
+            storage_tries: HashMap::default(),
+        };
+
+        let sorted = updates.into_sorted_ref();
+
+        assert_eq!(sorted.account_nodes.len(), 2);
+        assert_eq!(sorted.account_nodes[0].0, &removed_path);
+        assert_eq!(sorted.account_nodes[0].1, None);
+        assert_eq!(sorted.account_nodes[1].0, &updated_path);
+        assert!(sorted.account_nodes[1].1.is_some());
+    }
+
+    #[test]
+    fn test_storage_trie_updates_into_sorted_ref_merges_removed_nodes() {
+        let updated_path = Nibbles::from_nibbles_unchecked([0x02]);
+        let removed_path = Nibbles::from_nibbles_unchecked([0x01]);
+
+        let updates = StorageTrieUpdates {
+            is_deleted: true,
+            storage_nodes: HashMap::from_iter([(updated_path, BranchNodeCompact::default())]),
+            removed_nodes: HashSet::from_iter([removed_path, updated_path]),
+        };
+
+        let sorted = updates.into_sorted_ref();
+
+        assert!(sorted.is_deleted);
+        assert_eq!(sorted.storage_nodes.len(), 2);
+        assert_eq!(sorted.storage_nodes[0].0, &removed_path);
+        assert_eq!(sorted.storage_nodes[0].1, None);
+        assert_eq!(sorted.storage_nodes[1].0, &updated_path);
+        assert!(sorted.storage_nodes[1].1.is_some());
     }
 
     /// Test empty nibbles are filtered out during conversion (edge case bug)
