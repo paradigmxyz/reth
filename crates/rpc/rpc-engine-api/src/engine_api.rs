@@ -27,7 +27,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BalsStore, BlockReader, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{BalStoreHandle, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -98,7 +98,7 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
-        Self::with_bals_store(
+        Self::with_bal_store(
             provider,
             chain_spec,
             beacon_consensus,
@@ -110,13 +110,13 @@ where
             validator,
             accept_execution_requests_hash,
             network,
-            BalsStore::default(),
+            BalStoreHandle::default(),
         )
     }
 
     /// Create new instance of [`EngineApi`] with a custom BAL store.
     #[expect(clippy::too_many_arguments)]
-    pub fn with_bals_store(
+    pub fn with_bal_store(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
@@ -128,7 +128,7 @@ where
         validator: Validator,
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
-        bals_store: BalsStore,
+        bal_store: BalStoreHandle,
     ) -> Self {
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
@@ -144,14 +144,14 @@ where
             validator,
             accept_execution_requests_hash,
             is_syncing,
-            bals_store,
+            bal_store,
         });
         Self { inner }
     }
 
     /// Returns the configured BAL store.
-    pub const fn bals_store(&self) -> &BalsStore {
-        &self.inner.bals_store
+    pub const fn bal_store(&self) -> &BalStoreHandle {
+        &self.inner.bal_store
     }
 
     fn maybe_store_valid_bal(&self, payload: &PayloadT::ExecutionData, status: &PayloadStatus)
@@ -167,7 +167,7 @@ where
         };
 
         let num_hash = payload.num_hash();
-        if let Err(err) = self.inner.bals_store.insert(num_hash.hash, num_hash.number, bal) {
+        if let Err(err) = self.inner.bal_store.insert(num_hash.hash, num_hash.number, bal) {
             warn!(
                 target: "rpc::engine",
                 %err,
@@ -179,7 +179,7 @@ where
     }
 
     fn bals_by_hashes_or_empty(&self, hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
-        self.inner.bals_store.get_by_hashes(hashes).unwrap_or_else(|err| {
+        self.inner.bal_store.get_by_hashes(hashes).unwrap_or_else(|err| {
             warn!(target: "rpc::engine", %err, "failed to fetch BALs by hash");
             hashes.iter().map(|_| None).collect()
         })
@@ -187,7 +187,7 @@ where
 
     fn bals_by_range_or_empty(&self, start: BlockNumber, count: u64) -> Vec<Option<Bytes>> {
         self.inner
-            .bals_store
+            .bal_store
             .get_by_range(start, count)
             .map(|bals| bals.into_iter().map(Some).collect())
             .unwrap_or_else(|err| {
@@ -1566,7 +1566,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
     /// Store for Block Access Lists (BALs).
-    bals_store: BalsStore,
+    bal_store: BalStoreHandle,
 }
 
 #[cfg(test)]
@@ -1587,7 +1587,7 @@ mod tests {
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_storage_api::{BalStore, BalsStore};
+    use reth_storage_api::{BalStore, BalStoreHandle};
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -1602,11 +1602,11 @@ mod tests {
             ChainSpec,
         >,
     ) {
-        setup_engine_api_with_bals_store(BalsStore::default())
+        setup_engine_api_with_bal_store(BalStoreHandle::default())
     }
 
-    fn setup_engine_api_with_bals_store(
-        bals_store: BalsStore,
+    fn setup_engine_api_with_bal_store(
+        bal_store: BalStoreHandle,
     ) -> (
         EngineApiTestHandle,
         EngineApi<
@@ -1629,7 +1629,7 @@ mod tests {
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
         let task_executor = Runtime::test();
-        let api = EngineApi::with_bals_store(
+        let api = EngineApi::with_bal_store(
             provider.clone(),
             chain_spec.clone(),
             ConsensusEngineHandle::new(to_engine),
@@ -1641,7 +1641,7 @@ mod tests {
             EthereumEngineValidator::new(chain_spec.clone()),
             false,
             NoopNetwork::default(),
-            bals_store,
+            bal_store,
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -1975,8 +1975,8 @@ mod tests {
         #[tokio::test]
         async fn returns_payload_bodies_v2_with_bal_store_data() {
             let mut rng = generators::rng();
-            let bal_store = BalsStore::new(TestBalStore::default());
-            let (handle, api) = setup_engine_api_with_bals_store(bal_store.clone());
+            let bal_store = BalStoreHandle::new(TestBalStore::default());
+            let (handle, api) = setup_engine_api_with_bal_store(bal_store.clone());
 
             let (start, count) = (1, 5);
             let blocks = random_block_range(

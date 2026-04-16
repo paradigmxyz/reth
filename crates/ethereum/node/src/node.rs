@@ -33,7 +33,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, BalsStore, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, BalStoreHandle, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -258,12 +258,12 @@ where
     PVB: Clone,
 {
     /// Sets the BAL store used by the default engine API builder.
-    pub fn with_bals_store(
+    pub fn with_bal_store(
         self,
-        bals_store: BalsStore,
+        bal_store: BalStoreHandle,
     ) -> EthereumAddOns<N, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware> {
         let Self { inner } = self;
-        EthereumAddOns::new(inner.with_bals_store(bals_store))
+        EthereumAddOns::new(inner.with_bal_store(bal_store))
     }
 }
 

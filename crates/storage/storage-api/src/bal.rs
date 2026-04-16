@@ -30,17 +30,17 @@ pub trait BalStore: Send + Sync + 'static {
 
 /// Clone-friendly façade around a BAL store implementation.
 #[derive(Clone)]
-pub struct BalsStore {
+pub struct BalStoreHandle {
     inner: Arc<dyn BalStore>,
 }
 
-impl BalsStore {
-    /// Creates a new [`BalsStore`] from the given implementation.
+impl BalStoreHandle {
+    /// Creates a new [`BalStoreHandle`] from the given implementation.
     pub fn new(inner: impl BalStore) -> Self {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Creates a [`BalsStore`] backed by [`NoopBalStore`].
+    /// Creates a [`BalStoreHandle`] backed by [`NoopBalStore`].
     pub fn noop() -> Self {
         Self::new(NoopBalStore)
     }
@@ -69,15 +69,15 @@ impl BalsStore {
     }
 }
 
-impl Default for BalsStore {
+impl Default for BalStoreHandle {
     fn default() -> Self {
         Self::noop()
     }
 }
 
-impl core::fmt::Debug for BalsStore {
+impl core::fmt::Debug for BalStoreHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("BalsStore").finish_non_exhaustive()
+        f.debug_struct("BalStoreHandle").finish_non_exhaustive()
     }
 }
 
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn noop_store_returns_empty_results() {
-        let store = BalsStore::default();
+        let store = BalStoreHandle::default();
         let hashes = [B256::random(), B256::random()];
 
         let by_hash = store.get_by_hashes(&hashes).unwrap();
