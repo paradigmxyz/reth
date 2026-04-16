@@ -1608,17 +1608,18 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                            BeaconEngineMessage::NewPayload { payload, tx, enqueued_at } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
+                                let latency = enqueued_at.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
-                                    None,
+                                    latency,
                                 );
 
                                 let maybe_event =
@@ -1707,7 +1708,7 @@ where
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
-                                    Some(latency),
+                                    latency,
                                 );
 
                                 let maybe_event =
