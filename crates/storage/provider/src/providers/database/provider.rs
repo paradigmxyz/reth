@@ -568,11 +568,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode
     /// only). The main thread writes MDBX data (indices, state, trie - Full mode only).
     ///
-    /// `partial_persist_blocks` and `in_memory_only_blocks` are both written to static files,
-    /// RocksDB, and plain state.
-    /// `in_memory_only_blocks` are excluded from hashed-state and trie-node writes, and their
-    /// top-level keys are removed from the hashed-state and trie batches built from
-    /// `partial_persist_blocks`.
+    /// All blocks in `blocks` are written to static files, RocksDB, and plain state.
+    ///
+    /// Blocks in `trie_masking_range` do not persist hashed-state or trie-node data. Instead,
+    /// their top-level hashed-state and trie keys mask trie writes for blocks outside the range.
+    /// When `trie_masking_range` is empty, trie data for every block in `blocks` is fully
+    /// persisted.
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
