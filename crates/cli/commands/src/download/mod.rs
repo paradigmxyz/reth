@@ -1513,8 +1513,8 @@ fn resumable_download(
         let flush_result;
 
         if let Some(sp) = shared {
-            // Parallel path: bump shared atomic counter
-            if start_offset > 0 {
+            // Count preexisting .part bytes once when a run starts
+            if start_offset > 0 && retries == 0 {
                 sp.add(start_offset);
             }
             let mut writer =
