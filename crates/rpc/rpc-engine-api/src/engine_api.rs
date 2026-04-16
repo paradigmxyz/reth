@@ -150,7 +150,7 @@ where
     }
 
     /// Returns the configured BAL store.
-    pub const fn bal_store(&self) -> &BalStoreHandle {
+    pub fn bal_store(&self) -> &BalStoreHandle {
         &self.inner.bal_store
     }
 
