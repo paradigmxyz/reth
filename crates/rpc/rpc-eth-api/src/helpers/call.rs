@@ -501,16 +501,21 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // consistent with prepare_call_env and estimate_gas_with.
             evm_env.cfg_env.disable_fee_charge = true;
 
-            // Disable EIP-7825 transaction gas limit cap so that the gas limit
-            // fallback (block gas limit) is not rejected when it exceeds the
-            // per-tx cap (2^24 ≈ 16.7M post-Osaka).
-            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+            if !request_has_gas_limit {
+                let mut gas_limit = evm_env
+                    .cfg_env
+                    .tx_gas_limit_cap
+                    .unwrap_or(u64::MAX)
+                    .min(evm_env.block_env.gas_limit());
 
-            if !request_has_gas_limit && tx_env.gas_price() > 0 {
-                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
-                // no gas limit was provided in the request, so we need to cap the request's gas
-                // limit
-                tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
+                if tx_env.gas_price() > 0 {
+                    gas_limit =
+                        gas_limit.min(this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?);
+                }
+
+                // If the request omitted `gas`, pick a default that stays valid under the
+                // current tx gas cap (e.g. EIP-7825 post-Osaka).
+                tx_env.set_gas_limit(gas_limit);
             }
 
             let mut inspector = AccessListInspector::new(initial);

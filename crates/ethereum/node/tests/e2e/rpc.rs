@@ -20,6 +20,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
+use reth_primitives_traits::constants::MAX_TX_GAS_LIMIT_OSAKA;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_tasks::Runtime;
 use std::{
@@ -335,6 +336,61 @@ async fn test_eth_config() -> eyre::Result<()> {
     assert_eq!(config.last.unwrap().activation_time, osaka_timestamp);
     assert_eq!(config.current.activation_time, prague_timestamp);
     assert_eq!(config.next.unwrap().activation_time, osaka_timestamp);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_create_access_list_respects_osaka_tx_gas_cap() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .osaka_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let signer = wallet.wallet_gen().swap_remove(0);
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(signer.clone()))
+        .connect_http(node.rpc_url());
+
+    let latest_block = provider.get_block_by_number(0_u64.into()).await?.unwrap();
+    let gas_limit = MAX_TX_GAS_LIMIT_OSAKA + 1;
+
+    assert!(gas_limit > MAX_TX_GAS_LIMIT_OSAKA);
+    assert!(gas_limit < latest_block.header.gas_limit);
+
+    let request = GasWaster::deploy_builder(&provider, U256::ZERO)
+        .from(signer.address())
+        .into_transaction_request();
+
+    let result = provider.create_access_list(&request).await?;
+
+    assert!(result.error.is_none());
+    assert!(result.gas_used > U256::ZERO);
+
+    let above_cap_request = GasWaster::deploy_builder(&provider, U256::ZERO)
+        .from(signer.address())
+        .gas(gas_limit)
+        .into_transaction_request();
+
+    let err = provider.create_access_list(&above_cap_request).await.unwrap_err().to_string();
+    assert!(
+        err.contains("intrinsic gas too high") || err.contains("cap"),
+        "unexpected error: {err}"
+    );
 
     Ok(())
 }
