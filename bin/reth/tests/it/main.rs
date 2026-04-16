@@ -126,6 +126,12 @@ fn export_era_help() {
 }
 
 #[test]
+fn export_state_help() {
+    let stdout = reth_ok(&["export-state", "--help"]);
+    assert!(stdout.contains("--chain"), "stdout: {stdout}");
+}
+
+#[test]
 fn dump_genesis_help() {
     let stdout = reth_ok(&["dump-genesis", "--help"]);
     assert!(stdout.contains("--chain"), "stdout: {stdout}");
@@ -250,6 +256,110 @@ async fn dev_node_send_tx_and_mine() {
     // Verify the transfer actually mutated state.
     let balance = provider.get_balance(recipient).await.expect("eth_getBalance failed");
     assert_eq!(balance, U256::from(1_000_000));
+}
+
+#[tokio::test]
+async fn export_state_init_state_round_trip() {
+    use alloy_primitives::{Address, U256};
+    use alloy_provider::{Provider, ProviderBuilder};
+    use alloy_rpc_types_eth::TransactionRequest;
+    use std::{fs, time::Duration};
+
+    let (reth, source_datadir) = spawn_dev();
+    let provider = ProviderBuilder::new().connect_http(reth.endpoint().parse().unwrap());
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let accounts = provider.get_accounts().await.expect("eth_accounts failed");
+    assert!(!accounts.is_empty(), "dev node should expose at least one account");
+
+    let sender = accounts[0];
+    let recipient = Address::with_last_byte(0x43);
+    let tx = TransactionRequest::default().from(sender).to(recipient).value(U256::from(1_000_000));
+
+    let tx_hash = provider.send_transaction(tx).await.expect("eth_sendTransaction failed");
+    let receipt = tx_hash.get_receipt().await.expect("failed to get receipt");
+    assert!(receipt.status(), "transaction should have succeeded");
+    assert!(receipt.block_number.unwrap() > 0, "receipt should be in a mined block");
+
+    drop(reth);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let artifacts = tempfile::tempdir().expect("failed to create artifacts dir");
+    let exported_state = artifacts.path().join("state.jsonl");
+    let exported_header = artifacts.path().join("header.rlp");
+
+    let export = Command::new(RETH)
+        .env("RUST_LOG", "off")
+        .args([
+            "export-state",
+            "--chain",
+            "dev",
+            "--datadir",
+            source_datadir.path().to_str().unwrap(),
+            "--header",
+            exported_header.to_str().unwrap(),
+            exported_state.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        export.status.success(),
+        "export-state failed.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&export.stdout),
+        String::from_utf8_lossy(&export.stderr)
+    );
+
+    let imported_datadir = tempfile::tempdir().expect("failed to create import datadir");
+    let import = Command::new(RETH)
+        .env("RUST_LOG", "off")
+        .args([
+            "init-state",
+            "--chain",
+            "dev",
+            "--datadir",
+            imported_datadir.path().to_str().unwrap(),
+            "--without-evm",
+            "--header",
+            exported_header.to_str().unwrap(),
+            exported_state.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        import.status.success(),
+        "init-state failed.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&import.stdout),
+        String::from_utf8_lossy(&import.stderr)
+    );
+
+    let reexported_state = artifacts.path().join("roundtrip.jsonl");
+    let reexport = Command::new(RETH)
+        .env("RUST_LOG", "off")
+        .args([
+            "export-state",
+            "--chain",
+            "dev",
+            "--datadir",
+            imported_datadir.path().to_str().unwrap(),
+            reexported_state.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        reexport.status.success(),
+        "re-export failed.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&reexport.stdout),
+        String::from_utf8_lossy(&reexport.stderr)
+    );
+
+    let exported = fs::read_to_string(&exported_state).expect("failed to read exported state");
+    let reexported =
+        fs::read_to_string(&reexported_state).expect("failed to read re-exported state");
+
+    let exported_root = exported.lines().next().expect("missing exported root line");
+    let reexported_root = reexported.lines().next().expect("missing re-exported root line");
+    assert_eq!(exported_root, reexported_root, "state roots should round-trip");
 }
 
 const fn main() {}

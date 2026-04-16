@@ -30,6 +30,10 @@ export const rethCliSidebar: SidebarItem = {
             link: "/cli/reth/export-era"
         },
         {
+            text: "reth export-state",
+            link: "/cli/reth/export-state"
+        },
+        {
             text: "reth dump-genesis",
             link: "/cli/reth/dump-genesis"
         },

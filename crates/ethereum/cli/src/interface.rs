@@ -8,7 +8,7 @@ use reth_cli_commands::{
     common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     config_cmd, db, download,
     download::manifest_cmd,
-    dump_genesis, export_era, import, import_era, init_cmd, init_state,
+    dump_genesis, export_era, export_state, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
     p2p, prune, re_execute, stage,
@@ -277,6 +277,9 @@ pub enum Commands<
     /// Exports block to era1 files in a specified directory.
     #[command(name = "export-era")]
     ExportEra(export_era::ExportEraCommand<C>),
+    /// Export the latest canonical state as a JSONL dump.
+    #[command(name = "export-state")]
+    ExportState(export_state::ExportStateCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
@@ -336,6 +339,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
             Self::InitState(cmd) => cmd.chain_spec(),
             Self::Import(cmd) => cmd.chain_spec(),
             Self::ExportEra(cmd) => cmd.chain_spec(),
+            Self::ExportState(cmd) => cmd.chain_spec(),
             Self::ImportEra(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),

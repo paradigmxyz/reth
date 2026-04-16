@@ -14,6 +14,7 @@ pub mod db;
 pub mod download;
 pub mod dump_genesis;
 pub mod export_era;
+pub mod export_state;
 pub mod import;
 pub mod import_core;
 pub mod import_era;

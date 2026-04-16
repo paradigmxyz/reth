@@ -189,6 +189,9 @@ where
         }
         Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
         Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
+        Commands::ExportState(command) => {
+            runner.run_blocking_until_ctrl_c(command.execute::<N>(rt))
+        }
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => {
             runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
