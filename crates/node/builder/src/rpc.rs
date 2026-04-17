@@ -1483,22 +1483,9 @@ where
 /// This provides a basic default implementation for opstack and ethereum engine API via
 /// [`EngineTypes`] and uses the general purpose [`EngineApi`] implementation as the builder's
 /// output.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BasicEngineApiBuilder<PVB> {
     payload_validator_builder: PVB,
-}
-
-impl<PVB> BasicEngineApiBuilder<PVB> {
-    /// Creates a new instance from the payload validator builder.
-    pub fn new(payload_validator_builder: PVB) -> Self {
-        Self { payload_validator_builder }
-    }
-}
-
-impl<PVB: Default> Default for BasicEngineApiBuilder<PVB> {
-    fn default() -> Self {
-        Self::new(PVB::default())
-    }
 }
 
 impl<N, PVB> EngineApiBuilder<N> for BasicEngineApiBuilder<PVB>
