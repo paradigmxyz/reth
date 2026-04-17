@@ -27,7 +27,8 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    StateProviderBox, StorageChangeSetReader, StorageRangeProviderBox,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -617,6 +618,24 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
         storage_provider.try_into_history_at_block(block_number)
+    }
+
+    /// Consumes the provider and returns a storage range provider for the specific block hash.
+    pub(crate) fn into_storage_range_provider_at_block_hash(
+        self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
+        let block_number =
+            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        self.ensure_canonical_block(block_number)?;
+
+        let Self { storage_provider, head_block, .. } = self;
+        if head_block.as_ref().and_then(|blocks| blocks.block_on_chain(block_hash.into())).is_some()
+        {
+            return Err(ProviderError::UnsupportedProvider)
+        }
+
+        storage_provider.try_into_storage_range_history_at_block(block_number)
     }
 }
 

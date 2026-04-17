@@ -9,7 +9,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::Bytecode;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
@@ -228,6 +228,19 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a historical [`StorageRangeProvider`] indexed by the given block hash.
+    ///
+    /// This follows the same inclusive semantics as [`Self::history_by_block_hash`]: passing a
+    /// block hash yields the state after that block was executed.
+    ///
+    /// Default implementation returns [`ProviderError::UnsupportedProvider`].
+    fn storage_range_by_block_hash(
+        &self,
+        _block: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 
     /// Returns _any_ [StateProvider] with matching block hash.
     ///
