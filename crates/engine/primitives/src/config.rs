@@ -4,13 +4,25 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
-
-/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
-pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 10;
 
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
+
+/// Derives the default canonical-minus-persisted gap that triggers backpressure.
+pub const fn default_persistence_backpressure_threshold(
+    persistence_threshold: u64,
+    memory_block_buffer_target: u64,
+) -> u64 {
+    2 * (persistence_threshold + memory_block_buffer_target)
+}
+
+/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 =
+    default_persistence_backpressure_threshold(
+        DEFAULT_PERSISTENCE_THRESHOLD,
+        DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+    );
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
@@ -203,14 +215,18 @@ pub struct TreeConfig {
 
 impl Default for TreeConfig {
     fn default() -> Self {
+        let persistence_backpressure_threshold = default_persistence_backpressure_threshold(
+            DEFAULT_PERSISTENCE_THRESHOLD,
+            DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+        );
         assert_backpressure_threshold_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold,
         );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
@@ -764,7 +780,25 @@ impl TreeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::TreeConfig;
+    use super::{
+        default_persistence_backpressure_threshold, TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+        DEFAULT_PERSISTENCE_THRESHOLD,
+    };
+
+    #[test]
+    fn default_thresholds_use_derived_backpressure_threshold() {
+        let config = TreeConfig::default();
+
+        assert_eq!(config.persistence_threshold(), DEFAULT_PERSISTENCE_THRESHOLD);
+        assert_eq!(config.memory_block_buffer_target(), DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
+        assert_eq!(
+            config.persistence_backpressure_threshold(),
+            default_persistence_backpressure_threshold(
+                DEFAULT_PERSISTENCE_THRESHOLD,
+                DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            )
+        );
+    }
 
     #[test]
     #[should_panic(

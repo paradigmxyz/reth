@@ -977,12 +977,12 @@ Engine:
 
           To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
-          [default: 2]
+          [default: 10]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
-          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
+          If omitted, this defaults to the larger of the default backpressure threshold and twice the sum of `--engine.persistence-threshold` and `--engine.memory-block-buffer-target`.
 
           This value must be greater than `--engine.persistence-threshold`.
 
