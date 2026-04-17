@@ -193,6 +193,11 @@ where
             // Only successful outputs are cacheable. Non-success statuses and errors must execute
             // again instead of poisoning the cache for subsequent calls.
             Ok(output) if output.is_success() => {
+                // Sanity-check precompile output to ensure that it does not affect state gas in any
+                // way.
+                //
+                // This does not fully protect us from caching stateful precompiles but might make
+                // it obvious when the node is misconfigured.
                 if output.reservoir != reservoir {
                     error!(target: "engine::tree", precompile_id = self.precompile.precompile_id().name(), "cacheable precompile decremented reservoir, skipping cache insertion");
                 } else if output.state_gas_used != 0 {
