@@ -57,7 +57,7 @@ use reth_primitives_traits::{
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
-use reth_stages_types::{StageCheckpoint, StageId};
+use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
@@ -570,10 +570,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// All blocks in `blocks` are written to static files, RocksDB, and plain state.
     ///
-    /// Blocks in `trie_masking_range` do not persist hashed-state or trie-node data. Instead,
-    /// their top-level hashed-state and trie keys mask trie writes for blocks outside the range.
-    /// When `trie_masking_range` is empty, trie data for every block in `blocks` is fully
-    /// persisted.
+    /// If `trie_masked_block_start < blocks.len()`, then the suffix
+    /// `blocks[trie_masked_block_start..]` does not persist hashed-state or trie-node data.
+    /// Instead, those blocks' top-level hashed-state and trie keys mask trie writes for earlier
+    /// blocks in the slice. If `trie_masked_block_start == blocks.len()`, trie data for every
+    /// block in `blocks` is fully persisted.
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
@@ -583,14 +584,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         skip_all,
         fields(
             block_count = blocks.len(),
-            trie_masking_start = trie_masking_range.start,
-            trie_masking_end = trie_masking_range.end
+            trie_masked_block_start
         )
     )]
     pub fn save_blocks(
         &self,
         blocks: &[ExecutedBlock<N::Primitives>],
-        trie_masking_range: std::ops::Range<usize>,
+        trie_masked_block_start: usize,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -598,7 +598,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             return Ok(())
         }
 
-        let trie_masking_blocks = &blocks[trie_masking_range.clone()];
+        if trie_masked_block_start > blocks.len() {
+            return Err(ProviderError::Database(reth_db_api::DatabaseError::Other(format!(
+                "trie masked block start {trie_masked_block_start} exceeds block count {}",
+                blocks.len()
+            ))))
+        }
+
+        let trie_masking_blocks = &blocks[trie_masked_block_start..];
 
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
@@ -742,7 +749,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .iter()
                     .enumerate()
                     .filter_map(|(index, block)| {
-                        (!trie_masking_range.contains(&index)).then(|| block.trie_data())
+                        (index < trie_masked_block_start).then(|| block.trie_data())
                     })
                     .collect();
                 let trie_masking_data: Vec<_> =
@@ -783,6 +790,25 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Update pipeline progress
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
+            if save_mode.with_state() {
+                let partial_state_trie = if trie_masked_block_start == blocks.len() {
+                    Some(last_block_number)
+                } else if trie_masked_block_start > 0 {
+                    Some(blocks[trie_masked_block_start - 1].recovered_block().number())
+                } else {
+                    self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
+                        checkpoint
+                            .finish_stage_checkpoint()
+                            .and_then(|finish| finish.partial_state_trie)
+                            .unwrap_or(checkpoint.block_number)
+                    })
+                };
+                self.save_stage_checkpoint(
+                    StageId::Finish,
+                    StageCheckpoint::new(last_block_number)
+                        .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie }),
+                )?;
+            }
             timings.update_pipeline_stages = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
@@ -3558,7 +3584,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         );
 
         // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
-        self.save_blocks(std::slice::from_ref(&executed_block), 0..0, SaveBlocksMode::BlocksOnly)?;
+        self.save_blocks(std::slice::from_ref(&executed_block), 1, SaveBlocksMode::BlocksOnly)?;
 
         // Return the body indices
         self.block_body_indices(block_number)?
@@ -4525,7 +4551,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed), 0..0, SaveBlocksMode::Full)
+            .save_blocks(std::slice::from_ref(&genesis_executed), 1, SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -4668,11 +4694,17 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let blocks = vec![partial_persist_block, in_memory_only_block];
-        provider_rw.save_blocks(&blocks, 1..2, SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(&blocks, 1, SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
         let tx = provider.tx_ref();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 2);
+        assert_eq!(
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            Some(1)
+        );
 
         let mut plain_storages = tx.cursor_dup_read::<tables::PlainStorageState>().unwrap();
         assert_eq!(
@@ -5325,7 +5357,7 @@ mod tests {
         );
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed), 0..0, SaveBlocksMode::Full)
+            .save_blocks(std::slice::from_ref(&genesis_executed), 1, SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -5398,7 +5430,7 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks, 0..0, SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(&blocks, blocks.len(), SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

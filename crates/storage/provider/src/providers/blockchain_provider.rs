@@ -1012,7 +1012,7 @@ mod tests {
                 provider_rw
                     .save_blocks(
                         std::slice::from_ref(&lowest_memory_block),
-                        0..0,
+                        1,
                         SaveBlocksMode::Full,
                     )
                     .unwrap();
