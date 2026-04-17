@@ -46,6 +46,7 @@ use reth_trie_common::{
 #[non_exhaustive]
 pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives> {
     chain_spec: Arc<ChainSpec>,
+    bal_store: BalStoreHandle,
     #[cfg(feature = "db-api")]
     tx: TxMock,
     #[cfg(feature = "db-api")]
@@ -58,6 +59,7 @@ impl<ChainSpec, N> NoopProvider<ChainSpec, N> {
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
+            bal_store: BalStoreHandle::default(),
             #[cfg(feature = "db-api")]
             tx: TxMock::default(),
             #[cfg(feature = "db-api")]
@@ -72,6 +74,7 @@ impl<ChainSpec> NoopProvider<ChainSpec> {
     pub fn eth(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
+            bal_store: BalStoreHandle::default(),
             #[cfg(feature = "db-api")]
             tx: TxMock::default(),
             #[cfg(feature = "db-api")]
@@ -98,6 +101,7 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     fn clone(&self) -> Self {
         Self {
             chain_spec: Arc::clone(&self.chain_spec),
+            bal_store: self.bal_store.clone(),
             #[cfg(feature = "db-api")]
             tx: self.tx.clone(),
             #[cfg(feature = "db-api")]
@@ -109,8 +113,7 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
 
 impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
     fn bal_store(&self) -> &BalStoreHandle {
-        static NOOP_BAL_STORE: std::sync::OnceLock<BalStoreHandle> = std::sync::OnceLock::new();
-        NOOP_BAL_STORE.get_or_init(BalStoreHandle::default)
+        &self.bal_store
     }
 }
 
