@@ -32,7 +32,6 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_provider::BalStoreHandle;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -1487,19 +1486,12 @@ where
 #[derive(Debug, Clone)]
 pub struct BasicEngineApiBuilder<PVB> {
     payload_validator_builder: PVB,
-    bal_store: BalStoreHandle,
 }
 
 impl<PVB> BasicEngineApiBuilder<PVB> {
     /// Creates a new instance from the payload validator builder.
     pub fn new(payload_validator_builder: PVB) -> Self {
-        Self { payload_validator_builder, bal_store: BalStoreHandle::default() }
-    }
-
-    /// Sets the BAL store injected into the engine API.
-    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
-        self.bal_store = bal_store;
-        self
+        Self { payload_validator_builder }
     }
 }
 
@@ -1529,7 +1521,7 @@ where
     >;
 
     async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
-        let Self { payload_validator_builder, bal_store } = self;
+        let Self { payload_validator_builder } = self;
 
         let engine_validator = payload_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
@@ -1539,7 +1531,7 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        Ok(EngineApi::with_bal_store(
+        Ok(EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
             ctx.beacon_engine_handle.clone(),
@@ -1551,40 +1543,7 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
-            bal_store,
         ))
-    }
-}
-
-impl<Node, EthB, PVB, EVB, RpcMiddleware, AuthHttpMiddleware>
-    RpcAddOns<Node, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware, AuthHttpMiddleware>
-where
-    Node: FullNodeComponents,
-    EthB: EthApiBuilder<Node>,
-{
-    /// Sets the BAL store used by the default engine API builder.
-    pub fn with_bal_store(self, bal_store: BalStoreHandle) -> Self {
-        let Self {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-        } = self;
-
-        Self {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder: engine_api_builder.with_bal_store(bal_store),
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-        }
     }
 }
 

@@ -81,6 +81,13 @@ impl core::fmt::Debug for BalStoreHandle {
     }
 }
 
+/// Provider-side access to BAL storage.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BalProvider {
+    /// Returns the configured BAL store handle.
+    fn bal_store(&self) -> &BalStoreHandle;
+}
+
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopBalStore;

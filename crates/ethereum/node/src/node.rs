@@ -34,7 +34,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, BalStoreHandle, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -293,19 +293,6 @@ where
     pub fn with_tokio_runtime(self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
         let Self { inner } = self;
         Self { inner: inner.with_tokio_runtime(tokio_runtime) }
-    }
-}
-
-impl<N, EthB, PVB, EVB, RpcMiddleware, AuthHttpMiddleware>
-    EthereumAddOns<N, EthB, PVB, BasicEngineApiBuilder<PVB>, EVB, RpcMiddleware, AuthHttpMiddleware>
-where
-    N: FullNodeComponents,
-    EthB: EthApiBuilder<N>,
-{
-    /// Sets the BAL store used by the default engine API builder.
-    pub fn with_bal_store(self, bal_store: BalStoreHandle) -> Self {
-        let Self { inner } = self;
-        Self::new(inner.with_bal_store(bal_store))
     }
 }
 
