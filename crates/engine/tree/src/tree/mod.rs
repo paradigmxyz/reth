@@ -1476,16 +1476,21 @@ where
     ) -> Result<(), AdvancePersistenceError> {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let commit_duration = result.commit_duration;
+        let PersistenceResult { last_block, partial_state_trie, commit_duration } = result;
         let Some(BlockNumHash {
             hash: last_persisted_block_hash,
             number: last_persisted_block_number,
-        }) = result.last_block
+        }) = last_block
         else {
             // if this happened, then we persisted no blocks because we sent an empty vec of blocks
             warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
             return Ok(())
         };
+
+        let last_persisted_block =
+            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
+        let in_memory_persisted_block =
+            self.in_memory_persisted_block(last_persisted_block, partial_state_trie)?;
 
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
@@ -1512,11 +1517,39 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        self.on_new_persisted_block()?;
+        // Invalidate cached overlay since the anchor has changed
+        self.state.tree_state.invalidate_cached_overlay();
+
+        self.on_new_persisted_block(in_memory_persisted_block)?;
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
+    }
+
+    /// Returns the highest block that can be dropped from memory after persistence completes.
+    fn in_memory_persisted_block(
+        &self,
+        last_persisted_block: BlockNumHash,
+        partial_state_trie: Option<u64>,
+    ) -> ProviderResult<BlockNumHash> {
+        let Some(partial_state_trie) =
+            partial_state_trie.filter(|block_number| *block_number < last_persisted_block.number)
+        else {
+            return Ok(last_persisted_block)
+        };
+
+        let hash = self
+            .canonical_in_memory_state
+            .hash_by_number(partial_state_trie)
+            .map(Ok)
+            .unwrap_or_else(|| {
+                self.provider
+                    .block_hash(partial_state_trie)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(partial_state_trie.into()))
+            })?;
+
+        Ok(BlockNumHash::new(partial_state_trie, hash))
     }
 
     /// Handles a message from the engine.
@@ -2121,14 +2154,17 @@ where
         Ok(blocks_to_persist)
     }
 
-    /// This clears the blocks from the in-memory tree state that have been persisted to the
-    /// database.
+    /// This clears the blocks from the in-memory tree state that no longer need to stay resident
+    /// after persistence completes.
     ///
-    /// This also updates the canonical in-memory state to reflect the newest persisted block
-    /// height.
+    /// This also updates the canonical in-memory state to reflect the newest persisted block tip,
+    /// even if trie persistence only advanced through an earlier block.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+    fn on_new_persisted_block(
+        &mut self,
+        in_memory_persisted_block: BlockNumHash,
+    ) -> ProviderResult<()> {
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
@@ -2137,11 +2173,11 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-            number: self.persistence_state.last_persisted_block.number,
-            hash: self.persistence_state.last_persisted_block.hash,
-        });
+        self.remove_before(in_memory_persisted_block, finalized)?;
+        self.canonical_in_memory_state.remove_persisted_blocks_until(
+            self.persistence_state.last_persisted_block,
+            in_memory_persisted_block.number,
+        );
         Ok(())
     }
 

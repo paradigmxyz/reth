@@ -777,6 +777,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         persist_tx
             .send(PersistenceResult {
                 last_block: Some(persisted),
+                partial_state_trie: Some(persisted.number),
                 commit_duration: Some(Duration::ZERO),
             })
             .unwrap();
@@ -874,6 +875,7 @@ async fn test_tree_state_on_new_head_reorg() {
     sender
         .send(PersistenceResult {
             last_block: Some(blocks[1].recovered_block().num_hash()),
+            partial_state_trie: Some(blocks[1].recovered_block().number()),
             commit_duration: Some(Duration::ZERO),
         })
         .unwrap();
@@ -1057,6 +1059,121 @@ async fn test_get_canonical_blocks_to_persist() {
             highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
         })
     );
+}
+
+#[test]
+fn test_on_persistence_complete_retains_blocks_above_partial_state_trie() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..7).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[1].recovered_block().num_hash();
+
+    let persisted_tip = blocks[5].recovered_block().num_hash();
+    let partial_state_trie = blocks[3].recovered_block().number();
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: Some(persisted_tip),
+                partial_state_trie: Some(partial_state_trie),
+                commit_duration: Some(Duration::ZERO),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+
+    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted_tip);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_persisted_num_hash(),
+        Some(persisted_tip)
+    );
+
+    for block in &blocks[..=partial_state_trie as usize] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_none());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_none());
+    }
+
+    for block in &blocks[partial_state_trie as usize + 1..] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_some());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_some());
+    }
+}
+
+#[test]
+fn test_on_persistence_complete_without_partial_state_trie_prunes_through_tip() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..7).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[1].recovered_block().num_hash();
+
+    let persisted_tip = blocks[5].recovered_block().num_hash();
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: Some(persisted_tip),
+                partial_state_trie: None,
+                commit_duration: Some(Duration::ZERO),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+
+    for block in &blocks[..=persisted_tip.number as usize] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_none());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_none());
+    }
+
+    for block in &blocks[persisted_tip.number as usize + 1..] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_some());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_some());
+    }
 }
 
 #[tokio::test]
@@ -2162,6 +2279,9 @@ mod forkchoice_updated_tests {
                 sender
                     .send(PersistenceResult {
                         last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
+                        partial_state_trie: saved_blocks
+                            .last()
+                            .map(|b| b.recovered_block().number()),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
