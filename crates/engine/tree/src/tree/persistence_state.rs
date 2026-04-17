@@ -22,7 +22,6 @@
 
 use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_primitives_traits::FastInstant as Instant;
 use tracing::trace;
@@ -30,10 +29,12 @@ use tracing::trace;
 /// The state of the persistence task.
 #[derive(Debug)]
 pub struct PersistenceState {
-    /// Hash and number of the last block persisted.
+    /// Hash and number of the highest block whose non-trie outputs are persisted.
     ///
-    /// This tracks the chain height that is persisted on disk
-    pub(crate) last_persisted_block: BlockNumHash,
+    /// This tracks the highest canonical block with durable block/static-file/plain-state data.
+    pub(crate) non_trie_persisted_tip: BlockNumHash,
+    /// Hash and number of the highest block whose trie outputs are persisted.
+    pub(crate) trie_persisted_tip: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
@@ -76,13 +77,18 @@ impl PersistenceState {
     /// Sets state for a finished persistence task.
     pub(crate) fn finish(
         &mut self,
-        last_persisted_block_hash: B256,
-        last_persisted_block_number: u64,
+        non_trie_persisted_tip: BlockNumHash,
+        trie_persisted_tip: BlockNumHash,
     ) {
-        trace!(target: "engine::tree", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
+        trace!(
+            target: "engine::tree",
+            non_trie_persisted_tip = %non_trie_persisted_tip.number,
+            trie_persisted_tip = %trie_persisted_tip.number,
+            "updating persistence state"
+        );
         self.rx = None;
-        self.last_persisted_block =
-            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
+        self.non_trie_persisted_tip = non_trie_persisted_tip;
+        self.trie_persisted_tip = trie_persisted_tip;
     }
 }
 
