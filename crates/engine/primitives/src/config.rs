@@ -6,6 +6,10 @@ use core::time::Duration;
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 10;
 
+/// Maximum number of consecutive canonical blocks whose non-trie outputs may be persisted ahead
+/// of trie persistence.
+pub const DEFAULT_DEFERRED_TRIE_BLOCKS: u64 = 0;
+
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
@@ -105,6 +109,9 @@ pub struct TreeConfig {
     /// Maximum number of blocks to be kept only in memory without triggering
     /// persistence.
     persistence_threshold: u64,
+    /// Maximum number of consecutive canonical blocks whose non-trie outputs may be persisted
+    /// ahead of trie persistence.
+    deferred_trie_blocks: u64,
     /// How close to the canonical head we persist blocks. Represents the ideal
     /// number of most recent blocks to keep in memory for quick access and reorgs.
     ///
@@ -225,6 +232,7 @@ impl Default for TreeConfig {
         );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            deferred_trie_blocks: DEFAULT_DEFERRED_TRIE_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             persistence_backpressure_threshold,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
@@ -268,6 +276,7 @@ impl TreeConfig {
     #[expect(clippy::too_many_arguments)]
     pub const fn new(
         persistence_threshold: u64,
+        deferred_trie_blocks: u64,
         memory_block_buffer_target: u64,
         persistence_backpressure_threshold: u64,
         block_buffer_limit: u32,
@@ -302,6 +311,7 @@ impl TreeConfig {
         );
         Self {
             persistence_threshold,
+            deferred_trie_blocks,
             memory_block_buffer_target,
             persistence_backpressure_threshold,
             block_buffer_limit,
@@ -342,6 +352,11 @@ impl TreeConfig {
     /// Return the persistence threshold.
     pub const fn persistence_threshold(&self) -> u64 {
         self.persistence_threshold
+    }
+
+    /// Return the deferred trie block target.
+    pub const fn deferred_trie_blocks(&self) -> u64 {
+        self.deferred_trie_blocks
     }
 
     /// Return the memory block buffer target.
@@ -462,6 +477,12 @@ impl TreeConfig {
             self.persistence_threshold,
             self.persistence_backpressure_threshold,
         );
+        self
+    }
+
+    /// Setter for deferred trie blocks.
+    pub const fn with_deferred_trie_blocks(mut self, deferred_trie_blocks: u64) -> Self {
+        self.deferred_trie_blocks = deferred_trie_blocks;
         self
     }
 
@@ -781,8 +802,8 @@ impl TreeConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_persistence_backpressure_threshold, TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-        DEFAULT_PERSISTENCE_THRESHOLD,
+        default_persistence_backpressure_threshold, TreeConfig, DEFAULT_DEFERRED_TRIE_BLOCKS,
+        DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
     };
 
     #[test]
@@ -790,6 +811,7 @@ mod tests {
         let config = TreeConfig::default();
 
         assert_eq!(config.persistence_threshold(), DEFAULT_PERSISTENCE_THRESHOLD);
+        assert_eq!(config.deferred_trie_blocks(), DEFAULT_DEFERRED_TRIE_BLOCKS);
         assert_eq!(config.memory_block_buffer_target(), DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
         assert_eq!(
             config.persistence_backpressure_threshold(),

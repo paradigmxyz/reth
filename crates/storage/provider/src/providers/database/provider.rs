@@ -568,13 +568,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode
     /// only). The main thread writes MDBX data (indices, state, trie - Full mode only).
     ///
-    /// All blocks in `blocks` are written to static files, RocksDB, and plain state.
-    ///
-    /// If `trie_masked_block_start < blocks.len()`, then the suffix
-    /// `blocks[trie_masked_block_start..]` does not persist hashed-state or trie-node data.
-    /// Instead, those blocks' top-level hashed-state and trie keys mask trie writes for earlier
-    /// blocks in the slice. If `trie_masked_block_start == blocks.len()`, trie data for every
-    /// block in `blocks` is fully persisted.
+    /// `blocks` is split into four consecutive regions:
+    /// - `blocks[..trie_catchup_block_count]` are `trie_catchup_blocks`: their non-trie outputs are
+    ///   already durable, and this call only persists their trie state.
+    /// - `blocks[trie_catchup_block_count..full_persist_end]` are `full_persist_blocks`: this call
+    ///   persists both their non-trie outputs and trie data.
+    /// - `blocks[full_persist_end..in_memory_block_start]` are `deferred_trie_blocks`: this call
+    ///   persists only their non-trie outputs.
+    /// - `blocks[in_memory_block_start..]` are `in_memory_blocks`: they remain fully in memory and
+    ///   are only used to mask trie writes for older blocks.
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
@@ -584,13 +586,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         skip_all,
         fields(
             block_count = blocks.len(),
-            trie_masked_block_start
+            trie_catchup_block_count,
+            full_persist_block_count,
+            deferred_trie_block_count
         )
     )]
     pub fn save_blocks(
         &self,
         blocks: &[ExecutedBlock<N::Primitives>],
-        trie_masked_block_start: usize,
+        trie_catchup_block_count: usize,
+        full_persist_block_count: usize,
+        deferred_trie_block_count: usize,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -598,34 +604,46 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             return Ok(())
         }
 
-        if trie_masked_block_start > blocks.len() {
+        let full_persist_end = trie_catchup_block_count + full_persist_block_count;
+        let in_memory_block_start = full_persist_end + deferred_trie_block_count;
+        if in_memory_block_start > blocks.len() {
             return Err(ProviderError::Database(reth_db_api::DatabaseError::Other(format!(
-                "trie masked block start {trie_masked_block_start} exceeds block count {}",
+                "save block plan ({trie_catchup_block_count} catchup + {full_persist_block_count} full + {deferred_trie_block_count} deferred) exceeds block count {}",
                 blocks.len()
             ))))
         }
 
-        let trie_masking_blocks = &blocks[trie_masked_block_start..];
+        let trie_catchup_blocks = &blocks[..trie_catchup_block_count];
+        let full_persist_blocks = &blocks[trie_catchup_block_count..full_persist_end];
+        let deferred_trie_blocks = &blocks[full_persist_end..in_memory_block_start];
+        let non_trie_blocks = &blocks[trie_catchup_block_count..in_memory_block_start];
+        let in_memory_blocks = &blocks[in_memory_block_start..];
 
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
         let first_number = blocks.first().unwrap().recovered_block().number();
-        let last_block_number = blocks.last().unwrap().recovered_block().number();
+        let last_non_trie_block_number = non_trie_blocks
+            .last()
+            .or_else(|| trie_catchup_blocks.last())
+            .expect("checked non-empty block range")
+            .recovered_block()
+            .number();
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
-        // Compute tx_nums upfront (both threads need these)
-        let first_tx_num = self
-            .tx
-            .cursor_read::<tables::TransactionBlocks>()?
-            .last()?
-            .map(|(n, _)| n + 1)
-            .unwrap_or_default();
+        let tx_nums: SmallVec<[TxNumber; 4]> = if non_trie_blocks.is_empty() {
+            SmallVec::new()
+        } else {
+            let first_tx_num = self
+                .tx
+                .cursor_read::<tables::TransactionBlocks>()?
+                .last()?
+                .map(|(n, _)| n + 1)
+                .unwrap_or_default();
 
-        let tx_nums: SmallVec<[TxNumber; 4]> = {
-            let mut nums = SmallVec::with_capacity(blocks.len());
+            let mut nums = SmallVec::with_capacity(non_trie_blocks.len());
             let mut current = first_tx_num;
-            for block in blocks {
+            for block in non_trie_blocks {
                 nums.push(current);
                 current += block.recovered_block().body().transaction_count() as u64;
             }
@@ -635,12 +653,31 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut timings =
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
-        // avoid capturing &self.tx in scope below.
-        let sf_provider = &self.static_file_provider;
-        let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
-        let rocksdb_provider = self.rocksdb_provider.clone();
-        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let has_non_trie_blocks = !non_trie_blocks.is_empty();
+        let rocksdb_enabled = has_non_trie_blocks && self.cached_storage_settings().storage_v2;
+        let first_non_trie_block_number =
+            non_trie_blocks.first().map(|block| block.recovered_block().number());
+        let sf_ctx = if let Some(first_non_trie_block_number) = first_non_trie_block_number {
+            Some(self.static_file_write_ctx(
+                save_mode,
+                first_non_trie_block_number,
+                last_non_trie_block_number,
+            )?)
+        } else {
+            None
+        };
+        let state_write_config = sf_ctx.as_ref().map_or(
+            StateWriteConfig {
+                write_receipts: true,
+                write_account_changesets: true,
+                write_storage_changesets: true,
+            },
+            |sf_ctx| StateWriteConfig {
+                write_receipts: !sf_ctx.write_receipts,
+                write_account_changesets: !sf_ctx.write_account_changesets,
+                write_storage_changesets: !sf_ctx.write_storage_changesets,
+            },
+        );
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -651,42 +688,65 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
-            // SF writes
-            s.spawn(|_| {
-                let _guard = span.enter();
-                let start = Instant::now();
-                sf_result = Some(
-                    sf_provider
-                        .write_blocks_data(blocks, &tx_nums, sf_ctx, runtime)
-                        .map(|()| start.elapsed()),
-                );
-            });
+            if has_non_trie_blocks {
+                let sf_provider = &self.static_file_provider;
+                let first_non_trie_block_number =
+                    first_non_trie_block_number.expect("checked deferred trie blocks");
+                let sf_ctx = sf_ctx.expect("checked deferred trie blocks");
+                let sf_span = span.clone();
+                let sf_tx_nums = tx_nums.clone();
+                let sf_result = &mut sf_result;
 
-            // RocksDB writes
-            if rocksdb_enabled {
-                s.spawn(|_| {
-                    let _guard = span.enter();
+                // SF writes
+                s.spawn(move |_| {
+                    let _guard = sf_span.enter();
                     let start = Instant::now();
-                    rocksdb_result = Some(
-                        rocksdb_provider
-                            .write_blocks_data(blocks, &tx_nums, rocksdb_ctx, runtime)
+                    *sf_result = Some(
+                        sf_provider
+                            .write_blocks_data(non_trie_blocks, &sf_tx_nums, sf_ctx, runtime)
                             .map(|()| start.elapsed()),
                     );
                 });
+
+                // RocksDB writes
+                if rocksdb_enabled {
+                    let rocksdb_provider = self.rocksdb_provider.clone();
+                    let rocksdb_ctx = self.rocksdb_write_ctx(first_non_trie_block_number);
+                    let rocksdb_span = span.clone();
+                    let rocksdb_tx_nums = tx_nums.clone();
+                    let rocksdb_result = &mut rocksdb_result;
+                    s.spawn(move |_| {
+                        let _guard = rocksdb_span.enter();
+                        let start = Instant::now();
+                        *rocksdb_result = Some(
+                            rocksdb_provider
+                                .write_blocks_data(
+                                    non_trie_blocks,
+                                    &rocksdb_tx_nums,
+                                    rocksdb_ctx,
+                                    runtime,
+                                )
+                                .map(|()| start.elapsed()),
+                        );
+                    });
+                }
             }
 
             // MDBX writes
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if has_non_trie_blocks &&
+                !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
-                let total_tx_count: usize =
-                    blocks.iter().map(|b| b.recovered_block().body().transaction_count()).sum();
+                let total_tx_count: usize = non_trie_blocks
+                    .iter()
+                    .map(|b| b.recovered_block().body().transaction_count())
+                    .sum();
                 let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
-                for (i, block) in blocks.iter().enumerate() {
+                for (i, block) in non_trie_blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
                     for (tx_num, transaction) in
                         (tx_nums[i]..).zip(recovered_block.body().transactions_iter())
@@ -712,7 +772,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            for (i, block) in blocks.iter().enumerate() {
+            for (i, block) in non_trie_blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
@@ -732,11 +792,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             block: recovered_block.number(),
                         },
                         OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
+                        state_write_config,
                     )?;
                     timings.write_state += start.elapsed();
                 }
@@ -745,15 +801,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                let trie_persist_data: Vec<_> = blocks
+                let trie_persist_data: Vec<_> = trie_catchup_blocks
                     .iter()
-                    .enumerate()
-                    .filter_map(|(index, block)| {
-                        (index < trie_masked_block_start).then(|| block.trie_data())
-                    })
+                    .chain(full_persist_blocks.iter())
+                    .map(|block| block.trie_data())
                     .collect();
-                let trie_masking_data: Vec<_> =
-                    trie_masking_blocks.iter().map(|block| block.trie_data()).collect();
+                let trie_masking_data: Vec<_> = deferred_trie_blocks
+                    .iter()
+                    .chain(in_memory_blocks.iter())
+                    .map(|block| block.trie_data())
+                    .collect();
 
                 let start = Instant::now();
                 if !trie_persist_data.is_empty() {
@@ -781,31 +838,38 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() {
+            if save_mode.with_state() && has_non_trie_blocks {
                 let start = Instant::now();
-                self.update_history_indices(first_number..=last_block_number)?;
+                let first_non_trie_block_number =
+                    non_trie_blocks.first().unwrap().recovered_block().number();
+                self.update_history_indices(
+                    first_non_trie_block_number..=last_non_trie_block_number,
+                )?;
                 timings.update_history_indices = start.elapsed();
             }
 
             // Update pipeline progress
             let start = Instant::now();
-            self.update_pipeline_stages(last_block_number, false)?;
+            self.update_pipeline_stages(last_non_trie_block_number, false)?;
             if save_mode.with_state() {
-                let partial_state_trie = if trie_masked_block_start == blocks.len() {
-                    Some(last_block_number)
-                } else if trie_masked_block_start > 0 {
-                    Some(blocks[trie_masked_block_start - 1].recovered_block().number())
-                } else {
+                let current_trie_persisted_tip =
                     self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
                         checkpoint
                             .finish_stage_checkpoint()
                             .and_then(|finish| finish.partial_state_trie)
                             .unwrap_or(checkpoint.block_number)
-                    })
-                };
+                    });
+                let partial_state_trie =
+                    if let Some(last_full_persist_block) = full_persist_blocks.last() {
+                        Some(last_full_persist_block.recovered_block().number())
+                    } else if let Some(last_trie_catchup_block) = trie_catchup_blocks.last() {
+                        Some(last_trie_catchup_block.recovered_block().number())
+                    } else {
+                        current_trie_persisted_tip.or(Some(last_non_trie_block_number))
+                    };
                 self.save_stage_checkpoint(
                     StageId::Finish,
-                    StageCheckpoint::new(last_block_number)
+                    StageCheckpoint::new(last_non_trie_block_number)
                         .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie }),
                 )?;
             }
@@ -816,21 +880,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             Ok::<_, ProviderError>(())
         })?;
 
-        // Collect results from spawned tasks
-        timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
+        // Collect results from spawned tasks.
+        if has_non_trie_blocks {
+            timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-        if rocksdb_enabled {
-            timings.rocksdb = rocksdb_result.ok_or_else(|| {
-                ProviderError::Database(reth_db_api::DatabaseError::Other(
-                    "RocksDB thread panicked".into(),
-                ))
-            })??;
+            if rocksdb_enabled {
+                timings.rocksdb = rocksdb_result.ok_or_else(|| {
+                    ProviderError::Database(reth_db_api::DatabaseError::Other(
+                        "RocksDB thread panicked".into(),
+                    ))
+                })??;
+            }
         }
 
         timings.total = total_start.elapsed();
 
         self.metrics.record_save_blocks(&timings);
-        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        debug!(
+            target: "providers::db",
+            range = ?first_number..=last_non_trie_block_number,
+            "Appended block data"
+        );
 
         Ok(())
     }
@@ -3584,7 +3654,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         );
 
         // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
-        self.save_blocks(std::slice::from_ref(&executed_block), 1, SaveBlocksMode::BlocksOnly)?;
+        self.save_blocks(
+            std::slice::from_ref(&executed_block),
+            0,
+            1,
+            0,
+            SaveBlocksMode::BlocksOnly,
+        )?;
 
         // Return the body indices
         self.block_body_indices(block_number)?
@@ -4551,7 +4627,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed), 1, SaveBlocksMode::Full)
+            .save_blocks(std::slice::from_ref(&genesis_executed), 0, 1, 0, SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -4694,7 +4770,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let blocks = vec![partial_persist_block, in_memory_only_block];
-        provider_rw.save_blocks(&blocks, 1, SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(&blocks, 1, 0, 1, SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -4769,6 +4845,48 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(in_memory_entries.is_empty());
+    }
+
+    #[test]
+    fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
+        let factory = create_test_provider_factory();
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_blocks(std::slice::from_ref(&genesis), 0, 1, 0, SaveBlocksMode::Full)
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(&blocks[..2], 0, 2, 0, SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(&blocks, 2, 0, 2, SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 4);
+        assert_eq!(
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            Some(2)
+        );
+
+        let static_files = factory.static_file_provider();
+        assert_eq!(static_files.get_highest_static_file_block(StaticFileSegment::Headers), Some(4));
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(4)
+        );
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(4)
+        );
     }
 
     #[test]
@@ -5357,7 +5475,7 @@ mod tests {
         );
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed), 1, SaveBlocksMode::Full)
+            .save_blocks(std::slice::from_ref(&genesis_executed), 0, 1, 0, SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -5430,7 +5548,7 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks, blocks.len(), SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(&blocks, 0, blocks.len(), 0, SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

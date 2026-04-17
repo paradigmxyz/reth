@@ -27,15 +27,67 @@ use tracing::{debug, error, instrument, warn};
 /// Unified result of any persistence operation.
 #[derive(Debug)]
 pub struct PersistenceResult {
-    /// The last block that was persisted, if any.
-    pub last_block: Option<BlockNumHash>,
+    /// The highest block whose non-trie outputs are persisted, if any.
+    pub non_trie_persisted_tip: Option<BlockNumHash>,
     /// The highest block whose trie data is fully persisted, if known.
     ///
-    /// When this lags behind [`Self::last_block`], callers must retain the suffix above it in
-    /// memory so trie-backed operations can still unwind from that point.
-    pub partial_state_trie: Option<u64>,
+    /// When this lags behind [`Self::non_trie_persisted_tip`], callers must retain the suffix
+    /// above it in memory so trie-backed operations can still unwind from that point.
+    pub trie_persisted_tip: Option<u64>,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
+}
+
+/// Plan for a single persistence cycle.
+#[derive(Debug)]
+pub struct SaveBlocksPlan<N: NodePrimitives = EthPrimitives> {
+    /// Canonical blocks starting at `trie_persisted_tip + 1`.
+    pub blocks: Vec<ExecutedBlock<N>>,
+    /// Prefix of [`Self::blocks`] that persists trie only.
+    pub trie_catchup_block_count: usize,
+    /// Region of [`Self::blocks`] that persists both non-trie outputs and trie data.
+    pub full_persist_block_count: usize,
+    /// Following region of [`Self::blocks`] that persists non-trie data only.
+    pub deferred_trie_block_count: usize,
+}
+
+impl<N: NodePrimitives> SaveBlocksPlan<N> {
+    /// Creates a new save plan.
+    pub const fn new(
+        blocks: Vec<ExecutedBlock<N>>,
+        trie_catchup_block_count: usize,
+        full_persist_block_count: usize,
+        deferred_trie_block_count: usize,
+    ) -> Self {
+        Self {
+            blocks,
+            trie_catchup_block_count,
+            full_persist_block_count,
+            deferred_trie_block_count,
+        }
+    }
+
+    /// Returns `true` if the plan contains no blocks.
+    pub const fn is_empty(&self) -> bool {
+        self.non_trie_persisted_block_count() == 0
+    }
+
+    /// Returns the number of blocks whose non-trie outputs are persisted by this plan.
+    pub const fn non_trie_persisted_block_count(&self) -> usize {
+        self.full_persist_block_count + self.deferred_trie_block_count
+    }
+
+    /// Returns the in-memory block start index.
+    pub const fn in_memory_block_start(&self) -> usize {
+        self.trie_catchup_block_count + self.non_trie_persisted_block_count()
+    }
+
+    /// Returns the highest block whose non-trie outputs are persisted by this plan.
+    pub fn non_trie_persisted_tip(&self) -> Option<BlockNumHash> {
+        self.blocks
+            .get(self.in_memory_block_start().checked_sub(1)?)
+            .map(|block| block.recovered_block().num_hash())
+    }
 }
 
 /// Writes parts of reth's in memory tree state to the database and static files.
@@ -107,14 +159,14 @@ where
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(PersistenceResult {
-                        last_block,
-                        partial_state_trie: None,
+                        non_trie_persisted_tip: last_block,
+                        trie_persisted_tip: None,
                         commit_duration: None,
                     });
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.last_block.map(|b| b.number);
+                PersistenceAction::SaveBlocks(plan, sender) => {
+                    let result = self.on_save_blocks(plan)?;
+                    let result_number = result.non_trie_persisted_tip.map(|b| b.number);
 
                     let _ = sender.send(result);
 
@@ -155,60 +207,85 @@ where
         Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
     }
 
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = blocks.len()))]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = plan.blocks.len()))]
     fn on_save_blocks(
         &mut self,
-        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        plan: SaveBlocksPlan<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
+        let SaveBlocksPlan {
+            blocks,
+            trie_catchup_block_count,
+            full_persist_block_count,
+            deferred_trie_block_count,
+        } = plan;
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
-        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
+        let non_trie_persisted_tip = trie_catchup_block_count
+            .checked_add(full_persist_block_count)
+            .and_then(|count| count.checked_add(deferred_trie_block_count))
+            .and_then(|in_memory_block_start| in_memory_block_start.checked_sub(1))
+            .and_then(|last_persisted_index| {
+                blocks.get(last_persisted_index).map(|block| block.recovered_block().num_hash())
+            });
         let block_count = blocks.len();
-        let mut partial_state_trie = None;
+        let mut trie_persisted_tip = None;
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
+        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?non_trie_persisted_tip, "Saving range of blocks");
 
         let start_time = Instant::now();
 
-        if let Some(last) = last_block {
+        if let Some(non_trie_persisted_tip) = non_trie_persisted_tip {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks(&blocks, blocks.len(), SaveBlocksMode::Full)?;
-            partial_state_trie = provider_rw
+            provider_rw.save_blocks(
+                &blocks,
+                trie_catchup_block_count,
+                full_persist_block_count,
+                deferred_trie_block_count,
+                SaveBlocksMode::Full,
+            )?;
+            trie_persisted_tip = provider_rw
                 .get_stage_checkpoint(StageId::Finish)?
                 .and_then(|checkpoint| {
                     checkpoint
                         .finish_stage_checkpoint()
                         .and_then(|finish| finish.partial_state_trie)
                 })
-                .or(Some(last.number));
+                .or(Some(non_trie_persisted_tip.number));
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
-                if finalized > last.number {
+                provider_rw
+                    .save_finalized_block_number(finalized.min(non_trie_persisted_tip.number))?;
+                if finalized > non_trie_persisted_tip.number {
                     self.pending_finalized_block = Some(finalized);
                 }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last.number))?;
-                if safe > last.number {
+                provider_rw.save_safe_block_number(safe.min(non_trie_persisted_tip.number))?;
+                if safe > non_trie_persisted_tip.number {
                     self.pending_safe_block = Some(safe);
                 }
             }
 
             provider_rw.commit()?;
             let _ = self.provider.bal_store().flush().inspect_err(|err| {
-                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+                warn!(target: "engine::persistence", last=?non_trie_persisted_tip, ?err, "Failed to flush BAL store");
             });
-            debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
+            debug!(target: "engine::persistence", first=?first_block, last=?non_trie_persisted_tip, "Saved range of blocks");
+
+            self.maybe_run_pruner(non_trie_persisted_tip.number)?;
         }
 
         let elapsed = start_time.elapsed();
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(PersistenceResult { last_block, partial_state_trie, commit_duration: Some(elapsed) })
+        Ok(PersistenceResult {
+            non_trie_persisted_tip,
+            trie_persisted_tip,
+            commit_duration: Some(elapsed),
+        })
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
@@ -254,9 +331,10 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
     ///
-    /// First, header, transaction, and receipt-related data should be written to static files.
-    /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    /// First, header, transaction, and receipt-related data should be written to static files for
+    /// the deferred trie region. Then the execution history-related data will be written to the
+    /// database, while trie catchup is persisted for the prefix.
+    SaveBlocks(SaveBlocksPlan<N>, CrossbeamSender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -340,10 +418,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        blocks: Vec<ExecutedBlock<T>>,
+        plan: SaveBlocksPlan<T>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
+        self.send_action(PersistenceAction::SaveBlocks(plan, tx))
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -434,6 +512,11 @@ mod tests {
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
     }
 
+    fn full_save_plan(blocks: Vec<ExecutedBlock<EthPrimitives>>) -> SaveBlocksPlan<EthPrimitives> {
+        let full_persist_block_count = blocks.len();
+        SaveBlocksPlan::new(blocks, 0, full_persist_block_count, 0)
+    }
+
     #[test]
     fn test_pruner_prunes_bal_store() {
         reth_tracing::init_test_tracing();
@@ -511,14 +594,14 @@ mod tests {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
 
-        let blocks = vec![];
+        let blocks = full_save_plan(vec![]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv().unwrap();
-        assert!(result.last_block.is_none());
-        assert!(result.partial_state_trie.is_none());
+        assert!(result.non_trie_persisted_tip.is_none());
+        assert!(result.trie_persisted_tip.is_none());
     }
 
     #[test]
@@ -531,16 +614,16 @@ mod tests {
             test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.recovered_block().hash();
 
-        let blocks = vec![executed];
+        let blocks = full_save_plan(vec![executed]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
-        let last_block = result.last_block.unwrap();
+        let last_block = result.non_trie_persisted_tip.unwrap();
         assert_eq!(block_hash, last_block.hash);
-        assert_eq!(result.partial_state_trie, Some(last_block.number));
+        assert_eq!(result.trie_persisted_tip, Some(last_block.number));
     }
 
     #[test]
@@ -553,11 +636,11 @@ mod tests {
         let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+        handle.save_blocks(full_save_plan(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
-        let last_block = result.last_block.unwrap();
+        let last_block = result.non_trie_persisted_tip.unwrap();
         assert_eq!(last_hash, last_block.hash);
-        assert_eq!(result.partial_state_trie, Some(last_block.number));
+        assert_eq!(result.trie_persisted_tip, Some(last_block.number));
     }
 
     #[test]
@@ -572,12 +655,12 @@ mod tests {
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = crossbeam_channel::bounded(1);
 
-            handle.save_blocks(blocks, tx).unwrap();
+            handle.save_blocks(full_save_plan(blocks), tx).unwrap();
 
             let result = rx.recv().unwrap();
-            let last_block = result.last_block.unwrap();
+            let last_block = result.non_trie_persisted_tip.unwrap();
             assert_eq!(last_hash, last_block.hash);
-            assert_eq!(result.partial_state_trie, Some(last_block.number));
+            assert_eq!(result.trie_persisted_tip, Some(last_block.number));
         }
     }
 
@@ -669,7 +752,7 @@ mod tests {
 
         {
             let provider_rw = provider_factory.database_provider_rw().unwrap();
-            provider_rw.save_blocks(&blocks_a, blocks_a.len(), SaveBlocksMode::Full).unwrap();
+            provider_rw.save_blocks(&blocks_a, 0, blocks_a.len(), 0, SaveBlocksMode::Full).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -727,7 +810,7 @@ mod tests {
 
             let provider_rw = pf.database_provider_rw().unwrap();
             provider_rw
-                .save_blocks(std::slice::from_ref(&block_b2), 1, SaveBlocksMode::Full)
+                .save_blocks(std::slice::from_ref(&block_b2), 0, 1, 0, SaveBlocksMode::Full)
                 .unwrap();
             provider_rw.commit().unwrap();
         });
