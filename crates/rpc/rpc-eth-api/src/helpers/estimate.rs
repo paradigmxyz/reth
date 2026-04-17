@@ -25,7 +25,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use revm::{
     context::Block,
-    context_interface::{result::ExecutionResult, Transaction},
+    context_interface::{result::ExecutionResult, Cfg, Transaction},
     primitives::KECCAK_EMPTY,
 };
 use tracing::trace;
@@ -69,6 +69,12 @@ pub trait EstimateCall: Call {
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
+
+        // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx gas limit cap
+        // because the cap only applies to regular gas (state gas uses a reservoir).
+        if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+            evm_env.cfg_env.tx_gas_limit_cap = None;
+        }
 
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
