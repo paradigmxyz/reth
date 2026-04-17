@@ -304,7 +304,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
                     .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
-                        #[expect(clippy::needless_update)]
                         let tx_info = TransactionInfo {
                             hash: Some(*ctx.tx.tx_hash()),
                             index: Some(idx),

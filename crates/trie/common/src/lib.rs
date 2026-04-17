@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+mod execution_witness;
+pub use execution_witness::ExecutionWitnessMode;
+
 /// Lazy initialization wrapper for trie data.
 mod lazy;
 pub use lazy::{LazyTrieData, SortedTrieData};

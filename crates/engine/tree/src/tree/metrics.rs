@@ -436,9 +436,9 @@ impl NewPayloadStatusMetrics {
         latest_forkchoice_updated_at: &mut Option<Instant>,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
+        latency: Duration,
     ) {
         let finish = Instant::now();
-        let elapsed = finish - start;
 
         if let Some(prev_finish) = self.latest_finish_at {
             self.time_between_new_payloads.record(start - prev_finish);
@@ -455,13 +455,13 @@ impl NewPayloadStatusMetrics {
                     if !outcome.already_seen {
                         self.new_payload_total_gas.record(gas_used as f64);
                         self.new_payload_total_gas_last.set(gas_used as f64);
-                        let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
+                        let gas_per_second = gas_used as f64 / latency.as_secs_f64();
                         self.new_payload_gas_per_second.record(gas_per_second);
                         self.new_payload_gas_per_second_last.set(gas_per_second);
 
-                        self.new_payload_latency.record(elapsed);
-                        self.new_payload_last.set(elapsed);
-                        self.gas_bucket.record(gas_used, elapsed);
+                        self.new_payload_latency.record(latency);
+                        self.new_payload_last.set(latency);
+                        self.gas_bucket.record(gas_used, latency);
                     }
                 }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),

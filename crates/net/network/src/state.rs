@@ -308,8 +308,13 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
-        self.peers_manager.add_peer_kind(peer_id, Some(kind), addr, None)
+    pub(crate) fn add_peer_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: Option<PeerKind>,
+        addr: PeerAddr,
+    ) {
+        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
     /// Connects a peer and its address with the given kind
@@ -400,6 +405,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     let response = PeerResponse::BlockBodies { response: rx };
                     (request, response)
                 }
+                BlockRequest::GetBlockAccessLists(request) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetBlockAccessLists { request, response };
+                    let response = PeerResponse::BlockAccessLists { response: rx };
+                    (request, response)
+                }
                 BlockRequest::GetReceipts(request) => {
                     if peer.capabilities.supports_eth_v70() {
                         let (response, rx) = oneshot::channel();
@@ -475,6 +486,9 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             PeerResponseResult::Receipts70(res) => {
                 let normalized = res.map(ReceiptsResponse::from);
                 self.state_fetcher.on_receipts_response(peer, normalized)
+            }
+            PeerResponseResult::BlockAccessLists(res) => {
+                self.state_fetcher.on_block_access_lists_response(peer, res)
             }
             _ => None,
         };

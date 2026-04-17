@@ -21,7 +21,6 @@ engine-cancun:
   # Affects all clients, not just reth. Tracked: https://github.com/ethereum/hive/issues/1382
   - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
-  - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Cancun) (reth)
 engine-api:
   - Transaction Re-Org, Re-Org Out (Paris) (reth)
   - Transaction Re-Org, Re-Org to Different Block (Paris) (reth)
@@ -31,5 +30,3 @@ engine-api:
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P10 (Paris) (reth)
-  - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Paris) (reth)
-  - Multiple New Payloads Extending Canonical Chain, Set Head to First Payload Received (Paris) (reth)

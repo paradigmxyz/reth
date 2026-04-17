@@ -18,13 +18,13 @@
 #   BENCH_JOB_URL      – link to the Actions job
 #   BENCH_ACTOR        – user who triggered the benchmark
 #   BENCH_CONFIG       – config summary line
-set -euo pipefail
+set -euxo pipefail
 
 MC="mc"
 BUCKET="minio/reth-snapshots"
 # Allow overriding the snapshot name (e.g. for big-blocks mode where the
 # big-blocks manifest specifies which base snapshot to use).
-SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable}"
+SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable-previous}"
 MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
 DATADIR_NAME="datadir"
 HASH_MODE_SUFFIX=""
@@ -77,9 +77,8 @@ trap 'rm -f -- "$MANIFEST_TMP"' EXIT
 echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
-# Prepare mount. If a previous run left the volume mounted, let schelk recover
-# it in place so dm-era can restore only the changed blocks.
-mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+# Prepare mount. If a previous run left the volume mounted, recover first.
+sudo schelk recover -y --kill || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"

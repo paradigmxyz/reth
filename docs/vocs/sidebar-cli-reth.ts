@@ -85,6 +85,10 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db get static-file",
                             link: "/cli/reth/db/get/static-file"
+                        },
+                        {
+                            text: "reth db get rocksdb",
+                            link: "/cli/reth/db/get/rocksdb"
                         }
                     ]
                 },

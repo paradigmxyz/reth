@@ -262,6 +262,7 @@ impl SelectorApp {
             ComponentSelection::None => return 0,
             ComponentSelection::All => None,
             ComponentSelection::Distance(d) => Some(d),
+            ComponentSelection::Since(block) => Some(self.manifest.block - block + 1),
         };
         self.groups[group_idx]
             .types
@@ -344,6 +345,7 @@ fn format_selection(sel: &ComponentSelection) -> String {
     match sel {
         ComponentSelection::All => "All".to_string(),
         ComponentSelection::Distance(d) => format!("Last {d} blocks"),
+        ComponentSelection::Since(block) => format!("Since block {block}"),
         ComponentSelection::None => "None".to_string(),
     }
 }
