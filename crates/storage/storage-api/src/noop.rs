@@ -3,12 +3,12 @@
 pub use crate::bal::NoopBalStore;
 
 use crate::{
-    AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
-    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
+    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -104,6 +104,13 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
             prune_modes: self.prune_modes.clone(),
             _phantom: Default::default(),
         }
+    }
+}
+
+impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        static NOOP_BAL_STORE: std::sync::OnceLock<BalStoreHandle> = std::sync::OnceLock::new();
+        NOOP_BAL_STORE.get_or_init(BalStoreHandle::default)
     }
 }
 
