@@ -2,7 +2,7 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
@@ -28,6 +28,35 @@ pub trait StateReader: Send {
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
+/// Type alias of boxed [`StorageRangeProvider`].
+pub type StorageRangeProviderBox = Box<dyn StorageRangeProvider + Send + 'static>;
+
+/// Result of a storage range query matching the semantics of `debug_storageRangeAt`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageRangeEntry {
+    /// Hashed storage slot key used for paging.
+    pub hash: B256,
+    /// Plain storage slot key preimage.
+    pub key: StorageKey,
+    /// Value stored at the slot.
+    pub value: StorageValue,
+}
+
+/// Result of a storage range query matching the semantics of `debug_storageRangeAt`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageRangeResult {
+    /// Collected storage entries ordered by hashed slot key.
+    pub slots: Vec<StorageRangeEntry>,
+    /// Hashed key to resume iteration from, if more slots remain.
+    pub next_key: Option<B256>,
+}
+
+impl StorageRangeResult {
+    /// Creates an empty range result.
+    pub const fn empty() -> Self {
+        Self { slots: Vec::new(), next_key: None }
+    }
+}
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
@@ -90,6 +119,22 @@ pub trait StateProvider:
     }
 }
 
+/// Optional trait for providers that can iterate storage slots in key order.
+#[auto_impl(&, Arc, Box)]
+pub trait StorageRangeProvider {
+    /// Returns storage slots for `account` starting at the hashed storage key `start_key`
+    /// (inclusive) and capped by `max_slots`.
+    ///
+    /// When additional slots are available beyond `max_slots`, `next_key` in the result contains
+    /// the hashed key where the caller should resume.
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult>;
+}
+
 /// Minimal requirements to read a full account, for example, to validate its new transactions
 pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
@@ -115,6 +160,15 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a historical [`StorageRangeProvider`] indexed by the given historic block number.
+    ///
+    /// This follows the same inclusive semantics as [`Self::try_into_history_at_block`]: passing
+    /// block `n` yields the state after block `n` was executed.
+    fn try_into_storage_range_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StorageRangeProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
