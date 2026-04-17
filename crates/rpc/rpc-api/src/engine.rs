@@ -407,5 +407,5 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
-    async fn block_access_list_raw(&self, number: BlockNumberOrTag) -> RpcResult<Option<Bytes>>;
+    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }

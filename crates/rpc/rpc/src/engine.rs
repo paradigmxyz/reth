@@ -161,7 +161,7 @@ where
     }
 
     /// Handler for `getBlockAccessListRaw`
-    async fn block_access_list_raw(&self, number: BlockNumberOrTag) -> Result<Option<Bytes>> {
-        self.eth.block_access_list_raw(number).instrument(engine_span!()).await
+    async fn block_access_list_raw(&self, block: BlockId) -> Result<Option<Bytes>> {
+        self.eth.block_access_list_raw(block).instrument(engine_span!()).await
     }
 }
