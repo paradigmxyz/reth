@@ -1483,7 +1483,7 @@ where
 /// This provides a basic default implementation for opstack and ethereum engine API via
 /// [`EngineTypes`] and uses the general purpose [`EngineApi`] implementation as the builder's
 /// output.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<PVB> {
     payload_validator_builder: PVB,
 }
