@@ -70,20 +70,19 @@ pub trait EstimateCall: Call {
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
 
-        // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx gas limit cap
-        // because the cap only applies to regular gas (state gas uses a reservoir).
-        if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            evm_env.cfg_env.tx_gas_limit_cap = None;
-        }
-
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
         // the gas limit of the corresponding block
-        let max_gas_limit = evm_env.cfg_env.tx_gas_limit_cap.map_or_else(
-            || evm_env.block_env.gas_limit(),
-            |cap| cap.min(evm_env.block_env.gas_limit()),
-        );
+        let max_gas_limit = evm_env
+            .cfg_env
+            .tx_gas_limit_cap
+            // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
+            .filter(|_| !evm_env.cfg_env.is_amsterdam_eip8037_enabled())
+            .map_or_else(
+                || evm_env.block_env.gas_limit(),
+                |cap| cap.min(evm_env.block_env.gas_limit()),
+            );
 
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
