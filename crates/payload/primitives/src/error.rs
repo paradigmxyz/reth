@@ -128,7 +128,7 @@ pub enum VersionSpecificValidationError {
     NoParentBeaconBlockRootPostCancun,
     /// Thrown if the current engine method version does not support a block access list
     #[error("block access list not supported in this engine API version")]
-    BlockAccessListNotSupportedInVersion,
+    BlockAccessListNotSupported,
     /// Thrown if  `engine_newPayload` contains no block access list
     /// after Amsterdam
     #[error("no block access list post-Amsterdam")]
@@ -139,7 +139,7 @@ pub enum VersionSpecificValidationError {
     HasBlockAccessListPreAmsterdam,
     /// Thrown if the current engine method version does not support a slot number
     #[error("slot number not supported in this engine API version")]
-    SlotNumberNotSupportedInVersion,
+    SlotNumberNotSupported,
     /// Thrown if  `engine_newPayload` contains no slot number
     /// after Amsterdam
     #[error("no slot number post-Amsterdam")]

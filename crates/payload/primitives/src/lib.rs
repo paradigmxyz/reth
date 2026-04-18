@@ -206,7 +206,7 @@ pub fn validate_block_access_list_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V4 => {
             if has_block_access_list {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::BlockAccessListNotSupportedInVersion))
+                    .to_error(VersionSpecificValidationError::BlockAccessListNotSupported))
             }
         }
 
@@ -222,7 +222,7 @@ pub fn validate_block_access_list_presence<T: EthereumHardforks>(
                 }
             } else if has_block_access_list {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::BlockAccessListNotSupportedInVersion))
+                    .to_error(VersionSpecificValidationError::BlockAccessListNotSupported))
             }
         }
 
@@ -257,7 +257,7 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if has_slot_number {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::SlotNumberNotSupportedInVersion))
+                    .to_error(VersionSpecificValidationError::SlotNumberNotSupported))
             }
         }
 
@@ -273,7 +273,7 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
                 }
             } else if has_slot_number {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::SlotNumberNotSupportedInVersion))
+                    .to_error(VersionSpecificValidationError::SlotNumberNotSupported))
             }
         }
 
@@ -289,7 +289,7 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
                 }
             } else if has_slot_number {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::SlotNumberNotSupportedInVersion))
+                    .to_error(VersionSpecificValidationError::SlotNumberNotSupported))
             }
         }
 

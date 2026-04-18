@@ -121,12 +121,12 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai |
-                    VersionSpecificValidationError::BlockAccessListNotSupportedInVersion |
+                    VersionSpecificValidationError::BlockAccessListNotSupported |
                     VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
                     VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
                     VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
                     VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
-                    VersionSpecificValidationError::SlotNumberNotSupportedInVersion,
+                    VersionSpecificValidationError::SlotNumberNotSupported,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
