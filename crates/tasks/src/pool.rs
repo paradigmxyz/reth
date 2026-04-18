@@ -188,12 +188,11 @@ impl WorkerPool {
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
-        let num_threads = self.num_threads;
-        let prefix = self.thread_name_prefix;
         self.pool.get_or_init(|| {
+            let prefix = self.thread_name_prefix;
             build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
-                    .num_threads(num_threads)
+                    .num_threads(self.num_threads)
                     .thread_name(move |i| format!("{prefix}-{i:02}")),
             )
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
