@@ -1,5 +1,6 @@
 use super::headers::client::HeadersRequest;
 use crate::{
+    block_access_lists::client::BlockAccessListsClient,
     bodies::client::{BodiesClient, SingleBodyRequest},
     download::DownloadClient,
     error::PeerRequestResult,
@@ -10,15 +11,17 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
 use core::marker::PhantomData;
+use futures::FutureExt;
 use reth_consensus::Consensus;
-use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
+use reth_eth_wire_types::{
+    BlockAccessLists, EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
+};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
     fmt::Debug,
-    future::Future,
     hash::Hash,
     ops::RangeInclusive,
     pin::Pin,
@@ -26,6 +29,9 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tracing::debug;
+
+// RLP encoding for an empty list.
+const EMPTY_LIST_CODE: u8 = 0xc0;
 
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
@@ -64,18 +70,7 @@ where
     /// Caution: This does no validation of body (transactions) response but guarantees that the
     /// [`SealedHeader`] matches the requested hash.
     pub fn get_full_block(&self, hash: B256) -> FetchFullBlockFuture<Client> {
-        let client = self.client.clone();
-        FetchFullBlockFuture {
-            hash,
-            consensus: self.consensus.clone(),
-            request: FullBlockRequest {
-                header: Some(client.get_header(hash.into())),
-                body: Some(client.get_block_body(hash)),
-            },
-            client,
-            header: None,
-            body: None,
-        }
+        FetchFullBlockFuture::new(self.client.clone(), self.consensus.clone(), hash)
     }
 
     /// Returns a future that fetches [`SealedBlock`]s for the given hash and count.
@@ -109,6 +104,31 @@ where
     }
 }
 
+impl<Client> FullBlockClient<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    /// Returns a future that fetches the [`SealedBlock`] and its [`BlockAccessLists`] for the
+    /// given hash.
+    ///
+    /// Note: this future is cancel safe
+    ///
+    /// Caution: This does no validation of body (transactions) response but guarantees that the
+    /// [`SealedHeader`] matches the requested hash.
+    pub fn get_full_block_with_access_lists(
+        &self,
+        hash: B256,
+    ) -> FetchFullBlockWithAccessListsFuture<Client> {
+        let client = self.client.clone();
+        FetchFullBlockWithAccessListsFuture {
+            block: FetchFullBlockFuture::new(client.clone(), self.consensus.clone(), hash),
+            access_lists: Some(client.get_block_access_lists(vec![hash])),
+            block_result: None,
+            access_lists_result: None,
+        }
+    }
+}
+
 /// A future that downloads a full block from the network.
 ///
 /// This will attempt to fetch both the header and body for the given block hash at the same time.
@@ -124,6 +144,25 @@ where
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader<Client::Header>>,
     body: Option<BodyResponse<Client::Body>>,
+}
+
+impl<Client> FetchFullBlockFuture<Client>
+where
+    Client: BlockClient,
+{
+    fn new(client: Client, consensus: Arc<dyn Consensus<Client::Block>>, hash: B256) -> Self {
+        Self {
+            hash,
+            consensus,
+            request: FullBlockRequest {
+                header: Some(client.get_header(hash.into())),
+                body: Some(client.get_block_body(hash)),
+            },
+            client,
+            header: None,
+            body: None,
+        }
+    }
 }
 
 impl<Client> FetchFullBlockFuture<Client>
@@ -248,6 +287,142 @@ where
                 return Poll::Pending
             }
         }
+    }
+}
+
+/// A future that downloads a full block and its block access lists from the network.
+///
+/// This composes the existing full block downloader with a block access list request so the
+/// header/body logic stays centralized.
+#[must_use = "futures do nothing unless polled"]
+pub struct FetchFullBlockWithAccessListsFuture<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    block: FetchFullBlockFuture<Client>,
+    access_lists: Option<<Client as BlockAccessListsClient>::Output>,
+    block_result: Option<SealedBlock<Client::Block>>,
+    access_lists_result: Option<BlockAccessLists>,
+}
+
+impl<Client> FetchFullBlockWithAccessListsFuture<Client>
+where
+    Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
+{
+    /// Returns the hash of the block being requested.
+    pub const fn hash(&self) -> &B256 {
+        self.block.hash()
+    }
+}
+
+impl<Client> FetchFullBlockWithAccessListsFuture<Client>
+where
+    Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
+{
+    /// If the header request is already complete, this returns the block number.
+    pub fn block_number(&self) -> Option<u64> {
+        self.block_result.as_ref().map(|block| block.number()).or_else(|| self.block.block_number())
+    }
+
+    fn retry_access_lists_request(&mut self) {
+        let hash = *self.block.hash();
+        self.access_lists = Some(self.block.client.get_block_access_lists(vec![hash]));
+    }
+
+    fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
+        if self.access_lists_result.is_some() {
+            return
+        }
+
+        let Some(fut) = self.access_lists.as_mut() else { return };
+
+        match fut.poll_unpin(cx) {
+            Poll::Pending => {}
+            Poll::Ready(res) => {
+                self.access_lists = None;
+
+                match res {
+                    Ok(bal) => {
+                        let (peer, access_lists) = bal.split();
+                        if access_lists.0.len() == 1 {
+                            self.access_lists_result = Some(access_lists);
+                        } else {
+                            debug!(
+                                target: "downloaders",
+                                hash = ?self.block.hash(),
+                                expected = 1,
+                                received = access_lists.0.len(),
+                                "Received wrong access list response",
+                            );
+                            self.block.client.report_bad_message(peer);
+                            self.retry_access_lists_request();
+                            cx.waker().wake_by_ref();
+                        }
+                    }
+                    Err(err) => {
+                        debug!(
+                            target: "downloaders",
+                            %err,
+                            hash = ?self.block.hash(),
+                            "Access list download failed",
+                        );
+                        self.retry_access_lists_request();
+                        cx.waker().wake_by_ref();
+                    }
+                }
+            }
+        }
+    }
+
+    fn take_block_and_access_lists(
+        &mut self,
+    ) -> Option<(SealedBlock<Client::Block>, BlockAccessLists)> {
+        if self.block_result.is_some() && self.access_lists_result.is_some() {
+            return Some((
+                self.block_result.take().expect("block result should exist"),
+                self.access_lists_result.take().expect("access lists result should exist"),
+            ))
+        }
+
+        None
+    }
+}
+
+impl<Client> Future for FetchFullBlockWithAccessListsFuture<Client>
+where
+    Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
+{
+    type Output = (SealedBlock<Client::Block>, BlockAccessLists);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        if this.block_result.is_none() &&
+            let Poll::Ready(block) = this.block.poll_unpin(cx)
+        {
+            this.block_result = Some(block);
+        }
+
+        this.poll_access_lists(cx);
+
+        if let Some(res) = this.take_block_and_access_lists() {
+            return Poll::Ready(res)
+        }
+
+        Poll::Pending
+    }
+}
+
+impl<Client> Debug for FetchFullBlockWithAccessListsFuture<Client>
+where
+    Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FetchFullBlockWithAccessListsFuture")
+            .field("hash", &self.block.hash())
+            .field("block_ready", &self.block_result.is_some())
+            .field("access_lists_ready", &self.access_lists_result.is_some())
+            .finish()
     }
 }
 
@@ -752,9 +927,15 @@ mod tests {
 
     use super::*;
     use crate::{error::RequestError, test_utils::TestFullBlockClient};
+    use alloy_primitives::Bytes;
+    use parking_lot::Mutex;
     use std::{
+        collections::HashMap,
         ops::Range,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc,
+        },
     };
     use tokio::time::{timeout, Duration};
 
@@ -783,6 +964,50 @@ mod tests {
         assert_eq!(*received, SealedBlock::from_sealed_parts(header, body));
     }
 
+    #[tokio::test]
+    async fn download_single_full_block_with_access_lists() {
+        let client = FullBlockWithAccessListsClient::default();
+        let header: SealedHeader = SealedHeader::default();
+        let body = BlockBody::default();
+        let access_list = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        client.insert(header.clone(), body.clone(), access_list.clone());
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let client = FullBlockClient::test_client(client);
+
+        let (received_block, received_access_lists) =
+            client.get_full_block_with_access_lists(header.hash()).await;
+
+        assert_eq!(received_block, SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(received_access_lists, BlockAccessLists(vec![access_list]));
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn download_single_full_block_with_access_lists_retries_after_invalid_response() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.empty_first_response.store(true, Ordering::SeqCst);
+
+        let header: SealedHeader = SealedHeader::default();
+        let body = BlockBody::default();
+        let access_list = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        client.insert(header.clone(), body.clone(), access_list.clone());
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let bad_messages = Arc::clone(&client.bad_messages);
+        let client = FullBlockClient::test_client(client);
+
+        let (received_block, received_access_lists) =
+            timeout(Duration::from_secs(1), client.get_full_block_with_access_lists(header.hash()))
+                .await
+                .expect("access list request retry should complete");
+
+        assert_eq!(received_block, SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(received_access_lists, BlockAccessLists(vec![access_list]));
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+        assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
+    }
+
     /// Inserts headers and returns the last header and block body.
     fn insert_headers_into_client(
         client: &TestFullBlockClient,
@@ -802,6 +1027,111 @@ mod tests {
         }
 
         (sealed_header, body)
+    }
+
+    #[derive(Clone, Debug)]
+    struct FullBlockWithAccessListsClient {
+        inner: TestFullBlockClient,
+        access_lists: Arc<Mutex<HashMap<B256, Bytes>>>,
+        access_list_requests: Arc<AtomicUsize>,
+        bad_messages: Arc<AtomicUsize>,
+        empty_first_response: Arc<AtomicBool>,
+    }
+
+    impl Default for FullBlockWithAccessListsClient {
+        fn default() -> Self {
+            Self {
+                inner: TestFullBlockClient::default(),
+                access_lists: Arc::new(Mutex::new(HashMap::default())),
+                access_list_requests: Arc::new(AtomicUsize::new(0)),
+                bad_messages: Arc::new(AtomicUsize::new(0)),
+                empty_first_response: Arc::new(AtomicBool::new(false)),
+            }
+        }
+    }
+
+    impl FullBlockWithAccessListsClient {
+        fn insert(&self, header: SealedHeader, body: BlockBody, access_list: Bytes) {
+            self.inner.insert(header.clone(), body);
+            self.access_lists.lock().insert(header.hash(), access_list);
+        }
+    }
+
+    impl DownloadClient for FullBlockWithAccessListsClient {
+        fn report_bad_message(&self, peer_id: PeerId) {
+            self.bad_messages.fetch_add(1, Ordering::SeqCst);
+            self.inner.report_bad_message(peer_id);
+        }
+
+        fn num_connected_peers(&self) -> usize {
+            self.inner.num_connected_peers()
+        }
+    }
+
+    impl HeadersClient for FullBlockWithAccessListsClient {
+        type Header = <TestFullBlockClient as HeadersClient>::Header;
+        type Output = <TestFullBlockClient as HeadersClient>::Output;
+
+        fn get_headers_with_priority(
+            &self,
+            request: HeadersRequest,
+            priority: Priority,
+        ) -> Self::Output {
+            self.inner.get_headers_with_priority(request, priority)
+        }
+    }
+
+    impl BodiesClient for FullBlockWithAccessListsClient {
+        type Body = <TestFullBlockClient as BodiesClient>::Body;
+        type Output = <TestFullBlockClient as BodiesClient>::Output;
+
+        fn get_block_bodies_with_priority_and_range_hint(
+            &self,
+            hashes: Vec<B256>,
+            priority: Priority,
+            range_hint: Option<RangeInclusive<u64>>,
+        ) -> Self::Output {
+            self.inner.get_block_bodies_with_priority_and_range_hint(hashes, priority, range_hint)
+        }
+    }
+
+    impl BlockAccessListsClient for FullBlockWithAccessListsClient {
+        type Output = futures::future::Ready<PeerRequestResult<BlockAccessLists>>;
+
+        fn get_block_access_lists_with_priority(
+            &self,
+            hashes: Vec<B256>,
+            _priority: Priority,
+        ) -> Self::Output {
+            self.access_list_requests.fetch_add(1, Ordering::SeqCst);
+
+            if self.empty_first_response.swap(false, Ordering::SeqCst) {
+                return futures::future::ready(Ok(WithPeerId::new(
+                    PeerId::random(),
+                    BlockAccessLists(Vec::new()),
+                )))
+            }
+
+            let access_lists = hashes
+                .into_iter()
+                .map(|hash| {
+                    self.access_lists
+                        .lock()
+                        .get(&hash)
+                        .cloned()
+                        .unwrap_or_else(|| Bytes::from_static(&[EMPTY_LIST_CODE]))
+                })
+                .collect();
+
+            futures::future::ready(Ok(WithPeerId::new(
+                PeerId::random(),
+                BlockAccessLists(access_lists),
+            )))
+        }
+    }
+
+    impl BlockClient for FullBlockWithAccessListsClient {
+        type Block = reth_ethereum_primitives::Block;
     }
 
     #[derive(Clone, Debug)]
