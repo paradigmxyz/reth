@@ -5,6 +5,7 @@ use crate::common::{
     EnvironmentArgs,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
+use alloy_primitives::{Address, B256, U256};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -12,14 +13,18 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
+use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
-    BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
-    StaticFileProviderFactory, TransactionVariant,
+    BlockNumReader, BlockReader, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    ReceiptProvider, StaticFileProviderFactory, StorageChangeSetReader, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    revm::database::states::{reverts::AccountInfoRevert, RevertToSlot},
+};
 use reth_stages::stages::calculate_gas_used_from_headers;
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -56,6 +61,14 @@ pub struct Command<C: ChainSpecParser> {
     /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
     skip_invalid_blocks: bool,
+
+    /// Compare execution state outputs against stored changesets.
+    ///
+    /// For each block, compares the account and storage changes produced by execution
+    /// against the changesets stored in the database. Uses per-block execution instead
+    /// of batching when enabled.
+    #[arg(long)]
+    compare_changesets: bool,
 }
 
 impl<C: ChainSpecParser> Command<C> {
@@ -118,6 +131,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         };
 
         let skip_invalid_blocks = self.skip_invalid_blocks;
+        let compare_changesets = self.compare_changesets;
         let blocks_per_chunk = self.blocks_per_chunk;
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
         let (info_tx, mut info_rx) = mpsc::unbounded_channel();
@@ -164,6 +178,67 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let block = provider_factory
                             .recovered_block(block.into(), TransactionVariant::NoHash)?
                             .unwrap();
+
+                        if compare_changesets {
+                            // Use per-block execution to get the BundleState for comparison.
+                            let block_executor = evm_config.executor(db_at(block.number() - 1));
+                            let output = match block_executor.execute(&block) {
+                                Ok(output) => output,
+                                Err(err) => {
+                                    if skip_invalid_blocks {
+                                        let _ =
+                                            info_tx.send((block, eyre::Report::new(err)));
+                                        continue
+                                    }
+                                    return Err(err.into())
+                                }
+                            };
+
+                            if let Err(err) = consensus
+                                .validate_block_post_execution(&block, &output.result, None)
+                                .wrap_err_with(|| {
+                                    format!(
+                                        "Failed to validate block {} {}",
+                                        block.number(),
+                                        block.hash()
+                                    )
+                                })
+                            {
+                                if skip_invalid_blocks {
+                                    let _ = info_tx.send((block, err));
+                                    continue
+                                }
+                                return Err(err);
+                            }
+
+                            // Compare state changes against stored changesets.
+                            let provider =
+                                DatabaseProviderFactory::database_provider_ro(&provider_factory)?;
+
+                            if let Err(err) =
+                                compare_state_with_changesets(&output.state, block.number(), &provider)
+                            {
+                                error!(
+                                    number = block.number(),
+                                    %err,
+                                    "Changeset mismatch"
+                                );
+                                if skip_invalid_blocks {
+                                    let _ = info_tx.send((
+                                        block,
+                                        eyre::eyre!("Changeset mismatch: {err}"),
+                                    ));
+                                    continue
+                                }
+                                return Err(eyre::eyre!(
+                                    "Changeset mismatch at block {}: {err}",
+                                    block.number()
+                                ));
+                            }
+
+                            let _ = stats_tx.send(block.gas_used());
+                            continue;
+                        }
 
                         let result = match executor.execute_one(&block) {
                             Ok(result) => result,
@@ -333,3 +408,118 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         Ok(())
     }
 }
+
+/// Compares the execution state output (`BundleState`) against the changesets stored in the
+/// database for the given block number.
+///
+/// The `BundleState` reverts represent the "previous" values before the block was applied,
+/// which should match exactly what the database stores as changesets.
+fn compare_state_with_changesets(
+    bundle: &reth_revm::revm::database::BundleState,
+    block_number: u64,
+    provider: &impl ProviderWithChangesets,
+) -> eyre::Result<()> {
+    let reverts = &bundle.reverts;
+    if reverts.len() != 1 {
+        eyre::bail!(
+            "expected exactly 1 revert frame from single-block execution, got {}",
+            reverts.len()
+        );
+    }
+
+    let block_reverts = &reverts[0];
+
+    // --- Account changeset comparison ---
+    let db_account_changesets = provider
+        .account_block_changeset(block_number)
+        .wrap_err("failed to read account changesets from database")?;
+
+    // Build normalized maps: Address -> Option<Account>
+    // DoNothing means account info wasn't changed, so no entry in the changeset.
+    // DeleteIt means the account was created in this block; reverting means removing it (None).
+    // RevertTo(info) means the account existed before with the given info.
+    let mut exec_accounts: BTreeMap<Address, Option<Account>> = BTreeMap::new();
+    for (address, revert) in block_reverts {
+        match &revert.account {
+            AccountInfoRevert::DoNothing => {}
+            AccountInfoRevert::DeleteIt => {
+                exec_accounts.insert(*address, None);
+            }
+            AccountInfoRevert::RevertTo(info) => {
+                exec_accounts.insert(*address, Some(info.into()));
+            }
+        }
+    }
+
+    let mut db_accounts: BTreeMap<Address, Option<Account>> = BTreeMap::new();
+    for changeset in &db_account_changesets {
+        db_accounts.insert(changeset.address, changeset.info);
+    }
+
+    if exec_accounts != db_accounts {
+        let only_in_exec: Vec<_> =
+            exec_accounts.keys().filter(|k| !db_accounts.contains_key(*k)).collect();
+        let only_in_db: Vec<_> =
+            db_accounts.keys().filter(|k| !exec_accounts.contains_key(*k)).collect();
+        let mismatched: Vec<_> = exec_accounts
+            .iter()
+            .filter(|(k, v)| db_accounts.get(*k).is_some_and(|db_v| db_v != *v))
+            .map(|(k, _)| k)
+            .collect();
+
+        eyre::bail!(
+            "account changeset mismatch: \
+             only_in_execution={only_in_exec:?}, \
+             only_in_db={only_in_db:?}, \
+             value_mismatch={mismatched:?}"
+        );
+    }
+
+    // --- Storage changeset comparison ---
+    let db_storage_changesets = provider
+        .storage_changeset(block_number)
+        .wrap_err("failed to read storage changesets from database")?;
+
+    // Build normalized map: (Address, B256 key) -> U256 value
+    let mut exec_storage: BTreeMap<(Address, B256), U256> = BTreeMap::new();
+    for (address, revert) in block_reverts {
+        for (slot, value) in &revert.storage {
+            let key = B256::from(slot.to_be_bytes());
+            let prev_value = match value {
+                RevertToSlot::Some(v) => *v,
+                RevertToSlot::Destroyed => U256::ZERO,
+            };
+            exec_storage.insert((*address, key), prev_value);
+        }
+    }
+
+    let mut db_storage: BTreeMap<(Address, B256), U256> = BTreeMap::new();
+    for (block_number_address, entry) in &db_storage_changesets {
+        db_storage.insert((block_number_address.address(), entry.key), entry.value);
+    }
+
+    if exec_storage != db_storage {
+        let only_in_exec: Vec<_> =
+            exec_storage.keys().filter(|k| !db_storage.contains_key(*k)).collect();
+        let only_in_db: Vec<_> =
+            db_storage.keys().filter(|k| !exec_storage.contains_key(*k)).collect();
+        let mismatched: Vec<_> = exec_storage
+            .iter()
+            .filter(|(k, v)| db_storage.get(*k).is_some_and(|db_v| db_v != *v))
+            .map(|(k, _)| k)
+            .collect();
+
+        eyre::bail!(
+            "storage changeset mismatch: \
+             only_in_execution={only_in_exec:?}, \
+             only_in_db={only_in_db:?}, \
+             value_mismatch={mismatched:?}"
+        );
+    }
+
+    Ok(())
+}
+
+/// Helper trait combining the changeset reader traits needed for comparison.
+trait ProviderWithChangesets: ChangeSetReader + StorageChangeSetReader {}
+impl<T: ChangeSetReader + StorageChangeSetReader> ProviderWithChangesets for T {}
