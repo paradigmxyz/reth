@@ -30,9 +30,6 @@ use std::{
 };
 use tracing::debug;
 
-// RLP encoding for an empty list.
-const EMPTY_LIST_CODE: u8 = 0xc0;
-
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
 pub struct FullBlockClient<Client>
@@ -938,6 +935,9 @@ mod tests {
         },
     };
     use tokio::time::{timeout, Duration};
+
+    // RLP encoding for an empty list.
+    const EMPTY_LIST_CODE: u8 = 0xc0;
 
     #[tokio::test]
     async fn download_single_full_block() {
