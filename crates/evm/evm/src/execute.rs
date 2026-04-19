@@ -141,6 +141,9 @@ pub trait Executor<DB: Database>: Sized {
     /// Consumes the executor and returns the [`State`] containing all state changes.
     fn into_state(self) -> State<DB>;
 
+    /// Returns a reference to the current [`BundleState`].
+    fn bundle_state(&self) -> &BundleState;
+
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
@@ -589,6 +592,10 @@ where
         self.db
     }
 
+    fn bundle_state(&self) -> &BundleState {
+        &self.db.bundle_state
+    }
+
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
     }
@@ -691,6 +698,10 @@ mod tests {
         }
 
         fn into_state(self) -> State<DB> {
+            unreachable!()
+        }
+
+        fn bundle_state(&self) -> &BundleState {
             unreachable!()
         }
 

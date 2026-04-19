@@ -73,6 +73,13 @@ where
         }
     }
 
+    fn bundle_state(&self) -> &revm::database::BundleState {
+        match self {
+            Self::Left(a) => a.bundle_state(),
+            Self::Right(b) => b.bundle_state(),
+        }
+    }
+
     fn size_hint(&self) -> usize {
         match self {
             Self::Left(a) => a.size_hint(),
