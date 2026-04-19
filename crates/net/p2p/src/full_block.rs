@@ -371,7 +371,7 @@ where
         }
     }
 
-    fn take_block_and_access_lists(
+    const fn take_block_and_access_lists(
         &mut self,
     ) -> Option<(SealedBlock<Client::Block>, BlockAccessLists)> {
         if self.block_result.is_some() && self.access_lists_result.is_some() {
