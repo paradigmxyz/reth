@@ -5,7 +5,6 @@ use crate::common::{
     EnvironmentArgs,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
-use alloy_primitives::B256;
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -15,6 +14,7 @@ use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
+    changesets_utils::{reverts_to_account_changesets, reverts_to_storage_changesets},
     BlockNumReader, BlockReader, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     ReceiptProvider, StaticFileProviderFactory, StorageChangeSetReader, TransactionVariant,
 };
@@ -265,27 +265,24 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 .to_plain_state_reverts();
 
                             // Account changesets
-                            let mut exec_account_changesets: Vec<_> = plain_reverts
-                                .accounts[prev_reverts_len]
-                                .iter()
-                                .map(|(address, info)| {
-                                    reth_db_api::models::AccountBeforeTx {
-                                        address: *address,
-                                        info: info.as_ref().map(|i| i.into()),
-                                    }
-                                })
-                                .collect();
-                            exec_account_changesets.sort_by_key(|a| a.address);
+                            let mut exec_accounts =
+                                reverts_to_account_changesets(
+                                    plain_reverts.accounts
+                                        .into_iter()
+                                        .nth(prev_reverts_len)
+                                        .unwrap_or_default(),
+                                );
+                            exec_accounts.sort_by_key(|a| a.address);
 
-                            let mut db_account_changesets =
+                            let mut db_accounts =
                                 provider.account_block_changeset(block.number())?;
-                            db_account_changesets.sort_by_key(|a| a.address);
+                            db_accounts.sort_by_key(|a| a.address);
 
-                            if exec_account_changesets != db_account_changesets {
+                            if exec_accounts != db_accounts {
                                 let err = eyre::eyre!(
                                     "account changeset mismatch at block {}\n  \
-                                     execution: {exec_account_changesets:?}\n  \
-                                     database:  {db_account_changesets:?}",
+                                     execution: {exec_accounts:?}\n  \
+                                     database:  {db_accounts:?}",
                                     block.number()
                                 );
                                 error!(%err);
@@ -299,32 +296,24 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
 
                             // Storage changesets
-                            let mut exec_storage_changesets: Vec<_> = plain_reverts
-                                .storage[prev_reverts_len]
-                                .iter()
-                                .flat_map(|revert| {
-                                    revert.storage_revert.iter().map(|(key, value)| {
-                                        reth_db_api::models::StorageBeforeTx {
-                                            address: revert.address,
-                                            key: B256::from(key.to_be_bytes()),
-                                            value: value.to_previous_value(),
-                                        }
-                                    })
-                                })
-                                .collect();
-                            exec_storage_changesets
-                                .sort_by_key(|s| (s.address, s.key));
+                            let mut exec_storage =
+                                reverts_to_storage_changesets(
+                                    plain_reverts.storage
+                                        .into_iter()
+                                        .nth(prev_reverts_len)
+                                        .unwrap_or_default(),
+                                );
+                            exec_storage.sort_by_key(|s| (s.address, s.key));
 
-                            let mut db_storage_changesets =
+                            let mut db_storage =
                                 provider.storage_block_changeset(block.number())?;
-                            db_storage_changesets
-                                .sort_by_key(|s| (s.address, s.key));
+                            db_storage.sort_by_key(|s| (s.address, s.key));
 
-                            if exec_storage_changesets != db_storage_changesets {
+                            if exec_storage != db_storage {
                                 let err = eyre::eyre!(
                                     "storage changeset mismatch at block {}\n  \
-                                     execution: {exec_storage_changesets:?}\n  \
-                                     database:  {db_storage_changesets:?}",
+                                     execution: {exec_storage:?}\n  \
+                                     database:  {db_storage:?}",
                                     block.number()
                                 );
                                 error!(%err);
