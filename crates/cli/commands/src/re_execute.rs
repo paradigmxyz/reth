@@ -5,7 +5,7 @@ use crate::common::{
     EnvironmentArgs,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::B256;
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -13,18 +13,14 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     ReceiptProvider, StaticFileProviderFactory, StorageChangeSetReader, TransactionVariant,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    revm::database::states::{reverts::AccountInfoRevert, RevertToSlot},
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_stages::stages::calculate_gas_used_from_headers;
 use std::{
-    collections::BTreeMap,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -259,31 +255,86 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
 
                         if compare_changesets {
-                            let block_reverts = &executor.bundle_state().reverts[prev_reverts_len];
                             let provider =
                                 DatabaseProviderFactory::database_provider_ro(&provider_factory)?;
 
-                            if let Err(err) =
-                                compare_block_changesets(block_reverts, block.number(), &provider)
-                            {
-                                error!(
-                                    number = block.number(),
-                                    %err,
-                                    "Changeset mismatch"
+                            // Convert execution reverts to the same format the DB stores.
+                            let plain_reverts = executor
+                                .bundle_state()
+                                .reverts
+                                .to_plain_state_reverts();
+
+                            // Account changesets
+                            let mut exec_account_changesets: Vec<_> = plain_reverts
+                                .accounts[prev_reverts_len]
+                                .iter()
+                                .map(|(address, info)| {
+                                    reth_db_api::models::AccountBeforeTx {
+                                        address: *address,
+                                        info: info.as_ref().map(|i| i.into()),
+                                    }
+                                })
+                                .collect();
+                            exec_account_changesets.sort_by_key(|a| a.address);
+
+                            let mut db_account_changesets =
+                                provider.account_block_changeset(block.number())?;
+                            db_account_changesets.sort_by_key(|a| a.address);
+
+                            if exec_account_changesets != db_account_changesets {
+                                let err = eyre::eyre!(
+                                    "account changeset mismatch at block {}\n  \
+                                     execution: {exec_account_changesets:?}\n  \
+                                     database:  {db_account_changesets:?}",
+                                    block.number()
                                 );
+                                error!(%err);
                                 if skip_invalid_blocks {
                                     executor =
                                         evm_config.batch_executor(db_at(block.number()));
-                                    let _ = info_tx.send((
-                                        block,
-                                        eyre::eyre!("Changeset mismatch: {err}"),
-                                    ));
+                                    let _ = info_tx.send((block, err));
                                     continue 'blocks;
                                 }
-                                return Err(eyre::eyre!(
-                                    "Changeset mismatch at block {}: {err}",
+                                return Err(err);
+                            }
+
+                            // Storage changesets
+                            let mut exec_storage_changesets: Vec<_> = plain_reverts
+                                .storage[prev_reverts_len]
+                                .iter()
+                                .flat_map(|revert| {
+                                    revert.storage_revert.iter().map(|(key, value)| {
+                                        reth_db_api::models::StorageBeforeTx {
+                                            address: revert.address,
+                                            key: B256::from(key.to_be_bytes()),
+                                            value: value.to_previous_value(),
+                                        }
+                                    })
+                                })
+                                .collect();
+                            exec_storage_changesets
+                                .sort_by_key(|s| (s.address, s.key));
+
+                            let mut db_storage_changesets =
+                                provider.storage_block_changeset(block.number())?;
+                            db_storage_changesets
+                                .sort_by_key(|s| (s.address, s.key));
+
+                            if exec_storage_changesets != db_storage_changesets {
+                                let err = eyre::eyre!(
+                                    "storage changeset mismatch at block {}\n  \
+                                     execution: {exec_storage_changesets:?}\n  \
+                                     database:  {db_storage_changesets:?}",
                                     block.number()
-                                ));
+                                );
+                                error!(%err);
+                                if skip_invalid_blocks {
+                                    executor =
+                                        evm_config.batch_executor(db_at(block.number()));
+                                    let _ = info_tx.send((block, err));
+                                    continue 'blocks;
+                                }
+                                return Err(err);
                             }
                         }
 
@@ -377,99 +428,4 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         Ok(())
     }
-}
-
-/// Compares a single block's revert frame against the changesets stored in the database.
-fn compare_block_changesets(
-    block_reverts: &[(Address, reth_revm::revm::database::states::reverts::AccountRevert)],
-    block_number: u64,
-    provider: &(impl ChangeSetReader + StorageChangeSetReader),
-) -> eyre::Result<()> {
-    // --- Account changeset comparison ---
-    let db_account_changesets = provider
-        .account_block_changeset(block_number)
-        .wrap_err("failed to read account changesets from database")?;
-
-    // DoNothing: account info unchanged, no changeset entry.
-    // DeleteIt: account was created in this block; revert = remove it (None).
-    // RevertTo(info): account existed before with the given info.
-    let mut exec_accounts: BTreeMap<Address, Option<Account>> = BTreeMap::new();
-    for (address, revert) in block_reverts {
-        match &revert.account {
-            AccountInfoRevert::DoNothing => {}
-            AccountInfoRevert::DeleteIt => {
-                exec_accounts.insert(*address, None);
-            }
-            AccountInfoRevert::RevertTo(info) => {
-                exec_accounts.insert(*address, Some(info.into()));
-            }
-        }
-    }
-
-    let mut db_accounts: BTreeMap<Address, Option<Account>> = BTreeMap::new();
-    for changeset in &db_account_changesets {
-        db_accounts.insert(changeset.address, changeset.info);
-    }
-
-    if exec_accounts != db_accounts {
-        let only_in_exec: Vec<_> =
-            exec_accounts.keys().filter(|k| !db_accounts.contains_key(*k)).collect();
-        let only_in_db: Vec<_> =
-            db_accounts.keys().filter(|k| !exec_accounts.contains_key(*k)).collect();
-        let mismatched: Vec<_> = exec_accounts
-            .iter()
-            .filter(|(k, v)| db_accounts.get(*k).is_some_and(|db_v| db_v != *v))
-            .map(|(k, _)| k)
-            .collect();
-
-        eyre::bail!(
-            "account changeset mismatch: \
-             only_in_execution={only_in_exec:?}, \
-             only_in_db={only_in_db:?}, \
-             value_mismatch={mismatched:?}"
-        );
-    }
-
-    // --- Storage changeset comparison ---
-    let db_storage_changesets = provider
-        .storage_changeset(block_number)
-        .wrap_err("failed to read storage changesets from database")?;
-
-    let mut exec_storage: BTreeMap<(Address, B256), U256> = BTreeMap::new();
-    for (address, revert) in block_reverts {
-        for (slot, value) in &revert.storage {
-            let key = B256::from(slot.to_be_bytes());
-            let prev_value = match value {
-                RevertToSlot::Some(v) => *v,
-                RevertToSlot::Destroyed => U256::ZERO,
-            };
-            exec_storage.insert((*address, key), prev_value);
-        }
-    }
-
-    let mut db_storage: BTreeMap<(Address, B256), U256> = BTreeMap::new();
-    for (block_number_address, entry) in &db_storage_changesets {
-        db_storage.insert((block_number_address.address(), entry.key), entry.value);
-    }
-
-    if exec_storage != db_storage {
-        let only_in_exec: Vec<_> =
-            exec_storage.keys().filter(|k| !db_storage.contains_key(*k)).collect();
-        let only_in_db: Vec<_> =
-            db_storage.keys().filter(|k| !exec_storage.contains_key(*k)).collect();
-        let mismatched: Vec<_> = exec_storage
-            .iter()
-            .filter(|(k, v)| db_storage.get(*k).is_some_and(|db_v| db_v != *v))
-            .map(|(k, _)| k)
-            .collect();
-
-        eyre::bail!(
-            "storage changeset mismatch: \
-             only_in_execution={only_in_exec:?}, \
-             only_in_db={only_in_db:?}, \
-             value_mismatch={mismatched:?}"
-        );
-    }
-
-    Ok(())
 }
