@@ -17,6 +17,10 @@ pub struct MerkleCheckpoint {
     pub walker_stack: Vec<StoredSubNode>,
     /// The hash builder state.
     pub state: HashBuilderState,
+    /// `TrieNodeIter::should_check_walker_key` snapshot at pause time. Persisting it ensures
+    /// the resumed walker doesn't re-emit a branch the prior run already emitted, which would
+    /// trip `HashBuilder::add_branch` with `key == self.key`.
+    pub should_check_walker_key: bool,
     /// Optional storage root checkpoint for the last processed account.
     pub storage_root_checkpoint: Option<StorageRootMerkleCheckpoint>,
 }
@@ -28,8 +32,16 @@ impl MerkleCheckpoint {
         last_account_key: B256,
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
+        should_check_walker_key: bool,
     ) -> Self {
-        Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint: None }
+        Self {
+            target_block,
+            last_account_key,
+            walker_stack,
+            state,
+            should_check_walker_key,
+            storage_root_checkpoint: None,
+        }
     }
 }
 
@@ -70,6 +82,10 @@ impl reth_codecs::Compact for MerkleCheckpoint {
             }
         }
 
+        // Trailer byte: `should_check_walker_key`.
+        buf.put_u8(self.should_check_walker_key as u8);
+        len += 1;
+
         len
     }
 
@@ -90,20 +106,34 @@ impl reth_codecs::Compact for MerkleCheckpoint {
 
         let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
 
-        // Decode the storage root checkpoint if it exists
-        let (storage_root_checkpoint, buf) = if buf.is_empty() {
-            (None, buf)
+        // Decode the optional storage root checkpoint
+        let storage_root_checkpoint = if buf.is_empty() {
+            None
         } else {
             match buf.get_u8() {
                 1 => {
                     let (checkpoint, rest) = StorageRootMerkleCheckpoint::from_compact(buf, 0);
-                    (Some(checkpoint), rest)
+                    buf = rest;
+                    Some(checkpoint)
                 }
-                _ => (None, buf),
+                _ => None,
             }
         };
 
-        (Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint }, buf)
+        // Trailer byte added later; default to false for older bytes that don't have it.
+        let should_check_walker_key = if buf.is_empty() { false } else { buf.get_u8() != 0 };
+
+        (
+            Self {
+                target_block,
+                last_account_key,
+                walker_stack,
+                state,
+                should_check_walker_key,
+                storage_root_checkpoint,
+            },
+            buf,
+        )
     }
 }
 
@@ -124,6 +154,8 @@ pub struct StorageRootMerkleCheckpoint {
     pub account_balance: U256,
     /// The account bytecode hash.
     pub account_bytecode_hash: B256,
+    /// Storage walker's `should_check_walker_key` snapshot. See [`MerkleCheckpoint`].
+    pub should_check_walker_key: bool,
 }
 
 impl StorageRootMerkleCheckpoint {
@@ -135,6 +167,7 @@ impl StorageRootMerkleCheckpoint {
         account_nonce: u64,
         account_balance: U256,
         account_bytecode_hash: B256,
+        should_check_walker_key: bool,
     ) -> Self {
         Self {
             last_storage_key,
@@ -143,6 +176,7 @@ impl StorageRootMerkleCheckpoint {
             account_nonce,
             account_balance,
             account_bytecode_hash,
+            should_check_walker_key,
         }
     }
 }
@@ -178,6 +212,9 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         buf.put_slice(self.account_bytecode_hash.as_slice());
         len += 32;
 
+        buf.put_u8(self.should_check_walker_key as u8);
+        len += 1;
+
         len
     }
 
@@ -203,6 +240,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         let (account_balance, mut buf) = U256::from_compact(buf, balance_len);
         let account_bytecode_hash = B256::from_slice(&buf[..32]);
         buf.advance(32);
+        let should_check_walker_key = buf.get_u8() != 0;
 
         (
             Self {
@@ -212,6 +250,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
                 account_nonce,
                 account_balance,
                 account_bytecode_hash,
+                should_check_walker_key,
             },
             buf,
         )
@@ -596,6 +635,7 @@ mod tests {
             }],
             state: HashBuilderState::default(),
             storage_root_checkpoint: None,
+            should_check_walker_key: false,
         };
 
         let mut buf = Vec::new();
@@ -618,6 +658,7 @@ mod tests {
             account_nonce: 0,
             account_balance: U256::ZERO,
             account_bytecode_hash: B256::ZERO,
+            should_check_walker_key: false,
         };
 
         let mut buf = Vec::new();
@@ -644,6 +685,7 @@ mod tests {
             account_bytecode_hash: b256!(
                 "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
             ),
+            should_check_walker_key: false,
         };
 
         // Create a merkle checkpoint with the storage root checkpoint
@@ -657,6 +699,7 @@ mod tests {
             }],
             state: HashBuilderState::default(),
             storage_root_checkpoint: Some(storage_checkpoint),
+            should_check_walker_key: false,
         };
 
         let mut buf = Vec::new();

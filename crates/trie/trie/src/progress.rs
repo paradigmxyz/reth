@@ -45,6 +45,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                 hash_builder: HashBuilder::from(value.state),
                 walker_stack: value.walker_stack.into_iter().map(CursorSubNode::from).collect(),
                 last_hashed_key: value.last_account_key,
+                should_check_walker_key: value.should_check_walker_key,
             },
             storage_root_state: value.storage_root_checkpoint.map(|checkpoint| {
                 IntermediateStorageRootState {
@@ -56,6 +57,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                             .map(CursorSubNode::from)
                             .collect(),
                         last_hashed_key: checkpoint.last_storage_key,
+                        should_check_walker_key: checkpoint.should_check_walker_key,
                     },
                     account: Account {
                         nonce: checkpoint.account_nonce,
@@ -77,6 +79,12 @@ pub struct IntermediateRootState {
     pub walker_stack: Vec<CursorSubNode>,
     /// The last hashed key processed.
     pub last_hashed_key: B256,
+    /// Captures `TrieNodeIter::should_check_walker_key` at the moment Progress was returned.
+    ///
+    /// This flag prevents the resumed walker from re-emitting a branch node that was already
+    /// emitted in the prior run. Without it, the saved walker position is reused as if it were
+    /// new, which causes `HashBuilder::add_branch` to fail with `key == self.key`.
+    pub should_check_walker_key: bool,
 }
 
 /// The progress of a storage root calculation.

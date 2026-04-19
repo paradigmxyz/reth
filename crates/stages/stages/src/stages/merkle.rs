@@ -270,6 +270,7 @@ where
                             .map(StoredSubNode::from)
                             .collect(),
                         state.account_root_state.hash_builder.into(),
+                        state.account_root_state.should_check_walker_key,
                     );
 
                     // Save storage root state if present
@@ -287,6 +288,7 @@ where
                                 storage_state.account.nonce,
                                 storage_state.account.balance,
                                 storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                                storage_state.state.should_check_walker_key,
                             ));
                     }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;

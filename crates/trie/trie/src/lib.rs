@@ -48,8 +48,8 @@ pub use trie::{StateRoot, StorageRoot, TrieType};
 /// Utilities for state root checkpoint progress.
 mod progress;
 pub use progress::{
-    IntermediateStateRootState, IntermediateStorageRootState, StateRootProgress,
-    StorageRootProgress,
+    IntermediateRootState, IntermediateStateRootState, IntermediateStorageRootState,
+    StateRootProgress, StorageRootProgress,
 };
 
 /// Trie calculation stats.

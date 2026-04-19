@@ -180,7 +180,8 @@ where
             )
             .with_deletions_retained(retain_updates);
             let account_node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
-                .with_last_hashed_key(account_root_state.last_hashed_key);
+                .with_last_hashed_key(account_root_state.last_hashed_key)
+                .with_should_check_walker_key(account_root_state.should_check_walker_key);
 
             // if we have an in-progress storage root, complete it first
             if let Some(storage_state) = storage_root_state {
@@ -368,12 +369,18 @@ impl StateRootContext {
         H: HashedCursor,
         K: AsRef<AddedRemovedKeys>,
     {
+        let should_check_walker_key = account_node_iter.should_check_walker_key;
         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
         self.trie_updates.removed_nodes.extend(walker_deleted_keys);
         let (hash_builder, hash_builder_updates) = hash_builder.split();
         self.trie_updates.account_nodes.extend(hash_builder_updates);
 
-        let account_state = IntermediateRootState { hash_builder, walker_stack, last_hashed_key };
+        let account_state = IntermediateRootState {
+            hash_builder,
+            walker_stack,
+            last_hashed_key,
+            should_check_walker_key,
+        };
 
         let state = IntermediateStateRootState {
             account_root_state: account_state,
@@ -643,7 +650,8 @@ where
                 )
                 .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor)
-                    .with_last_hashed_key(state.last_hashed_key);
+                    .with_last_hashed_key(state.last_hashed_key)
+                    .with_should_check_walker_key(state.should_check_walker_key);
                 (hash_builder, node_iter)
             }
             None => {
@@ -674,6 +682,7 @@ where
                     let total_updates_len =
                         storage_node_iter.walker.removed_keys_len() + hash_builder.updates_len();
                     if retain_updates && total_updates_len as u64 >= self.threshold {
+                        let should_check_walker_key = storage_node_iter.should_check_walker_key;
                         let (walker_stack, walker_deleted_keys) = storage_node_iter.walker.split();
                         trie_updates.removed_nodes.extend(walker_deleted_keys);
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
@@ -683,6 +692,7 @@ where
                             hash_builder,
                             walker_stack,
                             last_hashed_key: hashed_slot,
+                            should_check_walker_key,
                         };
 
                         return Ok(StorageRootProgress::Progress(

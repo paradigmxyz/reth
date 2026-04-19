@@ -63,7 +63,7 @@ pub struct TrieNodeIter<C, H: HashedCursor, K> {
     /// Current hashed  entry.
     current_hashed_entry: Option<(B256, H::Value)>,
     /// Flag indicating whether we should check the current walker key.
-    should_check_walker_key: bool,
+    pub should_check_walker_key: bool,
 
     /// The last seeked hashed entry.
     ///
@@ -113,6 +113,16 @@ where
     /// This is used to resume iteration from the last checkpoint.
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
+        self
+    }
+
+    /// Restores the `should_check_walker_key` flag for resumed iteration.
+    ///
+    /// Used to round-trip the flag through pause/resume: the default `false` would cause the
+    /// resumed iterator to re-emit the previously yielded branch and panic in
+    /// `HashBuilder::add_branch` with `key == self.key`.
+    pub const fn with_should_check_walker_key(mut self, should_check_walker_key: bool) -> Self {
+        self.should_check_walker_key = should_check_walker_key;
         self
     }
 
