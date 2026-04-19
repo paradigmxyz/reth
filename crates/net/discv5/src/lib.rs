@@ -248,7 +248,7 @@ impl Discv5 {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
             discv5::Event::Discovered(_) => None,
-            discv5::Event::NodeInserted { replaced: _, .. } => {
+            discv5::Event::NodeInserted { .. } => {
 
                 // node has been inserted into kbuckets
 
