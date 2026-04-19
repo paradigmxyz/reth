@@ -36,7 +36,12 @@ impl reth_codecs::Compact for StoredSubNode {
         if let Some(node) = &self.node {
             buf.put_u8(1);
             len += 1;
-            len += node.to_compact(buf);
+
+            let mut node_buf = Vec::new();
+            let node_len = node.to_compact(&mut node_buf);
+            buf.put_u16(node_len as u16);
+            buf.put_slice(&node_buf);
+            len += 2 + node_len;
         } else {
             len += 1;
             buf.put_u8(0);
@@ -57,8 +62,9 @@ impl reth_codecs::Compact for StoredSubNode {
 
         let node_exists = buf.get_u8() != 0;
         let node = node_exists.then(|| {
-            let (node, rest) = BranchNodeCompact::from_compact(buf, 0);
-            buf = rest;
+            let node_len = buf.get_u16() as usize;
+            let (node, _) = BranchNodeCompact::from_compact(&buf[..node_len], node_len);
+            buf.advance(node_len);
             node
         });
 
@@ -92,5 +98,34 @@ mod tests {
         let (decoded, _) = StoredSubNode::from_compact(&encoded[..], 0);
 
         assert_eq!(subnode, decoded);
+    }
+
+    // Covers `state_mask` values whose BE u16 encoding collides with a valid
+    // `BranchNodeCompact` compact length (6 + 32*N). Without an explicit length
+    // prefix, a heuristic decoder over-reads these and corrupts the trailing bytes.
+    #[test]
+    fn subnode_with_colliding_state_mask_roundtrips_with_trailing_bytes() {
+        for mask in [6u16, 38, 70, 550] {
+            let subnode = StoredSubNode {
+                key: vec![0x01, 0x02],
+                nibble: Some(0x03),
+                node: Some(BranchNodeCompact {
+                    state_mask: TrieMask::new(mask),
+                    tree_mask: TrieMask::new(0),
+                    hash_mask: TrieMask::new(mask),
+                    hashes: vec![B256::ZERO; mask.count_ones() as usize].into(),
+                    root_hash: None,
+                }),
+            };
+
+            let mut encoded = vec![];
+            subnode.to_compact(&mut encoded);
+            encoded.extend_from_slice(&[0xaa, 0xbb]);
+
+            let (decoded, rest) = StoredSubNode::from_compact(&encoded[..], 0);
+
+            assert_eq!(subnode, decoded, "mask={mask}");
+            assert_eq!(rest, &[0xaa, 0xbb], "mask={mask}");
+        }
     }
 }
