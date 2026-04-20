@@ -1,10 +1,11 @@
 use alloy_eips::BlockId;
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::address;
+use alloy_primitives::{address, Address, U256};
 use alloy_provider::ext::DebugApi;
-use alloy_rpc_types_eth::{Transaction, TransactionRequest};
+use alloy_rpc_types_eth::{Bundle, StateContext, Transaction, TransactionRequest};
 use alloy_rpc_types_trace::geth::{
-    AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame,
+    AccountState, GethDebugTracingCallOptions, GethDebugTracingOptions, PreStateConfig,
+    PreStateFrame,
 };
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -18,6 +19,9 @@ use std::sync::Arc;
 
 const PRESTATE_SNAPSHOT: &str =
     include_str!("../../../../../testing/prestate/tx-selfdestruct-prestate.json");
+const FEE_CHARGE_CALLER: Address = address!("0x1000000000000000000000000000000000000001");
+const FEE_CHARGE_CALL_TARGET: Address = address!("0x2000000000000000000000000000000000000002");
+const FEE_CHARGE_BENEFICIARY: Address = address!("0x3000000000000000000000000000000000000003");
 
 /// Replays the selfdestruct transaction via `debug_traceCall` and ensures Reth's prestate matches
 /// Geth's captured snapshot.
@@ -108,6 +112,115 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     Ok(())
 }
 
+/// Regression test for <https://github.com/paradigmxyz/reth/issues/23475>.
+///
+/// `debug_traceCall` disables fee charging for simulations, so the prestate tracer must not
+/// invent caller debits or beneficiary credits when `diffMode` is enabled.
+#[tokio::test]
+async fn debug_trace_call_prestate_diff_mode_skips_fee_balance_changes() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let mut genesis: Genesis = MAINNET.genesis().clone();
+    genesis.coinbase = FEE_CHARGE_BENEFICIARY;
+    genesis
+        .alloc
+        .insert(FEE_CHARGE_CALLER, GenesisAccount::default().with_balance(regression_balance()));
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let runtime = Runtime::test();
+    let node_config = NodeConfig::test().with_chain(chain_spec).with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_http_api(RpcModuleSelection::all_modules().into()),
+    );
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let provider = node.rpc_server_handle().eth_http_provider().unwrap();
+
+    let trace: PreStateFrame = provider
+        .debug_trace_call_prestate(
+            regression_request(),
+            BlockId::latest(),
+            regression_trace_options(),
+        )
+        .await?;
+
+    assert_no_phantom_fee_diff(&trace);
+
+    Ok(())
+}
+
+/// Regression test for <https://github.com/paradigmxyz/reth/issues/23475>.
+///
+/// `debug_traceCallMany` shares the same simulation path as `debug_traceCall`, so it must also
+/// avoid reporting fee-related balance deltas when fee charging is disabled.
+#[tokio::test]
+async fn debug_trace_call_many_prestate_diff_mode_skips_fee_balance_changes() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let mut genesis: Genesis = MAINNET.genesis().clone();
+    genesis.coinbase = FEE_CHARGE_BENEFICIARY;
+    genesis
+        .alloc
+        .insert(FEE_CHARGE_CALLER, GenesisAccount::default().with_balance(regression_balance()));
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let runtime = Runtime::test();
+    let node_config = NodeConfig::test().with_chain(chain_spec).with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_http_api(RpcModuleSelection::all_modules().into()),
+    );
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let provider = node.rpc_server_handle().eth_http_provider().unwrap();
+
+    let traces: Vec<Vec<PreStateFrame>> = provider
+        .debug_trace_call_many_as(
+            vec![Bundle { transactions: vec![regression_request()], block_override: None }],
+            StateContext::default(),
+            regression_trace_options(),
+        )
+        .await?;
+
+    let trace = traces
+        .first()
+        .and_then(|bundle| bundle.first())
+        .ok_or_else(|| eyre!("expected a single debug_traceCallMany result"))?;
+
+    assert_no_phantom_fee_diff(trace);
+
+    Ok(())
+}
+
 fn expected_snapshot_frame() -> Result<PreStateFrame> {
     #[derive(Deserialize)]
     struct Snapshot {
@@ -128,4 +241,40 @@ fn account_state_to_genesis(value: AccountState) -> GenesisAccount {
         .with_nonce(value.nonce)
         .with_code(code)
         .with_storage(storage)
+}
+
+fn regression_request() -> TransactionRequest {
+    TransactionRequest::default()
+        .from(FEE_CHARGE_CALLER)
+        .to(FEE_CHARGE_CALL_TARGET)
+        .gas_limit(21_000)
+        .gas_price(1)
+}
+
+fn regression_trace_options() -> GethDebugTracingCallOptions {
+    GethDebugTracingOptions::prestate_tracer(PreStateConfig {
+        diff_mode: Some(true),
+        ..Default::default()
+    })
+    .into()
+}
+
+fn regression_balance() -> U256 {
+    U256::from(1_000_000_000_u64)
+}
+
+fn assert_no_phantom_fee_diff(trace: &PreStateFrame) {
+    let diff = trace.as_diff().expect("expected diff-mode prestate trace");
+
+    let caller_pre = diff.pre.get(&FEE_CHARGE_CALLER).expect("caller missing from prestate");
+    assert_eq!(caller_pre.balance, Some(regression_balance()));
+
+    let caller_post = diff.post.get(&FEE_CHARGE_CALLER).expect("caller missing from poststate");
+    assert_eq!(caller_post.balance, None, "simulation should not report a phantom caller debit");
+    assert_eq!(caller_post.nonce, Some(1), "simulation should only advance the caller nonce");
+
+    assert!(
+        !diff.post.contains_key(&FEE_CHARGE_BENEFICIARY),
+        "simulation should not report a phantom beneficiary reward"
+    );
 }

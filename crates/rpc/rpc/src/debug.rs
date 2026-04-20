@@ -2,13 +2,14 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    BlockTraceResult, DiffMode, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    PreStateFrame, TraceResult,
 };
 use async_trait::async_trait;
 use futures::Stream;
@@ -36,7 +37,11 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
-use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
+use revm::{
+    context_interface::{result::ResultGas, Block as RevmBlock, Transaction as RevmTransaction},
+    database::states::bundle_state::BundleRetention,
+    DatabaseCommit,
+};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -308,9 +313,15 @@ where
                     tx_env.clone(),
                     &mut inspector,
                 )?;
-                let trace = inspector
+                let mut trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
+                remove_fee_only_prestate_diff(
+                    &mut trace,
+                    &tx_env,
+                    &evm_env.block_env,
+                    res.result.gas(),
+                );
                 Ok(trace)
             })
             .await
@@ -370,9 +381,15 @@ where
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-                let trace = inspector
+                let mut trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
+                remove_fee_only_prestate_diff(
+                    &mut trace,
+                    &tx_env,
+                    &evm_env.block_env,
+                    res.result.gas(),
+                );
 
                 Ok(trace)
             })
@@ -468,9 +485,15 @@ where
                             tx_env.clone(),
                             &mut inspector,
                         )?;
-                        let trace = inspector
+                        let mut trace = inspector
                             .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                             .map_err(Eth::Error::from_eth_err)?;
+                        remove_fee_only_prestate_diff(
+                            &mut trace,
+                            &tx_env,
+                            &evm_env.block_env,
+                            res.result.gas(),
+                        );
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -623,6 +646,64 @@ where
                 Ok(roots)
             })
             .await
+    }
+}
+
+fn remove_fee_only_prestate_diff(
+    trace: &mut GethTrace,
+    tx_env: &impl RevmTransaction,
+    block_env: &impl RevmBlock,
+    gas: &ResultGas,
+) {
+    let GethTrace::PreStateTracer(PreStateFrame::Diff(diff)) = trace else { return };
+
+    let effective_gas_price = tx_env.effective_gas_price(block_env.basefee() as u128);
+    if effective_gas_price == 0 {
+        return;
+    }
+
+    let reimbursed_gas = tx_env
+        .gas_limit()
+        .saturating_sub(gas.total_gas_spent())
+        .saturating_add(gas.inner_refunded());
+    let caller_credit = U256::from(effective_gas_price.saturating_mul(reimbursed_gas as u128));
+    remove_balance_credit(diff, tx_env.caller(), caller_credit);
+
+    let beneficiary_tip = effective_gas_price.saturating_sub(block_env.basefee() as u128);
+    let beneficiary_reward =
+        U256::from(beneficiary_tip.saturating_mul(gas.block_regular_gas_used() as u128));
+    remove_balance_credit(diff, block_env.beneficiary(), beneficiary_reward);
+}
+
+fn remove_balance_credit(diff: &mut DiffMode, address: Address, credit: U256) {
+    if credit.is_zero() {
+        return;
+    }
+
+    let Some(post_state) = diff.post.get_mut(&address) else { return };
+    let existed_in_pre = diff.pre.contains_key(&address);
+    let pre_balance = diff.pre.get(&address).and_then(|state| state.balance).unwrap_or_default();
+    let post_balance = post_state.balance.unwrap_or(pre_balance);
+    let adjusted_balance = post_balance.saturating_sub(credit);
+
+    post_state.balance = if existed_in_pre && adjusted_balance == pre_balance {
+        None
+    } else if !existed_in_pre && adjusted_balance.is_zero() {
+        None
+    } else {
+        Some(adjusted_balance)
+    };
+
+    let is_empty = post_state.balance.is_none() &&
+        post_state.code.is_none() &&
+        post_state.nonce.is_none() &&
+        post_state.storage.is_empty();
+
+    if is_empty {
+        diff.post.remove(&address);
+        if existed_in_pre {
+            diff.pre.remove(&address);
+        }
     }
 }
 
