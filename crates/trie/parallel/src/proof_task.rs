@@ -1400,10 +1400,10 @@ mod tests {
     fn spawn_proof_workers_creates_handle() {
         let provider_factory = create_test_provider_factory();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            provider_factory,
-            changeset_cache,
-        );
+        let factory = reth_provider::providers::OverlayStateProviderFactory::<
+            _,
+            reth_ethereum_primitives::EthPrimitives,
+        >::new(provider_factory, changeset_cache);
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();

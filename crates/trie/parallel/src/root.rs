@@ -283,10 +283,10 @@ mod tests {
     async fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            factory.clone(),
-            changeset_cache,
-        );
+        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::<
+            _,
+            reth_ethereum_primitives::EthPrimitives,
+        >::new(factory.clone(), changeset_cache);
 
         let mut rng = rand::rng();
         let mut state = (0..100)

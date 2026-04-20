@@ -1087,7 +1087,7 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
@@ -1107,7 +1107,7 @@ where
     /// [`HashedPostState`] containing the changes of this block, to compute the state root and
     /// trie updates for this block.
     fn compute_state_root_serial(
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let hashed_state = hashed_state.get();
@@ -1147,7 +1147,7 @@ where
     fn await_state_root_with_timeout<Tx, Err, R: Send + Sync + 'static>(
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         let Some(timeout) = self.config.state_root_task_timeout() else {
@@ -1239,7 +1239,7 @@ where
     /// updates.
     fn compare_trie_updates_with_serial(
         &self,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
@@ -1437,7 +1437,7 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: StateRootStrategy,
         block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
@@ -1563,7 +1563,7 @@ where
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> (Option<LazyOverlay>, B256) {
+    ) -> (Option<LazyOverlay<N>>, B256) {
         // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
@@ -1591,10 +1591,7 @@ where
             "Creating lazy overlay for in-memory blocks"
         );
 
-        // Extract deferred trie data handles (non-blocking)
-        let handles: Vec<DeferredTrieData> = blocks.iter().map(|b| b.trie_data_handle()).collect();
-
-        (Some(LazyOverlay::new(anchor_hash, handles)), anchor_hash)
+        (Some(LazyOverlay::new(blocks)), anchor_hash)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.

@@ -1,10 +1,13 @@
 use alloy_primitives::{BlockNumber, B256};
 use metrics::{Counter, Histogram};
-use reth_chain_state::LazyOverlay;
+use reth_chain_state::{EthPrimitives, LazyOverlay};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
-use reth_primitives_traits::dashmap::{self, DashMap};
+use reth_primitives_traits::{
+    dashmap::{self, DashMap},
+    NodePrimitives,
+};
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -61,7 +64,7 @@ struct Overlay {
 /// Either provides immediate pre-computed overlay data, or a lazy overlay that computes
 /// on first access.
 #[derive(Debug, Clone)]
-pub enum OverlaySource {
+pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     /// Immediate overlay with already-computed data.
     Immediate {
         /// Trie updates overlay.
@@ -70,10 +73,10 @@ pub enum OverlaySource {
         state: Arc<HashedPostStateSorted>,
     },
     /// Lazy overlay computed on first access.
-    Lazy(LazyOverlay),
+    Lazy(LazyOverlay<N>),
 }
 
-impl OverlaySource {
+impl<N: NodePrimitives> OverlaySource<N> {
     /// Resolve the overlay source into (trie, state) tuple.
     ///
     /// For lazy overlays, this may block waiting for deferred data.
@@ -90,13 +93,13 @@ impl OverlaySource {
 /// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
 /// particular block, and/or with additional overlay information added on top.
 #[derive(Debug, Clone)]
-pub struct OverlayStateProviderFactory<F> {
+pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// The underlying database provider factory
     factory: F,
     /// Optional block hash for collecting reverts
     block_hash: Option<B256>,
     /// Optional overlay source (lazy or immediate).
-    overlay_source: Option<OverlaySource>,
+    overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
@@ -106,7 +109,7 @@ pub struct OverlayStateProviderFactory<F> {
     overlay_cache: Arc<DashMap<BlockNumber, Overlay>>,
 }
 
-impl<F> OverlayStateProviderFactory<F> {
+impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory
     pub fn new(factory: F, changeset_cache: ChangesetCache) -> Self {
         Self {
@@ -129,7 +132,7 @@ impl<F> OverlayStateProviderFactory<F> {
     /// Set the overlay source (lazy or immediate).
     ///
     /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
-    pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
+    pub fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
         self.overlay_source = source;
         // Clear the overlay cache since we've updated the source.
         self.overlay_cache = Default::default();
@@ -139,7 +142,7 @@ impl<F> OverlayStateProviderFactory<F> {
     /// Set a lazy overlay that will be computed on first access.
     ///
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
-    pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay>) -> Self {
+    pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay<N>>) -> Self {
         self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
         // Clear the overlay cache since we've updated the source.
         self.overlay_cache = Default::default();
@@ -192,8 +195,9 @@ impl<F> OverlayStateProviderFactory<F> {
     }
 }
 
-impl<F> OverlayStateProviderFactory<F>
+impl<F, N> OverlayStateProviderFactory<F, N>
 where
+    N: NodePrimitives,
     F: DatabaseProviderFactory,
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
@@ -430,8 +434,9 @@ where
     }
 }
 
-impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
+impl<F, N> DatabaseProviderROFactory for OverlayStateProviderFactory<F, N>
 where
+    N: NodePrimitives,
     F: DatabaseProviderFactory,
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
