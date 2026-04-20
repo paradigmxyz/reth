@@ -10,6 +10,7 @@ use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
+use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 10_000;
@@ -73,7 +74,9 @@ where
     }
 }
 
-/// Cache entry, precompile successful output.
+/// Cache entry for a successful precompile output.
+///
+/// We intentionally do not cache non-successful statuses or errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry<S> {
     output: PrecompileOutput,
@@ -85,8 +88,14 @@ impl<S> CacheEntry<S> {
         self.output.gas_used
     }
 
-    fn to_precompile_result(&self) -> PrecompileResult {
-        Ok(self.output.clone())
+    /// Converts the cache entry to a precompile result. Accepts state gas reservoir as input.
+    ///
+    /// All cached precompiles are not expected to access/created state and thus reservoir is always
+    /// kept as is.
+    fn to_precompile_result(&self, reservoir: u64) -> PrecompileResult {
+        let mut output = self.output.clone();
+        output.reservoir = reservoir;
+        Ok(output)
     }
 }
 
@@ -173,20 +182,34 @@ where
             input.gas >= entry.gas_used()
         {
             self.increment_by_one_precompile_cache_hits();
-            return entry.to_precompile_result()
+            return entry.to_precompile_result(input.reservoir);
         }
 
         let calldata = input.data;
+        let reservoir = input.reservoir;
         let result = self.precompile.call(input);
 
         match &result {
-            Ok(output) => {
-                let size = self.cache.insert(
-                    Bytes::copy_from_slice(calldata),
-                    CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
-                );
-                self.set_precompile_cache_size_metric(size as f64);
-                self.increment_by_one_precompile_cache_misses();
+            // Only successful outputs are cacheable. Non-success statuses and errors must execute
+            // again instead of poisoning the cache for subsequent calls.
+            Ok(output) if output.is_success() => {
+                // Sanity-check precompile output to ensure that it does not affect state gas in any
+                // way.
+                //
+                // This does not fully protect us from caching stateful precompiles but might make
+                // it obvious when the node is misconfigured.
+                if output.reservoir != reservoir {
+                    error!(target: "engine::tree", precompile_id = self.precompile.precompile_id().name(), "cacheable precompile decremented reservoir, skipping cache insertion");
+                } else if output.state_gas_used != 0 {
+                    error!(target: "engine::tree", precompile_id = self.precompile.precompile_id().name(), "cacheable precompile used state gas, skipping cache insertion");
+                } else {
+                    let size = self.cache.insert(
+                        Bytes::copy_from_slice(calldata),
+                        CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
+                    );
+                    self.set_precompile_cache_size_metric(size as f64);
+                    self.increment_by_one_precompile_cache_misses();
+                }
             }
             _ => {
                 self.increment_by_one_precompile_errors();
@@ -228,17 +251,22 @@ mod tests {
     use super::*;
     use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
-    use revm::{context::TxEnv, precompile::PrecompileOutput};
+    use revm::{
+        context::TxEnv,
+        precompile::{PrecompileOutput, PrecompileStatus},
+    };
     use revm_primitives::hardfork::SpecId;
 
     #[test]
     fn test_precompile_cache_basic() {
         let dyn_precompile: DynPrecompile = (|_input: PrecompileInput<'_>| -> PrecompileResult {
             Ok(PrecompileOutput {
+                status: PrecompileStatus::Success,
                 gas_used: 0,
+                state_gas_used: 0,
+                reservoir: 0,
                 gas_refunded: 0,
                 bytes: Bytes::default(),
-                reverted: false,
             })
         })
         .into();
@@ -247,10 +275,12 @@ mod tests {
             CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE, None);
 
         let output = PrecompileOutput {
+            status: PrecompileStatus::Success,
             gas_used: 50,
+            state_gas_used: 0,
+            reservoir: 0,
             gas_refunded: 0,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
-            reverted: false,
         };
 
         let input = b"test_input";
@@ -279,10 +309,12 @@ mod tests {
                 assert_eq!(input.data, input_data);
 
                 Ok(PrecompileOutput {
+                    status: PrecompileStatus::Success,
                     gas_used: 5000,
+                    state_gas_used: 0,
+                    reservoir: 0,
                     gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
-                    reverted: false,
                 })
             }
         })
@@ -294,10 +326,12 @@ mod tests {
                 assert_eq!(input.data, input_data);
 
                 Ok(PrecompileOutput {
+                    status: PrecompileStatus::Success,
                     gas_used: 7000,
+                    state_gas_used: 0,
+                    reservoir: 0,
                     gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
-                    reverted: false,
                 })
             }
         })

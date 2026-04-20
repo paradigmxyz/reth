@@ -248,6 +248,7 @@ fn selection_to_prune_mode(
         ComponentSelection::Distance(d) => {
             Some(PruneMode::Distance(min_distance.map_or(d, |min| d.max(min))))
         }
+        ComponentSelection::Since(block) => Some(PruneMode::Before(block)),
         ComponentSelection::None => Some(min_distance.map_or(PruneMode::Full, PruneMode::Distance)),
     }
 }
@@ -269,6 +270,7 @@ pub(crate) fn describe_prune_config(config: &Config) -> Vec<String> {
     .collect()
 }
 
+/// Formats one prune mode for the generated config summary.
 fn format_mode(mode: &PruneMode) -> String {
     match mode {
         PruneMode::Full => "\"full\"".to_string(),
@@ -451,6 +453,36 @@ mod tests {
         );
         assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10_064)));
         assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10_064)));
+    }
+
+    #[test]
+    fn selections_since_maps_to_before_prune_mode() {
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        selections
+            .insert(SnapshotComponentType::Transactions, ComponentSelection::Since(15_537_394));
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::Since(15_537_394));
+        selections.insert(
+            SnapshotComponentType::AccountChangesets,
+            ComponentSelection::Since(15_537_394),
+        );
+        selections.insert(
+            SnapshotComponentType::StorageChangesets,
+            ComponentSelection::Since(15_537_394),
+        );
+
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+
+        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Before(15_537_394)));
+        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Before(15_537_394)));
+        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Before(15_537_394)));
+        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Before(15_537_394)));
     }
 
     #[test]

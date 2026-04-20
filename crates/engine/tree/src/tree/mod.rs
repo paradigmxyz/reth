@@ -71,7 +71,8 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateMetrics, CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+    CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
+    PayloadExecutionCache, SavedCache,
 };
 
 pub mod state;
@@ -1607,16 +1608,18 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                            BeaconEngineMessage::NewPayload { payload, tx, enqueued_at } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
+                                let latency = enqueued_at.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
+                                    latency,
                                 );
 
                                 let maybe_event =
@@ -1692,12 +1695,20 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
-                                let latency = start.elapsed();
+
+                                // Latency measures time from enqueue to completion, excluding
+                                // only the explicit persistence wait. This means backpressure
+                                // (time spent queued due to the engine being busy) is included,
+                                // reflecting real-world engine responsiveness.
+                                let latency =
+                                    enqueued_at.elapsed().saturating_sub(explicit_persistence_wait);
+
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
+                                    latency,
                                 );
 
                                 let maybe_event =

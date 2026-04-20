@@ -3,13 +3,23 @@
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
-    map::{AddressMap, B256Map, HashMap},
+    keccak256,
+    map::{AddressMap, B256Map, B256Set, HashMap},
     Address, B256, U256,
 };
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
+use reth_db_api::{
+    cursor::{DbCursorRW, DbDupCursorRW},
+    models::{
+        storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, IntegerList,
+        ShardedKey,
+    },
+    tables,
+    transaction::DbTxMut,
+    DatabaseError,
+};
 use reth_etl::Collector;
 use reth_execution_errors::StateRootError;
 use reth_primitives_traits::{
@@ -53,6 +63,11 @@ pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
 
 /// Soft limit for the number of flushed updates after which to log progress summary.
 const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
+
+/// Max number of storage "units" (1 per account + 1 per storage slot) before committing
+/// the current MDBX transaction and opening a new one. This bounds dirty page accumulation
+/// and prevents OOM on large state imports.
+const STORAGE_COMMIT_THRESHOLD: usize = 500_000;
 
 /// Storage initialization error type.
 #[derive(Debug, thiserror::Error, Clone)]
@@ -460,43 +475,54 @@ where
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<Provider>(
+pub fn init_from_state_dump<PF>(
     mut reader: impl BufRead,
-    provider_rw: &Provider,
+    provider_factory: &PF,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256>
 where
-    Provider: StaticFileProviderFactory
-        + DBProvider<Tx: DbTxMut>
-        + BlockNumReader
-        + BlockHashReader
-        + ChainSpecProvider
-        + StageCheckpointWriter
-        + HistoryWriter
-        + HeaderProvider
-        + HashingWriter
-        + TrieWriter
-        + StateWriter
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider
-        + AsRef<Provider>,
+    PF: DatabaseProviderFactory<
+        ProviderRW: StaticFileProviderFactory
+                        + DBProvider<Tx: DbTxMut>
+                        + BlockNumReader
+                        + BlockHashReader
+                        + ChainSpecProvider
+                        + StageCheckpointWriter
+                        + HistoryWriter
+                        + HeaderProvider
+                        + HashingWriter
+                        + TrieWriter
+                        + StateWriter
+                        + StorageSettingsCache
+                        + RocksDBProviderFactory
+                        + NodePrimitivesProvider
+                        + AsRef<PF::ProviderRW>,
+    >,
 {
     if etl_config.file_size == 0 {
         return Err(eyre::eyre!("ETL file size cannot be zero"))
     }
 
-    let block = provider_rw.last_block_number()?;
+    let (block, hash, expected_state_root) = {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        let block = provider_rw.last_block_number()?;
+        let hash = provider_rw
+            .block_hash(block)?
+            .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
+        let header = provider_rw
+            .header_by_number(block)?
+            .map(|h| SealedHeader::new(h, hash))
+            .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+        let state_root = header.state_root();
 
-    let hash = provider_rw
-        .block_hash(block)?
-        .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
-    let header = provider_rw
-        .header_by_number(block)?
-        .map(|h| SealedHeader::new(h, hash))
-        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+        debug!(target: "reth::cli",
+            block,
+            chain=%provider_rw.chain_spec().chain(),
+            "Initializing state at block"
+        );
 
-    let expected_state_root = header.state_root();
+        (block, hash, state_root)
+    };
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
@@ -504,7 +530,6 @@ where
         error!(target: "reth::cli",
             ?dump_state_root,
             ?expected_state_root,
-            header=?header.num_hash(),
             "State root from state dump does not match state root in current header."
         );
         return Err(InitStorageError::StateRootMismatch(GotExpected {
@@ -514,26 +539,24 @@ where
         .into())
     }
 
-    debug!(target: "reth::cli",
-        block,
-        chain=%provider_rw.chain_spec().chain(),
-        "Initializing state at block"
-    );
-
     // remaining lines are accounts
     let collector = parse_accounts(&mut reader, etl_config)?;
 
-    // write state to db
-    dump_state(collector, provider_rw, block)?;
+    // write state to db with chunked commits to avoid OOM
+    dump_state(collector, provider_factory, block)?;
 
     info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
     // clear trie tables so state root is computed from scratch
-    provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
-    provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+    {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
+        provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+        provider_rw.commit()?;
+    }
 
-    // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(provider_rw, None)?;
+    // compute and compare state root
+    let computed_state_root = compute_state_root_chunked(provider_factory)?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -554,8 +577,12 @@ where
     }
 
     // insert sync stages for stages that require state
-    for stage in StageId::STATE_REQUIRED {
-        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
+    {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        for stage in StageId::STATE_REQUIRED {
+            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
+        }
+        provider_rw.commit()?;
     }
 
     Ok(hash)
@@ -597,70 +624,170 @@ fn parse_accounts(
     Ok(collector)
 }
 
-/// Takes a [`Collector`] and processes all accounts.
-fn dump_state<Provider>(
+/// Takes a [`Collector`] and writes all accounts directly to database tables.
+///
+/// This bypasses the higher-level `insert_state`/`insert_genesis_hashes`/`insert_history`
+/// functions which build intermediate structures (`BundleStateInit`, `RevertsInit`,
+/// `ExecutionOutcome`) that duplicate all storage data 2-3x in memory. For accounts with
+/// millions of storage entries this causes OOM.
+///
+/// Instead, each account is written directly to all required tables using cursor operations,
+/// using `append`/`append_dup` for sorted tables where possible (MDBX fast path that skips
+/// B-tree traversal). Commits happen every [`STORAGE_COMMIT_THRESHOLD`] storage units to
+/// bound MDBX dirty page accumulation.
+///
+/// NOTE: This function is not idempotent. If the process crashes mid-import, the database
+/// must be wiped before retrying.
+fn dump_state<PF>(
     mut collector: Collector<Address, GenesisAccount>,
-    provider_rw: &Provider,
+    provider_factory: &PF,
     block: u64,
 ) -> Result<(), eyre::Error>
 where
-    Provider: StaticFileProviderFactory
-        + DBProvider<Tx: DbTxMut>
-        + HeaderProvider
-        + HashingWriter
-        + HistoryWriter
-        + StateWriter
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider
-        + AsRef<Provider>,
+    PF: DatabaseProviderFactory<ProviderRW: DBProvider<Tx: DbTxMut>>,
 {
     let accounts_len = collector.len();
-    let mut accounts = Vec::new();
-    let mut total_inserted_accounts = 0;
-    let mut chunk_byte_size = 0;
+    let mut total_accounts: usize = 0;
+    let mut storage_units: usize = 0;
 
-    for (index, entry) in collector.iter()?.enumerate() {
-        let (address, account) = entry?;
-        chunk_byte_size += address.len() + account.len();
-        let (address, _) = Address::from_compact(address.as_slice(), address.len());
-        let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
+    // pre-allocate the history list once — every entry uses the same single-block bitmap
+    let history_list = IntegerList::new([block])?;
 
-        accounts.push((address, account));
+    // track seen bytecode hashes to avoid re-hashing and re-writing duplicates
+    let mut seen_bytecodes: B256Set = B256Set::default();
 
-        if chunk_byte_size >= DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK ||
-            index == accounts_len - 1
-        {
-            total_inserted_accounts += accounts.len();
+    let mut provider_rw = provider_factory.database_provider_rw()?;
 
+    for entry in collector.iter()? {
+        let (address_raw, account_raw) = entry?;
+        let (address, _) = Address::from_compact(address_raw.as_slice(), address_raw.len());
+        let (account, _) = GenesisAccount::from_compact(account_raw.as_slice(), account_raw.len());
+
+        let account_storage_len = account.storage.as_ref().map_or(0, |s| s.len());
+        let account_units = 1 + account_storage_len;
+
+        // commit before this account would push us over the threshold
+        if storage_units > 0 && storage_units + account_units > STORAGE_COMMIT_THRESHOLD {
+            provider_rw.commit()?;
+            provider_rw = provider_factory.database_provider_rw()?;
             info!(target: "reth::cli",
-                total_inserted_accounts,
-                "Writing accounts to db"
+                total_accounts,
+                accounts_len,
+                storage_units,
+                "Committed chunk"
             );
+            storage_units = 0;
+        }
 
-            // use transaction to insert genesis header
-            insert_genesis_hashes(
-                provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-            )?;
+        write_account_to_db(
+            provider_rw.tx_ref(),
+            &address,
+            &account,
+            block,
+            &history_list,
+            &mut seen_bytecodes,
+        )?;
 
-            insert_history(
-                provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-                block,
-            )?;
+        total_accounts += 1;
+        storage_units += account_units;
 
-            // block is already written to static files
-            insert_state(
-                provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-                block,
-            )?;
-
-            accounts.clear();
-            chunk_byte_size = 0;
+        if total_accounts.is_multiple_of(100_000) {
+            info!(target: "reth::cli", total_accounts, accounts_len, "Writing accounts...");
         }
     }
+
+    // commit final batch
+    provider_rw.commit()?;
+
+    info!(target: "reth::cli", total_accounts, "All accounts written to database");
+
+    Ok(())
+}
+
+/// Writes a single account and all its storage to every required DB table directly,
+/// without building intermediary structures.
+///
+/// Uses `append_dup` for `DupSort` tables where insertion order matches key order (the ETL
+/// collector sorts by address, so `AccountChangeSets`, `PlainStorageState`, and
+/// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
+/// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
+/// use `put`/`upsert` which do a full B-tree lookup.
+fn write_account_to_db<TX: DbTxMut>(
+    tx: &TX,
+    address: &Address,
+    genesis_account: &GenesisAccount,
+    block: u64,
+    history_list: &IntegerList,
+    seen_bytecodes: &mut B256Set,
+) -> Result<(), eyre::Error> {
+    let bytecode_hash = if let Some(code) = &genesis_account.code {
+        let bytecode = Bytecode::new_raw_checked(code.clone())
+            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let hash = bytecode.hash_slow();
+        if seen_bytecodes.insert(hash) {
+            tx.put::<tables::Bytecodes>(hash, bytecode)?;
+        }
+        Some(hash)
+    } else {
+        None
+    };
+
+    let account = Account {
+        nonce: genesis_account.nonce.unwrap_or_default(),
+        balance: genesis_account.balance,
+        bytecode_hash,
+    };
+
+    let hashed_address = keccak256(address);
+
+    // plain state — sorted by address (ETL order), use append
+    tx.put::<tables::PlainAccountState>(*address, account)?;
+
+    // hashed state — unsorted (keccak scrambles order), must use put
+    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
+
+    // account changeset — DupSort keyed by block, subkey sorted by address (ETL order)
+    let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
+    acct_cs_cursor.append_dup(block, AccountBeforeTx { address: *address, info: None })?;
+
+    // account history
+    tx.put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list.clone())?;
+
+    // storage entries
+    if let Some(storage) = &genesis_account.storage {
+        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut storage_cs_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
+
+        // sort storage slots by key so we can use append_dup for plain/changeset tables
+        let mut sorted_slots: Vec<_> = storage.iter().collect();
+        sorted_slots.sort_unstable_by_key(|(k, _)| *k);
+
+        for &(&key, &value) in &sorted_slots {
+            let value_u256 = U256::from_be_bytes(value.0);
+
+            // plain storage — sorted by (address, key), use append_dup
+            plain_storage_cursor.append_dup(*address, StorageEntry { key, value: value_u256 })?;
+
+            // hashed storage — unsorted keccak order, use upsert
+            let hashed_key = keccak256(key);
+            hashed_storage_cursor
+                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+
+            // storage changeset — sorted by (block, address), then by key via append_dup
+            storage_cs_cursor.append_dup(
+                BlockNumberAddress((block, *address)),
+                StorageEntry { key, value: U256::ZERO },
+            )?;
+
+            // storage history
+            tx.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(*address, key, u64::MAX),
+                history_list.clone(),
+            )?;
+        }
+    }
+
     Ok(())
 }
 
@@ -736,6 +863,81 @@ where
             }
         }
     }
+}
+
+/// Computes the state root (from scratch) with periodic commits to free MDBX dirty pages.
+///
+/// Opens a fresh transaction each iteration to release dirty pages, preventing OOM on large
+/// states where trie updates accumulate gigabytes of MDBX dirty pages.
+fn compute_state_root_chunked<PF>(provider_factory: &PF) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory<
+        ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    >,
+{
+    let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+
+    reth_trie_db::with_adapter!(&provider_rw, |A| {
+        drop(provider_rw);
+        compute_state_root_chunked_inner::<PF, A>(provider_factory)
+    })
+}
+
+fn compute_state_root_chunked_inner<PF, A>(provider_factory: &PF) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory<
+        ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    >,
+    A: reth_trie_db::TrieTableAdapter,
+{
+    trace!(target: "reth::cli", "Computing state root");
+
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let mut total_flushed_updates = 0;
+
+    loop {
+        let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+        let tx = provider_rw.tx_ref();
+
+        let state_root =
+            DbStateRoot::<_, A>::from_tx(tx).with_intermediate_state(intermediate_state.take());
+
+        match state_root.root_with_progress()? {
+            StateRootProgress::Progress(state, _, updates) => {
+                let updated_len = provider_rw.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                info!(target: "reth::cli",
+                    last_account_key = %state.account_root_state.last_hashed_key,
+                    updated_len,
+                    total_flushed_updates,
+                    "Flushing trie updates (committing to free memory)"
+                );
+
+                intermediate_state = Some(*state);
+                provider_rw.commit().map_err(provider_db_err)?;
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                let updated_len = provider_rw.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                info!(target: "reth::cli",
+                    %root,
+                    updated_len,
+                    total_flushed_updates,
+                    "State root computation complete"
+                );
+
+                provider_rw.commit().map_err(provider_db_err)?;
+                return Ok(root)
+            }
+        }
+    }
+}
+
+/// Converts a provider error into an [`InitStorageError`].
+fn provider_db_err(e: impl std::fmt::Display) -> InitStorageError {
+    InitStorageError::from(StateRootError::Database(DatabaseError::Other(e.to_string())))
 }
 
 /// Type to deserialize state root from state dump file.

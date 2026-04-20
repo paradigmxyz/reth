@@ -24,7 +24,7 @@ MC="mc"
 BUCKET="minio/reth-snapshots"
 # Allow overriding the snapshot name (e.g. for big-blocks mode where the
 # big-blocks manifest specifies which base snapshot to use).
-SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable}"
+SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable-previous}"
 MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
 DATADIR_NAME="datadir"
 HASH_MODE_SUFFIX=""

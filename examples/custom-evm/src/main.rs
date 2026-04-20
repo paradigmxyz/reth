@@ -22,7 +22,7 @@ use reth_ethereum::{
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileOutput, PrecompileResult, Precompiles},
+            precompile::{PrecompileOutput, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -110,7 +110,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let precompile = Precompile::new(
             PrecompileId::custom("custom"),
             address!("0x0000000000000000000000000000000000000999"),
-            |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+            |_, _, _| Ok(PrecompileOutput::new(0, Bytes::new(), 0)),
         );
         precompiles.extend([precompile]);
         precompiles

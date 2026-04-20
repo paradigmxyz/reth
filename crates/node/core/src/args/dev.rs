@@ -42,6 +42,22 @@ pub struct DevArgs {
     )]
     pub block_time: Option<Duration>,
 
+    /// Time to wait after initiating payload building before resolving.
+    ///
+    /// Introduces a sleep between `fork_choice_updated` and `resolve_kind` in the
+    /// local miner, giving the payload job time for multiple rebuild attempts with
+    /// new transactions from the pool.
+    ///
+    /// Parses strings using [`humantime::parse_duration`]
+    /// --dev.payload-wait-time 450ms
+    #[arg(
+        long = "dev.payload-wait-time",
+        help_heading = "Dev testnet",
+        value_parser = parse_duration,
+        verbatim_doc_comment
+    )]
+    pub payload_wait_time: Option<Duration>,
+
     /// Derive dev accounts from a fixed mnemonic instead of random ones.
     #[arg(
         long = "dev.mnemonic",
@@ -60,6 +76,7 @@ impl Default for DevArgs {
             dev: false,
             block_max_transactions: None,
             block_time: None,
+            payload_wait_time: None,
             dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
         }
     }
@@ -86,6 +103,7 @@ mod tests {
                 dev: false,
                 block_max_transactions: None,
                 block_time: None,
+                payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
@@ -97,6 +115,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: None,
+                payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
@@ -108,6 +127,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: None,
+                payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
@@ -125,6 +145,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: Some(2),
                 block_time: None,
+                payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
@@ -137,6 +158,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: Some(std::time::Duration::from_secs(1)),
+                payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );

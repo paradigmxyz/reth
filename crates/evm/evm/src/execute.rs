@@ -466,7 +466,7 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
-            Ok(Some(gas_used))
+            Ok(Some(gas_used.tx_gas_used()))
         } else {
             Ok(None)
         }

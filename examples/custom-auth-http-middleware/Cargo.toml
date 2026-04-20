@@ -1,0 +1,16 @@
+[package]
+name = "example-custom-auth-http-middleware"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "rpc", "cli"] }
+
+clap = { workspace = true, features = ["derive"] }
+http = { workspace = true }
+jsonrpsee = { workspace = true, features = ["server"] }
+serde_json.workspace = true
+tower.workspace = true
+tracing.workspace = true

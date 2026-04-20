@@ -45,6 +45,7 @@ pub struct SnapshotManifestCommand {
 }
 
 impl SnapshotManifestCommand {
+    /// Packages snapshot archives and writes the manifest file.
     pub fn execute(self) -> Result<()> {
         let block = match self.block {
             Some(block) => block,
@@ -88,6 +89,7 @@ impl SnapshotManifestCommand {
     }
 }
 
+/// Infers the snapshot block from the source datadir.
 fn infer_snapshot_block(source_datadir: &std::path::Path) -> Result<u64> {
     if let Ok(block) = infer_snapshot_block_from_db(source_datadir) {
         return Ok(block);
@@ -102,6 +104,7 @@ fn infer_snapshot_block(source_datadir: &std::path::Path) -> Result<u64> {
     Ok(block)
 }
 
+/// Reads the snapshot block from the source database Finish stage checkpoint.
 fn infer_snapshot_block_from_db(source_datadir: &std::path::Path) -> Result<u64> {
     let candidates = [source_datadir.join("db"), source_datadir.to_path_buf()];
 
@@ -126,6 +129,7 @@ fn infer_snapshot_block_from_db(source_datadir: &std::path::Path) -> Result<u64>
     )
 }
 
+/// Infers the snapshot block from the highest header static-file range.
 fn infer_snapshot_block_from_headers(source_datadir: &std::path::Path) -> Result<u64> {
     let max_end = header_ranges(source_datadir)?
         .into_iter()
@@ -135,6 +139,7 @@ fn infer_snapshot_block_from_headers(source_datadir: &std::path::Path) -> Result
     Ok(max_end)
 }
 
+/// Infers the static-file block span from header file ranges.
 fn infer_blocks_per_file(source_datadir: &std::path::Path) -> Result<u64> {
     let mut inferred = None;
     for (start, end) in header_ranges(source_datadir)? {
@@ -161,6 +166,7 @@ fn infer_blocks_per_file(source_datadir: &std::path::Path) -> Result<u64> {
     })
 }
 
+/// Collects header static-file ranges from the source datadir.
 fn header_ranges(source_datadir: &std::path::Path) -> Result<Vec<(u64, u64)>> {
     let static_files_dir = source_datadir.join("static_files");
     let static_files_dir =
@@ -183,6 +189,7 @@ fn header_ranges(source_datadir: &std::path::Path) -> Result<Vec<(u64, u64)>> {
     Ok(ranges)
 }
 
+/// Parses the block range from a header static-file name.
 fn parse_headers_range(file_name: &str) -> Option<(u64, u64)> {
     let remainder = file_name.strip_prefix("static_file_headers_")?;
     let (start, end_with_suffix) = remainder.split_once('_')?;
