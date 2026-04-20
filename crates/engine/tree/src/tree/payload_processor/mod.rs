@@ -597,6 +597,7 @@ where
                 proof_worker_handle,
                 trie_metrics.clone(),
                 sparse_state_trie,
+                parent_state_root,
                 chunk_size,
             );
 
