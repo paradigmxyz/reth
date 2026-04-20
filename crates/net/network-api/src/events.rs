@@ -345,17 +345,6 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
         }
     }
 
-    /// Returns `true` if this is a snap protocol request.
-    pub fn is_snap_request(&self) -> bool {
-        matches!(
-            self,
-            Self::GetAccountRange { .. } |
-                Self::GetStorageRanges { .. } |
-                Self::GetByteCodes { .. } |
-                Self::GetTrieNodes { .. }
-        )
-    }
-
     /// Returns the wire message for this type.
     pub fn create_request_message(&self, request_id: u64) -> EthSnapMessage<N> {
         match self {
