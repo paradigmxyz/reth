@@ -1,0 +1,204 @@
+# Mantle release workflow — builds op-reth for Linux and publishes to GitHub Releases.
+# CI can download binaries directly via:
+#   https://github.com/mantle-xyz/reth/releases/download/<tag>/op-reth-<tag>-<target>.tar.gz
+
+name: mantle-release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to release (e.g. v2.2.1). Must be an existing git tag starting with 'v'."
+        required: true
+        type: string
+
+# Default permissions: read-only. Only the release job escalates to write.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  extract-version:
+    name: extract version
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: Determine version tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            tag="${tag//[[:space:]]/}"
+            [[ "$tag" == v* ]] || { echo "::error::Tag must start with 'v' (got: $tag)"; exit 1; }
+            echo "VERSION=${tag}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: build op-reth (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    needs: extract-version
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.extract-version.outputs.VERSION }}
+
+      # cross runs inside Docker, so host-side mold is unused — intentionally omitted.
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build op-reth
+        run: make PROFILE=maxperf op-build-${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          mkdir -p artifacts
+          cp "target/${{ matrix.target }}/maxperf/op-reth" artifacts/
+          cd artifacts
+          tar -czf "op-reth-${{ env.VERSION }}-${{ matrix.target }}.tar.gz" op-reth
+          sha256sum "op-reth-${{ env.VERSION }}-${{ matrix.target }}.tar.gz" \
+            > "op-reth-${{ env.VERSION }}-${{ matrix.target }}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: op-reth-${{ env.VERSION }}-${{ matrix.target }}
+          path: |
+            artifacts/op-reth-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+            artifacts/op-reth-${{ env.VERSION }}-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    name: create release
+    runs-on: ubuntu-latest
+    needs: [build, extract-version]
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.extract-version.outputs.VERSION }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Validate artifacts exist
+        run: |
+          shopt -s nullglob
+          files=(artifacts/op-reth-*.tar.gz)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No release artifacts found in artifacts/"
+            exit 1
+          fi
+          echo "Found ${#files[@]} tarball(s):"
+          printf '  %s\n' "${files[@]}"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          {
+            echo "CHANGELOG<<CHANGELOG_DELIMITER_7f3c"
+            prev_tag=$(git describe --tags --abbrev=0 "${{ env.VERSION }}^" 2>/dev/null || echo "")
+            if [ -n "$prev_tag" ]; then
+              git log --pretty=format:"- %s" "${prev_tag}..${{ env.VERSION }}"
+            else
+              git log --pretty=format:"- %s" -20 "${{ env.VERSION }}"
+            fi
+            echo ""
+            echo "CHANGELOG_DELIMITER_7f3c"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG: ${{ steps.changelog.outputs.CHANGELOG }}
+        run: |
+          # Detect pre-release tags (-rc, -beta, -alpha)
+          prerelease_flag=""
+          if [[ "${{ env.VERSION }}" == *-rc* ]] || [[ "${{ env.VERSION }}" == *-beta* ]] || [[ "${{ env.VERSION }}" == *-alpha* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          # Write release body to a temp file to avoid heredoc injection issues.
+          # YAML block scalar (run: |) strips the common leading whitespace, so the
+          # shell sees this content without the 10-space YAML indent.
+          cat > /tmp/release-body.md <<RELEASE_BODY_END
+          ## Mantle op-reth ${VERSION}
+
+          ### Download
+
+          | Architecture | Binary | SHA-256 |
+          |:---:|:---:|:---:|
+          | x86_64 | [op-reth-${VERSION}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/op-reth-${VERSION}-x86_64-unknown-linux-gnu.tar.gz) | [checksum](https://github.com/${{ github.repository }}/releases/download/${VERSION}/op-reth-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256) |
+          | aarch64 | [op-reth-${VERSION}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/op-reth-${VERSION}-aarch64-unknown-linux-gnu.tar.gz) | [checksum](https://github.com/${{ github.repository }}/releases/download/${VERSION}/op-reth-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256) |
+
+          ### CI Usage
+
+          \`\`\`bash
+          # Download op-reth for x86_64
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/op-reth-${VERSION}-x86_64-unknown-linux-gnu.tar.gz | tar -xzf -
+
+          # Download op-reth for aarch64
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/op-reth-${VERSION}-aarch64-unknown-linux-gnu.tar.gz | tar -xzf -
+          \`\`\`
+
+          ### Changes
+
+          ${CHANGELOG}
+          RELEASE_BODY_END
+
+          # Collect all assets
+          shopt -s nullglob
+          assets=()
+          for file in artifacts/op-reth-*.tar.gz artifacts/op-reth-*.sha256; do
+            assets+=("$file")
+          done
+
+          # Check if release already exists
+          if gh release view "${{ env.VERSION }}" &>/dev/null; then
+            echo "Release ${{ env.VERSION }} exists, uploading assets..."
+            for file in "${assets[@]}"; do
+              gh release upload "${{ env.VERSION }}" "$file" --clobber
+            done
+          else
+            echo "Creating release ${{ env.VERSION }}..."
+            gh release create \
+              $prerelease_flag \
+              -t "Mantle op-reth ${{ env.VERSION }}" \
+              -F /tmp/release-body.md \
+              "${{ env.VERSION }}" \
+              "${assets[@]}"
+          fi
