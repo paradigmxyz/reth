@@ -14,14 +14,14 @@ use reth_node_api::HeaderTy;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    DatabaseProviderFactory, ProviderFactory,
+    DBProvider, DatabaseProviderFactory, ProviderFactory, StageCheckpointWriter,
 };
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage,
         MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
     },
-    ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
+    ExecutionStageThresholds, Stage, StageCheckpoint, StageId, UnwindInput,
 };
 use tracing::info;
 
@@ -164,20 +164,24 @@ where
     N: ProviderNodeTypes,
 {
     info!(target: "reth::cli", "Executing stage.");
-    let provider = output_provider_factory.database_provider_rw()?;
 
     let mut stage = MerkleStage::Execution {
         // Forces updating the root instead of calculating from scratch
         rebuild_threshold: u64::MAX,
         incremental_threshold: u64::MAX,
     };
+    let mut checkpoint = StageCheckpoint::new(from);
 
     loop {
-        let input = reth_stages::ExecInput {
-            target: Some(to),
-            checkpoint: Some(StageCheckpoint::new(from)),
-        };
-        if stage.execute(&provider, input)?.done {
+        let provider = output_provider_factory.database_provider_rw()?;
+        let input = reth_stages::ExecInput { target: Some(to), checkpoint: Some(checkpoint) };
+        let output = stage.execute(&provider, input)?;
+        provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint)?;
+        provider.commit()?;
+
+        checkpoint = output.checkpoint;
+
+        if output.done {
             break
         }
     }
