@@ -19,7 +19,7 @@
 //! And returns `TrieUpdatesSorted` containing the old node values.
 
 use crate::trie_cursor::TrieCursorIter;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::map::B256Map;
 use itertools::{merge_join_by, EitherOrBoth};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
@@ -60,28 +60,52 @@ where
     // Compute storage trie changesets
     let mut storage_tries = B256Map::default();
 
-    // Create storage cursor once and reuse it for all addresses
-    let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
+    let mut storage_tries_sorted = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
+    storage_tries_sorted.sort_unstable_by_key(|(hashed_address, _)| **hashed_address);
 
-    for (hashed_address, storage_updates) in trie_updates.storage_tries_ref() {
-        storage_cursor.set_hashed_address(*hashed_address);
+    if let Some(((first_hashed_address, first_storage_updates), rest)) =
+        storage_tries_sorted.split_first()
+    {
+        // Create the storage cursor at the first account we actually need and then walk accounts
+        // forward in hashed-address order to keep MDBX cursor positioning cache-friendly.
+        let mut storage_cursor = factory.storage_trie_cursor(**first_hashed_address)?;
 
-        let storage_changesets = if storage_updates.is_deleted() {
-            // Handle wiped storage
-            compute_wiped_storage_changesets(&mut storage_cursor, storage_updates)?
+        let first_storage_changesets = if first_storage_updates.is_deleted() {
+            compute_wiped_storage_changesets(&mut storage_cursor, first_storage_updates)?
         } else {
-            // Handle normal storage updates
-            compute_storage_changesets(&mut storage_cursor, storage_updates)?
+            compute_storage_changesets(&mut storage_cursor, first_storage_updates)?
         };
 
-        if !storage_changesets.is_empty() {
+        if !first_storage_changesets.is_empty() {
             storage_tries.insert(
-                *hashed_address,
+                **first_hashed_address,
                 StorageTrieUpdatesSorted {
-                    is_deleted: storage_updates.is_deleted(),
-                    storage_nodes: storage_changesets,
+                    is_deleted: first_storage_updates.is_deleted(),
+                    storage_nodes: first_storage_changesets,
                 },
             );
+        }
+
+        for (hashed_address, storage_updates) in rest {
+            storage_cursor.set_hashed_address(**hashed_address);
+
+            let storage_changesets = if storage_updates.is_deleted() {
+                // Handle wiped storage
+                compute_wiped_storage_changesets(&mut storage_cursor, storage_updates)?
+            } else {
+                // Handle normal storage updates
+                compute_storage_changesets(&mut storage_cursor, storage_updates)?
+            };
+
+            if !storage_changesets.is_empty() {
+                storage_tries.insert(
+                    **hashed_address,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: storage_updates.is_deleted(),
+                        storage_nodes: storage_changesets,
+                    },
+                );
+            }
         }
     }
 
@@ -238,7 +262,7 @@ pub fn storage_trie_wiped_changeset_iter(
 mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursorFactory;
-    use alloy_primitives::map::B256Map;
+    use alloy_primitives::{map::B256Map, B256};
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
 
