@@ -1,14 +1,24 @@
 //! API related to listening for network events.
 
-use reth_eth_wire_types::{
-    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
+use reth_eth_wire::{
+    eth_snap_stream::EthSnapMessage, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
     DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
     Receipts70, UnifiedStatus,
 };
+use reth_eth_wire_types::{
+    message::RequestPair,
+    snap::{
+        GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
+        SnapProtocolMessage,
+    },
+};
 use reth_ethereum_forks::ForkId;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_tokio_util::EventStream;
@@ -262,6 +272,42 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
+    /// Requests an account range from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetAccountRange {
+        /// The request for an account range.
+        request: GetAccountRangeMessage,
+        /// The channel to send the response for the account range.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests storage ranges from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetStorageRanges {
+        /// The request for storage ranges.
+        request: GetStorageRangesMessage,
+        /// The channel to send the response for storage ranges.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests bytecodes from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetByteCodes {
+        /// The request for bytecodes.
+        request: GetByteCodesMessage,
+        /// The channel to send the response for bytecodes.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests trie nodes from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetTrieNodes {
+        /// The request for trie nodes.
+        request: GetTrieNodesMessage,
+        /// The channel to send the response for trie nodes.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -283,6 +329,10 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
+            Self::GetAccountRange { response, .. } => response.send(Err(err)).ok(),
+            Self::GetStorageRanges { response, .. } => response.send(Err(err)).ok(),
+            Self::GetByteCodes { response, .. } => response.send(Err(err)).ok(),
+            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -295,35 +345,81 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
         }
     }
 
-    /// Returns the [`EthMessage`] for this type
-    pub fn create_request_message(&self, request_id: u64) -> EthMessage<N> {
+    /// Returns `true` if this is a snap protocol request.
+    pub fn is_snap_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetAccountRange { .. } |
+                Self::GetStorageRanges { .. } |
+                Self::GetByteCodes { .. } |
+                Self::GetTrieNodes { .. }
+        )
+    }
+
+    /// Returns the wire message for this type.
+    pub fn create_request_message(&self, request_id: u64) -> EthSnapMessage<N> {
         match self {
             Self::GetBlockHeaders { request, .. } => {
-                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
+                EthSnapMessage::Eth(EthMessage::GetBlockHeaders(RequestPair {
+                    request_id,
+                    message: *request,
+                }))
             }
             Self::GetBlockBodies { request, .. } => {
-                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() })
+                EthSnapMessage::Eth(EthMessage::GetBlockBodies(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
             }
             Self::GetPooledTransactions { request, .. } => {
-                EthMessage::GetPooledTransactions(RequestPair {
+                EthSnapMessage::Eth(EthMessage::GetPooledTransactions(RequestPair {
                     request_id,
                     message: request.clone(),
-                })
+                }))
             }
             Self::GetNodeData { request, .. } => {
-                EthMessage::GetNodeData(RequestPair { request_id, message: request.clone() })
-            }
-            Self::GetReceipts { request, .. } | Self::GetReceipts69 { request, .. } => {
-                EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
-            }
-            Self::GetReceipts70 { request, .. } => {
-                EthMessage::GetReceipts70(RequestPair { request_id, message: request.clone() })
-            }
-            Self::GetBlockAccessLists { request, .. } => {
-                EthMessage::GetBlockAccessLists(RequestPair {
+                EthSnapMessage::Eth(EthMessage::GetNodeData(RequestPair {
                     request_id,
                     message: request.clone(),
-                })
+                }))
+            }
+            Self::GetReceipts { request, .. } | Self::GetReceipts69 { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetReceipts(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
+            }
+            Self::GetReceipts70 { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetReceipts70(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
+            }
+            Self::GetBlockAccessLists { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetBlockAccessLists(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
+            }
+            Self::GetAccountRange { request, .. } => {
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(request))
+            }
+            Self::GetStorageRanges { request, .. } => {
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetStorageRanges(request))
+            }
+            Self::GetByteCodes { request, .. } => {
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetByteCodes(request))
+            }
+            Self::GetTrieNodes { request, .. } => {
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetTrieNodes(request))
             }
         }
     }

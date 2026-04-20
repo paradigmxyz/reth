@@ -176,6 +176,12 @@ impl Capability {
             self.is_eth_v70() ||
             self.is_eth_v71()
     }
+
+    /// Whether this is snap/1.
+    #[inline]
+    pub fn is_snap(&self) -> bool {
+        self.name == "snap" && self.version == 1
+    }
 }
 
 impl fmt::Display for Capability {
@@ -272,6 +278,12 @@ impl Capabilities {
     #[inline]
     pub const fn supports_eth(&self) -> bool {
         self.eth_71 || self.eth_70 || self.eth_69 || self.eth_68 || self.eth_67 || self.eth_66
+    }
+
+    /// Whether this peer supports snap/1.
+    #[inline]
+    pub fn supports_snap(&self) -> bool {
+        self.inner.iter().any(Capability::is_snap)
     }
 
     /// Whether this peer supports eth v66 protocol.

@@ -4,12 +4,18 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{message::BlockRequest, session::BlockRangeInfo};
+use crate::{
+    message::{BlockRequest, SnapRequest},
+    session::BlockRangeInfo,
+};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockAccessLists, Capabilities, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
+};
+use reth_eth_wire_types::snap::{
+    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -18,6 +24,7 @@ use reth_network_p2p::{
     headers::client::HeadersRequest,
     priority::Priority,
     receipts::client::ReceiptsResponse,
+    snap::client::SnapResponse,
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
@@ -38,6 +45,13 @@ type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 type InflightReceiptsRequest<R> = Request<(), PeerRequestResult<ReceiptsResponse<R>>>;
 type InflightBlockAccessListsRequest = Request<(), PeerRequestResult<BlockAccessLists>>;
 
+/// Tracks an inflight snap request, bridging the session's response back to the caller.
+#[derive(Debug)]
+struct InflightSnapRequest {
+    /// Final response channel back to the download caller.
+    response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+}
+
 /// Manages data fetching operations.
 ///
 /// This type is hooked into the staged sync pipeline and delegates download request to available
@@ -54,6 +68,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     inflight_bals_requests: HashMap<PeerId, InflightBlockAccessListsRequest>,
     /// Currently active `GetReceipts` requests
     inflight_receipts_requests: HashMap<PeerId, InflightReceiptsRequest<N::Receipt>>,
+    /// Currently active snap requests.
+    inflight_snap_requests: HashMap<PeerId, InflightSnapRequest>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -78,6 +94,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             inflight_bodies_requests: Default::default(),
             inflight_bals_requests: Default::default(),
             inflight_receipts_requests: Default::default(),
+            inflight_snap_requests: Default::default(),
             peers: Default::default(),
             peers_handle,
             num_active_peers,
@@ -129,6 +146,9 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
         if let Some(req) = self.inflight_receipts_requests.remove(peer) {
+            let _ = req.response.send(Err(RequestError::ConnectionDropped));
+        }
+        if let Some(req) = self.inflight_snap_requests.remove(peer) {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
     }
@@ -224,9 +244,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoPeersAvailable
         };
 
-        let request = self.prepare_block_request(peer_id, request);
-
-        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+        PollAction::Ready(self.prepare_request(peer_id, request))
     }
 
     /// Advance the state the syncer
@@ -281,62 +299,160 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Handles a new request to a peer.
     ///
-    /// Caution: this assumes the peer exists and is idle
-    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> BlockRequest {
-        // update the peer's state
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = req.peer_state();
-        }
-
+    /// Caution: this assumes the peer exists and is idle.
+    fn prepare_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> FetchAction {
         match req {
             DownloadRequest::GetBlockHeaders { request, response, .. } => {
-                let inflight = Request { request: request.clone(), response };
-                self.inflight_headers_requests.insert(peer_id, inflight);
-                let HeadersRequest { start, limit, direction } = request;
-                BlockRequest::GetBlockHeaders(GetBlockHeaders {
-                    start_block: start,
-                    limit,
-                    skip: 0,
-                    direction,
-                })
+                let request = self.prepare_block_headers_request(peer_id, request, response);
+                FetchAction::BlockRequest { peer_id, request }
             }
             DownloadRequest::GetBlockBodies { request, response, .. } => {
-                let inflight = Request { request: (), response };
-                self.inflight_bodies_requests.insert(peer_id, inflight);
-                BlockRequest::GetBlockBodies(GetBlockBodies(request))
+                let request = self.prepare_block_bodies_request(peer_id, request, response);
+                FetchAction::BlockRequest { peer_id, request }
             }
             DownloadRequest::GetBlockAccessLists { request, response, .. } => {
-                let inflight = Request { request: (), response };
-                self.inflight_bals_requests.insert(peer_id, inflight);
-                BlockRequest::GetBlockAccessLists(GetBlockAccessLists(request))
+                let request = self.prepare_block_access_lists_request(peer_id, request, response);
+                FetchAction::BlockRequest { peer_id, request }
             }
             DownloadRequest::GetReceipts { request, response, .. } => {
-                let inflight = Request { request: (), response };
-                self.inflight_receipts_requests.insert(peer_id, inflight);
-                BlockRequest::GetReceipts(GetReceipts(request))
+                let request = self.prepare_receipts_request(peer_id, request, response);
+                FetchAction::BlockRequest { peer_id, request }
+            }
+            DownloadRequest::GetAccountRange { request, response, .. } => {
+                let request = self.prepare_snap_request(
+                    peer_id,
+                    SnapRequest::GetAccountRange(request),
+                    response,
+                );
+                FetchAction::SnapRequest { peer_id, request }
+            }
+            DownloadRequest::GetStorageRanges { request, response, .. } => {
+                let request = self.prepare_snap_request(
+                    peer_id,
+                    SnapRequest::GetStorageRanges(request),
+                    response,
+                );
+                FetchAction::SnapRequest { peer_id, request }
+            }
+            DownloadRequest::GetByteCodes { request, response, .. } => {
+                let request = self.prepare_snap_request(
+                    peer_id,
+                    SnapRequest::GetByteCodes(request),
+                    response,
+                );
+                FetchAction::SnapRequest { peer_id, request }
+            }
+            DownloadRequest::GetTrieNodes { request, response, .. } => {
+                let request = self.prepare_snap_request(
+                    peer_id,
+                    SnapRequest::GetTrieNodes(request),
+                    response,
+                );
+                FetchAction::SnapRequest { peer_id, request }
             }
         }
+    }
+
+    /// Handles a new block-header request to a peer.
+    fn prepare_block_headers_request(
+        &mut self,
+        peer_id: PeerId,
+        request: HeadersRequest,
+        response: oneshot::Sender<PeerRequestResult<Vec<N::BlockHeader>>>,
+    ) -> BlockRequest {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = PeerState::GetBlockHeaders;
+        }
+        let inflight = Request { request: request.clone(), response };
+        self.inflight_headers_requests.insert(peer_id, inflight);
+        let HeadersRequest { start, limit, direction } = request;
+        BlockRequest::GetBlockHeaders(GetBlockHeaders {
+            start_block: start,
+            limit,
+            skip: 0,
+            direction,
+        })
+    }
+
+    /// Handles a new block-bodies request to a peer.
+    fn prepare_block_bodies_request(
+        &mut self,
+        peer_id: PeerId,
+        request: Vec<B256>,
+        response: oneshot::Sender<PeerRequestResult<Vec<N::BlockBody>>>,
+    ) -> BlockRequest {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = PeerState::GetBlockBodies;
+        }
+        let inflight = Request { request: (), response };
+        self.inflight_bodies_requests.insert(peer_id, inflight);
+        BlockRequest::GetBlockBodies(GetBlockBodies(request))
+    }
+
+    /// Handles a new block access list request to a peer.
+    fn prepare_block_access_lists_request(
+        &mut self,
+        peer_id: PeerId,
+        request: Vec<B256>,
+        response: oneshot::Sender<PeerRequestResult<BlockAccessLists>>,
+    ) -> BlockRequest {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = PeerState::GetBlockAccessLists;
+        }
+        let inflight = Request { request: (), response };
+        self.inflight_bals_requests.insert(peer_id, inflight);
+        BlockRequest::GetBlockAccessLists(GetBlockAccessLists(request))
+    }
+
+    /// Handles a new receipts request to a peer.
+    fn prepare_receipts_request(
+        &mut self,
+        peer_id: PeerId,
+        request: Vec<B256>,
+        response: oneshot::Sender<PeerRequestResult<ReceiptsResponse<N::Receipt>>>,
+    ) -> BlockRequest {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = PeerState::GetReceipts;
+        }
+        let inflight = Request { request: (), response };
+        self.inflight_receipts_requests.insert(peer_id, inflight);
+        BlockRequest::GetReceipts(GetReceipts(request))
+    }
+
+    /// Handles a new snap request to a peer.
+    fn prepare_snap_request(
+        &mut self,
+        peer_id: PeerId,
+        request: SnapRequest,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+    ) -> SnapRequest {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = PeerState::GetSnap;
+        }
+
+        self.inflight_snap_requests.insert(peer_id, InflightSnapRequest { response });
+
+        request
     }
 
     /// Returns a new followup request for the peer.
     ///
     /// Caution: this expects that the peer is _not_ closed.
-    fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
-        let req = self.queued_requests.pop_front()?;
-        let req = self.prepare_block_request(peer_id, req);
-        Some(BlockResponseOutcome::Request(peer_id, req))
+    fn followup_request(&mut self, peer_id: PeerId) -> Option<FetchResponseOutcome> {
+        let Some(req) = self.queued_requests.pop_front() else { return None };
+        Some(FetchResponseOutcome::Request(self.prepare_request(peer_id, req)))
     }
 
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
-    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
+    /// This delegates the response and returns a [`FetchResponseOutcome`] to either queue in a
     /// direct followup request or get the peer reported if the response was a
     /// [`EthResponseValidator::reputation_change_err`]
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
         res: RequestResult<Vec<N::BlockHeader>>,
-    ) -> Option<BlockResponseOutcome> {
+    ) -> Option<FetchResponseOutcome> {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
 
@@ -364,7 +480,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         // if the response was an `Err` worth reporting the peer for then we return a `BadResponse`
         // outcome
         maybe_reputation_change
-            .map(|reputation_change| BlockResponseOutcome::BadResponse(peer_id, reputation_change))
+            .map(|reputation_change| FetchResponseOutcome::BadResponse(peer_id, reputation_change))
     }
 
     /// Called on a `GetBlockBodies` response from a peer
@@ -372,7 +488,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         &mut self,
         peer_id: PeerId,
         res: RequestResult<Vec<N::BlockBody>>,
-    ) -> Option<BlockResponseOutcome> {
+    ) -> Option<FetchResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |bodies| bodies.is_empty());
 
         if let Some(resp) = self.inflight_bodies_requests.remove(&peer_id) {
@@ -394,11 +510,34 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         &mut self,
         peer_id: PeerId,
         res: RequestResult<BlockAccessLists>,
-    ) -> Option<BlockResponseOutcome> {
+    ) -> Option<FetchResponseOutcome> {
         let is_likely_bad_response = res.is_err();
 
         if let Some(resp) = self.inflight_bals_requests.remove(&peer_id) {
             let _ = resp.response.send(res.map(|b| (peer_id, b).into()));
+        }
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.last_response_likely_bad = is_likely_bad_response;
+
+            if peer.state.on_request_finished() && !is_likely_bad_response {
+                return self.followup_request(peer_id)
+            }
+        }
+        None
+    }
+
+    /// Called on a `Snap` response from a peer.
+    ///
+    /// The response is forwarded to the caller and the peer is made available again.
+    pub(crate) fn on_snap_response(
+        &mut self,
+        peer_id: PeerId,
+        res: RequestResult<SnapResponse>,
+    ) -> Option<FetchResponseOutcome> {
+        let is_likely_bad_response = res.is_err();
+
+        if let Some(resp) = self.inflight_snap_requests.remove(&peer_id) {
+            let _ = resp.response.send(res.map(|response| (peer_id, response).into()));
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.last_response_likely_bad = is_likely_bad_response;
@@ -418,7 +557,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         &mut self,
         peer_id: PeerId,
         res: RequestResult<ReceiptsResponse<N::Receipt>>,
-    ) -> Option<BlockResponseOutcome> {
+    ) -> Option<FetchResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |resp| resp.receipts.is_empty());
 
         if let Some(resp) = self.inflight_receipts_requests.remove(&peer_id) {
@@ -499,6 +638,7 @@ impl Peer {
     fn satisfies(&self, requirement: &BestPeerRequirements) -> bool {
         match requirement {
             BestPeerRequirements::EthVersion(ver) => self.capabilities.supports_eth_at_least(ver),
+            BestPeerRequirements::Snap => self.capabilities.supports_snap(),
             BestPeerRequirements::None |
             BestPeerRequirements::FullBlock |
             BestPeerRequirements::FullBlockRange(_) => true,
@@ -555,7 +695,9 @@ impl Peer {
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
             // Version-based filtering happens in `next_best_peer`, so by the time we get here
             // both peers already satisfy the version requirement.
-            BestPeerRequirements::None | BestPeerRequirements::EthVersion(_) => false,
+            BestPeerRequirements::None |
+            BestPeerRequirements::EthVersion(_) |
+            BestPeerRequirements::Snap => false,
         }
     }
 }
@@ -573,6 +715,8 @@ enum PeerState {
     GetBlockAccessLists,
     /// Peer is handling a `GetReceipts` request.
     GetReceipts,
+    /// Peer is handling a snap request.
+    GetSnap,
     /// Peer session is about to close
     Closing,
 }
@@ -639,28 +783,46 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         response: oneshot::Sender<PeerRequestResult<ReceiptsResponse<N::Receipt>>>,
         priority: Priority,
     },
+    /// Download the requested account ranges and send response through channel
+    GetAccountRange {
+        request: GetAccountRangeMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
+    /// Download the requested storage ranges and send response through channel
+    GetStorageRanges {
+        request: GetStorageRangesMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
+    /// Download the requested bytecodes and send response through channel
+    GetByteCodes {
+        request: GetByteCodesMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
+    /// Download the requested trie nodes and send response through channel
+    GetTrieNodes {
+        request: GetTrieNodesMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
 }
 
 // === impl DownloadRequest ===
 
 impl<N: NetworkPrimitives> DownloadRequest<N> {
-    /// Returns the corresponding state for a peer that handles the request.
-    const fn peer_state(&self) -> PeerState {
-        match self {
-            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
-            Self::GetBlockAccessLists { .. } => PeerState::GetBlockAccessLists,
-            Self::GetReceipts { .. } => PeerState::GetReceipts,
-        }
-    }
-
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
             Self::GetBlockHeaders { priority, .. } |
             Self::GetBlockBodies { priority, .. } |
             Self::GetBlockAccessLists { priority, .. } |
-            Self::GetReceipts { priority, .. } => priority,
+            Self::GetReceipts { priority, .. } |
+            Self::GetAccountRange { priority, .. } |
+            Self::GetStorageRanges { priority, .. } |
+            Self::GetByteCodes { priority, .. } |
+            Self::GetTrieNodes { priority, .. } => priority,
         }
     }
 
@@ -681,6 +843,10 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetBlockBodies { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
+            Self::GetAccountRange { response, .. } |
+            Self::GetStorageRanges { response, .. } |
+            Self::GetByteCodes { response, .. } |
+            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -697,11 +863,16 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
                 }
             }
             Self::GetReceipts { .. } => BestPeerRequirements::FullBlock,
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetTrieNodes { .. } => BestPeerRequirements::Snap,
         }
     }
 }
 
 /// An action the syncer can emit.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FetchAction {
     /// Dispatch an eth request to the given peer.
     BlockRequest {
@@ -710,15 +881,22 @@ pub(crate) enum FetchAction {
         /// The request to send
         request: BlockRequest,
     },
+    /// Dispatch a snap request to the given peer.
+    SnapRequest {
+        /// The targeted recipient for the request
+        peer_id: PeerId,
+        /// The request to send
+        request: SnapRequest,
+    },
 }
 
 /// Outcome of a processed response.
 ///
 /// Returned after processing a response.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum BlockResponseOutcome {
+pub(crate) enum FetchResponseOutcome {
     /// Continue with another request to the peer.
-    Request(PeerId, BlockRequest),
+    Request(FetchAction),
     /// How to handle a bad response and the reputation change to apply, if any.
     BadResponse(PeerId, ReputationChangeKind),
 }
@@ -733,6 +911,8 @@ enum BestPeerRequirements {
     FullBlock,
     /// Peer must support at least this eth protocol version.
     EthVersion(EthVersion),
+    /// Peer must support snap.
+    Snap,
 }
 
 #[cfg(test)]
@@ -864,7 +1044,7 @@ mod tests {
 
         assert_eq!(
             fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)),
-            Some(BlockResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
+            Some(FetchResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
         );
         assert_eq!(
             fetcher.on_block_headers_response(peer_id, Err(RequestError::BadResponse)),
@@ -930,10 +1110,10 @@ mod tests {
         .is_some());
 
         match outcome {
-            BlockResponseOutcome::BadResponse(peer, _) => {
+            FetchResponseOutcome::BadResponse(peer, _) => {
                 assert_eq!(peer, peer_id)
             }
-            BlockResponseOutcome::Request(_, _) => {
+            FetchResponseOutcome::Request(_) => {
                 unreachable!()
             }
         };
@@ -1446,7 +1626,9 @@ mod tests {
         let resp = ReceiptsResponse::new(vec![vec![]]);
         let outcome = fetcher.on_receipts_response(peer_id, Ok(resp));
 
-        assert!(matches!(outcome, Some(BlockResponseOutcome::Request(pid, _)) if pid == peer_id));
+        assert!(
+            matches!(outcome, Some(FetchResponseOutcome::Request(FetchAction::BlockRequest { peer_id: pid, .. })) if pid == peer_id)
+        );
     }
 
     #[tokio::test]
@@ -1461,14 +1643,18 @@ mod tests {
             priority: Priority::default(),
         };
 
-        let block_request = fetcher.prepare_block_request(peer_id, req);
+        let block_request = fetcher.prepare_request(peer_id, req);
 
         // Returns a GetReceipts block request with the same hashes
         match block_request {
-            BlockRequest::GetReceipts(ref get) => {
+            FetchAction::BlockRequest {
+                request: BlockRequest::GetReceipts(get),
+                peer_id: dispatched_peer,
+            } => {
+                assert_eq!(dispatched_peer, peer_id);
                 assert_eq!(get.0, hashes);
             }
-            other => panic!("expected GetReceipts, got {other:?}"),
+            other => panic!("expected BlockRequest::GetReceipts, got {other:?}"),
         }
 
         // Peer state transitions to GetReceipts

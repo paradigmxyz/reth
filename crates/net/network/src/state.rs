@@ -3,8 +3,8 @@
 use crate::{
     cache::LruCache,
     discovery::Discovery,
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
-    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
+    fetch::{FetchAction, FetchResponseOutcome, StateFetcher},
+    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult, SnapRequest},
     peers::{PeerAction, PeersManager},
     session::BlockRangeInfo,
     FetchClient,
@@ -386,69 +386,130 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         }
     }
 
-    /// Sends The message to the peer's session and queues in a response.
+    /// Sends a request to the peer's session and queues the matching response.
     ///
     /// Caution: this will replace an already pending response. It's the responsibility of the
     /// caller to select the peer.
-    fn handle_block_request(&mut self, peer_id: PeerId, request: BlockRequest) {
-        if let Some(ref mut peer) = self.active_peers.get_mut(&peer_id) {
-            let (request, response) = match request {
-                BlockRequest::GetBlockHeaders(request) => {
-                    let (response, rx) = oneshot::channel();
-                    let request = PeerRequest::GetBlockHeaders { request, response };
-                    let response = PeerResponse::BlockHeaders { response: rx };
-                    (request, response)
-                }
-                BlockRequest::GetBlockBodies(request) => {
-                    let (response, rx) = oneshot::channel();
-                    let request = PeerRequest::GetBlockBodies { request, response };
-                    let response = PeerResponse::BlockBodies { response: rx };
-                    (request, response)
-                }
-                BlockRequest::GetBlockAccessLists(request) => {
-                    let (response, rx) = oneshot::channel();
-                    let request = PeerRequest::GetBlockAccessLists { request, response };
-                    let response = PeerResponse::BlockAccessLists { response: rx };
-                    (request, response)
-                }
-                BlockRequest::GetReceipts(request) => {
-                    if peer.capabilities.supports_eth_v70() {
-                        let (response, rx) = oneshot::channel();
-                        let request = PeerRequest::GetReceipts70 {
-                            request: GetReceipts70 {
-                                first_block_receipt_index: 0,
-                                block_hashes: request.0,
-                            },
-                            response,
-                        };
-                        let response = PeerResponse::Receipts70 { response: rx };
-                        (request, response)
-                    } else if peer.capabilities.supports_eth_v69() {
-                        let (response, rx) = oneshot::channel();
-                        let request = PeerRequest::GetReceipts69 { request, response };
-                        let response = PeerResponse::Receipts69 { response: rx };
-                        (request, response)
-                    } else {
-                        let (response, rx) = oneshot::channel();
-                        let request = PeerRequest::GetReceipts { request, response };
-                        let response = PeerResponse::Receipts { response: rx };
-                        (request, response)
-                    }
-                }
-            };
+    fn send_peer_request(
+        &mut self,
+        peer_id: PeerId,
+        request: PeerRequest<N>,
+        response: PeerResponse<N>,
+    ) {
+        if let Some(peer) = self.active_peers.get_mut(&peer_id) {
             let _ = peer.request_tx.to_session_tx.try_send(request);
             peer.pending_response = Some(response);
         }
     }
 
-    /// Handle the outcome of processed response, for example directly queue another request.
-    fn on_block_response_outcome(&mut self, outcome: BlockResponseOutcome) {
-        match outcome {
-            BlockResponseOutcome::Request(peer, request) => {
-                self.handle_block_request(peer, request);
+    /// Sends a block request to the peer's session and queues the matching response.
+    fn handle_block_request(&mut self, peer_id: PeerId, request: BlockRequest) {
+        let (supports_eth_v69, supports_eth_v70) = self
+            .active_peers
+            .get(&peer_id)
+            .map(|peer| {
+                (peer.capabilities.supports_eth_v69(), peer.capabilities.supports_eth_v70())
+            })
+            .unwrap_or_default();
+
+        let (request, response) = match request {
+            BlockRequest::GetBlockHeaders(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetBlockHeaders { request, response };
+                let response = PeerResponse::BlockHeaders { response: rx };
+                (request, response)
             }
-            BlockResponseOutcome::BadResponse(peer, reputation_change) => {
+            BlockRequest::GetBlockBodies(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetBlockBodies { request, response };
+                let response = PeerResponse::BlockBodies { response: rx };
+                (request, response)
+            }
+            BlockRequest::GetBlockAccessLists(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetBlockAccessLists { request, response };
+                let response = PeerResponse::BlockAccessLists { response: rx };
+                (request, response)
+            }
+            BlockRequest::GetReceipts(request) => {
+                if supports_eth_v70 {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetReceipts70 {
+                        request: GetReceipts70 {
+                            first_block_receipt_index: 0,
+                            block_hashes: request.0,
+                        },
+                        response,
+                    };
+                    let response = PeerResponse::Receipts70 { response: rx };
+                    (request, response)
+                } else if supports_eth_v69 {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetReceipts69 { request, response };
+                    let response = PeerResponse::Receipts69 { response: rx };
+                    (request, response)
+                } else {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetReceipts { request, response };
+                    let response = PeerResponse::Receipts { response: rx };
+                    (request, response)
+                }
+            }
+        };
+        self.send_peer_request(peer_id, request, response);
+    }
+
+    /// Sends a snap request to the peer's session and queues the matching response.
+    fn handle_snap_request(&mut self, peer_id: PeerId, request: SnapRequest) {
+        let (request, response) = match request {
+            SnapRequest::GetAccountRange(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetAccountRange { request, response };
+                let response = PeerResponse::Snap { response: rx };
+                (request, response)
+            }
+            SnapRequest::GetStorageRanges(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetStorageRanges { request, response };
+                let response = PeerResponse::Snap { response: rx };
+                (request, response)
+            }
+            SnapRequest::GetByteCodes(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetByteCodes { request, response };
+                let response = PeerResponse::Snap { response: rx };
+                (request, response)
+            }
+            SnapRequest::GetTrieNodes(request) => {
+                let (response, rx) = oneshot::channel();
+                let request = PeerRequest::GetTrieNodes { request, response };
+                let response = PeerResponse::Snap { response: rx };
+                (request, response)
+            }
+        };
+        self.send_peer_request(peer_id, request, response);
+    }
+
+    /// Handle the outcome of processed response, for example directly queue another request.
+    fn on_fetch_response_outcome(&mut self, outcome: FetchResponseOutcome) {
+        match outcome {
+            FetchResponseOutcome::Request(action) => {
+                self.handle_fetch_action(action);
+            }
+            FetchResponseOutcome::BadResponse(peer, reputation_change) => {
                 self.peers_manager.apply_reputation_change(&peer, reputation_change);
+            }
+        }
+    }
+
+    /// Dispatches a fetch action to the target peer session.
+    fn handle_fetch_action(&mut self, action: FetchAction) {
+        match action {
+            FetchAction::BlockRequest { peer_id, request } => {
+                self.handle_block_request(peer_id, request)
+            }
+            FetchAction::SnapRequest { peer_id, request } => {
+                self.handle_snap_request(peer_id, request)
             }
         }
     }
@@ -456,9 +517,9 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// Invoked when received a response from a connected peer.
     ///
     /// Delegates the response result to the fetcher which may return an outcome specific
-    /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
+    /// instruction that needs to be handled in [`Self::on_fetch_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
-    fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult<N>) {
+    fn on_fetch_response(&mut self, peer: PeerId, resp: PeerResponseResult<N>) {
         let outcome = match resp {
             PeerResponseResult::BlockHeaders(res) => {
                 self.state_fetcher.on_block_headers_response(peer, res)
@@ -490,11 +551,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             PeerResponseResult::BlockAccessLists(res) => {
                 self.state_fetcher.on_block_access_lists_response(peer, res)
             }
+            PeerResponseResult::Snap(res) => self.state_fetcher.on_snap_response(peer, res),
             _ => None,
         };
 
         if let Some(outcome) = outcome {
-            self.on_block_response_outcome(outcome);
+            self.on_fetch_response_outcome(outcome);
         }
     }
 
@@ -511,11 +573,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             }
 
             while let Poll::Ready(action) = self.state_fetcher.poll(cx) {
-                match action {
-                    FetchAction::BlockRequest { peer_id, request } => {
-                        self.handle_block_request(peer_id, request)
-                    }
-                }
+                self.handle_fetch_action(action);
             }
 
             loop {
@@ -561,7 +619,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 }
 
                 for (peer_id, resp) in received_responses {
-                    self.on_eth_response(peer_id, resp);
+                    self.on_fetch_response(peer_id, resp);
                 }
             }
 

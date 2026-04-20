@@ -206,6 +206,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
     extra_protocols: RlpxSubProtocols,
+    /// Whether to announce snap capability.
+    snap_enabled: bool,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -259,6 +261,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor,
             hello_message: None,
             extra_protocols: Default::default(),
+            snap_enabled: false,
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
@@ -328,6 +331,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// ```
     pub fn hello_message(mut self, hello_message: HelloMessageWithProtocols) -> Self {
         self.hello_message = Some(hello_message);
+        self
+    }
+
+    /// Enables or disables announcing snap/1 capability.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        self.snap_enabled = enable;
         self
     }
 
@@ -635,6 +644,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor,
             hello_message,
             extra_protocols,
+            snap_enabled,
             head,
             tx_gossip_disabled,
             block_import,
@@ -668,6 +678,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+        hello_message = hello_message.with_snap(snap_enabled);
 
         // set the status
         let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);

@@ -20,6 +20,7 @@ use std::{
 use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    eth_snap_stream::EthSnapStream,
     handshake::EthRlpxHandshake,
     p2pstream::DisconnectP2P,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
@@ -238,6 +239,41 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     eth_max_message_size,
                 );
                 Ok((eth_stream, their_status))
+            },
+        )
+        .await
+    }
+
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] using an
+    /// [`EthSnapStream`] as primary when snap is shared.
+    pub async fn into_eth_snap_satellite_stream<N: NetworkPrimitives>(
+        self,
+        status: UnifiedStatus,
+        fork_filter: ForkFilter,
+        handshake: Arc<dyn EthRlpxHandshake>,
+        eth_max_message_size: usize,
+    ) -> Result<
+        (RlpxSatelliteStream<St, EthSnapStream<ProtocolProxy, N>>, UnifiedStatus),
+        EthStreamError,
+    >
+    where
+        St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    {
+        let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
+        self.into_satellite_stream_with_tuple_handshake(
+            &Capability::eth(eth_cap),
+            async move |proxy| {
+                let handshake = handshake.clone();
+                let mut unauth = UnauthProxy { inner: proxy };
+                let their_status = handshake
+                    .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
+                    .await?;
+                let stream = EthSnapStream::with_max_message_size(
+                    unauth.into_inner(),
+                    eth_cap,
+                    eth_max_message_size,
+                );
+                Ok((stream, their_status))
             },
         )
         .await

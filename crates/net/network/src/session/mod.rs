@@ -1179,22 +1179,46 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let (multiplex_stream, their_status) = match multiplex_stream
-            .into_eth_satellite_stream(status, fork_filter, handshake, eth_max_message_size)
-            .await
-        {
-            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-            Err(err) => {
-                return PendingSessionEvent::Disconnected {
-                    remote_addr,
-                    session_id,
-                    direction,
-                    error: Some(PendingSessionHandshakeError::Eth(err)),
+        let supports_snap = multiplex_stream.shared_capabilities().supports_snap();
+
+        let (conn, their_status) = if supports_snap {
+            match multiplex_stream
+                .into_eth_snap_satellite_stream(
+                    status,
+                    fork_filter,
+                    handshake,
+                    eth_max_message_size,
+                )
+                .await
+            {
+                Ok((multiplex_stream, their_status)) => (multiplex_stream.into(), their_status),
+                Err(err) => {
+                    return PendingSessionEvent::Disconnected {
+                        remote_addr,
+                        session_id,
+                        direction,
+                        error: Some(PendingSessionHandshakeError::Eth(err)),
+                    }
+                }
+            }
+        } else {
+            match multiplex_stream
+                .into_eth_satellite_stream(status, fork_filter, handshake, eth_max_message_size)
+                .await
+            {
+                Ok((multiplex_stream, their_status)) => (multiplex_stream.into(), their_status),
+                Err(err) => {
+                    return PendingSessionEvent::Disconnected {
+                        remote_addr,
+                        session_id,
+                        direction,
+                        error: Some(PendingSessionHandshakeError::Eth(err)),
+                    }
                 }
             }
         };
 
-        (multiplex_stream.into(), their_status)
+        (conn, their_status)
     };
 
     PendingSessionEvent::Established {

@@ -13,6 +13,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
     receipts::client::{ReceiptsClient, ReceiptsFut},
+    snap::client::{SnapClient, SnapResponse},
     BlockClient,
 };
 use reth_network_peers::PeerId;
@@ -164,5 +165,101 @@ impl<N: NetworkPrimitives> BlockAccessListsClient for FetchClient<N> {
         } else {
             Box::pin(future::err(RequestError::ChannelClosed))
         }
+    }
+}
+
+type SnapClientFuture =
+    std::pin::Pin<Box<dyn Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync>>;
+
+impl<N: NetworkPrimitives> SnapClient for FetchClient<N> {
+    type Output = SnapClientFuture;
+
+    fn get_account_range_with_priority(
+        &self,
+        request: reth_eth_wire_types::snap::GetAccountRangeMessage,
+        priority: Priority,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetAccountRange { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+
+    fn get_storage_ranges_with_priority(
+        &self,
+        request: reth_eth_wire_types::snap::GetStorageRangesMessage,
+        priority: Priority,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetStorageRanges { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+
+    fn get_storage_ranges(
+        &self,
+        request: reth_eth_wire_types::snap::GetStorageRangesMessage,
+    ) -> Self::Output {
+        self.get_storage_ranges_with_priority(request, Priority::Normal)
+    }
+
+    fn get_byte_codes_with_priority(
+        &self,
+        request: reth_eth_wire_types::snap::GetByteCodesMessage,
+        priority: Priority,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetByteCodes { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+
+    fn get_byte_codes(
+        &self,
+        request: reth_eth_wire_types::snap::GetByteCodesMessage,
+    ) -> Self::Output {
+        self.get_byte_codes_with_priority(request, Priority::Normal)
+    }
+
+    fn get_trie_nodes_with_priority(
+        &self,
+        request: reth_eth_wire_types::snap::GetTrieNodesMessage,
+        priority: Priority,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetTrieNodes { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+
+    fn get_trie_nodes(
+        &self,
+        request: reth_eth_wire_types::snap::GetTrieNodesMessage,
+    ) -> Self::Output {
+        self.get_trie_nodes_with_priority(request, Priority::Normal)
     }
 }

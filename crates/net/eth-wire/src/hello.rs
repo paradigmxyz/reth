@@ -84,6 +84,19 @@ impl HelloMessageWithProtocols {
         self.protocols.iter().any(|p| p.cap == protocol.cap)
     }
 
+    /// Enables or disables announcing snap/1 capability.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        if enable {
+            let snap = Protocol::snap_1();
+            if !self.contains_protocol(&snap) {
+                self.protocols.push(snap);
+            }
+        } else {
+            self.protocols.retain(|protocol| !protocol.cap.is_snap());
+        }
+        self
+    }
+
     /// Adds a new protocol to the set.
     ///
     /// Returns an error if the protocol already exists.
@@ -181,6 +194,16 @@ impl HelloMessageBuilder {
         self
     }
 
+    /// Enables or disables announcing snap/1 capability.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        if enable {
+            self.protocols.get_or_insert_with(Vec::new).push(Protocol::snap_1());
+        } else if let Some(protocols) = self.protocols.as_mut() {
+            protocols.retain(|protocol| !protocol.cap.is_snap());
+        }
+        self
+    }
+
     /// Sets client version.
     pub fn client_version(mut self, client_version: impl Into<String>) -> Self {
         self.client_version = Some(client_version.into());
@@ -217,7 +240,7 @@ impl HelloMessageBuilder {
 mod tests {
     use crate::{
         p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, HelloMessageWithProtocols,
-        ProtocolVersion,
+        Protocol, ProtocolVersion,
     };
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
@@ -259,6 +282,18 @@ mod tests {
         hello.encode(&mut hello_encoded);
 
         assert_eq!(hello_encoded.len(), hello.length());
+    }
+
+    #[test]
+    fn test_with_snap_toggle() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+
+        let hello = HelloMessageWithProtocols::builder(id).with_snap(true).build();
+        assert!(hello.contains_protocol(&Protocol::snap_1()));
+
+        let hello = hello.with_snap(false);
+        assert!(!hello.contains_protocol(&Protocol::snap_1()));
     }
     //TODO: add test for eth70 here once we have fully support it
 

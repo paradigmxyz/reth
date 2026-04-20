@@ -5,6 +5,7 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
     RawCapabilityMessage, SnapProtocolMessage, SnapVersion,
@@ -14,6 +15,7 @@ use core::fmt::Debug;
 use futures::{Sink, SinkExt};
 use pin_project::pin_project;
 use std::{
+    io,
     marker::PhantomData,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -39,6 +41,10 @@ pub enum EthSnapStreamError {
     #[error("rlp error: {0}")]
     Rlp(#[from] alloy_rlp::Error),
 
+    /// Underlying p2p stream error
+    #[error(transparent)]
+    P2P(#[from] P2PStreamError),
+
     /// Status message received outside handshake
     #[error("status message received outside handshake")]
     StatusNotInHandshake,
@@ -51,6 +57,32 @@ pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Eth(EthMessage<N>),
     /// A snap protocol message
     Snap(SnapProtocolMessage),
+}
+
+impl<N: NetworkPrimitives> EthSnapMessage<N> {
+    /// Returns the wire message id.
+    pub const fn message_id(&self) -> u8 {
+        match self {
+            Self::Eth(msg) => msg.message_id().to_u8(),
+            Self::Snap(msg) => msg.message_id() as u8,
+        }
+    }
+
+    /// Returns whether this message is a response.
+    pub const fn is_response(&self) -> bool {
+        match self {
+            Self::Eth(msg) => msg.is_response(),
+            Self::Snap(msg) => msg.is_response(),
+        }
+    }
+
+    /// Maps the inner eth message to the negotiated version, leaving snap messages untouched.
+    pub fn map_versioned(self, version: EthVersion) -> Self {
+        match self {
+            Self::Eth(msg) => Self::Eth(msg.map_versioned(version)),
+            Self::Snap(msg) => Self::Snap(msg),
+        }
+    }
 }
 
 /// A stream implementation that can handle both eth and snap protocol messages
@@ -225,6 +257,33 @@ where
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_close(cx).map_err(Into::into)
+    }
+}
+
+impl From<io::Error> for EthSnapStreamError {
+    fn from(err: io::Error) -> Self {
+        P2PStreamError::from(err).into()
+    }
+}
+
+impl From<EthSnapStreamError> for EthStreamError {
+    fn from(err: EthSnapStreamError) -> Self {
+        match err {
+            EthSnapStreamError::InvalidMessage(version, msg) => Self::InvalidMessage(
+                crate::message::MessageError::Other(format!("{msg} (version {version:?})")),
+            ),
+            EthSnapStreamError::UnknownMessageId(message_id) => {
+                Self::UnsupportedMessage { message_id }
+            }
+            EthSnapStreamError::MessageTooLarge(len, _) => Self::MessageTooBig(len),
+            EthSnapStreamError::Rlp(err) => {
+                Self::InvalidMessage(crate::message::MessageError::RlpError(err))
+            }
+            EthSnapStreamError::P2P(err) => Self::P2PStreamError(err),
+            EthSnapStreamError::StatusNotInHandshake => {
+                Self::EthHandshakeError(EthHandshakeError::StatusNotInHandshake)
+            }
+        }
     }
 }
 

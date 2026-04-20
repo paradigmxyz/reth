@@ -28,13 +28,21 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
+    eth_snap_stream::EthSnapMessage,
     message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
+use reth_eth_wire_types::{
+    message::RequestPair,
+    snap::{
+        AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
+        TrieNodesMessage,
+    },
+    NewPooledTransactionHashes, RawCapabilityMessage,
+};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
-use reth_network_p2p::error::RequestError;
+use reth_network_p2p::{error::RequestError, snap::client::SnapResponse};
 use reth_network_peers::PeerId;
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
 use reth_primitives_traits::Block;
@@ -219,7 +227,15 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
-    fn on_incoming_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
+    fn on_incoming_message(&mut self, msg: EthSnapMessage<N>) -> OnIncomingMessageOutcome<N> {
+        match msg {
+            EthSnapMessage::Eth(msg) => self.on_incoming_eth_message(msg),
+            EthSnapMessage::Snap(msg) => self.on_incoming_snap_message(msg),
+        }
+    }
+
+    /// Handle an eth protocol message read from the connection.
+    fn on_incoming_eth_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
         /// storing the receiver half internally so the pending response can be polled.
@@ -273,7 +289,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         match msg {
             message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
                 error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
-                message,
+                message: EthSnapMessage::Eth(message),
             },
             EthMessage::NewBlockHashes(msg) => {
                 self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
@@ -351,7 +367,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                             "invalid block range: earliest ({}) > latest ({})",
                             msg.earliest, msg.latest
                         ))),
-                        message: EthMessage::BlockRangeUpdate(msg),
+                        message: EthSnapMessage::Eth(EthMessage::BlockRangeUpdate(msg)),
                     };
                 }
 
@@ -361,7 +377,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         error: EthStreamError::InvalidMessage(MessageError::Other(
                             "invalid block range: latest_hash cannot be zero".to_string(),
                         )),
-                        message: EthMessage::BlockRangeUpdate(msg),
+                        message: EthSnapMessage::Eth(EthMessage::BlockRangeUpdate(msg)),
                     };
                 }
 
@@ -372,6 +388,138 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 OnIncomingMessageOutcome::Ok
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
+        }
+    }
+
+    /// Handle a snap protocol message read from the connection.
+    fn on_incoming_snap_message(
+        &mut self,
+        msg: SnapProtocolMessage,
+    ) -> OnIncomingMessageOutcome<N> {
+        match msg {
+            SnapProtocolMessage::GetAccountRange(req) => {
+                let resp = SnapProtocolMessage::AccountRange(AccountRangeMessage {
+                    request_id: req.request_id,
+                    accounts: Vec::new(),
+                    proof: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::SnapMessage(resp));
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::GetStorageRanges(req) => {
+                let resp = SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+                    request_id: req.request_id,
+                    slots: Vec::new(),
+                    proof: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::SnapMessage(resp));
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::GetByteCodes(req) => {
+                let resp = SnapProtocolMessage::ByteCodes(ByteCodesMessage {
+                    request_id: req.request_id,
+                    codes: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::SnapMessage(resp));
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::GetTrieNodes(req) => {
+                let resp = SnapProtocolMessage::TrieNodes(TrieNodesMessage {
+                    request_id: req.request_id,
+                    nodes: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::SnapMessage(resp));
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::AccountRange(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::GetAccountRange {
+                            response, ..
+                        }) => {
+                            let _ = response.send(Ok(SnapResponse::AccountRange(resp)));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::StorageRanges(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::GetStorageRanges {
+                            response, ..
+                        }) => {
+                            let _ = response.send(Ok(SnapResponse::StorageRanges(resp)));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::ByteCodes(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::GetByteCodes { response, .. }) => {
+                            let _ = response.send(Ok(SnapResponse::ByteCodes(resp)));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::TrieNodes(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::GetTrieNodes { response, .. }) => {
+                            let _ = response.send(Ok(SnapResponse::TrieNodes(resp)));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::GetBlockAccessLists(_) |
+            SnapProtocolMessage::BlockAccessLists(_) => {
+                self.on_bad_message();
+                OnIncomingMessageOutcome::Ok
+            }
         }
     }
 
@@ -728,7 +876,12 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
                     let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                        OutgoingMessage::Eth(msg) => {
+                            this.conn.start_send_unpin(EthSnapMessage::Eth(msg))
+                        }
+                        OutgoingMessage::SnapMessage(msg) => {
+                            this.conn.start_send_unpin(EthSnapMessage::Snap(msg))
+                        }
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                     };
@@ -798,13 +951,13 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         if this.is_disconnecting() {
                             break
                         }
-                        debug!(target: "net::session", remote_peer_id=?this.remote_peer_id, "eth stream completed");
+                        debug!(target: "net::session", remote_peer_id=?this.remote_peer_id, "protocol stream completed");
                         return this.emit_disconnect(cx)
                     }
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
+                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received protocol message");
                                 // decode and handle message
                                 match this.on_incoming_message(msg) {
                                     OnIncomingMessageOutcome::Ok => {
@@ -929,7 +1082,7 @@ enum OnIncomingMessageOutcome<N: NetworkPrimitives> {
     /// Message successfully handled.
     Ok,
     /// Message is considered to be in violation of the protocol
-    BadMessage { error: EthStreamError, message: EthMessage<N> },
+    BadMessage { error: EthStreamError, message: EthSnapMessage<N> },
     /// Currently no capacity to handle the message
     NoCapacity(ActiveSessionMessage<N>),
 }
@@ -957,6 +1110,8 @@ enum RequestState<R> {
 pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     /// A message that is owned.
     Eth(EthMessage<N>),
+    /// A snap protocol message.
+    SnapMessage(SnapProtocolMessage),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
@@ -968,6 +1123,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     const fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
+            Self::SnapMessage(msg) => msg.is_response(),
             _ => false,
         }
     }
@@ -985,6 +1141,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewPooledTransactionHashes68(h) => h.hashes.len(),
                 _ => 0,
             },
+            Self::SnapMessage(_) => 0,
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
                 EthBroadcastMessage::Transactions(txs) => txs.len(),
@@ -1025,6 +1182,15 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
 impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthMessage<N>) -> Self {
         Self::Eth(value)
+    }
+}
+
+impl<N: NetworkPrimitives> From<EthSnapMessage<N>> for OutgoingMessage<N> {
+    fn from(value: EthSnapMessage<N>) -> Self {
+        match value {
+            EthSnapMessage::Eth(msg) => Self::Eth(msg),
+            EthSnapMessage::Snap(msg) => Self::SnapMessage(msg),
+        }
     }
 }
 
