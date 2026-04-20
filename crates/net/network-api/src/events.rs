@@ -343,7 +343,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
         }
     }
 
-    /// Returns the wire message for this type.
+    /// Returns the [`EthSnapMessage`] for this type.
     pub fn create_request_message(&self, request_id: u64) -> EthSnapMessage<N> {
         match self {
             Self::GetBlockHeaders { request, .. } => {

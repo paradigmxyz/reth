@@ -4,7 +4,7 @@ use crate::{
     cache::LruCache,
     discovery::Discovery,
     fetch::{FetchAction, FetchResponseOutcome, StateFetcher},
-    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult, SnapRequest},
+    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     session::BlockRangeInfo,
     FetchClient,
@@ -18,7 +18,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
-use reth_network_p2p::{receipts::client::ReceiptsResponse, snap::client::SnapResponse};
+use reth_network_p2p::receipts::client::ReceiptsResponse;
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives_traits::Block;
@@ -459,37 +459,6 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         self.send_peer_request(peer_id, request, response);
     }
 
-    /// Sends a snap request to the peer's session and queues the matching response.
-    fn handle_snap_request(&mut self, peer_id: PeerId, request: SnapRequest) {
-        let (request, response) = match request {
-            SnapRequest::GetAccountRange(request) => {
-                let (response, rx) = oneshot::channel();
-                let request = PeerRequest::SnapGetAccountRange { request, response };
-                let response = PeerResponse::SnapAccountRange { response: rx };
-                (request, response)
-            }
-            SnapRequest::GetStorageRanges(request) => {
-                let (response, rx) = oneshot::channel();
-                let request = PeerRequest::SnapGetStorageRanges { request, response };
-                let response = PeerResponse::SnapStorageRanges { response: rx };
-                (request, response)
-            }
-            SnapRequest::GetByteCodes(request) => {
-                let (response, rx) = oneshot::channel();
-                let request = PeerRequest::SnapGetByteCodes { request, response };
-                let response = PeerResponse::SnapByteCodes { response: rx };
-                (request, response)
-            }
-            SnapRequest::GetTrieNodes(request) => {
-                let (response, rx) = oneshot::channel();
-                let request = PeerRequest::SnapGetTrieNodes { request, response };
-                let response = PeerResponse::SnapTrieNodes { response: rx };
-                (request, response)
-            }
-        };
-        self.send_peer_request(peer_id, request, response);
-    }
-
     /// Handle the outcome of processed response, for example directly queue another request.
     fn on_fetch_response_outcome(&mut self, outcome: FetchResponseOutcome) {
         match outcome {
@@ -507,9 +476,6 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         match action {
             FetchAction::BlockRequest { peer_id, request } => {
                 self.handle_block_request(peer_id, request)
-            }
-            FetchAction::SnapRequest { peer_id, request } => {
-                self.handle_snap_request(peer_id, request)
             }
         }
     }
@@ -550,18 +516,6 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             }
             PeerResponseResult::BlockAccessLists(res) => {
                 self.state_fetcher.on_block_access_lists_response(peer, res)
-            }
-            PeerResponseResult::SnapAccountRange(res) => {
-                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::AccountRange))
-            }
-            PeerResponseResult::SnapStorageRanges(res) => {
-                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::StorageRanges))
-            }
-            PeerResponseResult::SnapByteCodes(res) => {
-                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::ByteCodes))
-            }
-            PeerResponseResult::SnapTrieNodes(res) => {
-                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::TrieNodes))
             }
             _ => None,
         };
