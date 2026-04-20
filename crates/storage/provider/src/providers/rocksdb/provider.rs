@@ -1818,8 +1818,21 @@ impl<'a> RocksDBBatch<'a> {
         );
 
         let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+        let mut last_shard = self
+            .provider
+            .get::<tables::AccountsHistory>(last_key.clone())?
+            .unwrap_or_else(BlockNumberList::empty);
+
+        if last_shard.len() == NUM_OF_INDICES_IN_SHARD as u64 {
+            let highest_block_number =
+                last_shard.iter().next_back().expect("non-empty shard has a highest block");
+            self.delete::<tables::AccountsHistory>(last_key.clone())?;
+            self.put::<tables::AccountsHistory>(
+                ShardedKey::new(address, highest_block_number),
+                &last_shard,
+            )?;
+            last_shard = BlockNumberList::empty();
+        }
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
@@ -1880,8 +1893,21 @@ impl<'a> RocksDBBatch<'a> {
         );
 
         let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+        let mut last_shard = self
+            .provider
+            .get::<tables::StoragesHistory>(last_key.clone())?
+            .unwrap_or_else(BlockNumberList::empty);
+
+        if last_shard.len() == NUM_OF_INDICES_IN_SHARD as u64 {
+            let highest_block_number =
+                last_shard.iter().next_back().expect("non-empty shard has a highest block");
+            self.delete::<tables::StoragesHistory>(last_key.clone())?;
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &last_shard,
+            )?;
+            last_shard = BlockNumberList::empty();
+        }
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
