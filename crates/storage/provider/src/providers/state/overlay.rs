@@ -73,7 +73,12 @@ pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
         state: Arc<HashedPostStateSorted>,
     },
     /// Lazy overlay computed on first access.
-    Lazy(LazyOverlay<N>),
+    Lazy {
+        /// Lazy overlay that can compute trie input for the requested anchor.
+        overlay: LazyOverlay<N>,
+        /// Persisted anchor hash the overlay should be resolved against.
+        anchor_hash: B256,
+    },
 }
 
 impl<N: NodePrimitives> OverlaySource<N> {
@@ -83,7 +88,7 @@ impl<N: NodePrimitives> OverlaySource<N> {
     fn resolve(&self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         match self {
             Self::Immediate { trie, state } => (Arc::clone(trie), Arc::clone(state)),
-            Self::Lazy(lazy) => lazy.as_overlay(),
+            Self::Lazy { overlay, anchor_hash } => overlay.as_overlay(*anchor_hash),
         }
     }
 }
@@ -142,8 +147,13 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Set a lazy overlay that will be computed on first access.
     ///
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
-    pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay<N>>) -> Self {
-        self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
+    pub fn with_lazy_overlay(
+        mut self,
+        lazy_overlay: Option<LazyOverlay<N>>,
+        anchor_hash: B256,
+    ) -> Self {
+        self.overlay_source =
+            lazy_overlay.map(|overlay| OverlaySource::Lazy { overlay, anchor_hash });
         // Clear the overlay cache since we've updated the source.
         self.overlay_cache = Default::default();
         self
@@ -176,9 +186,9 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             Some(OverlaySource::Immediate { state, .. }) => {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
             }
-            Some(OverlaySource::Lazy(lazy)) => {
+            Some(OverlaySource::Lazy { overlay, anchor_hash }) => {
                 // Resolve lazy overlay and convert to immediate with extension
-                let (trie, mut state) = lazy.as_overlay();
+                let (trie, mut state) = overlay.as_overlay(*anchor_hash);
                 Arc::make_mut(&mut state).extend_ref_and_sort(&other);
                 self.overlay_source = Some(OverlaySource::Immediate { trie, state });
             }

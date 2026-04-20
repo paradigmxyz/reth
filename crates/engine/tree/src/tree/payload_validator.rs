@@ -526,7 +526,7 @@ where
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay);
+                .with_lazy_overlay(lazy_overlay, anchor_hash);
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -2026,7 +2026,7 @@ where
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay);
+                .with_lazy_overlay(lazy_overlay, anchor_hash);
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,

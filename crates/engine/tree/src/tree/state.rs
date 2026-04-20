@@ -106,10 +106,10 @@ impl<N: NodePrimitives> TreeState<N> {
     /// This should be called after the canonical head changes to optimistically
     /// prepare the overlay for the next payload that will likely build on it.
     ///
-    /// Returns a clone of the [`LazyOverlay`] so the caller can spawn a background
-    /// task to trigger computation via [`LazyOverlay::get`]. This ensures the overlay
-    /// is actually computed before the next payload arrives.
-    pub(crate) fn prepare_canonical_overlay(&mut self) -> Option<LazyOverlay<N>> {
+    /// Returns a clone of the prepared overlay so the caller can spawn a background
+    /// task to trigger computation via [`LazyOverlay::get`] for the cached anchor.
+    /// This ensures the overlay is actually computed before the next payload arrives.
+    pub(crate) fn prepare_canonical_overlay(&mut self) -> Option<PreparedCanonicalOverlay<N>> {
         let canonical_hash = self.current_canonical_head.hash;
 
         // Get blocks leading to the canonical head
@@ -120,12 +120,12 @@ impl<N: NodePrimitives> TreeState<N> {
         };
 
         let num_blocks = blocks.len();
-        let overlay = LazyOverlay::new(blocks);
-        self.cached_canonical_overlay = Some(PreparedCanonicalOverlay {
+        let prepared = PreparedCanonicalOverlay {
             parent_hash: canonical_hash,
-            overlay: overlay.clone(),
+            overlay: LazyOverlay::new(blocks),
             anchor_hash,
-        });
+        };
+        self.cached_canonical_overlay = Some(prepared.clone());
 
         debug!(
             target: "engine::tree",
@@ -135,7 +135,7 @@ impl<N: NodePrimitives> TreeState<N> {
             "Prepared cached canonical overlay"
         );
 
-        Some(overlay)
+        Some(prepared)
     }
 
     /// Returns the cached overlay if it matches the requested parent hash and anchor.
