@@ -202,6 +202,30 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         };
     }
 
+    /// Shrinks the capacity of the sparse trie's node storage.
+    /// Works for both revealed and blind tries with allocated storage.
+    pub fn shrink_nodes_to(&mut self, size: usize) {
+        match self {
+            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
+                trie.shrink_nodes_to(size);
+            }
+            _ => {}
+        }
+    }
+
+    /// Shrinks the capacity of the sparse trie's value storage.
+    /// Works for both revealed and blind tries with allocated storage.
+    pub fn shrink_values_to(&mut self, size: usize) {
+        match self {
+            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
+                trie.shrink_values_to(size);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl RevealableSparseTrie {
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
     ///
     /// # Errors
@@ -223,7 +247,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the trie is still blind, or if the leaf cannot be removed
+    /// Returns an error if the trie is still blind, or if the leaf cannot be removed.
     #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn remove_leaf(
         &mut self,
@@ -233,28 +257,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.remove_leaf(path, provider)?;
         Ok(())
-    }
-
-    /// Shrinks the capacity of the sparse trie's node storage.
-    /// Works for both revealed and blind tries with allocated storage.
-    pub fn shrink_nodes_to(&mut self, size: usize) {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
-                trie.shrink_nodes_to(size);
-            }
-            _ => {}
-        }
-    }
-
-    /// Shrinks the capacity of the sparse trie's value storage.
-    /// Works for both revealed and blind tries with allocated storage.
-    pub fn shrink_values_to(&mut self, size: usize) {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
-                trie.shrink_values_to(size);
-            }
-            _ => {}
-        }
     }
 }
 

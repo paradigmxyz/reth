@@ -553,7 +553,9 @@ where
             }
         })
     }
+}
 
+impl SparseStateTrie {
     /// Update the account leaf node.
     pub fn update_account_leaf(
         &mut self,
@@ -600,12 +602,9 @@ where
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
         } else if self.is_account_revealed(address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            // The account was revealed, either...
             if let Some(value) = self.get_account_value(&address) {
-                // ..it exists and we should take its current storage root or...
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
-                // ...the account is newly created and the storage trie is empty.
                 EMPTY_ROOT_HASH
             }
         } else {
@@ -680,7 +679,6 @@ where
             return Err(SparseTrieErrorKind::Blind.into())
         }
 
-        // Nothing to update if the account doesn't exist in the trie.
         let Some(mut trie_account) = self
             .get_account_value(&address)
             .map(|v| TrieAccount::decode(&mut &v[..]))
@@ -690,8 +688,6 @@ where
             return Ok(true)
         };
 
-        // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
-        // be empty.
         let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
@@ -699,15 +695,12 @@ where
             EMPTY_ROOT_HASH
         };
 
-        // Update the account with the new storage root.
         trie_account.storage_root = storage_root;
 
-        // If the account is empty, indicate that it should be removed.
         if trie_account == TrieAccount::default() {
             return Ok(false)
         }
 
-        // Otherwise, update the account leaf.
         trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
