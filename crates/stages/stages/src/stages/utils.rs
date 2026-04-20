@@ -1,11 +1,14 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{
+    map::{AddressMap, FbMap},
+    Address, BlockNumber, FixedBytes, TxNumber, B256,
+};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
+        AccountBeforeTx, BlockNumberAddress, ShardedKey,
     },
     table::{Decode, Decompress, Table},
     transaction::DbTx,
@@ -25,6 +28,8 @@ use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+
+type StorageHistoryCacheKey = FixedBytes<52>;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -113,6 +118,18 @@ where
     Ok(())
 }
 
+fn storage_history_cache_key(address: Address, storage_key: B256) -> StorageHistoryCacheKey {
+    let mut key = [0u8; 52];
+    key[..20].copy_from_slice(address.as_slice());
+    key[20..].copy_from_slice(storage_key.as_slice());
+    FixedBytes::new(key)
+}
+
+fn decode_storage_history_cache_key(key: StorageHistoryCacheKey) -> (Address, B256) {
+    let bytes = key.as_slice();
+    (Address::from_slice(&bytes[..20]), B256::from_slice(&bytes[20..]))
+}
+
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
 pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
@@ -179,12 +196,13 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: FbMap<52, Vec<u64>> = FbMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
+    let mut insert_fn = |key: StorageHistoryCacheKey, indices: Vec<u64>| {
         let last = indices.last().expect("qed");
+        let (address, storage_key) = decode_storage_history_cache_key(key);
         collector.insert(
-            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
+            StorageShardedKey::new(address, storage_key, *last),
             BlockNumberList::new_pre_sorted(indices),
         )?;
         Ok::<(), StageError>(())
@@ -201,7 +219,10 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache
+            .entry(storage_history_cache_key(address, storage.key))
+            .or_default()
+            .push(block_number);
 
         if block_number != current_block_number {
             current_block_number = block_number;
