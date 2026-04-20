@@ -83,7 +83,10 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie::{
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, HashedPostStateSorted,
+    StateRoot,
+};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -523,10 +526,13 @@ where
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
+        let hashed_state_overlay =
+            lazy_overlay.is_none().then(|| Arc::new(HashedPostStateSorted::default()));
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay);
+                .with_lazy_overlay(lazy_overlay)
+                .with_hashed_state_overlay(anchor_hash, hashed_state_overlay);
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -2023,10 +2029,13 @@ where
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
+        let hashed_state_overlay =
+            lazy_overlay.is_none().then(|| Arc::new(HashedPostStateSorted::default()));
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay);
+                .with_lazy_overlay(lazy_overlay)
+                .with_hashed_state_overlay(anchor_hash, hashed_state_overlay);
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,

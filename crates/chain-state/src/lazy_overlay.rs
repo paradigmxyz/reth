@@ -79,6 +79,13 @@ impl<N: NodePrimitives> LazyOverlay<N> {
         self.inputs.blocks.len()
     }
 
+    /// Returns the oldest anchor hash this overlay can serve.
+    ///
+    /// This is the parent hash of the oldest block in the stored newest-to-oldest chain segment.
+    pub fn anchor_hash(&self) -> Option<B256> {
+        self.inputs.blocks.last().map(|block| block.recovered_block().parent_hash())
+    }
+
     /// Returns true if the overlay has already been computed for the requested anchor.
     pub fn is_computed(&self, anchor_hash: B256) -> bool {
         self.inner.contains_key(&anchor_hash)
@@ -259,6 +266,15 @@ mod tests {
 
         assert_eq!(actual.nodes.as_ref(), expected.nodes.as_ref());
         assert_eq!(actual.state.as_ref(), expected.state.as_ref());
+    }
+
+    #[test]
+    fn anchor_hash_returns_oldest_served_anchor() {
+        let blocks = test_blocks();
+        let expected_anchor = blocks.last().unwrap().recovered_block().parent_hash();
+        let overlay = LazyOverlay::new(blocks);
+
+        assert_eq!(overlay.anchor_hash(), Some(expected_anchor));
     }
 
     #[test]

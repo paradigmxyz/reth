@@ -67,6 +67,8 @@ struct Overlay {
 pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     /// Immediate overlay with already-computed data.
     Immediate {
+        /// Anchor hash the overlay was computed against.
+        anchor_hash: B256,
         /// Trie updates overlay.
         trie: Arc<TrieUpdatesSorted>,
         /// Hashed state overlay.
@@ -85,7 +87,15 @@ impl<N: NodePrimitives> OverlaySource<N> {
         anchor_hash: Option<B256>,
     ) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         match self {
-            Self::Immediate { trie, state } => (Arc::clone(trie), Arc::clone(state)),
+            Self::Immediate { anchor_hash: overlay_anchor_hash, trie, state } => {
+                if let Some(anchor_hash) = anchor_hash {
+                    assert_eq!(
+                        *overlay_anchor_hash, anchor_hash,
+                        "immediate overlay anchor hash does not match requested anchor"
+                    );
+                }
+                (Arc::clone(trie), Arc::clone(state))
+            }
             Self::Lazy(overlay) => overlay
                 .as_overlay(anchor_hash.expect("lazy overlay resolution requires an anchor hash")),
         }
@@ -100,8 +110,8 @@ impl<N: NodePrimitives> OverlaySource<N> {
 pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// The underlying database provider factory
     factory: F,
-    /// Optional block hash for collecting reverts
-    block_hash: Option<B256>,
+    /// Optional block hash to revert the DB state to before applying overlays.
+    revert_block_hash: Option<B256>,
     /// Optional overlay source (lazy or immediate).
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
@@ -118,7 +128,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     pub fn new(factory: F, changeset_cache: ChangesetCache) -> Self {
         Self {
             factory,
-            block_hash: None,
+            revert_block_hash: None,
             overlay_source: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
@@ -126,10 +136,10 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         }
     }
 
-    /// Set the block hash for collecting reverts. All state will be reverted to the point
+    /// Set the block hash to revert the DB state to. All state will be reverted to the point
     /// _after_ this block has been processed.
     pub const fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
-        self.block_hash = block_hash;
+        self.revert_block_hash = block_hash;
         self
     }
 
@@ -158,10 +168,12 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_hashed_state_overlay(
         mut self,
+        anchor_hash: B256,
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     ) -> Self {
         if let Some(state) = hashed_state_overlay {
             self.overlay_source = Some(OverlaySource::Immediate {
+                anchor_hash,
                 trie: Arc::new(TrieUpdatesSorted::default()),
                 state,
             });
@@ -173,8 +185,9 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
 
     /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
     ///
-    /// If no overlay exists, creates a new immediate overlay with the given state.
     /// If a lazy overlay exists, it is resolved first then extended.
+    ///
+    /// Panics if no overlay source has been configured.
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
         match &mut self.overlay_source {
             Some(OverlaySource::Immediate { state, .. }) => {
@@ -183,16 +196,20 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             Some(OverlaySource::Lazy(overlay)) => {
                 // Resolve lazy overlay and convert to immediate with extension
                 let (trie, mut state) = overlay.as_overlay(
-                    self.block_hash.expect("extending a lazy overlay requires an anchor hash"),
+                    self.revert_block_hash
+                        .expect("extending a lazy overlay requires an anchor hash"),
                 );
                 Arc::make_mut(&mut state).extend_ref_and_sort(&other);
-                self.overlay_source = Some(OverlaySource::Immediate { trie, state });
+                self.overlay_source = Some(OverlaySource::Immediate {
+                    anchor_hash: self
+                        .revert_block_hash
+                        .expect("extending a lazy overlay requires an anchor hash"),
+                    trie,
+                    state,
+                });
             }
             None => {
-                self.overlay_source = Some(OverlaySource::Immediate {
-                    trie: Arc::new(TrieUpdatesSorted::default()),
-                    state: Arc::new(other),
-                });
+                panic!("extending a hashed state overlay requires an existing overlay source")
             }
         }
         // Clear the overlay cache since we've updated the source.
@@ -229,12 +246,12 @@ where
         }
     }
 
-    /// Returns the block number for [`Self`]'s `block_hash` field, if any.
+    /// Returns the block number for [`Self`]'s `revert_block_hash` field, if any.
     fn get_requested_block_number(
         &self,
         provider: &F::Provider,
     ) -> ProviderResult<Option<BlockNumber>> {
-        if let Some(block_hash) = self.block_hash {
+        if let Some(block_hash) = self.revert_block_hash {
             Ok(Some(
                 provider
                     .convert_hash_or_number(block_hash.into())?
@@ -314,14 +331,14 @@ where
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
 
-        // If block_hash is provided, collect reverts
+        // If a revert block hash is provided, collect reverts.
         let (trie_updates, hashed_post_state) = if let Some(from_block) =
             self.get_requested_block_number(provider)? &&
             self.reverts_required(provider, db_tip_block, from_block)?
         {
             debug!(
                 target: "providers::state::overlay",
-                block_hash = ?self.block_hash,
+                revert_block_hash = ?self.revert_block_hash,
                 from_block,
                 db_tip_block,
                 range_start = from_block + 1,
@@ -359,7 +376,7 @@ where
 
             // Resolve overlays (lazy or immediate) and extend reverts with them.
             // If reverts are empty, use overlays directly to avoid cloning.
-            let (overlay_trie, overlay_state) = self.resolve_overlays(self.block_hash);
+            let (overlay_trie, overlay_state) = self.resolve_overlays(self.revert_block_hash);
 
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
@@ -384,7 +401,7 @@ where
 
             debug!(
                 target: "providers::state::overlay",
-                block_hash = ?self.block_hash,
+                revert_block_hash = ?self.revert_block_hash,
                 ?from_block,
                 num_trie_updates = ?trie_updates_total_len,
                 num_state_updates = ?hashed_state_updates_total_len,
@@ -393,8 +410,8 @@ where
 
             (trie_updates, hashed_state_updates)
         } else {
-            // If no block_hash, use overlays directly (resolving lazy if set)
-            let (trie_updates, hashed_state) = self.resolve_overlays(self.block_hash);
+            // If no reverts are needed, use overlays directly (resolving lazy if set).
+            let (trie_updates, hashed_state) = self.resolve_overlays(self.revert_block_hash);
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
@@ -422,7 +439,7 @@ where
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn get_overlay(&self, provider: &F::Provider) -> ProviderResult<Overlay> {
         // No anchor block — just resolve the in-memory overlay directly.
-        if self.block_hash.is_none() {
+        if self.revert_block_hash.is_none() {
             let (trie_updates, hashed_post_state) = self.resolve_overlays(None);
             return Ok(Overlay { trie_updates, hashed_post_state })
         }
