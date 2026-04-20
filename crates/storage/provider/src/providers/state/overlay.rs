@@ -83,6 +83,14 @@ impl OverlaySource {
             Self::Lazy(lazy) => lazy.as_overlay(),
         }
     }
+
+    /// Resolve just the trie overlay.
+    fn resolve_trie(&self) -> Arc<TrieUpdatesSorted> {
+        match self {
+            Self::Immediate { trie, .. } => Arc::clone(trie),
+            Self::Lazy(lazy) => Arc::clone(&lazy.get().nodes),
+        }
+    }
 }
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -213,6 +221,14 @@ where
             None => {
                 (Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default()))
             }
+        }
+    }
+
+    /// Resolves just the trie overlay.
+    fn resolve_trie_overlay(&self) -> Arc<TrieUpdatesSorted> {
+        match &self.overlay_source {
+            Some(source) => source.resolve_trie(),
+            None => Arc::new(TrieUpdatesSorted::default()),
         }
     }
 
@@ -404,6 +420,70 @@ where
         Ok(Overlay { trie_updates, hashed_post_state })
     }
 
+    /// Calculates just the trie overlay given a transaction and the current db tip.
+    #[instrument(
+        level = "debug",
+        target = "providers::state::overlay",
+        skip_all,
+        fields(%db_tip_block)
+    )]
+    fn calculate_trie_overlay(
+        &self,
+        provider: &F::Provider,
+        db_tip_block: BlockNumber,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>> {
+        let retrieve_trie_reverts_duration;
+
+        let trie_updates = if let Some(from_block) = self.get_requested_block_number(provider)? &&
+            self.reverts_required(provider, db_tip_block, from_block)?
+        {
+            debug!(
+                target: "providers::state::overlay",
+                block_hash = ?self.block_hash,
+                from_block,
+                db_tip_block,
+                range_start = from_block + 1,
+                range_end = db_tip_block,
+                "Collecting trie reverts for trie-only overlay state provider"
+            );
+
+            let mut trie_reverts = {
+                let _guard =
+                    debug_span!(target: "providers::state::overlay", "retrieving_trie_reverts")
+                        .entered();
+
+                let start = Instant::now();
+                let accumulated_reverts = self
+                    .changeset_cache
+                    .get_or_compute_range(provider, (from_block + 1)..=db_tip_block)?;
+                retrieve_trie_reverts_duration = start.elapsed();
+                accumulated_reverts
+            };
+
+            let overlay_trie = self.resolve_trie_overlay();
+            if trie_reverts.is_empty() {
+                overlay_trie
+            } else if !overlay_trie.is_empty() {
+                trie_reverts.extend_ref_and_sort(&overlay_trie);
+                Arc::new(trie_reverts)
+            } else {
+                Arc::new(trie_reverts)
+            }
+        } else {
+            retrieve_trie_reverts_duration = Duration::ZERO;
+            self.resolve_trie_overlay()
+        };
+
+        self.metrics
+            .retrieve_trie_reverts_duration
+            .record(retrieve_trie_reverts_duration.as_secs_f64());
+        self.metrics.retrieve_hashed_state_reverts_duration.record(Duration::ZERO.as_secs_f64());
+        self.metrics.trie_updates_size.record(trie_updates.total_len() as f64);
+        self.metrics.hashed_state_size.record(0.0);
+
+        Ok(trie_updates)
+    }
+
     /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
     /// cached value then this calculates the [`Overlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
@@ -427,6 +507,43 @@ where
         };
 
         Ok(overlay)
+    }
+
+    /// Returns just the trie overlay, avoiding hashed-state revert reconstruction.
+    fn get_trie_overlay(&self, provider: &F::Provider) -> ProviderResult<Arc<TrieUpdatesSorted>> {
+        if self.block_hash.is_none() {
+            return Ok(self.resolve_trie_overlay())
+        }
+
+        if let Some(entry) = self.overlay_cache.get(&self.get_db_tip_block_number(provider)?) {
+            return Ok(Arc::clone(&entry.trie_updates))
+        }
+
+        let db_tip_block = self.get_db_tip_block_number(provider)?;
+        self.calculate_trie_overlay(provider, db_tip_block)
+    }
+
+    /// Create a read-only [`OverlayStateProvider`] that only prepares trie overlays.
+    pub fn database_trie_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
+        let overall_start = Instant::now();
+
+        let provider = {
+            let start = Instant::now();
+            let res = self.factory.database_provider_ro()?;
+            self.metrics.create_provider_duration.record(start.elapsed());
+            res
+        };
+
+        let trie_updates = self.get_trie_overlay(&provider)?;
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
+
+        Ok(OverlayStateProvider::new(
+            provider,
+            trie_updates,
+            Arc::new(HashedPostStateSorted::default()),
+            is_v2,
+        ))
     }
 }
 

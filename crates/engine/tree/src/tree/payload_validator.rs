@@ -823,7 +823,7 @@ where
         // could advance and evict changeset cache entries between factory creation and the task
         // actually running, causing expensive DB fallback computations when building the overlay.
         let changeset_provider =
-            ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
+            ensure_ok_post_block!(overlay_factory.database_trie_provider_ro(), block);
 
         let executed_block = self.spawn_deferred_trie_task(
             block,
