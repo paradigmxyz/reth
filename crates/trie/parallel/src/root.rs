@@ -362,8 +362,8 @@ mod tests {
         }
 
         let prefix_sets = hashed_state.construct_prefix_sets();
-        overlay_factory =
-            overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
+        overlay_factory = overlay_factory
+            .with_hashed_state_overlay(B256::ZERO, Some(Arc::new(hashed_state.into_sorted())));
 
         assert_eq!(
             ParallelStateRoot::new(overlay_factory, prefix_sets.freeze(), runtime)

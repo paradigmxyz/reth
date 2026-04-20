@@ -79,30 +79,19 @@ pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
 }
 
 impl<N: NodePrimitives> OverlaySource<N> {
-    /// Returns the anchor hash this overlay source should be resolved against.
-    fn anchor_hash(&self) -> B256 {
-        match self {
-            Self::Immediate { anchor_hash, .. } => *anchor_hash,
-            Self::Lazy(overlay) => {
-                overlay.anchor_hash().expect("lazy overlay resolution requires at least one block")
-            }
-        }
-    }
-
     /// Resolve the overlay source into (trie, state) tuple.
     ///
     /// For lazy overlays, this may block waiting for deferred data.
-    fn resolve(&self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
+    fn resolve(&self, anchor_hash: B256) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         match self {
             Self::Immediate { anchor_hash: overlay_anchor_hash, trie, state } => {
-                let anchor_hash = self.anchor_hash();
                 assert_eq!(
                     *overlay_anchor_hash, anchor_hash,
                     "immediate overlay anchor hash does not match requested anchor"
                 );
                 (Arc::clone(trie), Arc::clone(state))
             }
-            Self::Lazy(overlay) => overlay.as_overlay(self.anchor_hash()),
+            Self::Lazy(overlay) => overlay.as_overlay(anchor_hash),
         }
     }
 }
@@ -115,6 +104,8 @@ impl<N: NodePrimitives> OverlaySource<N> {
 pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// The underlying database provider factory
     factory: F,
+    /// Anchor hash to revert the DB state to before applying overlays.
+    requested_anchor_hash: Option<B256>,
     /// Optional overlay source (lazy or immediate).
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
@@ -131,11 +122,23 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     pub fn new(factory: F, changeset_cache: ChangesetCache) -> Self {
         Self {
             factory,
+            requested_anchor_hash: None,
             overlay_source: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
             overlay_cache: Default::default(),
         }
+    }
+
+    /// Set the anchor hash to revert the DB state to before applying overlays.
+    pub const fn with_anchor_hash(mut self, anchor_hash: B256) -> Self {
+        self.requested_anchor_hash = Some(anchor_hash);
+        self
+    }
+
+    /// Returns true if an overlay source has been configured.
+    pub fn has_overlay_source(&self) -> bool {
+        self.overlay_source.is_some()
     }
 
     /// Set the overlay source (lazy or immediate).
@@ -186,8 +189,8 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             }
             Some(OverlaySource::Lazy(overlay)) => {
                 // Resolve lazy overlay and convert to immediate with extension
-                let anchor_hash = overlay
-                    .anchor_hash()
+                let anchor_hash = self
+                    .requested_anchor_hash
                     .expect("extending a lazy overlay requires an anchor hash");
                 let (trie, mut state) = overlay.as_overlay(anchor_hash);
                 Arc::make_mut(&mut state).extend_ref_and_sort(&other);
@@ -215,30 +218,35 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    /// Returns the anchor hash implied by the current overlay source, if any.
-    fn requested_anchor_hash(&self) -> Option<B256> {
-        self.overlay_source.as_ref().map(OverlaySource::anchor_hash)
-    }
-
     /// Resolves the effective overlay (trie updates, hashed state).
     ///
     /// If an overlay source is set, it is resolved (blocking if lazy).
     /// Otherwise, returns empty defaults.
     fn resolve_overlays(&self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         match &self.overlay_source {
-            Some(source) => source.resolve(),
+            Some(source) => match self.requested_anchor_hash {
+                Some(anchor_hash) => source.resolve(anchor_hash),
+                None => match source {
+                    OverlaySource::Immediate { trie, state, .. } => {
+                        (Arc::clone(trie), Arc::clone(state))
+                    }
+                    OverlaySource::Lazy(_) => {
+                        panic!("lazy overlay resolution requires an anchor hash")
+                    }
+                },
+            },
             None => {
                 (Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default()))
             }
         }
     }
 
-    /// Returns the block number for [`Self`]'s overlay anchor, if any.
+    /// Returns the block number for [`Self`]'s requested anchor, if any.
     fn get_requested_block_number(
         &self,
         provider: &F::Provider,
     ) -> ProviderResult<Option<BlockNumber>> {
-        if let Some(block_hash) = self.requested_anchor_hash() {
+        if let Some(block_hash) = self.requested_anchor_hash {
             Ok(Some(
                 provider
                     .convert_hash_or_number(block_hash.into())?
@@ -317,7 +325,7 @@ where
         let retrieve_hashed_state_reverts_duration;
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
-        let requested_anchor_hash = self.requested_anchor_hash();
+        let requested_anchor_hash = self.requested_anchor_hash;
 
         // If an anchor hash is provided, collect reverts.
         let (trie_updates, hashed_post_state) = if let Some(from_block) =
@@ -427,7 +435,7 @@ where
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn get_overlay(&self, provider: &F::Provider) -> ProviderResult<Overlay> {
         // No anchor block — just resolve the in-memory overlay directly.
-        if self.requested_anchor_hash().is_none() {
+        if self.requested_anchor_hash.is_none() {
             let (trie_updates, hashed_post_state) = self.resolve_overlays();
             return Ok(Overlay { trie_updates, hashed_post_state })
         }

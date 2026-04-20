@@ -79,10 +79,11 @@ impl<N: NodePrimitives> LazyOverlay<N> {
         self.inputs.blocks.len()
     }
 
+    #[cfg(test)]
     /// Returns the oldest anchor hash this overlay can serve.
     ///
     /// This is the parent hash of the oldest block in the stored newest-to-oldest chain segment.
-    pub fn anchor_hash(&self) -> Option<B256> {
+    fn anchor_hash(&self) -> Option<B256> {
         self.inputs.blocks.last().map(|block| block.recovered_block().parent_hash())
     }
 
