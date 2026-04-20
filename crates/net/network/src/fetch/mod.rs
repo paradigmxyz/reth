@@ -4,10 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{
-    message::BlockRequest,
-    session::BlockRangeInfo,
-};
+use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -227,7 +224,9 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoPeersAvailable
         };
 
-        PollAction::Ready(self.prepare_request(peer_id, request))
+        let request = self.prepare_block_request(peer_id, request);
+
+        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
     }
 
     /// Advance the state the syncer
@@ -282,112 +281,62 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Handles a new request to a peer.
     ///
-    /// Caution: this assumes the peer exists and is idle.
-    fn prepare_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> FetchAction {
+    /// Caution: this assumes the peer exists and is idle
+    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> BlockRequest {
+        // update the peer's state
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = req.peer_state();
+        }
+
         match req {
             DownloadRequest::GetBlockHeaders { request, response, .. } => {
-                let request = self.prepare_block_headers_request(peer_id, request, response);
-                FetchAction::BlockRequest { peer_id, request }
+                let inflight = Request { request: request.clone(), response };
+                self.inflight_headers_requests.insert(peer_id, inflight);
+                let HeadersRequest { start, limit, direction } = request;
+                BlockRequest::GetBlockHeaders(GetBlockHeaders {
+                    start_block: start,
+                    limit,
+                    skip: 0,
+                    direction,
+                })
             }
             DownloadRequest::GetBlockBodies { request, response, .. } => {
-                let request = self.prepare_block_bodies_request(peer_id, request, response);
-                FetchAction::BlockRequest { peer_id, request }
+                let inflight = Request { request: (), response };
+                self.inflight_bodies_requests.insert(peer_id, inflight);
+                BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
             DownloadRequest::GetBlockAccessLists { request, response, .. } => {
-                let request = self.prepare_block_access_lists_request(peer_id, request, response);
-                FetchAction::BlockRequest { peer_id, request }
+                let inflight = Request { request: (), response };
+                self.inflight_bals_requests.insert(peer_id, inflight);
+                BlockRequest::GetBlockAccessLists(GetBlockAccessLists(request))
             }
             DownloadRequest::GetReceipts { request, response, .. } => {
-                let request = self.prepare_receipts_request(peer_id, request, response);
-                FetchAction::BlockRequest { peer_id, request }
+                let inflight = Request { request: (), response };
+                self.inflight_receipts_requests.insert(peer_id, inflight);
+                BlockRequest::GetReceipts(GetReceipts(request))
             }
         }
-    }
-
-    /// Handles a new block-header request to a peer.
-    fn prepare_block_headers_request(
-        &mut self,
-        peer_id: PeerId,
-        request: HeadersRequest,
-        response: oneshot::Sender<PeerRequestResult<Vec<N::BlockHeader>>>,
-    ) -> BlockRequest {
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = PeerState::GetBlockHeaders;
-        }
-        let inflight = Request { request: request.clone(), response };
-        self.inflight_headers_requests.insert(peer_id, inflight);
-        let HeadersRequest { start, limit, direction } = request;
-        BlockRequest::GetBlockHeaders(GetBlockHeaders {
-            start_block: start,
-            limit,
-            skip: 0,
-            direction,
-        })
-    }
-
-    /// Handles a new block-bodies request to a peer.
-    fn prepare_block_bodies_request(
-        &mut self,
-        peer_id: PeerId,
-        request: Vec<B256>,
-        response: oneshot::Sender<PeerRequestResult<Vec<N::BlockBody>>>,
-    ) -> BlockRequest {
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = PeerState::GetBlockBodies;
-        }
-        let inflight = Request { request: (), response };
-        self.inflight_bodies_requests.insert(peer_id, inflight);
-        BlockRequest::GetBlockBodies(GetBlockBodies(request))
-    }
-
-    /// Handles a new block access list request to a peer.
-    fn prepare_block_access_lists_request(
-        &mut self,
-        peer_id: PeerId,
-        request: Vec<B256>,
-        response: oneshot::Sender<PeerRequestResult<BlockAccessLists>>,
-    ) -> BlockRequest {
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = PeerState::GetBlockAccessLists;
-        }
-        let inflight = Request { request: (), response };
-        self.inflight_bals_requests.insert(peer_id, inflight);
-        BlockRequest::GetBlockAccessLists(GetBlockAccessLists(request))
-    }
-
-    /// Handles a new receipts request to a peer.
-    fn prepare_receipts_request(
-        &mut self,
-        peer_id: PeerId,
-        request: Vec<B256>,
-        response: oneshot::Sender<PeerRequestResult<ReceiptsResponse<N::Receipt>>>,
-    ) -> BlockRequest {
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = PeerState::GetReceipts;
-        }
-        let inflight = Request { request: (), response };
-        self.inflight_receipts_requests.insert(peer_id, inflight);
-        BlockRequest::GetReceipts(GetReceipts(request))
     }
 
     /// Returns a new followup request for the peer.
     ///
     /// Caution: this expects that the peer is _not_ closed.
-    fn followup_request(&mut self, peer_id: PeerId) -> Option<FetchResponseOutcome> {
-        let Some(req) = self.queued_requests.pop_front() else { return None };
-        Some(FetchResponseOutcome::Request(self.prepare_request(peer_id, req)))
+    fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
+        let req = self.queued_requests.pop_front()?;
+        let req = self.prepare_block_request(peer_id, req);
+        Some(BlockResponseOutcome::Request(peer_id, req))
     }
 
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
-    /// This delegates the response and returns a [`FetchResponseOutcome`] to either queue in a
+    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
     /// direct followup request or get the peer reported if the response was a
     /// [`EthResponseValidator::reputation_change_err`]
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
         res: RequestResult<Vec<N::BlockHeader>>,
-    ) -> Option<FetchResponseOutcome> {
+    ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
 
@@ -415,7 +364,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         // if the response was an `Err` worth reporting the peer for then we return a `BadResponse`
         // outcome
         maybe_reputation_change
-            .map(|reputation_change| FetchResponseOutcome::BadResponse(peer_id, reputation_change))
+            .map(|reputation_change| BlockResponseOutcome::BadResponse(peer_id, reputation_change))
     }
 
     /// Called on a `GetBlockBodies` response from a peer
@@ -423,7 +372,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         &mut self,
         peer_id: PeerId,
         res: RequestResult<Vec<N::BlockBody>>,
-    ) -> Option<FetchResponseOutcome> {
+    ) -> Option<BlockResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |bodies| bodies.is_empty());
 
         if let Some(resp) = self.inflight_bodies_requests.remove(&peer_id) {
@@ -445,7 +394,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         &mut self,
         peer_id: PeerId,
         res: RequestResult<BlockAccessLists>,
-    ) -> Option<FetchResponseOutcome> {
+    ) -> Option<BlockResponseOutcome> {
         let is_likely_bad_response = res.is_err();
 
         if let Some(resp) = self.inflight_bals_requests.remove(&peer_id) {
@@ -469,7 +418,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         &mut self,
         peer_id: PeerId,
         res: RequestResult<ReceiptsResponse<N::Receipt>>,
-    ) -> Option<FetchResponseOutcome> {
+    ) -> Option<BlockResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |resp| resp.receipts.is_empty());
 
         if let Some(resp) = self.inflight_receipts_requests.remove(&peer_id) {
@@ -696,6 +645,16 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
 // === impl DownloadRequest ===
 
 impl<N: NetworkPrimitives> DownloadRequest<N> {
+    /// Returns the corresponding state for a peer that handles the request.
+    const fn peer_state(&self) -> PeerState {
+        match self {
+            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
+            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetBlockAccessLists { .. } => PeerState::GetBlockAccessLists,
+            Self::GetReceipts { .. } => PeerState::GetReceipts,
+        }
+    }
+
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
@@ -748,7 +707,6 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
 }
 
 /// An action the syncer can emit.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FetchAction {
     /// Dispatch an eth request to the given peer.
     BlockRequest {
@@ -763,9 +721,9 @@ pub(crate) enum FetchAction {
 ///
 /// Returned after processing a response.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum FetchResponseOutcome {
+pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
-    Request(FetchAction),
+    Request(PeerId, BlockRequest),
     /// How to handle a bad response and the reputation change to apply, if any.
     BadResponse(PeerId, ReputationChangeKind),
 }
@@ -911,7 +869,7 @@ mod tests {
 
         assert_eq!(
             fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)),
-            Some(FetchResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
+            Some(BlockResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
         );
         assert_eq!(
             fetcher.on_block_headers_response(peer_id, Err(RequestError::BadResponse)),
@@ -977,10 +935,10 @@ mod tests {
         .is_some());
 
         match outcome {
-            FetchResponseOutcome::BadResponse(peer, _) => {
+            BlockResponseOutcome::BadResponse(peer, _) => {
                 assert_eq!(peer, peer_id)
             }
-            FetchResponseOutcome::Request(_) => {
+            BlockResponseOutcome::Request(_, _) => {
                 unreachable!()
             }
         };
@@ -1493,9 +1451,7 @@ mod tests {
         let resp = ReceiptsResponse::new(vec![vec![]]);
         let outcome = fetcher.on_receipts_response(peer_id, Ok(resp));
 
-        assert!(
-            matches!(outcome, Some(FetchResponseOutcome::Request(FetchAction::BlockRequest { peer_id: pid, .. })) if pid == peer_id)
-        );
+        assert!(matches!(outcome, Some(BlockResponseOutcome::Request(pid, _)) if pid == peer_id));
     }
 
     #[tokio::test]
@@ -1510,18 +1466,14 @@ mod tests {
             priority: Priority::default(),
         };
 
-        let block_request = fetcher.prepare_request(peer_id, req);
+        let block_request = fetcher.prepare_block_request(peer_id, req);
 
         // Returns a GetReceipts block request with the same hashes
         match block_request {
-            FetchAction::BlockRequest {
-                request: BlockRequest::GetReceipts(get),
-                peer_id: dispatched_peer,
-            } => {
-                assert_eq!(dispatched_peer, peer_id);
+            BlockRequest::GetReceipts(ref get) => {
                 assert_eq!(get.0, hashes);
             }
-            other => panic!("expected BlockRequest::GetReceipts, got {other:?}"),
+            other => panic!("expected GetReceipts, got {other:?}"),
         }
 
         // Peer state transitions to GetReceipts
