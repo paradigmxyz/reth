@@ -25,7 +25,7 @@ use reth_evm::{
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_cache::CachedStateProvider;
+use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
@@ -172,7 +172,9 @@ where
         state_provider = Box::new(CachedStateProvider::new(
             state_provider,
             execution_cache.cache().clone(),
-            execution_cache.metrics().clone(),
+            // It's ok to recreate the cache every time, because it's cheap to do so for a vanilla
+            // Ethereum builder every 12s.
+            CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder),
         ));
     }
     let state = StateProviderDatabase::new(state_provider.as_ref());

@@ -408,8 +408,7 @@ where
     /// cached value then this calculates the [`Overlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn get_overlay(&self, provider: &F::Provider) -> ProviderResult<Overlay> {
-        // If we have no anchor block configured then we will never need to get trie reverts, just
-        // return the in-memory overlay (resolving lazy overlay if set).
+        // No anchor block — just resolve the in-memory overlay directly.
         if self.block_hash.is_none() {
             let (trie_updates, hashed_post_state) = self.resolve_overlays();
             return Ok(Overlay { trie_updates, hashed_post_state })
@@ -417,27 +416,15 @@ where
 
         let db_tip_block = self.get_db_tip_block_number(provider)?;
 
-        // If the overlay is present in the cache then return it directly.
-        if let Some(entry) = self.overlay_cache.get(&db_tip_block) {
-            return Ok(entry.value().clone());
-        }
-
-        // If the overlay is not present then we need to calculate a new one.
-        // DashMap's entry API handles the race condition internally.
-        let mut cache_miss = false;
         let overlay = match self.overlay_cache.entry(db_tip_block) {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
-                cache_miss = true;
+                self.metrics.overlay_cache_misses.increment(1);
                 let overlay = self.calculate_overlay(provider, db_tip_block)?;
                 entry.insert(overlay.clone());
                 overlay
             }
         };
-
-        if cache_miss {
-            self.metrics.overlay_cache_misses.increment(1);
-        }
 
         Ok(overlay)
     }
