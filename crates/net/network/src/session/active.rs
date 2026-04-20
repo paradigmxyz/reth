@@ -42,7 +42,7 @@ use reth_eth_wire_types::{
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
-use reth_network_p2p::{error::RequestError, snap::client::SnapResponse};
+use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
 use reth_primitives_traits::Block;
@@ -435,10 +435,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::GetAccountRange {
-                            response, ..
+                        RequestState::Waiting(PeerRequest::SnapGetAccountRange {
+                            response,
+                            ..
                         }) => {
-                            let _ = response.send(Ok(SnapResponse::AccountRange(resp)));
+                            let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
                         RequestState::Waiting(other) => {
@@ -457,10 +458,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::GetStorageRanges {
-                            response, ..
+                        RequestState::Waiting(PeerRequest::SnapGetStorageRanges {
+                            response,
+                            ..
                         }) => {
-                            let _ = response.send(Ok(SnapResponse::StorageRanges(resp)));
+                            let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
                         RequestState::Waiting(other) => {
@@ -479,8 +481,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::GetByteCodes { response, .. }) => {
-                            let _ = response.send(Ok(SnapResponse::ByteCodes(resp)));
+                        RequestState::Waiting(PeerRequest::SnapGetByteCodes {
+                            response, ..
+                        }) => {
+                            let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
                         RequestState::Waiting(other) => {
@@ -499,8 +503,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::GetTrieNodes { response, .. }) => {
-                            let _ = response.send(Ok(SnapResponse::TrieNodes(resp)));
+                        RequestState::Waiting(PeerRequest::SnapGetTrieNodes {
+                            response, ..
+                        }) => {
+                            let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
                         RequestState::Waiting(other) => {

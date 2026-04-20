@@ -18,7 +18,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
-use reth_network_p2p::receipts::client::ReceiptsResponse;
+use reth_network_p2p::{receipts::client::ReceiptsResponse, snap::client::SnapResponse};
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives_traits::Block;
@@ -464,26 +464,26 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         let (request, response) = match request {
             SnapRequest::GetAccountRange(request) => {
                 let (response, rx) = oneshot::channel();
-                let request = PeerRequest::GetAccountRange { request, response };
-                let response = PeerResponse::Snap { response: rx };
+                let request = PeerRequest::SnapGetAccountRange { request, response };
+                let response = PeerResponse::SnapAccountRange { response: rx };
                 (request, response)
             }
             SnapRequest::GetStorageRanges(request) => {
                 let (response, rx) = oneshot::channel();
-                let request = PeerRequest::GetStorageRanges { request, response };
-                let response = PeerResponse::Snap { response: rx };
+                let request = PeerRequest::SnapGetStorageRanges { request, response };
+                let response = PeerResponse::SnapStorageRanges { response: rx };
                 (request, response)
             }
             SnapRequest::GetByteCodes(request) => {
                 let (response, rx) = oneshot::channel();
-                let request = PeerRequest::GetByteCodes { request, response };
-                let response = PeerResponse::Snap { response: rx };
+                let request = PeerRequest::SnapGetByteCodes { request, response };
+                let response = PeerResponse::SnapByteCodes { response: rx };
                 (request, response)
             }
             SnapRequest::GetTrieNodes(request) => {
                 let (response, rx) = oneshot::channel();
-                let request = PeerRequest::GetTrieNodes { request, response };
-                let response = PeerResponse::Snap { response: rx };
+                let request = PeerRequest::SnapGetTrieNodes { request, response };
+                let response = PeerResponse::SnapTrieNodes { response: rx };
                 (request, response)
             }
         };
@@ -551,7 +551,18 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             PeerResponseResult::BlockAccessLists(res) => {
                 self.state_fetcher.on_block_access_lists_response(peer, res)
             }
-            PeerResponseResult::Snap(res) => self.state_fetcher.on_snap_response(peer, res),
+            PeerResponseResult::SnapAccountRange(res) => {
+                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::AccountRange))
+            }
+            PeerResponseResult::SnapStorageRanges(res) => {
+                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::StorageRanges))
+            }
+            PeerResponseResult::SnapByteCodes(res) => {
+                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::ByteCodes))
+            }
+            PeerResponseResult::SnapTrieNodes(res) => {
+                self.state_fetcher.on_snap_response(peer, res.map(SnapResponse::TrieNodes))
+            }
             _ => None,
         };
 
