@@ -16,8 +16,7 @@ use tracing::{debug, trace};
 struct LazyOverlayInputs<N: NodePrimitives = EthPrimitives> {
     /// In-memory blocks from tip to anchor child.
     ///
-    /// Blocks must be provided in reverse chain order (newest to oldest). The overlay anchor is
-    /// derived from the last block's parent hash.
+    /// Blocks must be provided in reverse chain order (newest to oldest).
     blocks: Vec<ExecutedBlock<N>>,
 }
 
@@ -27,8 +26,7 @@ struct LazyOverlayInputs<N: NodePrimitives = EthPrimitives> {
 /// computation until first access.
 ///
 /// Blocks must be provided in reverse chain order (newest to oldest), so the first block is the
-/// chain tip and the last block is the child of the persisted anchor. The anchor hash for the
-/// overlay is derived from `blocks.last().parent_hash()`.
+/// chain tip and the last block is the oldest in-memory block in the chain segment.
 ///
 /// # Fast Path vs Slow Path
 ///
@@ -71,7 +69,7 @@ impl<N: NodePrimitives> LazyOverlay<N> {
     }
 
     /// Returns the anchor hash this overlay is built on.
-    pub fn anchor_hash(&self) -> Option<B256> {
+    fn anchor_hash(&self) -> Option<B256> {
         self.inputs.blocks.last().map(|block| block.recovered_block().parent_hash())
     }
 
@@ -139,12 +137,11 @@ impl<N: NodePrimitives> LazyOverlay<N> {
             return TrieInputSorted::default();
         }
 
-        let trie_data: Vec<_> = blocks.iter().map(|block| block.trie_data()).collect();
         let state = HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|trie_data| Arc::clone(&trie_data.hashed_state)),
+            blocks.iter().map(|block| block.trie_data().hashed_state),
         );
         let nodes = TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|trie_data| Arc::clone(&trie_data.trie_updates)),
+            blocks.iter().map(|block| block.trie_data().trie_updates),
         );
 
         TrieInputSorted { state, nodes, prefix_sets: Default::default() }

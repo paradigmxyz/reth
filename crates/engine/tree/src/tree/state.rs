@@ -119,7 +119,8 @@ impl<N: NodePrimitives> TreeState<N> {
             return None;
         };
 
-        let overlay = LazyOverlay::new(blocks.clone());
+        let num_blocks = blocks.len();
+        let overlay = LazyOverlay::new(blocks);
         self.cached_canonical_overlay = Some(PreparedCanonicalOverlay {
             parent_hash: canonical_hash,
             overlay: overlay.clone(),
@@ -130,7 +131,7 @@ impl<N: NodePrimitives> TreeState<N> {
             target: "engine::tree",
             %canonical_hash,
             %anchor_hash,
-            num_blocks = blocks.len(),
+            num_blocks,
             "Prepared cached canonical overlay"
         );
 
