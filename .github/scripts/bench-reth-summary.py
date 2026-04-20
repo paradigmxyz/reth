@@ -111,6 +111,7 @@ def compute_stats(combined: list[dict]) -> dict:
     wall_clock_s = sum(total_latencies_ms) / 1_000
     mean_total_lat_ms = sum(total_latencies_ms) / n
 
+    # Persistence wait mean (for main table)
     persist_values_ms = []
     for r in combined:
         v = r.get("persistence_wait_us")
@@ -398,6 +399,7 @@ def generate_comparison_table(
     p50_pct = pct(run1["p50_ms"], run2["p50_ms"])
     p90_pct = pct(run1["p90_ms"], run2["p90_ms"])
     p99_pct = pct(run1["p99_ms"], run2["p99_ms"])
+
     persist_pct = pct(run1["mean_persist_ms"], run2["mean_persist_ms"])
 
     # Bootstrap CIs as % of baseline percentile
