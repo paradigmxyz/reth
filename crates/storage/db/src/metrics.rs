@@ -26,6 +26,66 @@ pub(crate) struct DatabaseEnvMetrics {
         FxHashMap<(TransactionMode, TransactionOutcome), TransactionOutcomeMetrics>,
 }
 
+/// Per-table operation metric handles cached for hot cursor paths.
+#[derive(Debug, Clone)]
+pub(crate) struct TableOperationMetrics {
+    get: OperationMetrics,
+    put_upsert: OperationMetrics,
+    put_append: OperationMetrics,
+    delete: OperationMetrics,
+    cursor_upsert: OperationMetrics,
+    cursor_insert: OperationMetrics,
+    cursor_append: OperationMetrics,
+    cursor_append_dup: OperationMetrics,
+    cursor_delete_current: OperationMetrics,
+    cursor_delete_current_duplicates: OperationMetrics,
+}
+
+impl TableOperationMetrics {
+    fn new(env_metrics: &DatabaseEnvMetrics, table: &'static str) -> Self {
+        let metric = |operation| {
+            env_metrics
+                .operations
+                .get(&(table, operation))
+                .expect("operation metric handle not found")
+                .clone()
+        };
+
+        Self {
+            get: metric(Operation::Get),
+            put_upsert: metric(Operation::PutUpsert),
+            put_append: metric(Operation::PutAppend),
+            delete: metric(Operation::Delete),
+            cursor_upsert: metric(Operation::CursorUpsert),
+            cursor_insert: metric(Operation::CursorInsert),
+            cursor_append: metric(Operation::CursorAppend),
+            cursor_append_dup: metric(Operation::CursorAppendDup),
+            cursor_delete_current: metric(Operation::CursorDeleteCurrent),
+            cursor_delete_current_duplicates: metric(Operation::CursorDeleteCurrentDuplicates),
+        }
+    }
+
+    const fn metric(&self, operation: Operation) -> &OperationMetrics {
+        match operation {
+            Operation::Get => &self.get,
+            Operation::PutUpsert => &self.put_upsert,
+            Operation::PutAppend => &self.put_append,
+            Operation::Delete => &self.delete,
+            Operation::CursorUpsert => &self.cursor_upsert,
+            Operation::CursorInsert => &self.cursor_insert,
+            Operation::CursorAppend => &self.cursor_append,
+            Operation::CursorAppendDup => &self.cursor_append_dup,
+            Operation::CursorDeleteCurrent => &self.cursor_delete_current,
+            Operation::CursorDeleteCurrentDuplicates => &self.cursor_delete_current_duplicates,
+        }
+    }
+
+    /// Returns the cached metric handle for the given operation.
+    pub(crate) fn operation_metric(&self, operation: Operation) -> OperationMetrics {
+        self.metric(operation).clone()
+    }
+}
+
 impl DatabaseEnvMetrics {
     pub(crate) fn new() -> Self {
         // Pre-populate metric handle maps with all possible combinations of labels
@@ -110,6 +170,11 @@ impl DatabaseEnvMetrics {
         } else {
             f()
         }
+    }
+
+    /// Returns pre-bound operation metric handles for a single table.
+    pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
+        TableOperationMetrics::new(self, table)
     }
 
     /// Record metrics for opening a database transaction.
