@@ -1,7 +1,4 @@
-use crate::{
-    provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
-    SparseTrieUpdates,
-};
+use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
@@ -90,7 +87,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealableSparseTrie};
+    /// use reth_trie_sparse::RevealableSparseTrie;
     ///
     /// let trie = <RevealableSparseTrie>::blind();
     /// assert!(trie.is_blind());
@@ -232,14 +229,9 @@ impl RevealableSparseTrie {
     ///
     /// Returns an error if the trie is still blind, or if the update fails.
     #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-        provider: impl TrieNodeProvider,
-    ) -> SparseTrieResult<()> {
+    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.update_leaf(path, value, provider)?;
+        revealed.update_leaf(path, value)?;
         Ok(())
     }
 
@@ -249,13 +241,9 @@ impl RevealableSparseTrie {
     ///
     /// Returns an error if the trie is still blind, or if the leaf cannot be removed.
     #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn remove_leaf(
-        &mut self,
-        path: &Nibbles,
-        provider: impl TrieNodeProvider,
-    ) -> SparseTrieResult<()> {
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.remove_leaf(path, provider)?;
+        revealed.remove_leaf(path)?;
         Ok(())
     }
 }

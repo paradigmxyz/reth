@@ -364,26 +364,25 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) =
-            match self.trie.root_with_updates(&self.proof_worker_handle) {
-                Ok(result) => result,
-                Err(err)
-                    if matches!(
-                        err.kind(),
-                        SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
-                    ) =>
-                {
-                    // A still-blind account trie means this block never changed state, so preserve
-                    // the cached parent root instead of fetching and revealing
-                    // the unchanged root node.
-                    (self.parent_state_root, TrieUpdates::default())
-                }
-                Err(err) => {
-                    return Err(ParallelStateRootError::Other(format!(
-                        "could not calculate state root: {err:?}"
-                    )))
-                }
-            };
+        let (state_root, trie_updates) = match self.trie.root_with_updates() {
+            Ok(result) => result,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                ) =>
+            {
+                // A still-blind account trie means this block never changed state, so preserve
+                // the cached parent root instead of fetching and revealing
+                // the unchanged root node.
+                (self.parent_state_root, TrieUpdates::default())
+            }
+            Err(err) => {
+                return Err(ParallelStateRootError::Other(format!(
+                    "could not calculate state root: {err:?}"
+                )))
+            }
+        };
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
