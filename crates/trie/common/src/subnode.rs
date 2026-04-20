@@ -34,7 +34,12 @@ impl reth_codecs::Compact for StoredSubNode {
         }
 
         if let Some(node) = &self.node {
-            buf.put_u8(1);
+            // Tag `2`: length-prefixed payload. Tag `1` is the legacy form whose
+            // decoder relied on a heuristic over the remaining buffer and could
+            // over-read when `state_mask` collided with a plausible payload length.
+            // New writes always emit tag `2`; reads still accept `1` so checkpoint
+            // bytes written by an older binary remain loadable.
+            buf.put_u8(2);
             len += 1;
 
             let mut node_buf = Vec::new();
@@ -60,13 +65,24 @@ impl reth_codecs::Compact for StoredSubNode {
         let nibbles_exists = buf.get_u8() != 0;
         let nibble = nibbles_exists.then(|| buf.get_u8());
 
-        let node_exists = buf.get_u8() != 0;
-        let node = node_exists.then(|| {
-            let node_len = buf.get_u16() as usize;
-            let (node, _) = BranchNodeCompact::from_compact(&buf[..node_len], node_len);
-            buf.advance(node_len);
-            node
-        });
+        // Node tag: `0` None, `1` legacy (no length prefix), `2` length-prefixed.
+        // Legacy bytes decode only when the subnode sits at the tail of the
+        // buffer, which is the same constraint the old decoder carried.
+        let node = match buf.get_u8() {
+            0 => None,
+            1 => {
+                let (node, rest) = BranchNodeCompact::from_compact(buf, 0);
+                buf = rest;
+                Some(node)
+            }
+            2 => {
+                let node_len = buf.get_u16() as usize;
+                let (node, _) = BranchNodeCompact::from_compact(&buf[..node_len], node_len);
+                buf.advance(node_len);
+                Some(node)
+            }
+            tag => panic!("invalid StoredSubNode node tag: {tag}"),
+        };
 
         (Self { key, nibble, node }, buf)
     }
@@ -127,5 +143,33 @@ mod tests {
             assert_eq!(subnode, decoded, "mask={mask}");
             assert_eq!(rest, &[0xaa, 0xbb], "mask={mask}");
         }
+    }
+
+    // Legacy (tag `1`) bytes still decode when the subnode is at the tail of the
+    // buffer. This matches the constraint the pre-fix decoder already carried
+    // (`BranchNodeCompact::from_compact` asserts `buf.len() % 32 == 6`).
+    #[test]
+    fn subnode_decodes_legacy_v1_tag() {
+        let node = BranchNodeCompact {
+            state_mask: TrieMask::new(0x0001),
+            tree_mask: TrieMask::new(0),
+            hash_mask: TrieMask::new(0x0001),
+            hashes: vec![B256::ZERO].into(),
+            root_hash: None,
+        };
+
+        // Hand-crafted v1 wire format:
+        //   [key_len: u16=0][nibble_tag=0][node_tag=1][BranchNodeCompact raw bytes]
+        let mut v1 = Vec::new();
+        v1.extend_from_slice(&0u16.to_be_bytes());
+        v1.push(0);
+        v1.push(1);
+        node.to_compact(&mut v1);
+
+        let (decoded, rest) = StoredSubNode::from_compact(&v1[..], 0);
+        assert!(rest.is_empty());
+        assert_eq!(decoded.key, Vec::<u8>::new());
+        assert_eq!(decoded.nibble, None);
+        assert_eq!(decoded.node, Some(node));
     }
 }
