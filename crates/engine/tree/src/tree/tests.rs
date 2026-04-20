@@ -682,6 +682,7 @@ async fn test_holesky_payload() {
                     sidecar: ExecutionPayloadSidecar::none(),
                 },
                 tx,
+                enqueued_at: std::time::Instant::now(),
             }
             .into(),
         ))

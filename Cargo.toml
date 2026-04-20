@@ -433,14 +433,14 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.3.0", default-features = false }
 
 # revm
-revm = { version = "37.0.0", default-features = false }
+revm = { version = "38.0.0", default-features = false }
 revm-bytecode = { version = "10.0.0", default-features = false }
 revm-database = { version = "13.0.0", default-features = false }
 revm-state = { version = "11.0.0", default-features = false }
 revm-primitives = { version = "23.0.0", default-features = false }
 revm-interpreter = { version = "35.0.0", default-features = false }
 revm-database-interface = { version = "11.0.0", default-features = false }
-revm-inspectors = "0.38.0"
+revm-inspectors = "0.39.0"
 
 # eth
 alloy-dyn-abi = "1.5.6"
@@ -450,7 +450,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.32.0", default-features = false }
+alloy-evm = { version = "0.33.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
