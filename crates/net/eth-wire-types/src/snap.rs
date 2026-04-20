@@ -310,17 +310,6 @@ impl SnapProtocolMessage {
         }
     }
 
-    /// Returns true if the message variant is a request.
-    pub const fn is_request(&self) -> bool {
-        matches!(
-            self,
-            Self::GetAccountRange(_) |
-                Self::GetStorageRanges(_) |
-                Self::GetByteCodes(_) |
-                Self::GetTrieNodes(_)
-        )
-    }
-
     /// Returns true if the message variant is a response.
     pub const fn is_response(&self) -> bool {
         matches!(
