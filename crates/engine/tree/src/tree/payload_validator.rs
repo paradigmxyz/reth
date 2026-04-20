@@ -530,7 +530,6 @@ where
             lazy_overlay.is_none().then(|| Arc::new(HashedPostStateSorted::default()));
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
-                .with_block_hash(Some(anchor_hash))
                 .with_lazy_overlay(lazy_overlay)
                 .with_hashed_state_overlay(anchor_hash, hashed_state_overlay);
 
@@ -2028,14 +2027,10 @@ where
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
-        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
-        let hashed_state_overlay =
-            lazy_overlay.is_none().then(|| Arc::new(HashedPostStateSorted::default()));
+        let (lazy_overlay, _) = Self::get_parent_lazy_overlay(parent_hash, state);
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
-                .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay)
-                .with_hashed_state_overlay(anchor_hash, hashed_state_overlay);
+                .with_lazy_overlay(lazy_overlay);
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
