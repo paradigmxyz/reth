@@ -36,6 +36,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Preserved tries below this size are cheap enough to reuse without a full prune/shrink pass.
+const REUSE_PRUNE_SOFT_MEMORY_LIMIT_BYTES: usize = 32 * 1024 * 1024;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
     /// Sender for proof results.
@@ -220,9 +223,28 @@ where
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
-        if !disable_pruning {
+
+        let trie_memory_size = trie.memory_size();
+        let retained_storage_tries = trie.retained_storage_tries_count();
+        if !disable_pruning &&
+            should_prune_for_reuse(
+                trie_memory_size,
+                retained_storage_tries,
+                max_hot_accounts,
+                updates,
+            )
+        {
             trie.prune(max_hot_slots, max_hot_accounts);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        } else if !disable_pruning {
+            debug!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                trie_memory_size,
+                retained_storage_tries,
+                account_updates = updates.account_nodes.len() + updates.removed_nodes.len(),
+                storage_updates = updates.storage_tries.len(),
+                "Skipping sparse trie prune for reuse"
+            );
         }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
@@ -859,6 +881,18 @@ impl PendingTargets {
     }
 }
 
+fn should_prune_for_reuse(
+    trie_memory_size: usize,
+    retained_storage_tries: usize,
+    max_hot_accounts: usize,
+    updates: &TrieUpdates,
+) -> bool {
+    trie_memory_size > REUSE_PRUNE_SOFT_MEMORY_LIMIT_BYTES ||
+        retained_storage_tries > max_hot_accounts ||
+        updates.account_nodes.len() + updates.removed_nodes.len() > max_hot_accounts ||
+        updates.storage_tries.len() > max_hot_accounts
+}
+
 /// Message type for the sparse trie task.
 enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
@@ -873,6 +907,7 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
+    use reth_trie::Nibbles;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     #[test]
@@ -952,5 +987,36 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn test_should_prune_for_reuse_skips_small_trie() {
+        let updates = TrieUpdates::default();
+
+        assert!(!should_prune_for_reuse(1024, 0, 500, &updates));
+    }
+
+    #[test]
+    fn test_should_prune_for_reuse_on_large_memory() {
+        let updates = TrieUpdates::default();
+
+        assert!(should_prune_for_reuse(
+            REUSE_PRUNE_SOFT_MEMORY_LIMIT_BYTES + 1,
+            0,
+            500,
+            &updates,
+        ));
+    }
+
+    #[test]
+    fn test_should_prune_for_reuse_on_wide_account_fanout() {
+        let mut updates = TrieUpdates::default();
+        updates.removed_nodes.extend([
+            Nibbles::from_nibbles_unchecked([0x1]),
+            Nibbles::from_nibbles_unchecked([0x2]),
+            Nibbles::from_nibbles_unchecked([0x3]),
+        ]);
+
+        assert!(should_prune_for_reuse(1024, 0, 2, &updates));
     }
 }
