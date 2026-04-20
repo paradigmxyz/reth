@@ -49,6 +49,7 @@ pub struct DefaultEngineValues {
     state_root_task_timeout: Option<String>,
     share_execution_cache_with_payload_builder: bool,
     share_sparse_trie_with_payload_builder: bool,
+    suppress_persistence_during_build: bool,
 }
 
 impl DefaultEngineValues {
@@ -226,6 +227,12 @@ impl DefaultEngineValues {
         self.share_sparse_trie_with_payload_builder = v;
         self
     }
+
+    /// Set whether to suppress persistence during payload building by default
+    pub const fn with_suppress_persistence_during_build(mut self, v: bool) -> Self {
+        self.suppress_persistence_during_build = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -258,6 +265,7 @@ impl Default for DefaultEngineValues {
             state_root_task_timeout: Some("1s".to_string()),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
+            suppress_persistence_during_build: false,
         }
     }
 }
@@ -459,6 +467,17 @@ pub struct EngineArgs {
     )]
     pub share_sparse_trie_with_payload_builder: bool,
 
+    /// Suppress persistence while building a payload.
+    ///
+    /// When enabled, persistence cycles are deferred from the moment an FCU with payload
+    /// attributes arrives until the next FCU clears the build. Useful on chains with short
+    /// block times where persistence I/O can interfere with block building latency.
+    #[arg(
+        long = "engine.suppress-persistence-during-build",
+        default_value_t = DefaultEngineValues::get_global().suppress_persistence_during_build,
+    )]
+    pub suppress_persistence_during_build: bool,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -504,6 +523,7 @@ impl Default for EngineArgs {
             state_root_task_timeout,
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -539,6 +559,7 @@ impl Default for EngineArgs {
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -588,7 +609,8 @@ impl EngineArgs {
             )
             .with_share_sparse_trie_with_payload_builder(
                 self.share_sparse_trie_with_payload_builder,
-            );
+            )
+            .with_suppress_persistence_during_build(self.suppress_persistence_during_build);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -649,6 +671,7 @@ mod tests {
             state_root_task_timeout: Some(Duration::from_secs(2)),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
+            suppress_persistence_during_build: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
