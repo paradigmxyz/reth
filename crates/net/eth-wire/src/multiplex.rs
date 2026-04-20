@@ -260,10 +260,9 @@ impl<St> RlpxProtocolMultiplexer<St> {
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
         let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
-        self.into_satellite_stream_with_tuple_handshake(
-            &Capability::eth(eth_cap),
-            async move |proxy| {
-                let handshake = handshake.clone();
+        self.into_satellite_stream_with_tuple_handshake(&Capability::eth(eth_cap), move |proxy| {
+            let handshake = handshake.clone();
+            async move {
                 let mut unauth = UnauthProxy { inner: proxy };
                 let their_status = handshake
                     .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
@@ -274,8 +273,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     eth_max_message_size,
                 );
                 Ok((stream, their_status))
-            },
-        )
+            }
+        })
         .await
     }
 }
