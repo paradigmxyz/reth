@@ -480,12 +480,17 @@ pub fn build_local_enr(
         if let Some(addr) = v4 {
             if *addr.ip() != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(*addr.ip());
+            } else if let IpAddr::V4(ip4) = tcp_socket.ip() && !ip4.is_unspecified() {
+                // Fallback to the resolved NAT IP from the RLPx socket
+                builder.ip4(ip4);
             }
             builder.udp4(addr.port());
         }
         if let Some(addr) = v6 {
             if *addr.ip() != Ipv6Addr::UNSPECIFIED {
                 builder.ip6(*addr.ip());
+            } else if let IpAddr::V6(ip6) = tcp_socket.ip() && !ip6.is_unspecified() {
+                builder.ip6(ip6);
             }
             builder.udp6(addr.port());
         }
@@ -1047,5 +1052,69 @@ mod test {
             discv5.get_fork_id(&enr_without_network_stack_id),
             Err(Error::NetworkStackIdNotConfigured)
         ));
+    }
+
+    /// Regression test: when `RLPx` binds to 0.0.0.0 (all interfaces) and the user configures
+    /// `--nat extip:<IP>`, the discv5 ENR must contain the NAT-resolved external IPv4 address.
+    ///
+    /// The fix forwards the NAT-resolved IP via the `rlpx_tcp_socket` so that
+    /// `build_local_enr` can fall back to it when the discv5 listen address is unspecified.
+    #[test]
+    fn build_enr_includes_external_ip_when_listen_addr_is_unspecified() {
+        let nat_external_ip = Ipv4Addr::new(1, 2, 3, 4);
+        let tcp_port: u16 = 30303;
+        let udp_port: u16 = 9200;
+
+        // Simulate: --addr 0.0.0.0 --nat extip:1.2.3.4 — after NAT resolution the rlpx tcp
+        // socket carries the external IP, while discv5 still requests an unspecified listen.
+        let rlpx_tcp_socket: SocketAddr = (nat_external_ip, tcp_port).into();
+        let discv5_listen_config = ListenConfig::Ipv4 { ip: Ipv4Addr::UNSPECIFIED, port: udp_port };
+
+        let config = Config::builder(rlpx_tcp_socket)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        let sk = SecretKey::new(&mut thread_rng());
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(
+            enr.ip4(),
+            Some(nat_external_ip),
+            "discv5 ENR must advertise the NAT-resolved external IP ({nat_external_ip}) \
+             when listen address is 0.0.0.0, but got {:?}",
+            enr.ip4()
+        );
+    }
+
+    /// Regression test: dual-stack variant of the external IP bug.
+    #[test]
+    fn build_enr_includes_external_ip_when_listen_addr_is_unspecified_dual_stack() {
+        let nat_external_ip = Ipv4Addr::new(5, 6, 7, 8);
+        let tcp_port: u16 = 30303;
+        let udp_port_v4: u16 = 9200;
+        let udp_port_v6: u16 = 9201;
+
+        let rlpx_tcp_socket: SocketAddr = (nat_external_ip, tcp_port).into();
+        let discv5_listen_config = ListenConfig::DualStack {
+            ipv4: Ipv4Addr::UNSPECIFIED,
+            ipv4_port: udp_port_v4,
+            ipv6: Ipv6Addr::UNSPECIFIED,
+            ipv6_port: udp_port_v6,
+        };
+
+        let config = Config::builder(rlpx_tcp_socket)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        let sk = SecretKey::new(&mut thread_rng());
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(
+            enr.ip4(),
+            Some(nat_external_ip),
+            "discv5 ENR must advertise the NAT-resolved external IP ({nat_external_ip}) \
+             in dual-stack mode when IPv4 listen address is 0.0.0.0, but got {:?}",
+            enr.ip4()
+        );
     }
 }

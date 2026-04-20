@@ -954,7 +954,12 @@ pub struct DiscoveryArgs {
 }
 
 impl DiscoveryArgs {
-    /// Apply the discovery settings to the given [`NetworkConfigBuilder`]
+    /// Apply the discovery settings to the given `NetworkConfigBuilder` from `reth_network`.
+    ///
+    /// `rlpx_tcp_socket` and `boot_nodes` should match the builder's `listener_addr` and
+    /// `boot_nodes`, respectively. The NAT resolver for ENR `external_ip` is taken from the
+    /// builder at the start of this function (before discovery may call `disable_nat`), so
+    /// `--nat extip:...` still applies to the discv5 ENR when appropriate (see issue #14878).
     pub fn apply_to_builder<N>(
         &self,
         mut network_config_builder: NetworkConfigBuilder<N>,
@@ -964,6 +969,10 @@ impl DiscoveryArgs {
     where
         N: NetworkPrimitives,
     {
+        // Read before `disable_nat` mutates the builder: discv5 still uses this for `external_ip`
+        // in the local ENR when `nat:extip:...` is set (see issue #14878).
+        let nat_for_enr: Option<NatResolver> = network_config_builder.nat_resolver().cloned();
+
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
         }
@@ -979,17 +988,18 @@ impl DiscoveryArgs {
 
         if self.should_enable_discv5() {
             network_config_builder = network_config_builder
-                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
+                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes, nat_for_enr));
         }
 
         network_config_builder
     }
 
-    /// Creates a [`reth_discv5::ConfigBuilder`] filling it with the values from this struct.
+    /// Creates a [`reth_discv5::ConfigBuilder`] from CLI discovery args and the network builder.
     pub fn discovery_v5_builder(
         &self,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
+        nat: Option<NatResolver>,
     ) -> reth_discv5::ConfigBuilder {
         let Self {
             discv5_addr,
@@ -1026,6 +1036,20 @@ impl DiscoveryArgs {
             // disable native enr update if addresses manually set or nat disabled
             discv5_config_builder.disable_enr_update();
         }
+
+        // When the user configured `--nat extip:<IP>` and rlpx binds to an unspecified address,
+        // forward the resolved external IP through the rlpx tcp socket. `build_local_enr` then
+        // falls back to it for the ENR when the discv5 listen address is unspecified.
+        let rlpx_tcp_socket = if let Some(nat) = nat.as_ref() &&
+            let Some(IpAddr::V4(ip)) = nat.clone().as_external_ip(0) &&
+            !ip.is_unspecified() &&
+            rlpx_tcp_socket.ip().is_unspecified()
+        {
+            SocketAddr::new(IpAddr::V4(ip), rlpx_tcp_socket.port())
+        } else {
+            rlpx_tcp_socket
+        };
+
         reth_discv5::Config::builder(rlpx_tcp_socket)
             .discv5_config(discv5_config_builder.build())
             .add_unsigned_boot_nodes(boot_nodes)

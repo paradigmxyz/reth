@@ -287,6 +287,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         pk2id(&self.secret_key.public_key(SECP256K1))
     }
 
+    /// Returns the configured NAT / external-IP resolver, if any.
+    pub const fn nat_resolver(&self) -> Option<&NatResolver> {
+        self.nat.as_ref()
+    }
+
     /// Returns the configured [`SecretKey`], from which the node's identity is derived.
     pub const fn secret_key(&self) -> &SecretKey {
         &self.secret_key
