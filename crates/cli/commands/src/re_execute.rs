@@ -14,9 +14,9 @@ use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
-    changesets_utils::{reverts_to_account_changesets, reverts_to_storage_changesets},
-    BlockNumReader, BlockReader, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    ReceiptProvider, StaticFileProviderFactory, StorageChangeSetReader, TransactionVariant,
+    providers::BlockchainProvider, BlockNumReader, BlockReader, ChainSpecProvider,
+    DatabaseProviderFactory, ReceiptProvider, StateReader, StaticFileProviderFactory,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::stages::calculate_gas_used_from_headers;
@@ -116,6 +116,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             min_block..=max_block,
         )?;
 
+        let blockchain_provider = self
+            .compare_changesets
+            .then(|| BlockchainProvider::new(provider_factory.clone()))
+            .transpose()?;
+
         let db_at = {
             let provider_factory = provider_factory.clone();
             move |block_number: u64| {
@@ -139,6 +144,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let mut tasks = JoinSet::new();
         for _ in 0..num_tasks {
             let provider_factory = provider_factory.clone();
+            let blockchain_provider = blockchain_provider.clone();
             let evm_config = components.evm_config().clone();
             let consensus = components.consensus().clone();
             let db_at = db_at.clone();
@@ -255,34 +261,38 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
 
                         if compare_changesets {
-                            let provider =
-                                DatabaseProviderFactory::database_provider_ro(&provider_factory)?;
-
-                            // Convert execution reverts to the same format the DB stores.
-                            let plain_reverts = executor
+                            let exec_reverts = executor
                                 .bundle_state()
                                 .reverts
                                 .to_plain_state_reverts();
 
-                            // Account changesets
-                            let mut exec_accounts =
-                                reverts_to_account_changesets(
-                                    plain_reverts.accounts
-                                        .into_iter()
-                                        .nth(prev_reverts_len)
-                                        .unwrap_or_default(),
-                                );
-                            exec_accounts.sort_by_key(|a| a.address);
+                            let db_outcome = StateReader::get_state(
+                                blockchain_provider
+                                    .as_ref()
+                                    .expect("initialized when compare_changesets is true"),
+                                block.number(),
+                            )?
+                                .ok_or_else(|| {
+                                    eyre::eyre!(
+                                        "no state found in database for block {}",
+                                        block.number()
+                                    )
+                                })?;
+                            let db_reverts = db_outcome.bundle.reverts.to_plain_state_reverts();
 
-                            let mut db_accounts =
-                                provider.account_block_changeset(block.number())?;
-                            db_accounts.sort_by_key(|a| a.address);
+                            // Compare account changesets
+                            let exec_accounts = exec_reverts.accounts
+                                .get(prev_reverts_len)
+                                .cloned()
+                                .unwrap_or_default();
+                            let db_accounts = db_reverts.accounts
+                                .into_iter()
+                                .next()
+                                .unwrap_or_default();
 
                             if exec_accounts != db_accounts {
                                 let err = eyre::eyre!(
-                                    "account changeset mismatch at block {}\n  \
-                                     execution: {exec_accounts:?}\n  \
-                                     database:  {db_accounts:?}",
+                                    "account changeset mismatch at block {}",
                                     block.number()
                                 );
                                 error!(%err);
@@ -295,25 +305,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 return Err(err);
                             }
 
-                            // Storage changesets
-                            let mut exec_storage =
-                                reverts_to_storage_changesets(
-                                    plain_reverts.storage
-                                        .into_iter()
-                                        .nth(prev_reverts_len)
-                                        .unwrap_or_default(),
-                                );
-                            exec_storage.sort_by_key(|s| (s.address, s.key));
-
-                            let mut db_storage =
-                                provider.storage_block_changeset(block.number())?;
-                            db_storage.sort_by_key(|s| (s.address, s.key));
+                            // Compare storage changesets
+                            let exec_storage = exec_reverts.storage
+                                .get(prev_reverts_len)
+                                .cloned()
+                                .unwrap_or_default();
+                            let db_storage = db_reverts.storage
+                                .into_iter()
+                                .next()
+                                .unwrap_or_default();
 
                             if exec_storage != db_storage {
                                 let err = eyre::eyre!(
-                                    "storage changeset mismatch at block {}\n  \
-                                     execution: {exec_storage:?}\n  \
-                                     database:  {db_storage:?}",
+                                    "storage changeset mismatch at block {}",
                                     block.number()
                                 );
                                 error!(%err);
