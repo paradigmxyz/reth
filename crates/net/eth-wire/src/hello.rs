@@ -92,7 +92,9 @@ impl HelloMessageWithProtocols {
                 self.protocols.push(snap);
             }
         } else {
-            self.protocols.retain(|protocol| !protocol.cap.is_snap());
+            self.protocols.retain(|protocol| {
+                protocol.cap.name.as_ref() != "snap" || protocol.cap.version != 1
+            });
         }
         self
     }
@@ -199,7 +201,9 @@ impl HelloMessageBuilder {
         if enable {
             self.protocols.get_or_insert_with(Vec::new).push(Protocol::snap_1());
         } else if let Some(protocols) = self.protocols.as_mut() {
-            protocols.retain(|protocol| !protocol.cap.is_snap());
+            protocols.retain(|protocol| {
+                protocol.cap.name.as_ref() != "snap" || protocol.cap.version != 1
+            });
         }
         self
     }
