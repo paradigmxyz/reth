@@ -20,7 +20,8 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use rustc_hash::FxHashMap;
+use std::{hash::Hash, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
@@ -59,9 +60,9 @@ where
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
+    let mut cache: FxHashMap<P, Vec<u64>> = FxHashMap::default();
 
-    let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
+    let mut collect = |cache: &mut FxHashMap<P, Vec<u64>>| {
         for (key, indices) in cache.drain() {
             let last = *indices.last().expect("qed");
             collector
@@ -179,7 +180,7 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: FxHashMap<AddressStorageKey, Vec<u64>> = FxHashMap::default();
 
     let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
         let last = indices.last().expect("qed");
