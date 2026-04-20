@@ -73,22 +73,21 @@ pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
         state: Arc<HashedPostStateSorted>,
     },
     /// Lazy overlay computed on first access.
-    Lazy {
-        /// Lazy overlay that can compute trie input for the requested anchor.
-        overlay: LazyOverlay<N>,
-        /// Persisted anchor hash the overlay should be resolved against.
-        anchor_hash: B256,
-    },
+    Lazy(LazyOverlay<N>),
 }
 
 impl<N: NodePrimitives> OverlaySource<N> {
     /// Resolve the overlay source into (trie, state) tuple.
     ///
     /// For lazy overlays, this may block waiting for deferred data.
-    fn resolve(&self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
+    fn resolve(
+        &self,
+        anchor_hash: Option<B256>,
+    ) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         match self {
             Self::Immediate { trie, state } => (Arc::clone(trie), Arc::clone(state)),
-            Self::Lazy { overlay, anchor_hash } => overlay.as_overlay(*anchor_hash),
+            Self::Lazy(overlay) => overlay
+                .as_overlay(anchor_hash.expect("lazy overlay resolution requires an anchor hash")),
         }
     }
 }
@@ -147,13 +146,8 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Set a lazy overlay that will be computed on first access.
     ///
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
-    pub fn with_lazy_overlay(
-        mut self,
-        lazy_overlay: Option<LazyOverlay<N>>,
-        anchor_hash: B256,
-    ) -> Self {
-        self.overlay_source =
-            lazy_overlay.map(|overlay| OverlaySource::Lazy { overlay, anchor_hash });
+    pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay<N>>) -> Self {
+        self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
         // Clear the overlay cache since we've updated the source.
         self.overlay_cache = Default::default();
         self
@@ -186,9 +180,11 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             Some(OverlaySource::Immediate { state, .. }) => {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
             }
-            Some(OverlaySource::Lazy { overlay, anchor_hash }) => {
+            Some(OverlaySource::Lazy(overlay)) => {
                 // Resolve lazy overlay and convert to immediate with extension
-                let (trie, mut state) = overlay.as_overlay(*anchor_hash);
+                let (trie, mut state) = overlay.as_overlay(
+                    self.block_hash.expect("extending a lazy overlay requires an anchor hash"),
+                );
                 Arc::make_mut(&mut state).extend_ref_and_sort(&other);
                 self.overlay_source = Some(OverlaySource::Immediate { trie, state });
             }
@@ -221,9 +217,12 @@ where
     ///
     /// If an overlay source is set, it is resolved (blocking if lazy).
     /// Otherwise, returns empty defaults.
-    fn resolve_overlays(&self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
+    fn resolve_overlays(
+        &self,
+        anchor_hash: Option<B256>,
+    ) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         match &self.overlay_source {
-            Some(source) => source.resolve(),
+            Some(source) => source.resolve(anchor_hash),
             None => {
                 (Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default()))
             }
@@ -360,7 +359,7 @@ where
 
             // Resolve overlays (lazy or immediate) and extend reverts with them.
             // If reverts are empty, use overlays directly to avoid cloning.
-            let (overlay_trie, overlay_state) = self.resolve_overlays();
+            let (overlay_trie, overlay_state) = self.resolve_overlays(self.block_hash);
 
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
@@ -395,7 +394,7 @@ where
             (trie_updates, hashed_state_updates)
         } else {
             // If no block_hash, use overlays directly (resolving lazy if set)
-            let (trie_updates, hashed_state) = self.resolve_overlays();
+            let (trie_updates, hashed_state) = self.resolve_overlays(self.block_hash);
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
@@ -424,7 +423,7 @@ where
     fn get_overlay(&self, provider: &F::Provider) -> ProviderResult<Overlay> {
         // No anchor block — just resolve the in-memory overlay directly.
         if self.block_hash.is_none() {
-            let (trie_updates, hashed_post_state) = self.resolve_overlays();
+            let (trie_updates, hashed_post_state) = self.resolve_overlays(None);
             return Ok(Overlay { trie_updates, hashed_post_state })
         }
 
