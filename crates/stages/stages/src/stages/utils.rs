@@ -113,6 +113,14 @@ where
     Ok(())
 }
 
+fn retain_history_tail(list: &mut Vec<u64>, keep_from: usize) {
+    let tail_len = list.len().saturating_sub(keep_from);
+    if tail_len > 0 {
+        list.copy_within(keep_from.., 0);
+    }
+    list.truncate(tail_len);
+}
+
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
 pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
@@ -333,12 +341,11 @@ where
         return Ok(());
     }
 
-    // Split: flush the first N shards, keep the remainder buffered.
+    // Flush the first N shards in place and keep the remainder buffered.
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
-    let remainder = list.split_off(flush_len);
 
     // Write each complete shard with its highest block number as the key.
-    for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
+    for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -350,8 +357,7 @@ where
         }
     }
 
-    // Keep the remaining indices for the next iteration.
-    *list = remainder;
+    retain_history_tail(list, flush_len);
     Ok(())
 }
 
@@ -555,12 +561,11 @@ where
         return Ok(());
     }
 
-    // Split: flush the first N shards, keep the remainder buffered.
+    // Flush the first N shards in place and keep the remainder buffered.
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
-    let remainder = list.split_off(flush_len);
 
     // Write each complete shard with its highest block number as the key.
-    for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
+    for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -572,8 +577,7 @@ where
         }
     }
 
-    // Keep the remaining indices for the next iteration.
-    *list = remainder;
+    retain_history_tail(list, flush_len);
     Ok(())
 }
 
