@@ -59,32 +59,6 @@ pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Snap(SnapProtocolMessage),
 }
 
-impl<N: NetworkPrimitives> EthSnapMessage<N> {
-    /// Returns the wire message id.
-    pub const fn message_id(&self) -> u8 {
-        match self {
-            Self::Eth(msg) => msg.message_id().to_u8(),
-            Self::Snap(msg) => msg.message_id() as u8,
-        }
-    }
-
-    /// Returns whether this message is a response.
-    pub const fn is_response(&self) -> bool {
-        match self {
-            Self::Eth(msg) => msg.is_response(),
-            Self::Snap(msg) => msg.is_response(),
-        }
-    }
-
-    /// Maps the inner eth message to the negotiated version, leaving snap messages untouched.
-    pub fn map_versioned(self, version: EthVersion) -> Self {
-        match self {
-            Self::Eth(msg) => Self::Eth(msg.map_versioned(version)),
-            Self::Snap(msg) => Self::Snap(msg),
-        }
-    }
-}
-
 /// A stream implementation that can handle both eth and snap protocol messages
 /// over a single connection.
 #[pin_project]

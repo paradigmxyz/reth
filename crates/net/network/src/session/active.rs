@@ -540,7 +540,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id).map_versioned(version);
+        let msg = match request.create_request_message(request_id) {
+            EthSnapMessage::Eth(msg) => EthSnapMessage::Eth(msg.map_versioned(version)),
+            EthSnapMessage::Snap(msg) => EthSnapMessage::Snap(msg),
+        };
 
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
@@ -957,7 +960,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received protocol message");
+                                let msg_id = match &msg {
+                                    EthSnapMessage::Eth(msg) => msg.message_id().to_u8(),
+                                    EthSnapMessage::Snap(msg) => msg.message_id() as u8,
+                                };
+                                trace!(target: "net::session", msg_id=?msg_id, remote_peer_id=?this.remote_peer_id, "received protocol message");
                                 // decode and handle message
                                 match this.on_incoming_message(msg) {
                                     OnIncomingMessageOutcome::Ok => {
