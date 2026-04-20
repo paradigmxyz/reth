@@ -243,8 +243,8 @@ impl HelloMessageBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{
-        p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, HelloMessageWithProtocols,
-        Protocol, ProtocolVersion,
+        p2pstream::P2PMessage, protocol::Protocol, Capability, EthVersion, HelloMessage,
+        HelloMessageWithProtocols, ProtocolVersion,
     };
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;

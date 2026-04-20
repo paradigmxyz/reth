@@ -335,7 +335,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Enables or disables announcing snap/1 capability.
-    pub fn with_snap(mut self, enable: bool) -> Self {
+    pub const fn with_snap(mut self, enable: bool) -> Self {
         self.snap_enabled = enable;
         self
     }

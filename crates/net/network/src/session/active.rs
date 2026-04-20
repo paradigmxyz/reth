@@ -1154,12 +1154,11 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewPooledTransactionHashes68(h) => h.hashes.len(),
                 _ => 0,
             },
-            Self::SnapMessage(_) => 0,
+            Self::SnapMessage(_) | Self::Raw(_) => 0,
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
                 EthBroadcastMessage::Transactions(txs) => txs.len(),
             },
-            Self::Raw(_) => 0,
         }
     }
 
