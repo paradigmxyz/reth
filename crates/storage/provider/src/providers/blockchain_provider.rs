@@ -133,16 +133,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(state.state_provider(latest_historical))
     }
-
-    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
-    ///
-    /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
-    pub fn get_state(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
-        self.consistent_provider()?.get_state(range)
-    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
@@ -778,7 +768,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        StateReader::get_state(&self.consistent_provider()?, block)
+        self.consistent_provider()?.get_state(block)
     }
 }
 
