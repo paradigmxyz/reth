@@ -1,6 +1,7 @@
 use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
+        consistent::populate_bundle_state,
         database::{chain::ChainStorage, metrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
@@ -342,6 +343,82 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Sets the prune modes for provider.
     pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Reconstructs an [`ExecutionOutcome`] from the database changesets and receipts for the
+    /// given block range.
+    pub fn get_state(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
+        if range.is_empty() {
+            return Ok(None)
+        }
+        let start_block_number = *range.start();
+        let end_block_number = *range.end();
+
+        let mut block_bodies = Vec::new();
+        for block_num in range.clone() {
+            let block_body = self
+                .block_body_indices(block_num)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_num))?;
+            block_bodies.push((block_num, block_body))
+        }
+
+        let Some(from_transaction_num) = block_bodies.first().map(|body| body.1.first_tx_num())
+        else {
+            return Ok(None)
+        };
+        let Some(to_transaction_num) = block_bodies.last().map(|body| body.1.last_tx_num()) else {
+            return Ok(None)
+        };
+
+        let mut account_changeset = Vec::new();
+        for block_num in range.clone() {
+            let changeset =
+                self.account_block_changeset(block_num)?.into_iter().map(|elem| (block_num, elem));
+            account_changeset.extend(changeset);
+        }
+
+        let mut storage_changeset = Vec::new();
+        for block_num in range {
+            let changeset = self.storage_changeset(block_num)?;
+            storage_changeset.extend(changeset);
+        }
+
+        let block_hash = self
+            .block_hash(end_block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(end_block_number.into()))?;
+        let state_provider = self.history_by_block_hash(block_hash)?;
+
+        let (state, reverts) =
+            populate_bundle_state(account_changeset, storage_changeset, &*state_provider)?;
+
+        let mut receipt_iter =
+            self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?.into_iter();
+
+        let mut receipts = Vec::with_capacity(block_bodies.len());
+        for (_, block_body) in block_bodies {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for tx_num in block_body.tx_num_range() {
+                let receipt = receipt_iter
+                    .next()
+                    .ok_or_else(|| ProviderError::ReceiptNotFound(tx_num.into()))?;
+                block_receipts.push(receipt);
+            }
+            receipts.push(block_receipts);
+        }
+
+        Ok(Some(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts,
+            start_block_number,
+            Vec::new(),
+        )))
     }
 }
 

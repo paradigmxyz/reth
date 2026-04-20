@@ -184,8 +184,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             storage_changeset.extend(changeset);
         }
 
+        let state_provider = self.state_by_block_number_ref(end_block_number)?;
         let (state, reverts) =
-            self.populate_bundle_state(account_changeset, storage_changeset, end_block_number)?;
+            populate_bundle_state(account_changeset, storage_changeset, &*state_provider)?;
 
         let mut receipt_iter =
             self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?.into_iter();
@@ -213,76 +214,60 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             Vec::new(),
         )))
     }
+}
 
-    /// Populate a [`BundleStateInit`] and [`RevertsInit`] based on the given storage and account
-    /// changesets.
-    ///
-    /// Storage changeset keys are always plain (unhashed). Current values are read via
-    /// [`StateProvider::storage`], which handles hashing internally when `use_hashed_state` is
-    /// enabled.
-    fn populate_bundle_state(
-        &self,
-        account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        block_range_end: BlockNumber,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        let mut state: BundleStateInit = HashMap::default();
-        let mut reverts: RevertsInit = HashMap::default();
-        let state_provider = self.state_by_block_number_ref(block_range_end)?;
+/// Populate a [`BundleStateInit`] and [`RevertsInit`] based on the given account and storage
+/// changesets and a [`StateProvider`] for current values.
+pub(crate) fn populate_bundle_state(
+    account_changeset: Vec<(u64, AccountBeforeTx)>,
+    storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+    state_provider: &dyn StateProvider,
+) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+    let mut state: BundleStateInit = HashMap::default();
+    let mut reverts: RevertsInit = HashMap::default();
 
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = state_provider.basic_account(&address)?;
-                    entry.insert((old_info, new_info, HashMap::default()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
+    for (block_number, account_before) in account_changeset.into_iter().rev() {
+        let AccountBeforeTx { info: old_info, address } = account_before;
+        match state.entry(address) {
+            hash_map::Entry::Vacant(entry) => {
+                let new_info = state_provider.basic_account(&address)?;
+                entry.insert((old_info, new_info, HashMap::default()));
             }
-            // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+            hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().0 = old_info;
+            }
         }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = state_provider.basic_account(&address)?;
-                    entry.insert((present_info, present_info, HashMap::default()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage_value =
-                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage_value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
-
-        Ok((state, reverts))
+        reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
     }
 
+    for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
+        let BlockNumberAddress((block_number, address)) = block_and_address;
+        let account_state = match state.entry(address) {
+            hash_map::Entry::Vacant(entry) => {
+                let present_info = state_provider.basic_account(&address)?;
+                entry.insert((present_info, present_info, HashMap::default()))
+            }
+            hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        };
+
+        match account_state.2.entry(old_storage.key) {
+            hash_map::Entry::Vacant(entry) => {
+                let new_storage_value =
+                    state_provider.storage(address, old_storage.key)?.unwrap_or_default();
+                entry.insert((old_storage.value, new_storage_value));
+            }
+            hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().0 = old_storage.value;
+            }
+        };
+
+        reverts.entry(block_number).or_default().entry(address).or_default().1.push(old_storage);
+    }
+
+    Ok((state, reverts))
+}
+
+impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Fetches a range of data from both in-memory state and persistent storage while a predicate
     /// is met.
     ///
@@ -1641,7 +1626,7 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
             let state = state.block_ref().execution_outcome().clone();
             Ok(Some(ExecutionOutcome::from((state, block))))
         } else {
-            Self::get_state(self, block..=block)
+            self.storage_provider.get_state(block..=block)
         }
     }
 }

@@ -14,9 +14,8 @@ use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
-    providers::BlockchainProvider, BlockNumReader, BlockReader, ChainSpecProvider,
-    DatabaseProviderFactory, ReceiptProvider, StateReader, StaticFileProviderFactory,
-    TransactionVariant,
+    BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
+    StaticFileProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::stages::calculate_gas_used_from_headers;
@@ -116,11 +115,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             min_block..=max_block,
         )?;
 
-        let blockchain_provider = self
-            .compare_changesets
-            .then(|| BlockchainProvider::new(provider_factory.clone()))
-            .transpose()?;
-
         let db_at = {
             let provider_factory = provider_factory.clone();
             move |block_number: u64| {
@@ -144,7 +138,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let mut tasks = JoinSet::new();
         for _ in 0..num_tasks {
             let provider_factory = provider_factory.clone();
-            let blockchain_provider = blockchain_provider.clone();
             let evm_config = components.evm_config().clone();
             let consensus = components.consensus().clone();
             let db_at = db_at.clone();
@@ -266,18 +259,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 .reverts
                                 .to_plain_state_reverts();
 
-                            let db_outcome = StateReader::get_state(
-                                blockchain_provider
-                                    .as_ref()
-                                    .expect("initialized when compare_changesets is true"),
-                                block.number(),
+                            let db_outcome = DatabaseProviderFactory::database_provider_ro(
+                                &provider_factory,
                             )?
-                                .ok_or_else(|| {
-                                    eyre::eyre!(
-                                        "no state found in database for block {}",
-                                        block.number()
-                                    )
-                                })?;
+                            .get_state(block.number()..=block.number())?
+                            .ok_or_else(|| {
+                                eyre::eyre!(
+                                    "no state found in database for block {}",
+                                    block.number()
+                                )
+                            })?;
                             let db_reverts = db_outcome.bundle.reverts.to_plain_state_reverts();
 
                             // Compare account changesets
