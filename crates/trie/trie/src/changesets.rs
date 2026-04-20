@@ -102,16 +102,11 @@ where
     Factory: TrieCursorFactory,
 {
     let mut cursor = factory.account_trie_cursor()?;
-    let mut account_changesets = Vec::with_capacity(trie_updates.account_nodes_ref().len());
-
-    // For each changed account node, look up its current value
-    // The input is already sorted, so the output will be sorted
-    for (path, _new_node) in trie_updates.account_nodes_ref() {
-        let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
-        account_changesets.push((*path, old_node));
-    }
-
-    Ok(account_changesets)
+    compute_sorted_changesets(
+        &mut cursor,
+        trie_updates.account_nodes_ref().iter().map(|(path, _new_node)| *path),
+        trie_updates.account_nodes_ref().len(),
+    )
 }
 
 /// Computes storage trie changesets for a single account.
@@ -129,16 +124,43 @@ fn compute_storage_changesets(
     cursor: &mut impl TrieStorageCursor,
     storage_updates: &StorageTrieUpdatesSorted,
 ) -> ChangesetResult<Vec<(Nibbles, Option<BranchNodeCompact>)>> {
-    let mut storage_changesets = Vec::with_capacity(storage_updates.storage_nodes.len());
+    compute_sorted_changesets(
+        cursor,
+        storage_updates.storage_nodes.iter().map(|(path, _new_node)| *path),
+        storage_updates.storage_nodes.len(),
+    )
+}
 
-    // For each changed storage node, look up its current value
-    // The input is already sorted, so the output will be sorted
-    for (path, _new_node) in &storage_updates.storage_nodes {
-        let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
-        storage_changesets.push((*path, old_node));
+fn compute_sorted_changesets<C>(
+    cursor: &mut C,
+    changed_paths: impl Iterator<Item = Nibbles>,
+    len: usize,
+) -> ChangesetResult<Vec<(Nibbles, Option<BranchNodeCompact>)>>
+where
+    C: TrieCursor,
+{
+    let mut changed_paths = changed_paths.peekable();
+    let Some(first_path) = changed_paths.peek().copied() else { return Ok(Vec::new()) };
+
+    let mut current = cursor.seek(first_path)?;
+    let mut changesets = Vec::with_capacity(len);
+
+    for path in changed_paths {
+        while current.as_ref().is_some_and(|(current_path, _)| *current_path < path) {
+            current = cursor.next()?;
+        }
+
+        let old_node = if current.as_ref().is_some_and(|(current_path, _)| *current_path == path) {
+            let old_node = current.take().map(|(_path, node)| node);
+            current = cursor.next()?;
+            old_node
+        } else {
+            None
+        };
+        changesets.push((path, old_node));
     }
 
-    Ok(storage_changesets)
+    Ok(changesets)
 }
 
 /// Handles wiped storage trie changeset computation.
@@ -237,7 +259,10 @@ pub fn storage_trie_wiped_changeset_iter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trie_cursor::mock::MockTrieCursorFactory;
+    use crate::{
+        mock::{KeyVisit, KeyVisitType},
+        trie_cursor::mock::MockTrieCursorFactory,
+    };
     use alloy_primitives::map::B256Map;
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
@@ -303,6 +328,18 @@ mod tests {
         // path3 should have None (it didn't exist before)
         assert_eq!(changesets.account_nodes_ref()[1].0, path3);
         assert_eq!(changesets.account_nodes_ref()[1].1, None);
+
+        assert_eq!(
+            &*factory.visited_account_keys(),
+            &[
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(path1),
+                    visited_key: Some(path1),
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(path2) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+            ],
+        );
     }
 
     #[test]
@@ -357,6 +394,18 @@ mod tests {
         // path3 should have None (it didn't exist before)
         assert_eq!(storage_changesets.storage_nodes[1].0, path3);
         assert_eq!(storage_changesets.storage_nodes[1].1, None);
+
+        assert_eq!(
+            &*factory.visited_storage_keys(hashed_address),
+            &[
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(path1),
+                    visited_key: Some(path1),
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(path2) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+            ],
+        );
     }
 
     #[test]
