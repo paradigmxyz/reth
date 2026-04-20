@@ -171,14 +171,6 @@ impl ArenaCursor {
         logical_branch_path_len(arena, self.stack.last().expect("cursor is non-empty"))
     }
 
-    /// Returns the absolute path of a child at `child_nibble` under the branch at the top of
-    /// the stack. The result is `stack_head.path + branch.short_key + child_nibble`.
-    pub(super) fn child_path(&self, arena: &NodeArena, child_nibble: u8) -> Nibbles {
-        let mut path = logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"));
-        path.push_unchecked(child_nibble);
-        path
-    }
-
     /// Returns the logical path of the parent branch entry (second from top of the stack).
     /// Panics if the stack has fewer than 2 entries.
     pub(super) fn parent_logical_branch_path(&self, arena: &NodeArena) -> Nibbles {
@@ -248,7 +240,7 @@ impl ArenaCursor {
         }
 
         loop {
-            let Some(head) = self.stack.last_mut() else {
+            let Some(head) = self.stack.last() else {
                 return NextResult::Done;
             };
             let head_idx = head.index;
@@ -258,6 +250,7 @@ impl ArenaCursor {
                 return NextResult::NonBranch;
             };
 
+            let head_branch_logical_path = self.head_logical_branch_path(arena);
             let state_mask = branch.state_mask;
             let start = head.next_dense_idx;
             let child_depth = self.stack.len();
@@ -277,7 +270,8 @@ impl ArenaCursor {
                     // Record where to resume iteration when we return to this entry.
                     self.stack.last_mut().expect("head exists").next_dense_idx =
                         branch_child_idx.get() + 1;
-                    let path = self.child_path(arena, nibble);
+                    let mut path = head_branch_logical_path;
+                    path.push_unchecked(nibble);
                     self.push(arena, child_idx, path);
                     descended = true;
                     break;
@@ -351,7 +345,8 @@ impl ArenaCursor {
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    let mut path = head_branch_logical_path;
+                    path.push_unchecked(child_nibble);
                     self.push(arena, child_idx, path);
                 }
             }
