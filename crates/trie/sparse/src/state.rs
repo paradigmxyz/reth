@@ -1,9 +1,7 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
-    lfu::BucketedLfu,
-    provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    traits::SparseTrie as SparseTrieTrait,
+    lfu::BucketedLfu, provider::TrieNodeProviderFactory, traits::SparseTrie as SparseTrieTrait,
     ParallelSparseTrie, RevealableSparseTrie,
 };
 use alloc::vec::Vec;
@@ -13,8 +11,8 @@ use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
-    TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -480,56 +478,36 @@ where
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
-    ///
-    /// If the trie is not revealed yet, its root will be revealed using the trie node provider.
-    fn revealed_trie_mut(
-        &mut self,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<&mut A> {
-        match self.state {
-            RevealableSparseTrie::Blind(_) => {
-                let (root_node, hash_mask, tree_mask) = provider_factory
-                    .account_node_provider()
-                    .trie_node(&Nibbles::default())?
-                    .map(|node| {
-                        TrieNodeV2::decode(&mut &node.node[..])
-                            .map(|decoded| (decoded, node.hash_mask, node.tree_mask))
-                    })
-                    .transpose()?
-                    .unwrap_or((TrieNodeV2::EmptyRoot, None, None));
-                let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                self.state.reveal_root(root_node, masks, self.retain_updates).map_err(Into::into)
-            }
-            RevealableSparseTrie::Revealed(ref mut trie) => Ok(trie),
-        }
+    fn revealed_trie_mut(&mut self) -> SparseStateTrieResult<&mut A> {
+        self.state.as_revealed_mut().ok_or_else(|| SparseTrieErrorKind::Blind.into())
     }
 
     /// Returns sparse trie root.
-    ///
-    /// If the trie has not been revealed, this function reveals the root node and returns its hash.
     pub fn root(
         &mut self,
-        provider_factory: impl TrieNodeProviderFactory,
+        _provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<B256> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
-        Ok(self.revealed_trie_mut(provider_factory)?.root())
+        Ok(self.revealed_trie_mut()?.root())
     }
 
-    /// Returns sparse trie root and trie updates if the trie has been revealed.
+    /// Returns sparse trie root and trie updates.
+    ///
+    /// Returns an error if the account trie is still blind.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn root_with_updates(
         &mut self,
-        provider_factory: impl TrieNodeProviderFactory,
+        _provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
         let storage_tries = self.storage_trie_updates();
-        let revealed = self.revealed_trie_mut(provider_factory)?;
+        let revealed = self.revealed_trie_mut()?;
 
         let (root, updates) = (revealed.root(), revealed.take_updates());
         let updates = TrieUpdates {
@@ -1081,6 +1059,7 @@ mod tests {
     };
     use arbitrary::Arbitrary;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
@@ -1344,6 +1323,16 @@ mod tests {
             .unwrap()
             .get_leaf_value(&full_path_0)
             .is_none());
+    }
+
+    #[test]
+    fn root_on_blind_trie_returns_blind_error() {
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+
+        let err = sparse.root(&provider_factory).unwrap_err();
+
+        assert!(matches!(err.kind(), SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)));
     }
 
     #[test]

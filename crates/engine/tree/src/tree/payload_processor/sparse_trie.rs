@@ -27,8 +27,9 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    errors::SparseTrieResult, ConfigurableSparseTrie, DeferredDrops, LeafUpdate,
-    RevealableSparseTrie, SparseStateTrie, SparseTrie,
+    errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
+    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
+    SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
@@ -105,8 +106,6 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
-    /// Whether any actual hashed state updates were observed for this block.
-    has_state_updates: bool,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -161,7 +160,6 @@ where
             storage_cache_misses: 0,
             pending_targets: Default::default(),
             pending_updates: Default::default(),
-            has_state_updates: false,
             metrics,
         }
     }
@@ -366,15 +364,26 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = if self.has_state_updates {
-            self.trie.root_with_updates(&self.proof_worker_handle).map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?
-        } else {
-            // No state updates means the block preserves the parent root, so avoid lazily
-            // revealing a blind account root just to recompute the same hash.
-            (self.parent_state_root, TrieUpdates::default())
-        };
+        let (state_root, trie_updates) =
+            match self.trie.root_with_updates(&self.proof_worker_handle) {
+                Ok(result) => result,
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                    ) =>
+                {
+                    // A still-blind account trie means this block never changed state, so preserve
+                    // the cached parent root instead of fetching and revealing
+                    // the unchanged root node.
+                    (self.parent_state_root, TrieUpdates::default())
+                }
+                Err(err) => {
+                    return Err(ParallelStateRootError::Other(format!(
+                        "could not calculate state root: {err:?}"
+                    )))
+                }
+            };
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
@@ -445,9 +454,6 @@ where
         skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
-        self.has_state_updates |=
-            !hashed_state_update.accounts.is_empty() || !hashed_state_update.storages.is_empty();
-
         for (address, storage) in hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
