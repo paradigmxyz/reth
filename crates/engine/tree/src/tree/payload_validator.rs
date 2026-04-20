@@ -97,7 +97,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Output of block or payload validation.
 pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
@@ -600,17 +600,7 @@ where
             });
 
         let block = convert_to_block(input)?;
-        let transaction_root = is_payload.then(|| {
-            let body = block.body().clone();
-            let parent_span = Span::current();
-            let num_hash = block.num_hash();
-            self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
-                let _span =
-                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
-                        .entered();
-                body.calculate_tx_root()
-            })
-        });
+        let transaction_root = is_payload.then(|| block.header().transactions_root());
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -631,12 +621,6 @@ where
                 })
                 .ok()
         };
-        let transaction_root = transaction_root.map(|handle| {
-            let _span =
-                debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
-                    .entered();
-            handle.try_into_inner().expect("sole handle")
-        });
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
