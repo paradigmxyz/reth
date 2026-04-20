@@ -188,7 +188,7 @@ where
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .expect("fee is always valid; execution succeeded");
-                    let gas_used = result.gas_used();
+                    let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
 
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);

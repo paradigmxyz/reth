@@ -138,7 +138,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let cancellation = cancellation.clone();
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
-                let executor_lifetime = Duration::from_secs(120);
+                let executor_lifetime = Duration::from_secs(600);
 
                 loop {
                     if cancellation.is_cancelled() {
@@ -245,7 +245,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let _ = stats_tx.send(block.gas_used());
 
                         // Reset DB once in a while to avoid OOM or read tx timeouts
-                        if executor.size_hint() > 1_000_000 ||
+                        if executor.size_hint() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             executor =

@@ -299,13 +299,14 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
         // Add validation before starting unwind
-        let provider = self.provider_factory.provider()?;
-        let latest_block = provider.last_block_number()?;
-
-        // Get the actual pruning configuration
-        let prune_modes = provider.prune_modes_ref();
-
-        let checkpoints = provider.get_prune_checkpoints()?;
+        let (latest_block, prune_modes, checkpoints) = {
+            let provider = self.provider_factory.provider()?;
+            (
+                provider.last_block_number()?,
+                provider.prune_modes_ref().clone(),
+                provider.get_prune_checkpoints()?,
+            )
+        };
         prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
 
         // Unwind stages in reverse order of execution

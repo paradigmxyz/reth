@@ -13,11 +13,10 @@ pub struct RethPayloadStatus {
     pub status: PayloadStatus,
     /// Server-side execution latency in microseconds.
     pub latency_us: u64,
-    /// Time spent waiting for persistence to complete, in microseconds.
-    ///
-    /// `None` when wasn't asked to wait.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub persistence_wait_us: Option<u64>,
+    /// Time spent waiting on persistence in microseconds, including both time spent
+    /// queued due to persistence backpressure and, when requested, the explicit wait
+    /// for in-flight persistence to complete.
+    pub persistence_wait_us: u64,
     /// Time spent waiting for the execution cache lock, in microseconds.
     ///
     /// `None` when wasn't asked to wait.
@@ -44,8 +43,8 @@ pub enum RethNewPayloadInput<ExecutionData> {
 /// Reth-specific engine API extensions.
 ///
 /// This trait provides a `reth_newPayload` endpoint that accepts either `ExecutionData` directly
-/// (payload + sidecar) or an RLP-encoded block, optionally waiting for persistence and cache locks
-/// before processing.
+/// (payload + sidecar) or an RLP-encoded block, optionally alongside a block access list and
+/// waiting for persistence and cache locks before processing.
 ///
 /// By default, the endpoint waits for both in-flight persistence and cache updates to complete
 /// before executing the payload, providing unbiased timing measurements. Each can be independently

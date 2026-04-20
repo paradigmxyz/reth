@@ -4,7 +4,7 @@
 use crate::{
     bench::{
         context::BenchContext,
-        helpers::parse_duration,
+        helpers::{fetch_block_access_list, parse_duration},
         metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
@@ -84,7 +84,7 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
         }
 
         let BenchContext {
@@ -92,7 +92,6 @@ impl Command {
             block_provider,
             auth_provider,
             next_block,
-            is_optimism,
             use_reth_namespace,
             rlp_blocks,
             wait_for_persistence,
@@ -199,13 +198,19 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
+            let bal = if rlp.is_none() && block.header.block_access_list_hash.is_some() {
+                Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+            } else {
+                None
+            };
+
             let (version, params) = block_to_new_payload(
                 block,
-                is_optimism,
                 rlp,
                 use_reth_namespace,
                 wait_for_persistence,
                 no_wait_for_caches,
+                bal,
             )?;
             let start = Instant::now();
             let server_timings =
@@ -216,7 +221,10 @@ impl Command {
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
-                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
                 execution_cache_wait: server_timings
                     .as_ref()
                     .map(|t| t.execution_cache_wait)
@@ -265,7 +273,10 @@ impl Command {
             }
 
             if let Some(wait_time) = self.wait_time {
-                tokio::time::sleep(wait_time).await;
+                let remaining = wait_time.saturating_sub(start.elapsed());
+                if !remaining.is_zero() {
+                    tokio::time::sleep(remaining).await;
+                }
             }
 
             let gas_row =

@@ -28,30 +28,12 @@ on:
         required: false
         type: boolean
         default: false
-      pgo:
-        description: "Enable PGO profiling"
-        required: false
-        type: boolean
-        default: false
-      pgo_blocks:
-        description: "Number of blocks to execute for PGO profiling"
-        required: false
-        type: string
-        default: "20"
 
 jobs:
-  collect-pgo-profile:
-    if: github.repository == 'paradigmxyz/reth' && github.event_name == 'workflow_dispatch' && inputs.pgo
-    uses: ./.github/workflows/pgo-profile.yml
-    with:
-      pgo_blocks: ${{ inputs.pgo_blocks || '20' }}
-    secrets: inherit
-
   build:
-    if: github.repository == 'paradigmxyz/reth' && !failure() && !cancelled()
+    if: github.repository == 'paradigmxyz/reth'
     name: Build Docker images
     runs-on: ubuntu-24.04
-    needs: collect-pgo-profile
     permissions:
       packages: write
       contents: read
@@ -75,30 +57,6 @@ jobs:
           echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
           echo "dirty=false" >> "$GITHUB_OUTPUT"
-
-      - name: Download pre-collected PGO profile
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.pgo }}
-        uses: actions/download-artifact@v7
-        with:
-          name: pgo-profdata
-          path: dist
-
-      - name: Configure PGO build args
-        id: pgo
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ "${{ inputs.pgo }}" == "true" ]]; then
-            if [ ! -f dist/merged.profdata ]; then
-              echo "::error::Expected dist/merged.profdata from collect-pgo-profile job"
-              exit 1
-            fi
-            echo "use_pgo_bolt=true" >> "$GITHUB_OUTPUT"
-            echo "pgo_profdata=dist/merged.profdata" >> "$GITHUB_OUTPUT"
-            echo "Using pre-collected PGO profile from collect-pgo-profile job"
-          else
-            echo "use_pgo_bolt=false" >> "$GITHUB_OUTPUT"
-            echo "pgo_profdata=" >> "$GITHUB_OUTPUT"
-            echo "PGO disabled"
-          fi
 
       - name: Determine build parameters
         id: params
@@ -149,9 +107,6 @@ jobs:
           push: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
           set: |
             ${{ steps.params.outputs.ethereum_set }}
-            *.args.USE_PGO_BOLT=${{ steps.pgo.outputs.use_pgo_bolt }}
-            *.args.PGO_PROFDATA=${{ steps.pgo.outputs.pgo_profdata }}
-            *.args.STRIP_SYMBOLS=false
 
       - name: Verify image architectures
         env:

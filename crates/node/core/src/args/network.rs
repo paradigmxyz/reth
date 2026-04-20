@@ -4,6 +4,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    num::NonZeroUsize,
     ops::Not,
     path::PathBuf,
     sync::OnceLock,
@@ -81,6 +82,8 @@ pub struct DefaultNetworkArgs {
     pub tx_ingress_policy: TransactionIngressPolicy,
     /// Default transaction propagation mode.
     pub propagation_mode: TransactionPropagationMode,
+    /// Default enforce ENR fork ID setting.
+    pub enforce_enr_fork_id: bool,
 }
 
 impl DefaultNetworkArgs {
@@ -183,6 +186,12 @@ impl DefaultNetworkArgs {
         self.propagation_mode = v;
         self
     }
+
+    /// Set the default enforce ENR fork ID setting.
+    pub const fn with_enforce_enr_fork_id(mut self, v: bool) -> Self {
+        self.enforce_enr_fork_id = v;
+        self
+    }
 }
 
 impl Default for DefaultNetworkArgs {
@@ -204,6 +213,7 @@ impl Default for DefaultNetworkArgs {
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
+            enforce_enr_fork_id: false,
         }
     }
 }
@@ -384,6 +394,10 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub network_id: Option<u64>,
 
+    /// Maximum allowed ETH message size in bytes. Default is 10 MiB.
+    #[arg(long = "eth-max-message-size", value_name = "BYTES")]
+    pub eth_max_message_size: Option<NonZeroUsize>,
+
     /// Restrict network communication to the given IP networks (CIDR masks).
     ///
     /// Comma separated list of CIDR network specifications.
@@ -398,7 +412,7 @@ pub struct NetworkArgs {
     /// When enabled, peers discovered without a confirmed fork ID are not added to the peer set
     /// until their fork ID is verified via EIP-868 ENR request. This filters out peers from other
     /// networks that pollute the discovery table.
-    #[arg(long)]
+    #[arg(long, default_value_t = DefaultNetworkArgs::get_global().enforce_enr_fork_id)]
     pub enforce_enr_fork_id: bool,
 }
 
@@ -544,6 +558,7 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
+            .eth_max_message_size_opt(self.eth_max_message_size.map(NonZeroUsize::get))
             .network_id(self.network_id)
     }
 
@@ -648,6 +663,7 @@ impl Default for NetworkArgs {
             tx_propagation_policy,
             tx_ingress_policy,
             propagation_mode,
+            enforce_enr_fork_id,
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
@@ -680,8 +696,9 @@ impl Default for NetworkArgs {
             propagation_mode,
             required_block_hashes: vec![],
             network_id: None,
+            eth_max_message_size: None,
             netrestrict: None,
-            enforce_enr_fork_id: false,
+            enforce_enr_fork_id,
         }
     }
 }
@@ -1093,6 +1110,37 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn parse_eth_max_message_size() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--eth-max-message-size",
+            "15728640",
+        ])
+        .args;
+
+        assert_eq!(args.eth_max_message_size, Some(NonZeroUsize::new(15 * 1024 * 1024).unwrap()));
+    }
+
+    #[test]
+    fn parse_eth_max_message_size_zero_rejected() {
+        let result =
+            CommandParser::<NetworkArgs>::try_parse_from(["reth", "--eth-max-message-size", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_eth_max_message_size_above_rlpx_cap() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--eth-max-message-size",
+            "16777216",
+        ]);
+        assert!(result.is_ok());
+        let args = result.unwrap().args;
+        assert_eq!(args.eth_max_message_size, Some(NonZeroUsize::new(16 * 1024 * 1024).unwrap()));
     }
 
     #[test]

@@ -1,10 +1,11 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
+use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
-    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS, DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -22,6 +23,7 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
+    persistence_backpressure_threshold: u64,
     memory_block_buffer_target: u64,
     legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
@@ -63,6 +65,12 @@ impl DefaultEngineValues {
     /// Set the default persistence threshold
     pub const fn with_persistence_threshold(mut self, v: u64) -> Self {
         self.persistence_threshold = v;
+        self
+    }
+
+    /// Set the default persistence backpressure threshold
+    pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
+        self.persistence_backpressure_threshold = v;
         self
     }
 
@@ -224,6 +232,7 @@ impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
@@ -265,6 +274,12 @@ pub struct EngineArgs {
     /// cause more frequent DB writes.
     #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
+
+    /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
+    ///
+    /// This value must be greater than `--engine.persistence-threshold`.
+    #[arg(long = "engine.persistence-backpressure-threshold", default_value_t = DefaultEngineValues::get_global().persistence_backpressure_threshold)]
+    pub persistence_backpressure_threshold: u64,
 
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
@@ -463,6 +478,7 @@ impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
             persistence_threshold,
+            persistence_backpressure_threshold,
             memory_block_buffer_target,
             legacy_state_root_task_enabled,
             state_cache_disabled,
@@ -491,6 +507,7 @@ impl Default for EngineArgs {
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
+            persistence_backpressure_threshold,
             memory_block_buffer_target,
             legacy_state_root_task_enabled,
             state_root_task_compare_updates,
@@ -529,10 +546,22 @@ impl Default for EngineArgs {
 }
 
 impl EngineArgs {
+    /// Validates cross-field engine arguments.
+    pub fn validate(&self) -> eyre::Result<()> {
+        ensure!(
+            self.persistence_backpressure_threshold > self.persistence_threshold,
+            "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
+            self.persistence_backpressure_threshold,
+            self.persistence_threshold
+        );
+        Ok(())
+    }
+
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
         let config = TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
+            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
@@ -590,6 +619,7 @@ mod tests {
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
+            persistence_backpressure_threshold: 101,
             memory_block_buffer_target: 50,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
@@ -627,6 +657,8 @@ mod tests {
             "reth",
             "--engine.persistence-threshold",
             "100",
+            "--engine.persistence-backpressure-threshold",
+            "101",
             "--engine.memory-block-buffer-target",
             "50",
             "--engine.legacy-state-root",
@@ -663,6 +695,19 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn validate_rejects_invalid_backpressure_threshold() {
+        let args = EngineArgs {
+            persistence_threshold: 4,
+            persistence_backpressure_threshold: 4,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.persistence-backpressure-threshold"));
+        assert!(err.contains("engine.persistence-threshold"));
     }
 
     #[test]
