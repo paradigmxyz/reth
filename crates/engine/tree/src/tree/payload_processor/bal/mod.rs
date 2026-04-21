@@ -17,6 +17,8 @@
 //! place; orchestration follows in subsequent PRs.
 
 pub mod error;
+pub mod feasibility;
+pub mod fragment;
 pub mod pre_state;
 pub mod snapshot;
 pub mod snapshot_db;
