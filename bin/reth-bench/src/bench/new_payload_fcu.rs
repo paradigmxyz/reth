@@ -14,15 +14,31 @@ use crate::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
     },
 };
-use alloy_provider::{ext::DebugApi, Provider};
-use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_consensus::TxEnvelope;
+use alloy_eips::Encodable2718;
+use alloy_primitives::{Bytes, B256};
+use alloy_provider::{
+    ext::DebugApi,
+    network::{AnyNetwork, AnyRpcBlock},
+    Provider, RootProvider,
+};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
+    PraguePayloadFields,
+};
 use clap::Parser;
-use eyre::{Context, OptionExt};
+use eyre::{bail, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
+use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::BenchmarkArgs;
-use std::time::{Duration, Instant};
+use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
@@ -31,6 +47,13 @@ pub struct Command {
     /// The RPC url to use for getting data.
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
     rpc_url: String,
+
+    /// Build benchmark blocks with `testing_buildBlockV1` before submitting them.
+    ///
+    /// This requires enabling the hidden `testing` RPC module on the target node,
+    /// for example with `reth node --http --http.api eth,testing`.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    build_blocks: bool,
 
     /// How long to wait after a forkchoice update before sending the next payload.
     ///
@@ -83,12 +106,33 @@ pub struct Command {
     benchmark: BenchmarkArgs,
 }
 
+#[derive(Debug)]
+struct PreparedBuiltBlock {
+    block_hash: B256,
+    block_number: u64,
+    gas_used: u64,
+    gas_limit: u64,
+    transaction_count: u64,
+    version: Option<EngineApiMessageVersion>,
+    params: serde_json::Value,
+}
+
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
+        if self.build_blocks && self.benchmark.rlp_blocks {
+            bail!("--build-blocks cannot be combined with --rlp-blocks")
+        }
+        if self.build_blocks && self.enable_bal {
+            bail!("--build-blocks cannot be combined with --enable-bal")
+        }
+
         // Log mode configuration
         if let Some(duration) = self.wait_time {
             info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
+        }
+        if self.build_blocks {
+            info!(target: "reth-bench", "Using testing_buildBlockV1 to build benchmark blocks");
         }
 
         let BenchContext {
@@ -182,6 +226,8 @@ impl Command {
         let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
+        let mut built_chain = VecDeque::with_capacity(65);
+        let mut build_parent_hash = None;
 
         while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
@@ -189,35 +235,89 @@ impl Command {
             total_wait_time += wait_start.elapsed();
             result
         } {
-            let gas_used = block.header.gas_used;
-            let gas_limit = block.header.gas_limit;
-            let block_number = block.header.number;
-            let transaction_count = block.transactions.len() as u64;
+            let (
+                gas_used,
+                gas_limit,
+                block_number,
+                transaction_count,
+                version,
+                params,
+                forkchoice_state,
+            ) = if self.build_blocks {
+                let prepared = prepare_built_block(
+                    &auth_provider,
+                    &block,
+                    build_parent_hash.unwrap_or(block.header.parent_hash),
+                    use_reth_namespace,
+                    wait_for_persistence,
+                    no_wait_for_caches,
+                )
+                .await?;
+
+                built_chain.push_back(prepared.block_hash);
+                if built_chain.len() > 65 {
+                    built_chain.pop_front();
+                }
+                build_parent_hash = Some(prepared.block_hash);
+
+                (
+                    prepared.gas_used,
+                    prepared.gas_limit,
+                    prepared.block_number,
+                    prepared.transaction_count,
+                    prepared.version,
+                    prepared.params,
+                    ForkchoiceState {
+                        head_block_hash: prepared.block_hash,
+                        safe_block_hash: built_chain_hash(&built_chain, 32, prepared.block_hash),
+                        finalized_block_hash: built_chain_hash(
+                            &built_chain,
+                            64,
+                            prepared.block_hash,
+                        ),
+                    },
+                )
+            } else {
+                let gas_used = block.header.gas_used;
+                let gas_limit = block.header.gas_limit;
+                let block_number = block.header.number;
+                let transaction_count = block.transactions.len() as u64;
+                let forkchoice_state = ForkchoiceState {
+                    head_block_hash: head,
+                    safe_block_hash: safe,
+                    finalized_block_hash: finalized,
+                };
+
+                let bal = if rlp.is_none() &&
+                    (block.header.block_access_list_hash.is_some() || self.enable_bal)
+                {
+                    Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+                } else {
+                    None
+                };
+
+                let (version, params) = block_to_new_payload(
+                    block,
+                    rlp,
+                    use_reth_namespace,
+                    wait_for_persistence,
+                    no_wait_for_caches,
+                    bal,
+                )?;
+
+                (
+                    gas_used,
+                    gas_limit,
+                    block_number,
+                    transaction_count,
+                    version,
+                    params,
+                    forkchoice_state,
+                )
+            };
 
             debug!(target: "reth-bench", ?block_number, "Sending payload");
 
-            let forkchoice_state = ForkchoiceState {
-                head_block_hash: head,
-                safe_block_hash: safe,
-                finalized_block_hash: finalized,
-            };
-
-            let bal = if rlp.is_none() &&
-                (block.header.block_access_list_hash.is_some() || self.enable_bal)
-            {
-                Some(fetch_block_access_list(&block_provider, block.header.number).await?)
-            } else {
-                None
-            };
-
-            let (version, params) = block_to_new_payload(
-                block,
-                rlp,
-                use_reth_namespace,
-                wait_for_persistence,
-                no_wait_for_caches,
-                bal,
-            )?;
             let start = Instant::now();
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;
@@ -317,4 +417,238 @@ impl Command {
 
         Ok(())
     }
+}
+
+async fn prepare_built_block(
+    auth_provider: &RootProvider<AnyNetwork>,
+    block: &AnyRpcBlock,
+    parent_block_hash: B256,
+    use_reth_namespace: bool,
+    wait_for_persistence: reth_node_core::args::WaitForPersistence,
+    no_wait_for_caches: bool,
+) -> eyre::Result<PreparedBuiltBlock> {
+    let version = build_block_target_version(block)?;
+    let request = build_block_request(block, parent_block_hash)?;
+    let built_payload: ExecutionPayloadEnvelopeV5 =
+        auth_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
+            || format!("Failed to build block {} via testing_buildBlockV1", block.header.number),
+        )?;
+
+    let payload = &built_payload.execution_payload.payload_inner.payload_inner;
+    let block_hash = payload.block_hash;
+    let block_number = payload.block_number;
+    let gas_used = payload.gas_used;
+    let gas_limit = payload.gas_limit;
+    let transaction_count = payload.transactions.len() as u64;
+    let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
+    let (version, params) = built_payload_to_new_payload(
+        built_payload,
+        version,
+        use_reth_namespace,
+        wait_for_persistence,
+        no_wait_for_caches,
+        block.header.parent_beacon_block_root,
+    )?;
+
+    Ok(PreparedBuiltBlock {
+        block_hash,
+        block_number,
+        gas_used,
+        gas_limit,
+        transaction_count,
+        version,
+        params,
+    })
+}
+
+fn build_block_request(
+    block: &AnyRpcBlock,
+    parent_block_hash: B256,
+) -> eyre::Result<TestingBuildBlockRequestV1> {
+    let transactions = block
+        .clone()
+        .try_into_transactions()
+        .map_err(|_| eyre::eyre!("Block transactions must be fetched in full for --build-blocks"))?
+        .into_iter()
+        .map(|tx| {
+            let tx: TxEnvelope =
+                tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type in RPC block"))?;
+            Ok::<Bytes, eyre::Report>(tx.encoded_2718().into())
+        })
+        .collect::<eyre::Result<Vec<_>>>()?;
+
+    let rpc_block = block.clone().into_inner();
+
+    Ok(TestingBuildBlockRequestV1 {
+        parent_block_hash,
+        payload_attributes: PayloadAttributes {
+            timestamp: block.header.timestamp,
+            prev_randao: block.header.mix_hash.unwrap_or_default(),
+            suggested_fee_recipient: block.header.beneficiary,
+            withdrawals: rpc_block.withdrawals.map(|withdrawals| withdrawals.into_inner()),
+            parent_beacon_block_root: block.header.parent_beacon_block_root,
+            slot_number: block.header.slot_number,
+        },
+        transactions,
+        extra_data: Some(block.header.extra_data.clone()),
+    })
+}
+
+fn build_block_target_version(block: &AnyRpcBlock) -> eyre::Result<EngineApiMessageVersion> {
+    if block.header.block_access_list_hash.is_some() || block.header.slot_number.is_some() {
+        bail!(
+            "--build-blocks does not support Amsterdam payload fields with block access lists yet"
+        )
+    }
+
+    Ok(if block.header.requests_hash.is_some() {
+        EngineApiMessageVersion::V4
+    } else if block.header.parent_beacon_block_root.is_some() {
+        EngineApiMessageVersion::V3
+    } else if block.header.withdrawals_root.is_some() {
+        EngineApiMessageVersion::V2
+    } else {
+        EngineApiMessageVersion::V1
+    })
+}
+
+fn built_payload_to_new_payload(
+    built_payload: ExecutionPayloadEnvelopeV5,
+    target_version: EngineApiMessageVersion,
+    use_reth_namespace: bool,
+    wait_for_persistence: Option<bool>,
+    no_wait_for_caches: bool,
+    parent_beacon_block_root: Option<B256>,
+) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    let ExecutionPayloadEnvelopeV5 { execution_payload, blobs_bundle, execution_requests, .. } =
+        built_payload;
+
+    match target_version {
+        EngineApiMessageVersion::V1 => {
+            let payload = execution_payload.payload_inner.payload_inner;
+            if use_reth_namespace {
+                let execution_data = ExecutionData {
+                    payload: ExecutionPayload::V1(payload),
+                    sidecar: ExecutionPayloadSidecar::none(),
+                };
+                Ok((
+                    None,
+                    reth_new_payload_params(
+                        execution_data,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )?,
+                ))
+            } else {
+                Ok((Some(EngineApiMessageVersion::V1), serde_json::to_value((payload,))?))
+            }
+        }
+        EngineApiMessageVersion::V2 => {
+            let payload = execution_payload.payload_inner;
+            if use_reth_namespace {
+                let execution_data = ExecutionData {
+                    payload: ExecutionPayload::V2(payload.clone()),
+                    sidecar: ExecutionPayloadSidecar::none(),
+                };
+                Ok((
+                    None,
+                    reth_new_payload_params(
+                        execution_data,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )?,
+                ))
+            } else {
+                let payload = ExecutionPayloadInputV2 {
+                    execution_payload: payload.payload_inner,
+                    withdrawals: Some(payload.withdrawals),
+                };
+                Ok((Some(EngineApiMessageVersion::V2), serde_json::to_value((payload,))?))
+            }
+        }
+        EngineApiMessageVersion::V3 => {
+            let parent_beacon_block_root = parent_beacon_block_root
+                .ok_or_eyre("missing parent beacon block root for Cancun built block")?;
+            let versioned_hashes = blobs_bundle.versioned_hashes();
+
+            if use_reth_namespace {
+                let execution_data = ExecutionData {
+                    payload: ExecutionPayload::V3(execution_payload.clone()),
+                    sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields::new(
+                        parent_beacon_block_root,
+                        versioned_hashes,
+                    )),
+                };
+                Ok((
+                    None,
+                    reth_new_payload_params(
+                        execution_data,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )?,
+                ))
+            } else {
+                Ok((
+                    Some(EngineApiMessageVersion::V3),
+                    serde_json::to_value((
+                        execution_payload,
+                        versioned_hashes,
+                        parent_beacon_block_root,
+                    ))?,
+                ))
+            }
+        }
+        EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+            let parent_beacon_block_root = parent_beacon_block_root
+                .ok_or_eyre("missing parent beacon block root for Prague built block")?;
+            let versioned_hashes = blobs_bundle.versioned_hashes();
+
+            if use_reth_namespace {
+                let execution_data = ExecutionData {
+                    payload: ExecutionPayload::V3(execution_payload.clone()),
+                    sidecar: ExecutionPayloadSidecar::v4(
+                        CancunPayloadFields::new(parent_beacon_block_root, versioned_hashes),
+                        PraguePayloadFields::new(execution_requests.clone()),
+                    ),
+                };
+                Ok((
+                    None,
+                    reth_new_payload_params(
+                        execution_data,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )?,
+                ))
+            } else {
+                Ok((
+                    Some(target_version),
+                    serde_json::to_value((
+                        execution_payload,
+                        versioned_hashes,
+                        parent_beacon_block_root,
+                        execution_requests,
+                    ))?,
+                ))
+            }
+        }
+        EngineApiMessageVersion::V6 => {
+            bail!("--build-blocks does not support Amsterdam payload fields yet")
+        }
+    }
+}
+
+fn reth_new_payload_params(
+    execution_data: ExecutionData,
+    wait_for_persistence: Option<bool>,
+    no_wait_for_caches: bool,
+) -> eyre::Result<serde_json::Value> {
+    Ok(serde_json::to_value((
+        RethNewPayloadInput::ExecutionData(execution_data),
+        wait_for_persistence,
+        no_wait_for_caches.then_some(false),
+    ))?)
+}
+
+fn built_chain_hash(chain: &VecDeque<B256>, depth: usize, head: B256) -> B256 {
+    chain.len().checked_sub(depth + 1).and_then(|idx| chain.get(idx).copied()).unwrap_or(head)
 }
