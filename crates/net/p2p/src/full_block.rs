@@ -328,19 +328,22 @@ where
     }
 
     fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
-        let poll = match &mut self.access_lists_state {
-            AccessListsState::Pending(fut) => fut.poll_unpin(cx),
-            AccessListsState::Ready(_) => return,
-        };
+        loop {
+            let poll = match &mut self.access_lists_state {
+                AccessListsState::Pending(fut) => fut.poll_unpin(cx),
+                AccessListsState::Ready(_) => return,
+            };
 
-        match poll {
-            Poll::Pending => {}
-            Poll::Ready(res) => match res {
-                Ok(bal) => {
-                    let (peer, access_lists) = bal.split();
-                    if access_lists.0.len() == 1 {
-                        self.access_lists_state = AccessListsState::Ready(access_lists);
-                    } else {
+            match poll {
+                Poll::Pending => return,
+                Poll::Ready(res) => match res {
+                    Ok(bal) => {
+                        let (peer, access_lists) = bal.split();
+                        if access_lists.0.len() == 1 {
+                            self.access_lists_state = AccessListsState::Ready(access_lists);
+                            return;
+                        }
+
                         debug!(
                             target: "downloaders",
                             hash = ?self.block.hash(),
@@ -350,20 +353,18 @@ where
                         );
                         self.block.client.report_bad_message(peer);
                         self.retry_access_lists_request();
-                        cx.waker().wake_by_ref();
                     }
-                }
-                Err(err) => {
-                    debug!(
-                        target: "downloaders",
-                        %err,
-                        hash = ?self.block.hash(),
-                        "Access list download failed",
-                    );
-                    self.retry_access_lists_request();
-                    cx.waker().wake_by_ref();
-                }
-            },
+                    Err(err) => {
+                        debug!(
+                            target: "downloaders",
+                            %err,
+                            hash = ?self.block.hash(),
+                            "Access list download failed",
+                        );
+                        self.retry_access_lists_request();
+                    }
+                },
+            }
         }
     }
 
@@ -428,7 +429,7 @@ enum AccessListsState<Req> {
 }
 
 impl<Req> AccessListsState<Req> {
-    fn is_ready(&self) -> bool {
+    const fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
 }
