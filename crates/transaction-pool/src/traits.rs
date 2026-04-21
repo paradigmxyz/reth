@@ -1801,13 +1801,9 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
         &mut self,
     ) -> Result<NewTransactionEvent<Tx>, tokio::sync::mpsc::error::TryRecvError> {
         loop {
-            match self.st.try_recv() {
-                Ok(event) => {
-                    if event.subpool == self.subpool {
-                        return Ok(event)
-                    }
-                }
-                Err(e) => return Err(e),
+            let event = self.st.try_recv()?;
+            if event.subpool == self.subpool {
+                return Ok(event)
             }
         }
     }

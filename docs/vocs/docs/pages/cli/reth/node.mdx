@@ -840,6 +840,16 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
+      --dev.payload-wait-time <PAYLOAD_WAIT_TIME>
+          Time to wait after initiating payload building before resolving.
+
+          Introduces a sleep between `fork_choice_updated` and `resolve_kind` in the
+          local miner, giving the payload job time for multiple rebuild attempts with
+          new transactions from the pool.
+
+          Parses strings using [`humantime::parse_duration`]
+          --dev.payload-wait-time 450ms
+
       --dev.mnemonic <MNEMONIC>
           Derive dev accounts from a fixed mnemonic instead of random ones.
 
@@ -1045,6 +1055,11 @@ Engine:
           The engine and payload builder contend for the same trie — if a builder task is still running when `newPayload` arrives, the engine will block until the trie is stored back.
 
           The builder also anchors the trie at the built block's state root, so if the next `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
+
+      --engine.suppress-persistence-during-build
+          Suppress persistence while building a payload.
+
+          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
 ERA:
       --era.enable

@@ -1,21 +1,105 @@
+//! Snapshot download command.
+//!
+//! `reth download` prepares a data directory from published snapshot archives. [`DownloadCommand`]
+//! covers both a single-archive path and a manifest-driven path, and owns the steps required to
+//! turn downloaded bytes into a bootable node directory.
+//!
+//! ## Entry modes
+//!
+//! [`DownloadCommand`] has two main execution modes:
+//!
+//! - Single-archive mode processes one `.tar.lz4` or `.tar.zst` archive from `--url`.
+//!   Depending on the source and flags, it either extracts a local `file://` archive, streams a
+//!   remote archive straight into extraction, or downloads the archive to disk first and then
+//!   extracts it.
+//! - Manifest mode resolves a [`SnapshotManifest`], turns CLI or TUI choices into
+//!   [`ComponentSelection`]s, plans the required archives, processes them, and then writes the
+//!   resulting config and database checkpoints.
+//!
+//! [`DownloadDefaults`] defines the discovery endpoints and default help text used when the command
+//! needs to discover a manifest instead of consuming an explicit source.
+//!
+//! ## Selection and planning
+//!
+//! Manifest mode first reduces user input into `ResolvedComponents`: a map of
+//! [`SnapshotComponentType`] to [`ComponentSelection`] plus an optional `SelectionPreset`.
+//! This turns CLI input (`minimal`, `full`, `archive`, or explicit `--with-*` flags) into the
+//! component selections used by the download code.
+//!
+//! The selected components are then expanded into `PlannedDownloads`, which is the set of
+//! `PlannedArchive`s that must be verified, downloaded, or reused. Planning also computes the
+//! total byte count used by progress reporting.
+//!
+//! ## Archive processing
+//!
+//! Each planned archive is processed independently, but `DownloadSession` holds the shared
+//! progress, request limit, and cancellation token for the whole command.
+//! `ArchiveProcessContext` adds the paths needed to process one archive.
+//!
+//! Archive processing is modeled around `ModularDownloadJob`, which schedules work, and
+//! `ArchiveProcessor`, which owns the explicit retry state machine for one archive.
+//! `ArchiveMode` decides whether that archive should be fetched through the cache or streamed
+//! directly:
+//!
+//! - reuse verified plain output files when possible,
+//! - otherwise fetch and extract the archive,
+//! - verify the declared output files,
+//! - retry the entire archive attempt if extraction succeeded but verification failed.
+//!
+//! Reuse and completion are based on verified output files, not on whether an old archive file is
+//! present.
+//!
+//! ## Fetch and extraction
+//!
+//! `stream_and_extract` handles the single-archive path. It supports local files, resumable
+//! downloads to disk, and direct streaming extraction.
+//!
+//! When the code needs to fetch an archive to disk, it uses `ArchiveFetcher`. The fetcher probes
+//! the remote source and chooses between a sequential download and a segmented download plan
+//! (`SegmentedDownloadPlan`). `SequentialDownloadFallback` records why a source could not use the
+//! segmented path, while `SegmentedDownload` runs the worker queue and piece retries for the
+//! parallel path.
+//!
+//! Segmented download retries individual byte ranges. Archive processing retries whole-archive
+//! attempts. These are separate layers: range retries deal with transient request failures, while
+//! archive retries deal with extraction or output verification failures.
+//!
+//! `CompressionFormat` determines how the archive stream is unpacked once bytes are available, and
+//! `OutputVerifier` checks the extracted output files before reuse or completion.
+//!
+//! ## Progress and finalization
+//!
+//! `DownloadProgress` reports progress for the single-archive path. `SharedProgress` reports
+//! aggregate progress for modular downloads. It tracks fetched bytes separately from completed
+//! bytes so repeated fetches during retries do not overstate completion.
+//!
+//! After all required archives are complete, [`DownloadCommand`] finalizes the directory by
+//! writing the derived node configuration and updating prune or index-stage checkpoints. A
+//! successful command leaves a data directory that matches the snapshot shape that was selected.
+
+mod archive;
 pub mod config_gen;
+mod extract;
+mod fetch;
 pub mod manifest;
 pub mod manifest_cmd;
+mod planning;
+mod progress;
+mod session;
+mod source;
 mod tui;
+mod verify;
 
 use crate::common::EnvironmentArgs;
-use blake3::Hasher;
+use archive::run_modular_downloads;
 use clap::{builder::RangedU64ValueParser, Parser};
 use config_gen::{config_for_selections, write_config};
-use eyre::{Result, WrapErr};
-use futures::stream::{self, StreamExt};
-use lz4::Decoder;
-use manifest::{
-    ArchiveDescriptor, ComponentSelection, OutputFileChecksum, SnapshotComponentType,
-    SnapshotManifest,
-};
-use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
+use extract::stream_and_extract;
+use eyre::Result;
+use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
+use planning::{collect_planned_archives, summarize_download_startup};
+use progress::{DownloadProgress, DownloadRequestLimiter};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_db::{init_db, Database};
@@ -23,44 +107,36 @@ use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::PruneMode;
+use source::{
+    discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
+    print_snapshot_listing, resolve_manifest_base_url,
+};
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    fs::OpenOptions,
-    io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, OnceLock,
-    },
-    time::{Duration, Instant},
+    sync::{Arc, OnceLock},
 };
-use tar::Archive;
-use tokio::task;
-use tracing::{info, warn};
+use tracing::info;
 use tui::{run_selector, SelectorOutput};
-use url::Url;
-use zstd::stream::read::Decoder as ZstdDecoder;
 
-const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
 const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
 const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
-const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
-const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
-const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
-const STATIC_FILES_PREFIX: &str = "static_files/";
 
-/// Maximum number of concurrent archive downloads.
+/// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
+/// Built-in component presets for snapshot selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SelectionPreset {
+    /// Minimal node data needed to start from a snapshot.
     Minimal,
+    /// Full-node data matching the default full prune settings.
     Full,
+    /// All available snapshot data.
     Archive,
 }
 
-#[derive(Debug)]
 struct ResolvedComponents {
     selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
     preset: Option<SelectionPreset>,
@@ -128,6 +204,12 @@ impl DownloadDefaults {
             return custom_help.clone();
         }
 
+        let implicit_download_help = if self.mainnet_only_discovery() {
+            "\nIf no URL is provided, the latest archive snapshot will only be proposed\nfor Ethereum mainnet. For other chains, provide --manifest-url, --manifest-path,\nor -u explicitly."
+        } else {
+            "\nIf no URL is provided, the latest archive snapshot for the selected chain\nwill be proposed for download from "
+        };
+
         let mut help = format!(
             "Specify a snapshot URL or let the command propose a default one.\n\n\
              Browse available snapshots at {}\n\
@@ -141,16 +223,21 @@ impl DownloadDefaults {
             help.push('\n');
         }
 
+        help.push_str(implicit_download_help);
+        if !self.mainnet_only_discovery() {
+            help.push_str(
+                self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url),
+            );
+            help.push('.');
+        }
         help.push_str(
-            "\nIf no URL is provided, the latest archive snapshot for the selected chain\nwill be proposed for download from ",
-        );
-        help.push_str(
-            self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url),
-        );
-        help.push_str(
-            ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
+            "\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
         );
         help
+    }
+
+    fn mainnet_only_discovery(&self) -> bool {
+        self.snapshot_api_url == RETH_SNAPSHOTS_API_URL
     }
 
     /// Add a snapshot source to the list
@@ -191,6 +278,7 @@ impl DownloadDefaults {
 }
 
 impl Default for DownloadDefaults {
+    /// Returns the built-in download defaults.
     fn default() -> Self {
         Self::default_download_defaults()
     }
@@ -296,7 +384,10 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true")]
     resumable: bool,
 
-    /// Maximum number of concurrent modular archive workers.
+    /// Maximum number of simultaneous HTTP downloads.
+    ///
+    /// Applies across the entire snapshot download. Small files use one slot,
+    /// while large files may use multiple slots by splitting into fixed-size pieces.
     #[arg(long, default_value_t = MAX_CONCURRENT_DOWNLOADS)]
     download_concurrency: usize,
 
@@ -309,6 +400,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
+    /// Runs the download command in single-archive or manifest mode.
     pub async fn execute<N>(self) -> Result<()> {
         let chain = self.env.chain.chain();
         let chain_id = chain.id();
@@ -325,13 +417,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
-        // Resolve custom static files directory (None when using the default).
-        let default_sf = data_dir.data_dir().join("static_files");
-        let custom_sf = data_dir.static_files();
-        let static_files_dir = if custom_sf != default_sf { Some(custom_sf) } else { None };
-
         // Legacy single-URL mode: download one archive and extract it
         if let Some(ref url) = self.url {
+            let request_limiter = DownloadRequestLimiter::new(self.download_concurrency.max(1));
             info!(target: "reth::cli",
                 dir = ?data_dir.data_dir(),
                 url = %url,
@@ -341,9 +429,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             stream_and_extract(
                 url,
                 data_dir.data_dir(),
-                static_files_dir,
                 None,
                 self.resumable,
+                Some(request_limiter),
                 cancel_token.clone(),
             )
             .await?;
@@ -352,7 +440,44 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
-        // Modular download: fetch manifest and select components
+        let manifest = self.load_manifest(chain_id).await?;
+        let ResolvedComponents { mut selections, preset } = self.resolve_components(&manifest)?;
+
+        if matches!(preset, Some(SelectionPreset::Archive)) {
+            inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
+        }
+
+        let target_dir = data_dir.data_dir();
+        let planned_downloads = collect_planned_archives(&manifest, &selections)?;
+        let startup_summary = summarize_download_startup(&planned_downloads.archives, target_dir)?;
+        info!(target: "reth::cli",
+            reusable = startup_summary.reusable,
+            needs_download = startup_summary.needs_download,
+            "Startup integrity summary (plain output files)"
+        );
+
+        info!(target: "reth::cli",
+            archives = planned_downloads.total_archives(),
+            download_total = %DownloadProgress::format_size(planned_downloads.total_download_size),
+            output_total = %DownloadProgress::format_size(planned_downloads.total_output_size),
+            "Downloading all archives"
+        );
+
+        run_modular_downloads(
+            planned_downloads,
+            target_dir,
+            self.download_concurrency.max(1),
+            cancel_token.clone(),
+        )
+        .await?;
+
+        self.finalize_modular_download(&selections, &manifest, preset, target_dir, &data_dir.db())?;
+
+        Ok(())
+    }
+
+    /// Loads the manifest and resolves its effective base URL.
+    async fn load_manifest(&self, chain_id: u64) -> Result<SnapshotManifest> {
         let manifest_source = self.resolve_manifest_source(chain_id).await?;
 
         info!(target: "reth::cli", source = %manifest_source, "Fetching snapshot manifest");
@@ -367,148 +492,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Loaded snapshot manifest"
         );
 
-        let ResolvedComponents { mut selections, preset } = self.resolve_components(&manifest)?;
+        Ok(manifest)
+    }
 
-        if matches!(preset, Some(SelectionPreset::Archive)) {
-            inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
-        }
-
-        // Collect all archive descriptors across selected components.
-        let target_dir = data_dir.data_dir();
-        let mut all_downloads: Vec<PlannedArchive> = Vec::new();
-        for (ty, sel) in &selections {
-            let distance = match sel {
-                ComponentSelection::All => None,
-                ComponentSelection::Distance(d) => Some(*d),
-                ComponentSelection::Since(block) => Some(manifest.block - block + 1),
-                ComponentSelection::None => continue,
-            };
-            let descriptors = manifest.archive_descriptors_for_distance(*ty, distance);
-            let name = ty.display_name().to_string();
-
-            if !descriptors.is_empty() {
-                info!(target: "reth::cli",
-                    component = %name,
-                    archives = descriptors.len(),
-                    selection = %sel,
-                    "Queued component for download"
-                );
-            }
-
-            for descriptor in descriptors {
-                if descriptor.output_files.is_empty() {
-                    eyre::bail!(
-                        "Invalid modular manifest: {} is missing plain output checksum metadata",
-                        descriptor.file_name
-                    );
-                }
-                all_downloads.push(PlannedArchive {
-                    ty: *ty,
-                    component: name.clone(),
-                    archive: descriptor,
-                });
-            }
-        }
-
-        all_downloads.sort_by(|a, b| {
-            archive_priority_rank(a.ty)
-                .cmp(&archive_priority_rank(b.ty))
-                .then_with(|| a.component.cmp(&b.component))
-                .then_with(|| a.archive.file_name.cmp(&b.archive.file_name))
-        });
-
-        let download_cache_dir = if self.resumable {
-            let dir = target_dir.join(DOWNLOAD_CACHE_DIR);
-            fs::create_dir_all(&dir)?;
-            Some(dir)
-        } else {
-            None
-        };
-
-        let total_archives = all_downloads.len();
-        let total_size: u64 = selections
-            .iter()
-            .map(|(ty, sel)| match sel {
-                ComponentSelection::All => manifest.size_for_distance(*ty, None),
-                ComponentSelection::Distance(d) => manifest.size_for_distance(*ty, Some(*d)),
-                ComponentSelection::Since(block) => {
-                    manifest.size_for_distance(*ty, Some(manifest.block - block + 1))
-                }
-                ComponentSelection::None => 0,
-            })
-            .sum();
-
-        let startup_summary =
-            summarize_download_startup(&all_downloads, target_dir, static_files_dir.as_deref())?;
-        info!(target: "reth::cli",
-            reusable = startup_summary.reusable,
-            needs_download = startup_summary.needs_download,
-            "Startup integrity summary (plain output files)"
-        );
-
-        info!(target: "reth::cli",
-            archives = total_archives,
-            total = %DownloadProgress::format_size(total_size),
-            "Downloading all archives"
-        );
-
-        let shared = SharedProgress::new(total_size, total_archives as u64, cancel_token.clone());
-        let progress_handle = spawn_progress_display(Arc::clone(&shared));
-
-        let target = target_dir.to_path_buf();
-        let sf_dir = static_files_dir;
-        let cache_dir = download_cache_dir;
-        let resumable = self.resumable;
-        let download_concurrency = self.download_concurrency.max(1);
-        let results: Vec<Result<()>> = stream::iter(all_downloads)
-            .map(|planned| {
-                let dir = target.clone();
-                let sf = sf_dir.clone();
-                let cache = cache_dir.clone();
-                let sp = Arc::clone(&shared);
-                let ct = cancel_token.clone();
-                async move {
-                    process_modular_archive(
-                        planned,
-                        &dir,
-                        sf.as_deref(),
-                        cache.as_deref(),
-                        Some(sp),
-                        resumable,
-                        ct,
-                    )
-                    .await?;
-                    Ok(())
-                }
-            })
-            .buffer_unordered(download_concurrency)
-            .collect()
-            .await;
-
-        shared.done.store(true, Ordering::Relaxed);
-        let _ = progress_handle.await;
-
-        // Check for errors
-        for result in results {
-            result?;
-        }
-
-        // Generate reth.toml and set prune checkpoints
+    /// Writes config and checkpoint state after all modular archives complete.
+    fn finalize_modular_download(
+        &self,
+        selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+        manifest: &SnapshotManifest,
+        preset: Option<SelectionPreset>,
+        target_dir: &Path,
+        db_path: &Path,
+    ) -> Result<()> {
         let config =
-            config_for_selections(&selections, &manifest, preset, Some(self.env.chain.as_ref()));
+            config_for_selections(selections, manifest, preset, Some(self.env.chain.as_ref()));
         if write_config(&config, target_dir)? {
             let desc = config_gen::describe_prune_config(&config);
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
 
-        // Open the DB to write checkpoints
-        let db_path = data_dir.db();
-        let db = init_db(&db_path, self.env.db.database_args())?;
-
-        // Write prune checkpoints to the DB so the pruner knows data before the
-        // snapshot block is already in the expected pruned state
+        let db = init_db(db_path, self.env.db.database_args())?;
         let should_write_prune = config.prune.segments != Default::default();
-        let should_reset_indices = should_reset_index_stage_checkpoints(&selections);
+        let should_reset_indices = should_reset_index_stage_checkpoints(selections);
         if should_write_prune || should_reset_indices {
             let tx = db.tx_mut()?;
 
@@ -516,9 +521,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 config_gen::write_prune_checkpoints_tx(&tx, &config, manifest.block)?;
             }
 
-            // Reset stage checkpoints for history indexing stages only if RocksDB
-            // indices weren't downloaded. When archive snapshots include the
-            // optional RocksDB indices component, we preserve source checkpoints.
             if should_reset_indices {
                 config_gen::reset_index_stage_checkpoints_tx(&tx)?;
             }
@@ -581,26 +583,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
             let tx_selection = explicit_component_selection(
-                "--with-txs-since",
                 self.with_txs,
                 self.with_txs_since,
                 self.with_txs_distance,
                 manifest.block,
-            )?;
+            );
             let receipt_selection = explicit_component_selection(
-                "--with-receipts-since",
                 self.with_receipts,
                 self.with_receipts_since,
                 self.with_receipts_distance,
                 manifest.block,
-            )?;
+            );
             let state_history_selection = explicit_component_selection(
-                "--with-state-history-since",
                 self.with_state_history,
                 self.with_state_history_since,
                 self.with_state_history_distance,
                 manifest.block,
-            )?;
+            );
 
             // Required components always All
             if available(SnapshotComponentType::State) {
@@ -653,6 +652,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(ResolvedComponents { selections: selected, preset })
     }
 
+    /// Builds the default minimal component selection for the manifest.
     fn minimal_preset_selections(
         &self,
         manifest: &SnapshotManifest,
@@ -665,6 +665,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             .collect()
     }
 
+    /// Builds the default full-node component selection for the manifest.
     fn full_preset_selections(
         &self,
         manifest: &SnapshotManifest,
@@ -694,6 +695,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         selections
     }
 
+    /// Returns the full preset selection for one component type.
     fn full_selection_for_component(
         &self,
         ty: SnapshotComponentType,
@@ -740,6 +742,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
     }
 
+    /// Resolves the manifest source from CLI input or snapshot discovery.
     async fn resolve_manifest_source(&self, chain_id: u64) -> Result<String> {
         if let Some(path) = &self.manifest_path {
             return Ok(path.display().to_string());
@@ -747,11 +750,44 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         match &self.manifest_url {
             Some(url) => Ok(url.clone()),
-            None => discover_manifest_url(chain_id).await,
+            None => {
+                let defaults = DownloadDefaults::get_global();
+                if defaults.mainnet_only_discovery() && chain_id != MAINNET.chain.id() {
+                    eyre::bail!(
+                        "Snapshots are only auto-discovered for Ethereum mainnet.\n\n\
+                         Chain {chain_id} requires an explicit source:\n\
+                         \t--manifest-url <URL>\n\
+                         \t--manifest-path <PATH>\n\
+                         \t-u <SNAPSHOT-URL>\n\n\
+                         Use --list to inspect snapshots exposed by {}.",
+                        defaults.snapshot_api_url.trim_end_matches("/api/snapshots"),
+                    );
+                }
+
+                discover_manifest_url(chain_id).await
+            }
         }
     }
 }
 
+/// Resolves explicit `--with-*` / `--with-*-since` / `--with-*-distance` flags
+/// into a component selection.
+fn explicit_component_selection(
+    all: bool,
+    since: Option<u64>,
+    distance: Option<u64>,
+    snapshot_block: u64,
+) -> Option<ComponentSelection> {
+    if all {
+        Some(ComponentSelection::All)
+    } else if let Some(block) = since {
+        (block <= snapshot_block).then_some(ComponentSelection::Since(block))
+    } else {
+        distance.map(ComponentSelection::Distance)
+    }
+}
+
+/// Converts a prune mode into the matching component selection.
 fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> ComponentSelection {
     match mode {
         None => ComponentSelection::All,
@@ -765,27 +801,6 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
             }
         }
     }
-}
-
-fn explicit_component_selection(
-    since_flag_name: &str,
-    all: bool,
-    since: Option<u64>,
-    distance: Option<u64>,
-    snapshot_block: u64,
-) -> Result<Option<ComponentSelection>> {
-    if all {
-        return Ok(Some(ComponentSelection::All));
-    }
-
-    if let Some(since) = since {
-        if since > snapshot_block {
-            eyre::bail!("{since_flag_name} {since} is beyond the snapshot block {snapshot_block}");
-        }
-        return Ok(Some(ComponentSelection::Since(since)));
-    }
-
-    Ok(distance.map(ComponentSelection::Distance))
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
@@ -820,6 +835,7 @@ fn inject_archive_only_components(
     }
 }
 
+/// Returns `true` when RocksDB-backed index stages should be reset after download.
 fn should_reset_index_stage_checkpoints(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> bool {
@@ -893,1297 +909,17 @@ impl<C: ChainSpecParser> DownloadCommand<C> {
     }
 }
 
-/// Tracks download progress and throttles display updates to every 100ms.
-pub(crate) struct DownloadProgress {
-    downloaded: u64,
-    total_size: u64,
-    last_displayed: Instant,
-    started_at: Instant,
-}
-
-#[derive(Debug, Clone)]
-struct PlannedArchive {
-    ty: SnapshotComponentType,
-    component: String,
-    archive: ArchiveDescriptor,
-}
-
-const fn archive_priority_rank(ty: SnapshotComponentType) -> u8 {
-    match ty {
-        SnapshotComponentType::State => 0,
-        SnapshotComponentType::RocksdbIndices => 1,
-        _ => 2,
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-struct DownloadStartupSummary {
-    reusable: usize,
-    needs_download: usize,
-}
-
-fn summarize_download_startup(
-    all_downloads: &[PlannedArchive],
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-) -> Result<DownloadStartupSummary> {
-    let mut summary = DownloadStartupSummary::default();
-
-    for planned in all_downloads {
-        if verify_output_files(target_dir, static_files_dir, &planned.archive.output_files)? {
-            summary.reusable += 1;
-        } else {
-            summary.needs_download += 1;
-        }
-    }
-
-    Ok(summary)
-}
-
-impl DownloadProgress {
-    /// Creates new progress tracker with given total size
-    fn new(total_size: u64) -> Self {
-        let now = Instant::now();
-        Self { downloaded: 0, total_size, last_displayed: now, started_at: now }
-    }
-
-    /// Converts bytes to human readable format (B, KB, MB, GB)
-    pub(crate) fn format_size(size: u64) -> String {
-        let mut size = size as f64;
-        let mut unit_index = 0;
-
-        while size >= 1024.0 && unit_index < BYTE_UNITS.len() - 1 {
-            size /= 1024.0;
-            unit_index += 1;
-        }
-
-        format!("{:.2} {}", size, BYTE_UNITS[unit_index])
-    }
-
-    /// Format duration as human readable string
-    fn format_duration(duration: Duration) -> String {
-        let secs = duration.as_secs();
-        if secs < 60 {
-            format!("{secs}s")
-        } else if secs < 3600 {
-            format!("{}m {}s", secs / 60, secs % 60)
-        } else {
-            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
-        }
-    }
-
-    /// Updates progress bar (for single-archive legacy downloads)
-    fn update(&mut self, chunk_size: u64) -> Result<()> {
-        self.downloaded += chunk_size;
-
-        if self.last_displayed.elapsed() >= Duration::from_millis(100) {
-            let formatted_downloaded = Self::format_size(self.downloaded);
-            let formatted_total = Self::format_size(self.total_size);
-            let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
-
-            let elapsed = self.started_at.elapsed();
-            let eta = if self.downloaded > 0 {
-                let remaining = self.total_size.saturating_sub(self.downloaded);
-                let speed = self.downloaded as f64 / elapsed.as_secs_f64();
-                if speed > 0.0 {
-                    Duration::from_secs_f64(remaining as f64 / speed)
-                } else {
-                    Duration::ZERO
-                }
-            } else {
-                Duration::ZERO
-            };
-            let eta_str = Self::format_duration(eta);
-
-            print!(
-                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total}) ETA: {eta_str}     ",
-            );
-            io::stdout().flush()?;
-            self.last_displayed = Instant::now();
-        }
-
-        Ok(())
-    }
-}
-
-/// Shared progress counter for parallel downloads.
-///
-/// Each download thread atomically increments `downloaded`. A single display
-/// task on the main thread reads the counter periodically and prints one
-/// aggregated progress line.
-struct SharedProgress {
-    downloaded: AtomicU64,
-    total_size: u64,
-    total_archives: u64,
-    archives_done: AtomicU64,
-    done: AtomicBool,
-    cancel_token: CancellationToken,
-}
-
-impl SharedProgress {
-    fn new(total_size: u64, total_archives: u64, cancel_token: CancellationToken) -> Arc<Self> {
-        Arc::new(Self {
-            downloaded: AtomicU64::new(0),
-            total_size,
-            total_archives,
-            archives_done: AtomicU64::new(0),
-            done: AtomicBool::new(false),
-            cancel_token,
-        })
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancel_token.is_cancelled()
-    }
-
-    fn add(&self, bytes: u64) {
-        self.downloaded.fetch_add(bytes, Ordering::Relaxed);
-    }
-
-    fn archive_done(&self) {
-        self.archives_done.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-/// Spawns a background task that prints aggregated download progress.
-/// Returns a handle; drop it (or call `.abort()`) to stop.
-fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let started_at = Instant::now();
-        let mut prev_downloaded = 0u64;
-        let mut prev_time = started_at;
-        let mut interval = tokio::time::interval(Duration::from_secs(3));
-        interval.tick().await; // first tick is immediate, skip it
-        loop {
-            interval.tick().await;
-
-            if progress.done.load(Ordering::Relaxed) {
-                break;
-            }
-
-            let downloaded = progress.downloaded.load(Ordering::Relaxed);
-            let total = progress.total_size;
-            if total == 0 {
-                continue;
-            }
-
-            let done = progress.archives_done.load(Ordering::Relaxed);
-            let all = progress.total_archives;
-            let pct = (downloaded as f64 / total as f64) * 100.0;
-            let dl = DownloadProgress::format_size(downloaded);
-            let tot = DownloadProgress::format_size(total);
-
-            let remaining = total.saturating_sub(downloaded);
-
-            if remaining == 0 {
-                // Downloads done, waiting for extraction
-                info!(target: "reth::cli",
-                    archives = format_args!("{done}/{all}"),
-                    downloaded = %dl,
-                    "Extracting remaining archives"
-                );
-            } else {
-                let now = Instant::now();
-                let dt = now.duration_since(prev_time).as_secs_f64();
-                let speed = if dt > 0.0 {
-                    (downloaded.saturating_sub(prev_downloaded)) as f64 / dt
-                } else {
-                    0.0
-                };
-                prev_downloaded = downloaded;
-                prev_time = now;
-
-                let eta = if speed > 0.0 {
-                    DownloadProgress::format_duration(Duration::from_secs_f64(
-                        remaining as f64 / speed,
-                    ))
-                } else {
-                    "??".to_string()
-                };
-
-                info!(target: "reth::cli",
-                    archives = format_args!("{done}/{all}"),
-                    progress = format_args!("{pct:.1}%"),
-                    downloaded = %dl,
-                    total = %tot,
-                    eta = %eta,
-                    "Downloading"
-                );
-            }
-        }
-
-        // Final line
-        let downloaded = progress.downloaded.load(Ordering::Relaxed);
-        let dl = DownloadProgress::format_size(downloaded);
-        let tot = DownloadProgress::format_size(progress.total_size);
-        let elapsed = DownloadProgress::format_duration(started_at.elapsed());
-        info!(target: "reth::cli",
-            downloaded = %dl,
-            total = %tot,
-            elapsed = %elapsed,
-            "Downloads complete"
-        );
-    })
-}
-
-/// Adapter to track progress while reading (used for extraction in legacy path)
-struct ProgressReader<R> {
-    reader: R,
-    progress: DownloadProgress,
-    cancel_token: CancellationToken,
-}
-
-impl<R: Read> ProgressReader<R> {
-    fn new(reader: R, total_size: u64, cancel_token: CancellationToken) -> Self {
-        Self { reader, progress: DownloadProgress::new(total_size), cancel_token }
-    }
-}
-
-impl<R: Read> Read for ProgressReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.cancel_token.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
-        }
-        let bytes = self.reader.read(buf)?;
-        if bytes > 0 &&
-            let Err(e) = self.progress.update(bytes as u64)
-        {
-            return Err(io::Error::other(e));
-        }
-        Ok(bytes)
-    }
-}
-
-/// Supported compression formats for snapshots
-#[derive(Debug, Clone, Copy)]
-enum CompressionFormat {
-    Lz4,
-    Zstd,
-}
-
-impl CompressionFormat {
-    /// Detect compression format from file extension
-    fn from_url(url: &str) -> Result<Self> {
-        let path =
-            Url::parse(url).map(|u| u.path().to_string()).unwrap_or_else(|_| url.to_string());
-
-        if path.ends_with(EXTENSION_TAR_LZ4) {
-            Ok(Self::Lz4)
-        } else if path.ends_with(EXTENSION_TAR_ZSTD) {
-            Ok(Self::Zstd)
-        } else {
-            Err(eyre::eyre!(
-                "Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}",
-                path
-            ))
-        }
-    }
-}
-
-/// Resolves the filesystem path for an output file, remapping `static_files/`
-/// entries to the custom static files directory when one is configured.
-fn resolve_output_path(
-    target_dir: &Path,
-    relative_path: &str,
-    static_files_dir: Option<&Path>,
-) -> PathBuf {
-    if let Some(sf_dir) = static_files_dir &&
-        let Some(rest) = relative_path.strip_prefix(STATIC_FILES_PREFIX)
-    {
-        return sf_dir.join(rest);
-    }
-    target_dir.join(relative_path)
-}
-
-/// Unpacks a tar archive entry-by-entry, remapping `static_files/` paths to
-/// the custom static files directory when one is configured.
-fn unpack_archive_with_remap<R: Read>(
-    archive: &mut Archive<R>,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-) -> Result<()> {
-    // Fast path: no remapping needed, use standard unpack.
-    let Some(sf_dir) = static_files_dir else {
-        archive.unpack(target_dir)?;
-        return Ok(());
-    };
-
-    fs::create_dir_all(sf_dir)?;
-
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?.into_owned();
-        let path_str = path.to_string_lossy();
-
-        if let Some(rest) = path_str.strip_prefix(STATIC_FILES_PREFIX) {
-            if rest.is_empty() {
-                // Directory entry for `static_files/` itself — skip, we
-                // already created the custom directory above.
-                continue;
-            }
-            let dest = sf_dir.join(rest);
-            if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            entry.unpack(&dest)?;
-        } else if path_str == "static_files" {
-            // Bare directory entry without trailing slash.
-            continue;
-        } else {
-            let dest = target_dir.join(&path);
-            if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            entry.unpack(&dest)?;
-        }
-    }
-    Ok(())
-}
-
-/// Extracts a compressed tar archive to the target directory with progress tracking.
-fn extract_archive<R: Read>(
-    reader: R,
-    total_size: u64,
-    format: CompressionFormat,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let progress_reader = ProgressReader::new(reader, total_size, cancel_token);
-
-    match format {
-        CompressionFormat::Lz4 => {
-            let decoder = Decoder::new(progress_reader)?;
-            unpack_archive_with_remap(&mut Archive::new(decoder), target_dir, static_files_dir)?;
-        }
-        CompressionFormat::Zstd => {
-            let decoder = ZstdDecoder::new(progress_reader)?;
-            unpack_archive_with_remap(&mut Archive::new(decoder), target_dir, static_files_dir)?;
-        }
-    }
-
-    println!();
-    Ok(())
-}
-
-/// Extracts a compressed tar archive without progress tracking.
-fn extract_archive_raw<R: Read>(
-    reader: R,
-    format: CompressionFormat,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-) -> Result<()> {
-    match format {
-        CompressionFormat::Lz4 => {
-            unpack_archive_with_remap(
-                &mut Archive::new(Decoder::new(reader)?),
-                target_dir,
-                static_files_dir,
-            )?;
-        }
-        CompressionFormat::Zstd => {
-            unpack_archive_with_remap(
-                &mut Archive::new(ZstdDecoder::new(reader)?),
-                target_dir,
-                static_files_dir,
-            )?;
-        }
-    }
-    Ok(())
-}
-
-/// Extracts a snapshot from a local file.
-fn extract_from_file(
-    path: &Path,
-    format: CompressionFormat,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-) -> Result<()> {
-    let file = std::fs::File::open(path)?;
-    let total_size = file.metadata()?.len();
-    info!(target: "reth::cli",
-        file = %path.display(),
-        size = %DownloadProgress::format_size(total_size),
-        "Extracting local archive"
-    );
-    let start = Instant::now();
-    extract_archive(
-        file,
-        total_size,
-        format,
-        target_dir,
-        static_files_dir,
-        CancellationToken::new(),
-    )?;
-    info!(target: "reth::cli",
-        file = %path.display(),
-        elapsed = %DownloadProgress::format_duration(start.elapsed()),
-        "Local extraction complete"
-    );
-    Ok(())
-}
-
 const MAX_DOWNLOAD_RETRIES: u32 = 10;
 const RETRY_BACKOFF_SECS: u64 = 5;
-
-/// Wrapper that tracks download progress while writing data.
-/// Used with [`io::copy`] to display progress during downloads.
-struct ProgressWriter<W> {
-    inner: W,
-    progress: DownloadProgress,
-    cancel_token: CancellationToken,
-}
-
-impl<W: Write> Write for ProgressWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.cancel_token.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
-        }
-        let n = self.inner.write(buf)?;
-        let _ = self.progress.update(n as u64);
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// Wrapper that bumps a shared atomic counter while writing data.
-/// Used for parallel downloads where a single display task shows aggregated progress.
-struct SharedProgressWriter<W> {
-    inner: W,
-    progress: Arc<SharedProgress>,
-}
-
-impl<W: Write> Write for SharedProgressWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.progress.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
-        }
-        let n = self.inner.write(buf)?;
-        self.progress.add(n as u64);
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// Wrapper that bumps a shared atomic counter while reading data.
-/// Used for streaming downloads where a single display task shows aggregated progress.
-struct SharedProgressReader<R> {
-    inner: R,
-    progress: Arc<SharedProgress>,
-}
-
-impl<R: Read> Read for SharedProgressReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.progress.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
-        }
-        let n = self.inner.read(buf)?;
-        self.progress.add(n as u64);
-        Ok(n)
-    }
-}
-
-/// Downloads a file with resume support using HTTP Range requests.
-/// Automatically retries on failure, resuming from where it left off.
-/// Returns the path to the downloaded file and its total size.
-///
-/// When `shared` is provided, progress is reported to the shared counter
-/// (for parallel downloads). Otherwise uses a local progress bar.
-fn resumable_download(
-    url: &str,
-    target_dir: &Path,
-    shared: Option<&Arc<SharedProgress>>,
-    cancel_token: CancellationToken,
-) -> Result<(PathBuf, u64)> {
-    let file_name = Url::parse(url)
-        .ok()
-        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
-        .unwrap_or_else(|| "snapshot.tar".to_string());
-
-    let final_path = target_dir.join(&file_name);
-    let part_path = target_dir.join(format!("{file_name}.part"));
-
-    let quiet = shared.is_some();
-
-    if !quiet {
-        info!(target: "reth::cli", file = %file_name, "Connecting to download server");
-    }
-    let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
-
-    let mut total_size: Option<u64> = None;
-    let mut retries: u32 = 0;
-
-    let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
-        fs::rename(&part_path, &final_path)?;
-        if !quiet {
-            info!(target: "reth::cli", file = %file_name, "Download complete");
-        }
-        Ok((final_path.clone(), size))
-    };
-
-    loop {
-        let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
-
-        if let Some(total) = total_size &&
-            existing_size >= total
-        {
-            return finalize_download(total);
-        }
-
-        if retries > 0 {
-            info!(target: "reth::cli",
-                file = %file_name,
-                retries,
-                "Resuming download from {} bytes", existing_size
-            );
-        }
-
-        let mut request = client.get(url);
-        if existing_size > 0 {
-            request = request.header(RANGE, format!("bytes={existing_size}-"));
-            if !quiet && retries == 0 {
-                info!(target: "reth::cli", file = %file_name, "Resuming from {} bytes", existing_size);
-            }
-        }
-
-        let response = match request.send().and_then(|r| r.error_for_status()) {
-            Ok(r) => r,
-            Err(e) => {
-                retries += 1;
-                if retries >= MAX_DOWNLOAD_RETRIES {
-                    return Err(e.into());
-                }
-                warn!(target: "reth::cli",
-                    file = %file_name,
-                    %e,
-                    "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
-                );
-                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-                continue;
-            }
-        };
-
-        let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
-
-        let size = if is_partial {
-            response
-                .headers()
-                .get("Content-Range")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.split('/').next_back())
-                .and_then(|v| v.parse().ok())
-        } else {
-            response.content_length()
-        };
-
-        if total_size.is_none() {
-            total_size = size;
-            if !quiet && let Some(s) = size {
-                info!(target: "reth::cli",
-                    file = %file_name,
-                    size = %DownloadProgress::format_size(s),
-                    "Downloading"
-                );
-            }
-        }
-
-        let current_total = total_size.ok_or_else(|| {
-            eyre::eyre!("Server did not provide Content-Length or Content-Range header")
-        })?;
-
-        let file = if is_partial && existing_size > 0 {
-            OpenOptions::new()
-                .append(true)
-                .open(&part_path)
-                .map_err(|e| fs::FsPathError::open(e, &part_path))?
-        } else {
-            fs::create_file(&part_path)?
-        };
-
-        let start_offset = if is_partial { existing_size } else { 0 };
-        let mut reader = response;
-
-        let copy_result;
-        let flush_result;
-
-        if let Some(sp) = shared {
-            // Parallel path: bump shared atomic counter
-            if start_offset > 0 {
-                sp.add(start_offset);
-            }
-            let mut writer =
-                SharedProgressWriter { inner: BufWriter::new(file), progress: Arc::clone(sp) };
-            copy_result = io::copy(&mut reader, &mut writer);
-            flush_result = writer.inner.flush();
-        } else {
-            // Legacy single-download path: local progress bar
-            let mut progress = DownloadProgress::new(current_total);
-            progress.downloaded = start_offset;
-            let mut writer = ProgressWriter {
-                inner: BufWriter::new(file),
-                progress,
-                cancel_token: cancel_token.clone(),
-            };
-            copy_result = io::copy(&mut reader, &mut writer);
-            flush_result = writer.inner.flush();
-            println!();
-        }
-
-        match copy_result.and(flush_result) {
-            Err(e) => {
-                // Check if any new data was written since we started this attempt.
-                // If so, the connection was productive — reset the consecutive failure
-                // counter so transient mid-stream errors don't exhaust retries.
-                let new_size = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
-                if new_size > existing_size {
-                    retries = 0;
-                } else {
-                    retries += 1;
-                }
-
-                if retries >= MAX_DOWNLOAD_RETRIES {
-                    return Err(e.into());
-                }
-
-                warn!(target: "reth::cli",
-                    file = %file_name,
-                    %e,
-                    "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
-                );
-                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-                continue;
-            }
-            Ok(_) => return finalize_download(current_total),
-        }
-    }
-}
-
-/// Streams a remote archive directly into the extractor without writing to disk.
-///
-/// On failure, retries from scratch up to [`MAX_DOWNLOAD_RETRIES`] times.
-fn streaming_download_and_extract(
-    url: &str,
-    format: CompressionFormat,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    shared: Option<&Arc<SharedProgress>>,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let quiet = shared.is_some();
-    let mut last_error: Option<eyre::Error> = None;
-
-    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
-        if attempt > 1 {
-            info!(target: "reth::cli",
-                url = %url,
-                attempt,
-                max = MAX_DOWNLOAD_RETRIES,
-                "Retrying streaming download from scratch"
-            );
-        }
-
-        let client = BlockingClient::builder().connect_timeout(Duration::from_secs(30)).build()?;
-
-        let response = match client.get(url).send().and_then(|r| r.error_for_status()) {
-            Ok(r) => r,
-            Err(e) => {
-                let err = eyre::Error::from(e);
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    warn!(target: "reth::cli",
-                        url = %url,
-                        attempt,
-                        max = MAX_DOWNLOAD_RETRIES,
-                        err = %err,
-                        "Streaming request failed, retrying"
-                    );
-                }
-                last_error = Some(err);
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-                }
-                continue;
-            }
-        };
-
-        if !quiet && let Some(size) = response.content_length() {
-            info!(target: "reth::cli",
-                url = %url,
-                size = %DownloadProgress::format_size(size),
-                "Streaming archive"
-            );
-        }
-
-        let result = if let Some(sp) = shared {
-            let reader = SharedProgressReader { inner: response, progress: Arc::clone(sp) };
-            extract_archive_raw(reader, format, target_dir, static_files_dir)
-        } else {
-            let total_size = response.content_length().unwrap_or(0);
-            extract_archive(
-                response,
-                total_size,
-                format,
-                target_dir,
-                static_files_dir,
-                cancel_token.clone(),
-            )
-        };
-
-        match result {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    warn!(target: "reth::cli",
-                        url = %url,
-                        attempt,
-                        max = MAX_DOWNLOAD_RETRIES,
-                        err = %e,
-                        "Streaming extraction failed, retrying"
-                    );
-                }
-                last_error = Some(e);
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-                }
-            }
-        }
-    }
-
-    Err(last_error.unwrap_or_else(|| {
-        eyre::eyre!("Streaming download failed after {MAX_DOWNLOAD_RETRIES} attempts")
-    }))
-}
-
-/// Fetches the snapshot from a remote URL with resume support, then extracts it.
-fn download_and_extract(
-    url: &str,
-    format: CompressionFormat,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    shared: Option<&Arc<SharedProgress>>,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let quiet = shared.is_some();
-    let (downloaded_path, total_size) =
-        resumable_download(url, target_dir, shared, cancel_token.clone())?;
-
-    let file_name =
-        downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-
-    if !quiet {
-        info!(target: "reth::cli",
-            file = %file_name,
-            size = %DownloadProgress::format_size(total_size),
-            "Extracting archive"
-        );
-    }
-    let file = fs::open(&downloaded_path)?;
-
-    if quiet {
-        // Skip progress tracking for extraction in parallel mode
-        extract_archive_raw(file, format, target_dir, static_files_dir)?;
-    } else {
-        extract_archive(file, total_size, format, target_dir, static_files_dir, cancel_token)?;
-        info!(target: "reth::cli",
-            file = %file_name,
-            "Extraction complete"
-        );
-    }
-
-    fs::remove_file(&downloaded_path)?;
-
-    if let Some(sp) = shared {
-        sp.archive_done();
-    }
-
-    Ok(())
-}
-
-/// Downloads and extracts a snapshot, blocking until finished.
-///
-/// Supports `file://` URLs for local files and HTTP(S) URLs for remote downloads.
-/// When `resumable` is true, downloads to a `.part` file first with HTTP Range resume
-/// support. Otherwise streams directly into the extractor.
-fn blocking_download_and_extract(
-    url: &str,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    shared: Option<Arc<SharedProgress>>,
-    resumable: bool,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let format = CompressionFormat::from_url(url)?;
-
-    if let Ok(parsed_url) = Url::parse(url) &&
-        parsed_url.scheme() == "file"
-    {
-        let file_path = parsed_url
-            .to_file_path()
-            .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
-        let result = extract_from_file(&file_path, format, target_dir, static_files_dir);
-        if result.is_ok() &&
-            let Some(sp) = shared
-        {
-            sp.archive_done();
-        }
-        result
-    } else if resumable {
-        download_and_extract(
-            url,
-            format,
-            target_dir,
-            static_files_dir,
-            shared.as_ref(),
-            cancel_token,
-        )
-    } else {
-        let result = streaming_download_and_extract(
-            url,
-            format,
-            target_dir,
-            static_files_dir,
-            shared.as_ref(),
-            cancel_token,
-        );
-        if result.is_ok() &&
-            let Some(sp) = shared
-        {
-            sp.archive_done();
-        }
-        result
-    }
-}
-
-/// Downloads and extracts a snapshot archive asynchronously.
-///
-/// When `shared` is provided, download progress is reported to the shared
-/// counter for aggregated display. Otherwise uses a local progress bar.
-/// When `resumable` is true, uses two-phase download with `.part` files.
-async fn stream_and_extract(
-    url: &str,
-    target_dir: &Path,
-    static_files_dir: Option<PathBuf>,
-    shared: Option<Arc<SharedProgress>>,
-    resumable: bool,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let target_dir = target_dir.to_path_buf();
-    let url = url.to_string();
-    task::spawn_blocking(move || {
-        blocking_download_and_extract(
-            &url,
-            &target_dir,
-            static_files_dir.as_deref(),
-            shared,
-            resumable,
-            cancel_token,
-        )
-    })
-    .await??;
-
-    Ok(())
-}
-
-async fn process_modular_archive(
-    planned: PlannedArchive,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    cache_dir: Option<&Path>,
-    shared: Option<Arc<SharedProgress>>,
-    resumable: bool,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let target_dir = target_dir.to_path_buf();
-    let static_files_dir = static_files_dir.map(Path::to_path_buf);
-    let cache_dir = cache_dir.map(Path::to_path_buf);
-
-    task::spawn_blocking(move || {
-        blocking_process_modular_archive(
-            &planned,
-            &target_dir,
-            static_files_dir.as_deref(),
-            cache_dir.as_deref(),
-            shared,
-            resumable,
-            cancel_token,
-        )
-    })
-    .await??;
-
-    Ok(())
-}
-
-fn blocking_process_modular_archive(
-    planned: &PlannedArchive,
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    cache_dir: Option<&Path>,
-    shared: Option<Arc<SharedProgress>>,
-    resumable: bool,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    let archive = &planned.archive;
-    if verify_output_files(target_dir, static_files_dir, &archive.output_files)? {
-        if let Some(sp) = &shared {
-            sp.add(archive.size);
-            sp.archive_done();
-        }
-        info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Skipping already verified plain files");
-        return Ok(());
-    }
-
-    let format = CompressionFormat::from_url(&archive.file_name)?;
-    let mut last_error: Option<eyre::Error> = None;
-    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
-        cleanup_output_files(target_dir, static_files_dir, &archive.output_files);
-
-        if resumable {
-            let cache_dir = cache_dir.ok_or_else(|| eyre::eyre!("Missing cache directory"))?;
-            let archive_path = cache_dir.join(&archive.file_name);
-            let part_path = cache_dir.join(format!("{}.part", archive.file_name));
-            let result =
-                resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())
-                    .and_then(|(downloaded_path, _)| {
-                        let file = fs::open(&downloaded_path)?;
-                        extract_archive_raw(file, format, target_dir, static_files_dir)
-                    });
-            let _ = fs::remove_file(&archive_path);
-            let _ = fs::remove_file(&part_path);
-
-            if let Err(e) = result {
-                warn!(target: "reth::cli",
-                    file = %archive.file_name,
-                    component = %planned.component,
-                    attempt,
-                    err = %e,
-                    "Download or extraction failed, retrying"
-                );
-                last_error = Some(e);
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-                }
-                continue;
-            }
-        } else {
-            // streaming_download_and_extract already has its own internal retry loop
-            streaming_download_and_extract(
-                &archive.url,
-                format,
-                target_dir,
-                static_files_dir,
-                shared.as_ref(),
-                cancel_token.clone(),
-            )?;
-        }
-
-        if verify_output_files(target_dir, static_files_dir, &archive.output_files)? {
-            if let Some(sp) = &shared {
-                sp.archive_done();
-            }
-            return Ok(());
-        }
-
-        warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, attempt, "Extracted files failed integrity checks, retrying");
-    }
-
-    if let Some(e) = last_error {
-        return Err(e.wrap_err(format!(
-            "Failed after {} attempts for {}",
-            MAX_DOWNLOAD_RETRIES, archive.file_name
-        )));
-    }
-
-    eyre::bail!(
-        "Failed integrity validation after {} attempts for {}",
-        MAX_DOWNLOAD_RETRIES,
-        archive.file_name
-    )
-}
-
-fn verify_output_files(
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    output_files: &[OutputFileChecksum],
-) -> Result<bool> {
-    if output_files.is_empty() {
-        return Ok(false);
-    }
-
-    for expected in output_files {
-        let output_path = resolve_output_path(target_dir, &expected.path, static_files_dir);
-        let meta = match fs::metadata(&output_path) {
-            Ok(meta) => meta,
-            Err(_) => return Ok(false),
-        };
-        if meta.len() != expected.size {
-            return Ok(false);
-        }
-
-        let actual = file_blake3_hex(&output_path)?;
-        if !actual.eq_ignore_ascii_case(&expected.blake3) {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
-}
-
-fn cleanup_output_files(
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-    output_files: &[OutputFileChecksum],
-) {
-    for output in output_files {
-        let _ = fs::remove_file(resolve_output_path(target_dir, &output.path, static_files_dir));
-    }
-}
-
-fn file_blake3_hex(path: &Path) -> Result<String> {
-    let mut file = fs::open(path)?;
-    let mut hasher = Hasher::new();
-    let mut buf = [0_u8; 64 * 1024];
-
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
-/// Discovers the latest snapshot manifest URL for the given chain from the snapshots API.
-///
-/// Queries the configured snapshot API and returns the manifest URL for the most
-/// recent modular snapshot matching the requested chain.
-async fn discover_manifest_url(chain_id: u64) -> Result<String> {
-    let defaults = DownloadDefaults::get_global();
-    let api_url = &*defaults.snapshot_api_url;
-
-    info!(target: "reth::cli", %api_url, %chain_id, "Discovering latest snapshot manifest");
-
-    let entries = fetch_snapshot_api_entries(chain_id).await?;
-
-    let entry =
-        entries.iter().filter(|s| s.is_modular()).max_by_key(|s| s.block).ok_or_else(|| {
-            eyre::eyre!(
-                "No modular snapshot manifest found for chain \
-                 {chain_id} at {api_url}\n\n\
-                 You can provide a manifest URL directly with --manifest-url, or\n\
-                 use a direct snapshot URL with -u from:\n\
-                 \t- {}\n\n\
-                 Use --list to see all available snapshots.",
-                api_url.trim_end_matches("/api/snapshots"),
-            )
-        })?;
-
-    info!(target: "reth::cli",
-        block = entry.block,
-        url = %entry.metadata_url,
-        "Found latest snapshot manifest"
-    );
-
-    Ok(entry.metadata_url.clone())
-}
-
-/// Deserializes a JSON value that may be either a number or a string-encoded number.
-fn deserialize_string_or_u64<'de, D>(deserializer: D) -> std::result::Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize;
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match &value {
-        serde_json::Value::Number(n) => {
-            n.as_u64().ok_or_else(|| serde::de::Error::custom("expected u64"))
-        }
-        serde_json::Value::String(s) => {
-            s.parse::<u64>().map_err(|_| serde::de::Error::custom("expected numeric string"))
-        }
-        _ => Err(serde::de::Error::custom("expected number or string")),
-    }
-}
-
-/// An entry from the snapshot discovery API listing.
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotApiEntry {
-    #[serde(deserialize_with = "deserialize_string_or_u64")]
-    chain_id: u64,
-    #[serde(deserialize_with = "deserialize_string_or_u64")]
-    block: u64,
-    #[serde(default)]
-    date: Option<String>,
-    #[serde(default)]
-    profile: Option<String>,
-    metadata_url: String,
-    #[serde(default)]
-    size: u64,
-}
-
-impl SnapshotApiEntry {
-    fn is_modular(&self) -> bool {
-        self.metadata_url.ends_with("manifest.json")
-    }
-}
-
-/// Fetches the full snapshot listing from the snapshots API, filtered by chain ID.
-async fn fetch_snapshot_api_entries(chain_id: u64) -> Result<Vec<SnapshotApiEntry>> {
-    let api_url = &*DownloadDefaults::get_global().snapshot_api_url;
-
-    let entries: Vec<SnapshotApiEntry> = Client::new()
-        .get(api_url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .wrap_err_with(|| format!("Failed to fetch snapshot listing from {api_url}"))?
-        .json()
-        .await?;
-
-    Ok(entries.into_iter().filter(|e| e.chain_id == chain_id).collect())
-}
-
-/// Prints a formatted table of available modular snapshots.
-fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64) {
-    let modular: Vec<_> = entries.iter().filter(|e| e.is_modular()).collect();
-
-    let api_url = &*DownloadDefaults::get_global().snapshot_api_url;
-    println!(
-        "Available snapshots for chain {chain_id} ({}):\n",
-        api_url.trim_end_matches("/api/snapshots"),
-    );
-    println!("{:<12}  {:>10}  {:<10}  {:>10}  MANIFEST URL", "DATE", "BLOCK", "PROFILE", "SIZE");
-    println!("{}", "-".repeat(100));
-
-    for entry in &modular {
-        let date = entry.date.as_deref().unwrap_or("-");
-        let profile = entry.profile.as_deref().unwrap_or("-");
-        let size = if entry.size > 0 {
-            DownloadProgress::format_size(entry.size)
-        } else {
-            "-".to_string()
-        };
-
-        println!(
-            "{date:<12}  {:>10}  {profile:<10}  {size:>10}  {}",
-            entry.block, entry.metadata_url
-        );
-    }
-
-    if modular.is_empty() {
-        println!("  (no modular snapshots found)");
-    }
-
-    println!(
-        "\nTo download a specific snapshot, copy its manifest URL and run:\n  \
-         reth download --manifest-url <URL>"
-    );
-}
-
-async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
-    if let Ok(parsed) = Url::parse(source) {
-        return match parsed.scheme() {
-            "http" | "https" => {
-                let response = Client::new()
-                    .get(source)
-                    .send()
-                    .await
-                    .and_then(|r| r.error_for_status())
-                    .wrap_err_with(|| {
-                        let sources = DownloadDefaults::get_global()
-                            .available_snapshots
-                            .iter()
-                            .map(|s| format!("\t- {s}"))
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        format!(
-                            "Failed to fetch snapshot manifest from {source}\n\n\
-                             The manifest endpoint may not be available for this snapshot source.\n\
-                             You can use a direct snapshot URL instead:\n\n\
-                             \treth download -u <snapshot-url>\n\n\
-                             Available snapshot sources:\n{sources}"
-                        )
-                    })?;
-                Ok(response.json().await?)
-            }
-            "file" => {
-                let path = parsed
-                    .to_file_path()
-                    .map_err(|_| eyre::eyre!("Invalid file:// manifest path: {source}"))?;
-                let content = fs::read_to_string(path)?;
-                Ok(serde_json::from_str(&content)?)
-            }
-            _ => Err(eyre::eyre!("Unsupported manifest URL scheme: {}", parsed.scheme())),
-        };
-    }
-
-    let content = fs::read_to_string(source)?;
-    Ok(serde_json::from_str(&content)?)
-}
-
-fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Result<String> {
-    if let Some(base_url) = manifest.base_url.as_deref() &&
-        !base_url.is_empty()
-    {
-        return Ok(base_url.trim_end_matches('/').to_string());
-    }
-
-    if let Ok(mut url) = Url::parse(source) {
-        if url.scheme() == "file" {
-            let mut path = url
-                .to_file_path()
-                .map_err(|_| eyre::eyre!("Invalid file:// manifest path: {source}"))?;
-            path.pop();
-            let mut base = Url::from_directory_path(path)
-                .map_err(|_| eyre::eyre!("Invalid manifest directory for source: {source}"))?
-                .to_string();
-            if base.ends_with('/') {
-                base.pop();
-            }
-            return Ok(base);
-        }
-
-        {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| eyre::eyre!("manifest_url must have a hierarchical path"))?;
-            segments.pop_if_empty();
-            segments.pop();
-        }
-        return Ok(url.as_str().trim_end_matches('/').to_string());
-    }
-
-    let path = Path::new(source);
-    let manifest_dir = if path.is_absolute() {
-        path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
-    } else {
-        let joined = std::env::current_dir()?.join(path);
-        joined.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
-    };
-    let mut base = Url::from_directory_path(&manifest_dir)
-        .map_err(|_| eyre::eyre!("Invalid manifest directory: {}", manifest_dir.display()))?
-        .to_string();
-    if base.ends_with('/') {
-        base.pop();
-    }
-    Ok(base)
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::{Args, Parser};
-    use manifest::{ChunkedArchive, ComponentManifest, SingleArchive};
+    use extract::CompressionFormat;
+    use manifest::{ComponentManifest, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-    use tempfile::tempdir;
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -2198,6 +934,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "transaction_senders.tar.zst".to_string(),
                 size: 1,
+                decompressed_size: 0,
                 blake3: None,
                 output_files: vec![],
             }),
@@ -2207,52 +944,13 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 1,
+                decompressed_size: 0,
                 blake3: None,
                 output_files: vec![],
             }),
         );
         SnapshotManifest {
             block: 0,
-            chain_id: 1,
-            storage_version: 2,
-            timestamp: 0,
-            base_url: Some("https://example.com".to_string()),
-            reth_version: None,
-            components,
-        }
-    }
-
-    fn manifest_with_modular_components(block: u64) -> SnapshotManifest {
-        let mut components = BTreeMap::new();
-        for ty in [
-            SnapshotComponentType::State,
-            SnapshotComponentType::Headers,
-            SnapshotComponentType::Transactions,
-            SnapshotComponentType::Receipts,
-            SnapshotComponentType::AccountChangesets,
-            SnapshotComponentType::StorageChangesets,
-        ] {
-            let component = if ty.is_chunked() {
-                ComponentManifest::Chunked(ChunkedArchive {
-                    blocks_per_file: 1_000_000,
-                    total_blocks: block + 1,
-                    chunk_sizes: vec![1],
-                    chunk_output_files: vec![vec![]],
-                })
-            } else {
-                ComponentManifest::Single(SingleArchive {
-                    file: format!("{}.tar.zst", ty.key()),
-                    size: 1,
-                    blake3: None,
-                    output_files: vec![],
-                })
-            };
-
-            components.insert(ty.key().to_string(), component);
-        }
-
-        SnapshotManifest {
-            block,
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
@@ -2289,9 +987,20 @@ mod tests {
         let help = defaults.long_help();
 
         assert!(help.contains("Available snapshot sources:"));
+        assert!(help.contains("Ethereum mainnet"));
         assert!(help.contains("snapshots.reth.rs"));
         assert!(help.contains("publicnode.com"));
         assert!(help.contains("file://"));
+    }
+
+    #[test]
+    fn test_custom_snapshot_api_keeps_selected_chain_help() {
+        let help = DownloadDefaults::default()
+            .with_snapshot_api_url("https://snapshots.tempoxyz.dev/api/snapshots")
+            .long_help();
+
+        assert!(help.contains("selected chain"));
+        assert!(!help.contains("Ethereum mainnet"));
     }
 
     #[test]
@@ -2348,54 +1057,40 @@ mod tests {
     }
 
     #[test]
-    fn resolve_components_supports_since_and_distance_flags() {
-        let manifest = manifest_with_modular_components(20_000_000);
+    fn resolve_manifest_source_requires_explicit_source_for_non_mainnet_defaults() {
         let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
-            "reth",
-            "--with-txs-since",
-            "15537394",
-            "--with-receipts-distance",
-            "10064",
-            "--with-state-history-since",
-            "15537394",
+            "reth", "--chain", "holesky",
         ])
         .args;
 
-        let resolved = args.resolve_components(&manifest).unwrap();
+        let err = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(args.resolve_manifest_source(HOLESKY.chain.id()))
+            .unwrap_err();
 
-        assert_eq!(resolved.preset, None);
-        assert_eq!(
-            resolved.selections.get(&SnapshotComponentType::Transactions),
-            Some(&ComponentSelection::Since(15_537_394))
-        );
-        assert_eq!(
-            resolved.selections.get(&SnapshotComponentType::Receipts),
-            Some(&ComponentSelection::Distance(10_064))
-        );
-        assert_eq!(
-            resolved.selections.get(&SnapshotComponentType::AccountChangesets),
-            Some(&ComponentSelection::Since(15_537_394))
-        );
-        assert_eq!(
-            resolved.selections.get(&SnapshotComponentType::StorageChangesets),
-            Some(&ComponentSelection::Since(15_537_394))
-        );
+        let message = err.to_string();
+        assert!(message.contains("only auto-discovered for Ethereum mainnet"));
+        assert!(message.contains("--manifest-url <URL>"));
+        assert!(message.contains("-u <SNAPSHOT-URL>"));
     }
 
     #[test]
-    fn resolve_components_rejects_since_after_snapshot() {
-        let manifest = manifest_with_modular_components(20_000_000);
+    fn resolve_manifest_source_allows_manifest_path_for_non_mainnet_defaults() {
         let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
             "reth",
-            "--with-txs-since",
-            "20000001",
+            "--chain",
+            "holesky",
+            "--manifest-path",
+            "./manifest.json",
         ])
         .args;
 
-        let err = args.resolve_components(&manifest).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("--with-txs-since 20000001 is beyond the snapshot block 20000000"));
+        let source = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(args.resolve_manifest_source(HOLESKY.chain.id()))
+            .unwrap();
+
+        assert_eq!(source, "./manifest.json");
     }
 
     #[test]
@@ -2466,125 +1161,6 @@ mod tests {
 
         selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
         assert!(!should_reset_index_stage_checkpoints(&selections));
-    }
-
-    #[test]
-    fn summarize_download_startup_counts_reusable_and_needs_download() {
-        let dir = tempdir().unwrap();
-        let target_dir = dir.path();
-        let ok_file = target_dir.join("ok.bin");
-        std::fs::write(&ok_file, vec![1_u8; 4]).unwrap();
-        let ok_hash = file_blake3_hex(&ok_file).unwrap();
-
-        let planned = vec![
-            PlannedArchive {
-                ty: SnapshotComponentType::State,
-                component: "State".to_string(),
-                archive: ArchiveDescriptor {
-                    url: "https://example.com/ok.tar.zst".to_string(),
-                    file_name: "ok.tar.zst".to_string(),
-                    size: 10,
-                    blake3: None,
-                    output_files: vec![OutputFileChecksum {
-                        path: "ok.bin".to_string(),
-                        size: 4,
-                        blake3: ok_hash,
-                    }],
-                },
-            },
-            PlannedArchive {
-                ty: SnapshotComponentType::Headers,
-                component: "Headers".to_string(),
-                archive: ArchiveDescriptor {
-                    url: "https://example.com/missing.tar.zst".to_string(),
-                    file_name: "missing.tar.zst".to_string(),
-                    size: 10,
-                    blake3: None,
-                    output_files: vec![OutputFileChecksum {
-                        path: "missing.bin".to_string(),
-                        size: 1,
-                        blake3: "deadbeef".to_string(),
-                    }],
-                },
-            },
-            PlannedArchive {
-                ty: SnapshotComponentType::Transactions,
-                component: "Transactions".to_string(),
-                archive: ArchiveDescriptor {
-                    url: "https://example.com/bad-size.tar.zst".to_string(),
-                    file_name: "bad-size.tar.zst".to_string(),
-                    size: 10,
-                    blake3: None,
-                    output_files: vec![],
-                },
-            },
-        ];
-
-        let summary = summarize_download_startup(&planned, target_dir, None).unwrap();
-        assert_eq!(summary.reusable, 1);
-        assert_eq!(summary.needs_download, 2);
-    }
-
-    #[test]
-    fn archive_priority_prefers_state_then_rocksdb() {
-        let mut planned = [
-            PlannedArchive {
-                ty: SnapshotComponentType::Transactions,
-                component: "Transactions".to_string(),
-                archive: ArchiveDescriptor {
-                    url: "u3".to_string(),
-                    file_name: "t.tar.zst".to_string(),
-                    size: 1,
-                    blake3: None,
-                    output_files: vec![OutputFileChecksum {
-                        path: "a".to_string(),
-                        size: 1,
-                        blake3: "x".to_string(),
-                    }],
-                },
-            },
-            PlannedArchive {
-                ty: SnapshotComponentType::RocksdbIndices,
-                component: "RocksDB Indices".to_string(),
-                archive: ArchiveDescriptor {
-                    url: "u2".to_string(),
-                    file_name: "rocksdb_indices.tar.zst".to_string(),
-                    size: 1,
-                    blake3: None,
-                    output_files: vec![OutputFileChecksum {
-                        path: "b".to_string(),
-                        size: 1,
-                        blake3: "y".to_string(),
-                    }],
-                },
-            },
-            PlannedArchive {
-                ty: SnapshotComponentType::State,
-                component: "State (mdbx)".to_string(),
-                archive: ArchiveDescriptor {
-                    url: "u1".to_string(),
-                    file_name: "state.tar.zst".to_string(),
-                    size: 1,
-                    blake3: None,
-                    output_files: vec![OutputFileChecksum {
-                        path: "c".to_string(),
-                        size: 1,
-                        blake3: "z".to_string(),
-                    }],
-                },
-            },
-        ];
-
-        planned.sort_by(|a, b| {
-            archive_priority_rank(a.ty)
-                .cmp(&archive_priority_rank(b.ty))
-                .then_with(|| a.component.cmp(&b.component))
-                .then_with(|| a.archive.file_name.cmp(&b.archive.file_name))
-        });
-
-        assert_eq!(planned[0].ty, SnapshotComponentType::State);
-        assert_eq!(planned[1].ty, SnapshotComponentType::RocksdbIndices);
-        assert_eq!(planned[2].ty, SnapshotComponentType::Transactions);
     }
 
     #[test]

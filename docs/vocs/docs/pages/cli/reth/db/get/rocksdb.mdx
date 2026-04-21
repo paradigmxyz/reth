@@ -1,20 +1,38 @@
-# reth db get
+# reth db get rocksdb
 
-Gets the content of a table for the given key
+Gets the content of a RocksDB table for the given key
 
 ```bash
-$ reth db get --help
+$ reth db get rocksdb --help
 ```
 ```txt
-Usage: reth db get [OPTIONS] <COMMAND>
+Usage: reth db get rocksdb [OPTIONS] <TABLE> <KEY>
 
-Commands:
-  mdbx         Gets the content of a database table for the given key
-  static-file  Gets the content of a static file segment for the given key
-  rocksdb      Gets the content of a RocksDB table for the given key
-  help         Print this message or the help of the given subcommand(s)
+Arguments:
+  <TABLE>
+          The RocksDB table
+
+          Possible values:
+          - transaction-hash-numbers: Transaction hash to transaction number mapping
+          - accounts-history:         Account history indices
+          - storages-history:         Storage history indices
+
+  <KEY>
+          The key to get content for. For history tables, this can be a plain address
 
 Options:
+      --block <BLOCK>
+          Target block number for history tables. Seeks to the shard containing this block. Defaults to the latest shard if not specified
+
+      --storage-key <STORAGE_KEY>
+          Storage key for storages-history table lookups
+
+      --all-shards
+          List all shards for the given key (history tables only)
+
+      --raw
+          Output bytes instead of human-readable decoded value
+
   -h, --help
           Print help (see a summary with '-h')
 

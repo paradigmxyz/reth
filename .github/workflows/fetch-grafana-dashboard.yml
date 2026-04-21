@@ -1,0 +1,62 @@
+name: Fetch Grafana Dashboard
+
+on:
+  workflow_dispatch:
+    inputs:
+      dashboard_uid:
+        description: "Grafana dashboard UID to export"
+        required: true
+        default: "2k8BXz24x"
+      target_path:
+        description: "Target file path in the repo (e.g. etc/grafana/dashboards/overview.json)"
+        required: true
+        default: "etc/grafana/dashboards/overview.json"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch dashboard from Grafana
+        env:
+          FETCH_GRAFANA_DASHBOARD_URL: ${{ secrets.FETCH_GRAFANA_DASHBOARD_URL }}
+          FETCH_GRAFANA_DASHBOARD_TOKEN: ${{ secrets.FETCH_GRAFANA_DASHBOARD_TOKEN }}
+        run: |
+          python3 .github/scripts/fetch-grafana-dashboard.py "${{ inputs.dashboard_uid }}" \
+            > "${{ inputs.target_path }}"
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet "${{ inputs.target_path }}"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET="${{ inputs.target_path }}"
+          FILENAME="$(basename "$TARGET")"
+          BRANCH="chore/sync-grafana-${FILENAME%.*}-$(date +%Y%m%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "$TARGET"
+          git commit -m "chore: update Grafana dashboard ${FILENAME}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore: update Grafana dashboard ${FILENAME}" \
+            --body "Automated export from Grafana (dashboard UID: \`${{ inputs.dashboard_uid }}\`, target: \`${TARGET}\`)."

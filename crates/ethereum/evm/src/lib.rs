@@ -195,6 +195,7 @@ where
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: block.header().extra_data.clone(),
+            slot_number: block.header().slot_number,
         })
     }
 
@@ -210,6 +211,7 @@ where
             ommers: &[],
             withdrawals: attributes.withdrawals.map(|w| Cow::Owned(w.into_inner())),
             extra_data: attributes.extra_data,
+            slot_number: attributes.slot_number,
         })
     }
 }
@@ -274,7 +276,7 @@ where
             gas_limit: payload.payload.gas_limit(),
             basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
-            slot_num: 0,
+            slot_num: payload.payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default(),
         };
 
         Ok(EvmEnv { cfg_env, block_env })
@@ -291,6 +293,7 @@ where
             ommers: &[],
             withdrawals: payload.payload.withdrawals().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: payload.payload.as_v1().extra_data.clone(),
+            slot_number: payload.payload.as_v4().map(|v4| v4.slot_number),
         })
     }
 
