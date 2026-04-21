@@ -8232,6 +8232,7 @@ dependencies = [
  "reth-trie-parallel",
  "reth-trie-sparse",
  "revm",
+ "revm-database-interface",
  "revm-primitives",
  "revm-state",
  "schnellru",

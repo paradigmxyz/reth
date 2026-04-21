@@ -19,9 +19,11 @@
 pub mod error;
 pub mod pre_state;
 pub mod snapshot;
+pub mod snapshot_db;
 pub mod validation;
 
 pub use error::RejectReason;
 pub use pre_state::{BlockPreState, RequiredReads};
 pub use snapshot::build_pre_state;
+pub use snapshot_db::{SnapshotDatabase, SnapshotDbError};
 pub use validation::{check_bal_hash, check_item_count, BAL_ITEM_COST};
