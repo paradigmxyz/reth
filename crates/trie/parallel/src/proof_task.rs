@@ -1389,7 +1389,10 @@ enum AccountWorkerJob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_chainspec::ChainSpec;
+    use reth_db_common::init::init_genesis;
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -1398,12 +1401,15 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let provider_factory = create_test_provider_factory();
+        let provider_factory =
+            create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&provider_factory).unwrap();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory = reth_provider::providers::OverlayStateProviderFactory::<
-            _,
-            reth_ethereum_primitives::EthPrimitives,
-        >::new(provider_factory, changeset_cache);
+        let factory = reth_provider::providers::OverlayStateProviderFactory::<_>::new(
+            provider_factory,
+            genesis_hash,
+            changeset_cache,
+        );
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();

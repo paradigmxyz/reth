@@ -274,19 +274,23 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
+    use reth_chainspec::ChainSpec;
+    use reth_db_common::init::init_genesis;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{test_utils::create_test_provider_factory_with_chain_spec, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn random_parallel_root() {
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::<
-            _,
-            reth_ethereum_primitives::EthPrimitives,
-        >::new(factory.clone(), changeset_cache);
+        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::<_>::new(
+            factory.clone(),
+            genesis_hash,
+            changeset_cache,
+        );
 
         let mut rng = rand::rng();
         let mut state = (0..100)

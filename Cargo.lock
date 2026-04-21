@@ -10439,6 +10439,8 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.4",
  "rayon",
+ "reth-chainspec",
+ "reth-db-common",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
