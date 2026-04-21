@@ -67,6 +67,13 @@ verify_binary() {
   return 1
 }
 
+upload_cache_artifact() {
+  local source="$1" destination="$2"
+  if ! $MC cp "$source" "$destination"; then
+    echo "::warning::Failed to upload binary cache artifact to ${destination}; continuing without remote cache write"
+  fi
+}
+
 case "$MODE" in
   baseline|main)
     BUCKET="minio/reth-binaries/${COMMIT}${BUILD_SUFFIX}"
@@ -96,7 +103,7 @@ case "$MODE" in
       # shellcheck disable=SC2086
       RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
         cargo build --profile profiling $NODE_PKG $WORKSPACE_ARG $FEATURES_ARG
-      $MC cp "target/profiling/${NODE_BIN}" "${BUCKET}/${NODE_BIN}"
+      upload_cache_artifact "target/profiling/${NODE_BIN}" "${BUCKET}/${NODE_BIN}"
     fi
     ;;
 
@@ -132,8 +139,8 @@ case "$MODE" in
           cargo build --profile profiling $NODE_PKG
       fi
       make install-reth-bench
-      $MC cp "target/profiling/${NODE_BIN}" "${BUCKET}/${NODE_BIN}"
-      $MC cp "$(which reth-bench)" "${BUCKET}/reth-bench"
+      upload_cache_artifact "target/profiling/${NODE_BIN}" "${BUCKET}/${NODE_BIN}"
+      upload_cache_artifact "$(which reth-bench)" "${BUCKET}/reth-bench"
     fi
     ;;
 
