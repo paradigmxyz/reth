@@ -1238,6 +1238,7 @@ mod tests {
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
             OverlayStateProviderFactory::<_, EthPrimitives>::new(
                 provider_factory,
+                genesis_hash,
                 ChangesetCache::new(),
             ),
             &TreeConfig::default(),
