@@ -1,0 +1,23 @@
+//! BAL-driven parallel block execution.
+//!
+//! An alternative to the serial `execute_block` path, activated when a block carries a
+//! Block-Level Access List (EIP-7928). The BAL declares every storage slot, account field, and
+//! code access a block makes, which lets us:
+//!
+//! - Materialize an exhaustive in-memory pre-state snapshot before execution begins.
+//! - Execute transactions in parallel on isolated EVM instances, each using the BAL to resolve
+//!   mid-block state lookups via revm's `BalDatabase`.
+//! - Commit worker outputs to a canonical `BlockExecutor` in tx order, preserving client-override
+//!   extension points (`apply_pre_execution_changes`, `commit_transaction`,
+//!   `apply_post_execution_changes`).
+//!
+//! See `BAL.md` at the repo root for the full design.
+//!
+//! This module is being built leaf-first. Currently only the data types and error variants are in
+//! place; orchestration follows in subsequent PRs.
+
+pub mod error;
+pub mod pre_state;
+
+pub use error::RejectReason;
+pub use pre_state::{BlockPreState, RequiredReads};
