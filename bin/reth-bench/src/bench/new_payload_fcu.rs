@@ -46,7 +46,8 @@ pub struct Command {
     rpc_url: String,
 
     /// Build a separate fork with `testing_buildBlockV1` and alternate forkchoice updates between
-    /// the canonical chain and that fork once the fork reaches the configured depth.
+    /// the canonical chain and that fork on every block while the fork grows up to the configured
+    /// depth.
     ///
     /// This requires enabling the hidden `testing` RPC module on the target node,
     /// for example with `reth node --http --http.api eth,testing`.
@@ -120,9 +121,16 @@ struct PreparedBuiltBlock {
     params: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveBranch {
+    Canonical,
+    Fork,
+}
+
 #[derive(Debug)]
 struct ReorgState {
     depth: usize,
+    active_branch: ActiveBranch,
     fork_length: usize,
     branch_point_hash: Option<B256>,
     fork_parent_hash: Option<B256>,
@@ -130,11 +138,24 @@ struct ReorgState {
 
 impl ReorgState {
     fn new(depth: usize) -> Self {
-        Self { depth, fork_length: 0, branch_point_hash: None, fork_parent_hash: None }
+        Self {
+            depth,
+            active_branch: ActiveBranch::Canonical,
+            fork_length: 0,
+            branch_point_hash: None,
+            fork_parent_hash: None,
+        }
     }
 
     fn next_fork_parent_hash(&self, canonical_parent_hash: B256) -> B256 {
         self.fork_parent_hash.unwrap_or(canonical_parent_hash)
+    }
+
+    fn next_target_branch(&self) -> ActiveBranch {
+        match self.active_branch {
+            ActiveBranch::Canonical => ActiveBranch::Fork,
+            ActiveBranch::Fork => ActiveBranch::Canonical,
+        }
     }
 
     fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
@@ -143,10 +164,6 @@ impl ReorgState {
         }
         self.fork_length += 1;
         self.fork_parent_hash = Some(fork_head_hash);
-    }
-
-    fn should_switch_to_fork(&self) -> bool {
-        self.fork_length >= self.depth
     }
 
     fn forkchoice_state(&self, fork_head_hash: B256) -> eyre::Result<ForkchoiceState> {
@@ -163,6 +180,7 @@ impl ReorgState {
         self.fork_length = 0;
         self.branch_point_hash = None;
         self.fork_parent_hash = None;
+        self.active_branch = ActiveBranch::Canonical;
     }
 }
 
@@ -293,13 +311,16 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let built_fork_block = if let Some(reorg_state) = reorg_state.as_mut() {
+            let next_target_branch = reorg_state.as_ref().map(ReorgState::next_target_branch);
+
+            let built_fork_block = if let (Some(reorg_state), Some(ActiveBranch::Fork)) =
+                (reorg_state.as_ref(), next_target_branch)
+            {
                 Some(
                     prepare_built_block(
                         &auth_provider,
                         &block,
                         reorg_state.next_fork_parent_hash(canonical_parent_hash),
-                        reorg_extra_data(&block.header.extra_data),
                         use_reth_namespace,
                         wait_for_persistence,
                         no_wait_for_caches,
@@ -328,8 +349,6 @@ impl Command {
             )?;
 
             debug!(target: "reth-bench", ?block_number, "Sending payload");
-
-            let start = Instant::now();
             let mut forkchoice_state = canonical_forkchoice_state;
             let mut forkchoice_version = version;
 
@@ -339,25 +358,37 @@ impl Command {
 
                 if let Some(reorg_state) = reorg_state.as_mut() {
                     reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
+                    forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
+                    forkchoice_version = prepared.version;
+                    reorg_state.active_branch = ActiveBranch::Fork;
 
-                    if reorg_state.should_switch_to_fork() {
-                        forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
-                        forkchoice_version = prepared.version;
+                    info!(
+                        target: "reth-bench",
+                        block_number,
+                        branch_point = %forkchoice_state.safe_block_hash,
+                        fork_head = %prepared.block_hash,
+                        fork_depth = reorg_state.fork_length,
+                        max_reorg_depth = reorg_state.depth,
+                        "Switching forkchoice to reorg branch"
+                    );
+                }
+            } else if let Some(reorg_state) = reorg_state.as_mut() &&
+                next_target_branch == Some(ActiveBranch::Canonical)
+            {
+                reorg_state.active_branch = ActiveBranch::Canonical;
 
-                        info!(
-                            target: "reth-bench",
-                            block_number,
-                            branch_point = %forkchoice_state.safe_block_hash,
-                            fork_head = %prepared.block_hash,
-                            reorg_depth = reorg_state.depth,
-                            "Switching forkchoice to reorg branch"
-                        );
-
-                        reorg_state.reset();
-                    }
+                if reorg_state.fork_length >= reorg_state.depth {
+                    info!(
+                        target: "reth-bench",
+                        block_number,
+                        reorg_depth = reorg_state.depth,
+                        "Resetting reorg branch after switching back to canonical"
+                    );
+                    reorg_state.reset();
                 }
             }
 
+            let start = Instant::now();
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;
             let np_latency =
@@ -465,13 +496,12 @@ async fn prepare_built_block(
     auth_provider: &RootProvider<AnyNetwork>,
     block: &AnyRpcBlock,
     parent_block_hash: B256,
-    extra_data: Bytes,
     use_reth_namespace: bool,
     wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
     let version = build_block_target_version(block)?;
-    let request = build_block_request(block, parent_block_hash, extra_data)?;
+    let request = build_block_request(block, parent_block_hash)?;
     let built_payload: ExecutionPayloadEnvelopeV5 =
         auth_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
             || format!("Failed to build block {} via testing_buildBlockV1", block.header.number),
@@ -496,9 +526,8 @@ async fn prepare_built_block(
 fn build_block_request(
     block: &AnyRpcBlock,
     parent_block_hash: B256,
-    extra_data: Bytes,
 ) -> eyre::Result<TestingBuildBlockRequestV1> {
-    let transactions = block
+    let mut transactions = block
         .clone()
         .try_into_transactions()
         .map_err(|_| eyre::eyre!("Block transactions must be fetched in full for --reorg"))?
@@ -509,6 +538,11 @@ fn build_block_request(
             Ok::<Bytes, eyre::Report>(tx.encoded_2718().into())
         })
         .collect::<eyre::Result<Vec<_>>>()?;
+
+    // Keep only 90% of the original transactions on the fork so the alternate branch produces a
+    // materially different post-state instead of only differing by header data.
+    let keep = transactions.len().saturating_mul(9) / 10;
+    transactions.truncate(keep);
 
     let rpc_block = block.clone().into_inner();
 
@@ -523,7 +557,7 @@ fn build_block_request(
             slot_number: block.header.slot_number,
         },
         transactions,
-        extra_data: Some(extra_data),
+        extra_data: Some(block.header.extra_data.clone()),
     })
 }
 
@@ -621,21 +655,6 @@ fn built_payload_to_new_payload(
             bail!("--reorg does not support Amsterdam payload fields yet")
         }
     }
-}
-
-fn reorg_extra_data(extra_data: &Bytes) -> Bytes {
-    let mut extra_data = extra_data.to_vec();
-
-    // Fork blocks reuse the source block's transactions and payload attributes, so we perturb the
-    // header extra data to ensure the fork diverges immediately instead of collapsing into the
-    // canonical chain.
-    if extra_data.len() < 32 {
-        extra_data.push(0x01);
-    } else {
-        extra_data[0] ^= 0x01;
-    }
-
-    extra_data.into()
 }
 
 fn parse_reorg_depth(value: &str) -> Result<usize, String> {
