@@ -1,6 +1,6 @@
 //! Rejection reasons for the BAL execution path.
 
-use alloy_primitives::{Address, StorageKey, B256};
+use alloy_primitives::B256;
 
 /// Reasons a block may be rejected on the BAL execution path.
 ///
@@ -28,13 +28,12 @@ pub enum RejectReason {
 
     /// A worker accessed state not declared in the received BAL (surfaced as revm's
     /// `BalError::AccountNotFound` or a storage-key miss).
+    ///
+    /// TODO: once revm's `BalError` carries the offending `address` / `slot`, thread those
+    /// through to aid diagnostics. For now we only know which tx triggered the miss.
     UndeclaredAccess {
         /// Tx index whose worker reported the miss.
         tx_index: u64,
-        /// Address the worker tried to access.
-        address: Address,
-        /// Storage key, if the access was storage. `None` for basic-account accesses.
-        slot: Option<StorageKey>,
     },
 
     /// The phantom-reads feasibility invariant failed:
