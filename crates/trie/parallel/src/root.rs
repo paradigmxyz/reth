@@ -283,9 +283,10 @@ mod tests {
     async fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let overlay_builder = reth_provider::providers::OverlayBuilder::new(changeset_cache);
         let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
             factory.clone(),
-            reth_provider::providers::OverlayBuilder::new(changeset_cache),
+            overlay_builder.clone(),
         );
 
         let mut rng = rand::rng();
@@ -362,9 +363,8 @@ mod tests {
         }
 
         let prefix_sets = hashed_state.construct_prefix_sets();
-        let (factory, overlay_builder) = overlay_factory.into_parts();
         overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            factory,
+            factory.clone(),
             overlay_builder.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted()))),
         );
 

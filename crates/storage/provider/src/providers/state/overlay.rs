@@ -375,14 +375,9 @@ impl OverlayBuilder {
         Ok(Overlay { trie_updates, hashed_post_state })
     }
 
-    /// Builds the effective overlay for the given provider, using the supplied cache for
-    /// db-tip-scoped memoization.
+    /// Builds the effective overlay for the given provider.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn build_overlay<Provider>(
-        &self,
-        provider: &Provider,
-        overlay_cache: &DashMap<BlockNumber, Overlay>,
-    ) -> ProviderResult<Overlay>
+    fn build_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -398,18 +393,7 @@ impl OverlayBuilder {
         }
 
         let db_tip_block = self.get_db_tip_block_number(provider)?;
-
-        let overlay = match overlay_cache.entry(db_tip_block) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.calculate_overlay(provider, db_tip_block)?;
-                entry.insert(overlay.clone());
-                overlay
-            }
-        };
-
-        Ok(overlay)
+        self.calculate_overlay(provider, db_tip_block)
     }
 }
 
@@ -434,9 +418,32 @@ impl<F> OverlayStateProviderFactory<F> {
         Self { factory, overlay_builder, overlay_cache: Default::default() }
     }
 
-    /// Deconstruct the factory into its underlying provider factory and overlay builder.
-    pub fn into_parts(self) -> (F, OverlayBuilder) {
-        (self.factory, self.overlay_builder)
+    /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
+    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
+    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    where
+        Provider: StageCheckpointReader
+            + PruneCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + DBProvider
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        let db_tip_block = self.overlay_builder.get_db_tip_block_number(provider)?;
+
+        let overlay = match self.overlay_cache.entry(db_tip_block) {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
+                self.overlay_builder.metrics.overlay_cache_misses.increment(1);
+                let overlay = self.overlay_builder.build_overlay(provider)?;
+                entry.insert(overlay.clone());
+                overlay
+            }
+        };
+
+        Ok(overlay)
     }
 }
 
@@ -465,8 +472,7 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_state } =
-            self.overlay_builder.build_overlay(&provider, &self.overlay_cache)?;
+        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());

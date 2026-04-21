@@ -524,12 +524,12 @@ where
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            OverlayBuilder::new(self.changeset_cache.clone())
-                .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay),
-        );
+        let provider_factory = self.provider.clone();
+        let overlay_builder = OverlayBuilder::new(self.changeset_cache.clone())
+            .with_block_hash(Some(anchor_hash))
+            .with_lazy_overlay(lazy_overlay);
+        let overlay_factory =
+            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -667,7 +667,8 @@ where
                 let task_result = ensure_ok_post_block!(
                     self.await_state_root_with_timeout(
                         &mut handle,
-                        overlay_factory.clone(),
+                        provider_factory.clone(),
+                        overlay_builder.clone(),
                         &hashed_state,
                     ),
                     block
@@ -691,7 +692,8 @@ where
                         // Compare trie updates with serial computation if configured
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
-                                overlay_factory.clone(),
+                                provider_factory.clone(),
+                                overlay_builder.clone(),
                                 &hashed_state,
                                 trie_updates.as_ref().clone(),
                             );
@@ -730,7 +732,11 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
+                match self.compute_state_root_parallel(
+                    provider_factory.clone(),
+                    overlay_builder.clone(),
+                    &hashed_state,
+                ) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
                         info!(
@@ -766,7 +772,11 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                Self::compute_state_root_serial(overlay_factory.clone(), &hashed_state),
+                Self::compute_state_root_serial(
+                    provider_factory.clone(),
+                    overlay_builder.clone(),
+                    &hashed_state,
+                ),
                 block
             );
 
@@ -1090,7 +1100,8 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        provider_factory: P,
+        overlay_builder: OverlayBuilder,
         hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
@@ -1098,9 +1109,8 @@ where
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let (factory, overlay_builder) = overlay_factory.into_parts();
         let overlay_factory = OverlayStateProviderFactory::new(
-            factory,
+            provider_factory,
             overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted()),
         );
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
@@ -1113,7 +1123,8 @@ where
     /// [`HashedPostState`] containing the changes of this block, to compute the state root and
     /// trie updates for this block.
     fn compute_state_root_serial(
-        overlay_factory: OverlayStateProviderFactory<P>,
+        provider_factory: P,
+        overlay_builder: OverlayBuilder,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let hashed_state = hashed_state.get();
@@ -1121,9 +1132,8 @@ where
         // need to use the prefix sets which were generated from it to indicate to the
         // StateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let (factory, overlay_builder) = overlay_factory.into_parts();
         let overlay_factory = OverlayStateProviderFactory::new(
-            factory,
+            provider_factory,
             overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted()),
         );
 
@@ -1156,7 +1166,8 @@ where
     fn await_state_root_with_timeout<Tx, Err, R: Send + Sync + 'static>(
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        provider_factory: P,
+        overlay_builder: OverlayBuilder,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         let Some(timeout) = self.config.state_root_task_timeout() else {
@@ -1181,10 +1192,15 @@ where
                 let (seq_tx, seq_rx) =
                     std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
 
-                let seq_overlay = overlay_factory;
+                let seq_provider_factory = provider_factory;
+                let seq_overlay_builder = overlay_builder;
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
-                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
+                    let result = Self::compute_state_root_serial(
+                        seq_provider_factory,
+                        seq_overlay_builder,
+                        &seq_hashed_state,
+                    );
                     let _ = seq_tx.send(result);
                 });
 
@@ -1248,13 +1264,18 @@ where
     /// updates.
     fn compare_trie_updates_with_serial(
         &self,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        provider_factory: P,
+        overlay_builder: OverlayBuilder,
         hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
-        match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
+        match Self::compute_state_root_serial(
+            provider_factory.clone(),
+            overlay_builder.clone(),
+            hashed_state,
+        ) {
             Ok((serial_root, serial_trie_updates)) => {
                 debug!(
                     target: "engine::tree::payload_validator",
@@ -1263,6 +1284,8 @@ where
                 );
 
                 // Get a database provider to use as trie cursor factory
+                let overlay_factory =
+                    OverlayStateProviderFactory::new(provider_factory, overlay_builder);
                 match overlay_factory.database_provider_ro() {
                     Ok(provider) => {
                         match super::trie_updates::compare_trie_updates(
