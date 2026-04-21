@@ -168,6 +168,19 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             .with_bal_builder()
             .build();
 
+        // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
+        // (called by `commit_transaction`) panics at revm-database's
+        // `cache.rs:195` ("All accounts should be present inside cache") when it tries to
+        // apply a diff for an address not previously loaded. In the normal serial flow the
+        // EVM loads the account itself during execution, but in option (a) the worker runs
+        // the EVM on its own state and we only feed the diff to canonical — canonical never
+        // read those accounts, so they aren't in its cache.
+        for account_changes in &received_bal {
+            canonical_state
+                .load_cache_account(account_changes.address)
+                .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+        }
+
         // Declare `worker_state` at the outer scope so its lifetime matches canonical_state's
         // — both are method-local, and their borrows unify at the same `'a` when
         // `executor_for_block` is called. Each iteration re-initializes with a fresh `State`.
