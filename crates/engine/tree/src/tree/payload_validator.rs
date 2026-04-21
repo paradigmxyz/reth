@@ -1510,7 +1510,6 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-                self.changeset_cache.clone(),
             )))
         }
 
@@ -1519,12 +1518,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                hash,
-                None,
-                self.changeset_cache.clone(),
-            )))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");

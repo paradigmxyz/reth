@@ -30,12 +30,11 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, HistoricalStateProvider,
-    LatestStateProvider, NodePrimitivesProvider, ProviderError, PruneCheckpointReader,
-    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StateReader, StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, NodePrimitivesProvider,
+    ProviderError, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant,
 };
-use reth_prune::PruneSegment;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
@@ -105,8 +104,6 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
     historical: B256,
     /// The blocks that form the chain from historical to target and are in memory.
     overlay: Option<Vec<ExecutedBlock<N>>>,
-    /// Changeset cache handle for building historical providers.
-    changeset_cache: ChangesetCache,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
@@ -116,67 +113,18 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlock<N>>>,
-        changeset_cache: ChangesetCache,
     ) -> Self {
-        Self { provider_factory, historical, overlay, changeset_cache }
+        Self { provider_factory, historical, overlay }
     }
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone,
-    P::Provider: BlockHashReader
-        + BlockNumReader
-        + ChangeSetReader
-        + PruneCheckpointReader
-        + RocksDBProviderFactory
-        + StageCheckpointReader
-        + StorageChangeSetReader
-        + StorageSettingsCache
-        + 'static
-        + NodePrimitivesProvider,
+    P: BlockReader + StateProviderFactory + StateReader + Clone,
 {
-    fn build_database_state_provider(&self) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider_factory.database_provider_ro()?;
-        let block_number = provider
-            .block_number(self.historical)?
-            .ok_or(ProviderError::BlockHashNotFound(self.historical))?;
-
-        if block_number == provider.best_block_number().unwrap_or_default() &&
-            block_number == provider.last_block_number().unwrap_or_default()
-        {
-            return Ok(Box::new(LatestStateProvider::new(provider)))
-        }
-
-        let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-
-        let mut state_provider =
-            HistoricalStateProvider::new(provider, block_number + 1, self.changeset_cache.clone());
-
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-
-        Ok(Box::new(state_provider))
-    }
-
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let mut provider = self.build_database_state_provider()?;
+        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
         if let Some(overlay) = self.overlay.clone() {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
@@ -3381,7 +3329,6 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-                self.changeset_cache.clone(),
             )))
         }
 
@@ -3390,12 +3337,7 @@ where
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                hash,
-                None,
-                self.changeset_cache.clone(),
-            )))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
