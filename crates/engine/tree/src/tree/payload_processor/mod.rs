@@ -215,6 +215,25 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
+    /// Returns `true` when prewarming should be skipped entirely for a block with the given
+    /// transaction count.
+    ///
+    /// Prewarming is skipped when the user disabled it globally, or when the block is small
+    /// enough that spawning prewarm workers costs more than it saves.
+    const fn should_skip_prewarm(&self, transaction_count: usize) -> bool {
+        self.disable_transaction_prewarming || transaction_count < SMALL_BLOCK_TX_THRESHOLD
+    }
+
+    /// Returns `true` when BAL will actually drive prewarming for this invocation.
+    ///
+    /// The state hook that forwards execution updates to the state root task must be installed
+    /// whenever this returns `false`, so the task still gets updates via the execution path.
+    const fn bal_drives_prewarm(&self, transaction_count: usize, has_bal: bool) -> bool {
+        has_bal &&
+            !self.should_skip_prewarm(transaction_count) &&
+            !self.disable_bal_parallel_execution
+    }
+
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
     /// - Transaction prewarming task
@@ -273,7 +292,7 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = bal.is_none();
+        let install_state_hook = !self.bal_drives_prewarm(env.transaction_count, bal.is_some());
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -478,8 +497,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
+        let skip_prewarm = self.should_skip_prewarm(env.transaction_count);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -1094,6 +1112,54 @@ mod tests {
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+    }
+
+    #[test]
+    fn bal_only_drives_prewarm_when_it_will_actually_run() {
+        let processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        // Large block + BAL + defaults → BAL drives prewarm, state hook must be OFF.
+        assert!(processor.bal_drives_prewarm(100, true));
+
+        // Small block (< SMALL_BLOCK_TX_THRESHOLD): prewarm is skipped entirely, so BAL
+        // does not drive anything even if provided. The state hook must stay installed so
+        // the state root task still receives updates via the execution path.
+        assert!(!processor.bal_drives_prewarm(1, true));
+
+        // No BAL at all, regardless of block size.
+        assert!(!processor.bal_drives_prewarm(100, false));
+        assert!(!processor.bal_drives_prewarm(1, false));
+    }
+
+    #[test]
+    fn bal_does_not_drive_prewarm_when_prewarming_disabled() {
+        let processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default().without_prewarming(true),
+            PrecompileCacheMap::default(),
+        );
+
+        // User disabled all prewarming → BAL is not consumed, state hook must stay installed.
+        assert!(!processor.bal_drives_prewarm(100, true));
+    }
+
+    #[test]
+    fn bal_does_not_drive_prewarm_when_bal_parallel_execution_disabled() {
+        let processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default().without_bal_parallel_execution(true),
+            PrecompileCacheMap::default(),
+        );
+
+        // BAL-parallel-execution off → prewarm falls back to tx iteration, state hook must stay on.
+        assert!(!processor.bal_drives_prewarm(100, true));
     }
 
     #[test]
