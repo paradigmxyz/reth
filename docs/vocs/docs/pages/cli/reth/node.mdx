@@ -950,6 +950,13 @@ Engine:
 
           [default: 0]
 
+      --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
+          Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.
+
+          Set to `0` to effectively disable the cache because entries are evicted on the first lookup.
+
+          [default: 128]
+
       --engine.legacy-state-root
           Enable legacy state root
 
