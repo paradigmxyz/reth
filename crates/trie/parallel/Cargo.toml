@@ -74,5 +74,5 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
-    "reth-chainspec/test-utils"
+    "reth-chainspec/test-utils",
 ]

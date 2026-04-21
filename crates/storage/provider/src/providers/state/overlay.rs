@@ -117,7 +117,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     }
 
     /// Returns true if an overlay source has been configured.
-    pub fn has_overlay_source(&self) -> bool {
+    pub const fn has_overlay_source(&self) -> bool {
         self.overlay_source.is_some()
     }
 
@@ -210,7 +210,7 @@ where
                         self.anchor_hash
                     ))))
                 }
-                Ok((Arc::clone(&trie), Arc::clone(&state)))
+                Ok((Arc::clone(trie), Arc::clone(state)))
             }
             None => Ok((
                 Arc::new(TrieUpdatesSorted::default()),
