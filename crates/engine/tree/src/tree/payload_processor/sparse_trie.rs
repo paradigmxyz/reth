@@ -894,7 +894,8 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_provider::{
-        providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
+        providers::{OverlayBuilder, OverlayStateProviderFactory},
+        test_utils::create_test_provider_factory,
     };
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
@@ -983,8 +984,10 @@ mod tests {
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let overlay_factory =
-            OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new());
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::new(ChangesetCache::new()),
+        );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
 

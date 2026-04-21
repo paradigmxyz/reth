@@ -77,10 +77,11 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
+    providers::{OverlayBuilder, OverlayStateProviderFactory},
+    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
@@ -523,10 +524,12 @@ where
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
-        let overlay_factory =
-            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            OverlayBuilder::new(self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay);
+                .with_lazy_overlay(lazy_overlay),
+        );
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -1095,8 +1098,11 @@ where
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let overlay_factory =
-            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        let (factory, overlay_builder) = overlay_factory.into_parts();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            factory,
+            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted()),
+        );
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
             .incremental_root_with_updates()
     }
@@ -1115,8 +1121,11 @@ where
         // need to use the prefix sets which were generated from it to indicate to the
         // StateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let overlay_factory =
-            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        let (factory, overlay_builder) = overlay_factory.into_parts();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            factory,
+            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted()),
+        );
 
         let provider = overlay_factory.database_provider_ro()?;
 
@@ -2026,10 +2035,12 @@ where
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
-        let overlay_factory =
-            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            OverlayBuilder::new(self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
-                .with_lazy_overlay(lazy_overlay);
+                .with_lazy_overlay(lazy_overlay),
+        );
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,

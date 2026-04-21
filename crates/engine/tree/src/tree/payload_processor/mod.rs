@@ -962,7 +962,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
-        providers::{BlockchainProvider, OverlayStateProviderFactory},
+        providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
@@ -1237,7 +1237,10 @@ mod tests {
                 std::convert::identity,
             ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
+            OverlayStateProviderFactory::new(
+                provider_factory,
+                OverlayBuilder::new(ChangesetCache::new()),
+            ),
             &TreeConfig::default(),
             None, // No BAL for test
         );
