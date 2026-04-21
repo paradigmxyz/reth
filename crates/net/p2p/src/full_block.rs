@@ -119,10 +119,10 @@ where
         let client = self.client.clone();
         FetchFullBlockWithAccessListsFuture {
             block: FetchFullBlockFuture::new(client.clone(), self.consensus.clone(), hash),
+            block_result: None,
             access_lists_state: AccessListsState::Pending(
                 client.get_block_access_lists(vec![hash]),
             ),
-            block_result: None,
         }
     }
 }
@@ -298,8 +298,8 @@ where
     Client: BlockClient + BlockAccessListsClient,
 {
     block: FetchFullBlockFuture<Client>,
-    access_lists_state: AccessListsState<<Client as BlockAccessListsClient>::Output>,
     block_result: Option<SealedBlock<Client::Block>>,
+    access_lists_state: AccessListsState<<Client as BlockAccessListsClient>::Output>,
 }
 
 impl<Client> FetchFullBlockWithAccessListsFuture<Client>
