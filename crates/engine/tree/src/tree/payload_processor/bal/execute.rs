@@ -293,3 +293,433 @@ unsafe fn reinterpret_result<From, To>(src: From) -> To {
     core::mem::forget(src);
     dst
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_eips::{
+        eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
+        eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
+        eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+    };
+    use alloy_primitives::{keccak256, B256, U256};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
+    use revm::{
+        database::{CacheDB, EmptyDB},
+        state::{AccountInfo, Bytecode},
+    };
+
+    /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
+    /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
+    /// (EIP-7002), and historical block hashes (EIP-2935).
+    fn system_contracts_db() -> CacheDB<EmptyDB> {
+        let mut db = CacheDB::<EmptyDB>::new(Default::default());
+        db.insert_account_info(
+            BEACON_ROOTS_ADDRESS,
+            AccountInfo {
+                balance: U256::ZERO,
+                nonce: 1,
+                code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
+                code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
+                account_id: None,
+            },
+        );
+        db.insert_account_info(
+            WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+            AccountInfo {
+                balance: U256::ZERO,
+                nonce: 1,
+                code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
+                code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
+                account_id: None,
+            },
+        );
+        db.insert_account_info(
+            HISTORY_STORAGE_ADDRESS,
+            AccountInfo {
+                balance: U256::ZERO,
+                nonce: 1,
+                code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
+                code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
+                account_id: None,
+            },
+        );
+        db
+    }
+
+    /// Builds a minimal sealed block (empty body, Amsterdam-ready header) for tests.
+    fn empty_amsterdam_block(header_bal_hash: B256) -> SealedBlock<Block> {
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            gas_limit: 30_000_000,
+            parent_beacon_block_root: Some(B256::ZERO),
+            withdrawals_root: Some(alloy_consensus::EMPTY_ROOT_HASH),
+            requests_hash: Some(alloy_eips::eip7685::EMPTY_REQUESTS_HASH),
+            excess_blob_gas: Some(0),
+            blob_gas_used: Some(0),
+            block_access_list_hash: Some(header_bal_hash),
+            ..Header::default()
+        };
+        let block = Block {
+            header,
+            body: BlockBody {
+                transactions: vec![],
+                ommers: vec![],
+                withdrawals: Some(vec![].into()),
+            },
+        };
+        block.seal_slow()
+    }
+
+    #[test]
+    fn rejects_bad_bal_hash_up_front() {
+        // Check A: the received BAL's hash must match the header's commitment.
+        let executor = BalPayloadExecutor::new(EthEvmConfig::mainnet());
+        let snapshot = Arc::new(BlockPreState::default());
+        let received_bal: BlockAccessList = Vec::new();
+        let wrong_hash = B256::repeat_byte(0xff);
+        let block = empty_amsterdam_block(wrong_hash);
+
+        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
+            system_contracts_db(),
+            snapshot,
+            received_bal,
+            &block,
+            Vec::new(),
+            wrong_hash,
+            30_000_000,
+        );
+
+        match result {
+            Err(BalExecutionError::Reject(RejectReason::HeaderHashMismatch { .. })) => {}
+            Err(e) => panic!("expected HeaderHashMismatch, got error {e:?}"),
+            Ok(_) => panic!("expected HeaderHashMismatch, got Ok"),
+        }
+    }
+
+    #[test]
+    fn rejects_item_count_exceeding_gas_budget() {
+        // Check B: (addrs + unique_slots) * 2000 must be <= gas_limit.
+        use alloy_eip7928::AccountChanges;
+
+        let executor = BalPayloadExecutor::new(EthEvmConfig::mainnet());
+        let snapshot = Arc::new(BlockPreState::default());
+
+        // 10 accounts × 2000 gas = 20,000. We set the limit to 10,000 → reject.
+        let received_bal: BlockAccessList = (0u8..10)
+            .map(|i| {
+                let mut addr_bytes = [0u8; 20];
+                addr_bytes[19] = i;
+                AccountChanges { address: addr_bytes.into(), ..Default::default() }
+            })
+            .collect();
+
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
+        let block = empty_amsterdam_block(bal_hash);
+
+        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
+            system_contracts_db(),
+            snapshot,
+            received_bal,
+            &block,
+            Vec::new(),
+            bal_hash,
+            10_000,
+        );
+
+        match result {
+            Err(BalExecutionError::Reject(RejectReason::ItemCountExceedsGasBudget { .. })) => {}
+            Err(e) => panic!("expected ItemCountExceedsGasBudget, got error {e:?}"),
+            Ok(_) => panic!("expected ItemCountExceedsGasBudget, got Ok"),
+        }
+    }
+
+    /// Runs only the canonical phases (pre-exec → post-exec, no txs) against a fresh
+    /// `system_contracts_db()` to compute the composed BAL a block produces. Used to build
+    /// the "reference" received BAL for the happy-path test below.
+    ///
+    /// This intentionally mirrors what `BalPayloadExecutor::execute_block` does internally,
+    /// but without any hash check — the output is the BAL itself, not a pass/fail signal.
+    fn reference_bal_for_empty_block(evm_config: &EthEvmConfig) -> BlockAccessList {
+        use revm::database::State as RevmState;
+
+        let db = system_contracts_db();
+        let mut state =
+            RevmState::builder().with_database(db).with_bundle_update().with_bal_builder().build();
+
+        // Any header_bal_hash on the reference block is fine — we don't check it here.
+        let block = empty_amsterdam_block(B256::ZERO);
+        {
+            let mut executor =
+                evm_config.executor_for_block(&mut state, &block).expect("build executor");
+            executor.apply_pre_execution_changes().expect("pre-exec");
+            executor.evm_mut().db_mut().bump_bal_index();
+            executor.apply_post_execution_changes().expect("post-exec");
+        }
+        state.take_built_alloy_bal().expect("with_bal_builder was set")
+    }
+
+    #[test]
+    fn empty_block_happy_path_round_trip() {
+        // Two-pass end-to-end:
+        //   1. Build the canonical BAL an empty Amsterdam block produces (via
+        //      `reference_bal_for_empty_block`).
+        //   2. Hash it, stamp the header, and run `BalPayloadExecutor::execute_block` with that
+        //      BAL. Every check must pass (A, B, D, F).
+        let evm_config = EthEvmConfig::mainnet();
+
+        let received_bal = reference_bal_for_empty_block(&evm_config);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
+        // Sanity: reference BAL is non-empty (system calls populated it).
+        assert!(!received_bal.is_empty(), "empty BAL means system calls didn't record state");
+
+        let executor = BalPayloadExecutor::new(evm_config);
+        let snapshot = Arc::new(BlockPreState::default());
+        let block = empty_amsterdam_block(bal_hash);
+
+        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
+            system_contracts_db(),
+            snapshot,
+            received_bal,
+            &block,
+            Vec::new(),
+            bal_hash,
+            30_000_000,
+        );
+
+        match result {
+            Ok(output) => {
+                assert!(output.receipts.is_empty(), "empty block → no receipts");
+            }
+            Err(e) => panic!("expected success, got {e:?}"),
+        }
+    }
+
+    /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
+    fn insert_funded(db: &mut CacheDB<EmptyDB>, addr: alloy_primitives::Address, balance: U256) {
+        db.insert_account_info(
+            addr,
+            AccountInfo { nonce: 0, balance, code_hash: B256::ZERO, code: None, account_id: None },
+        );
+    }
+
+    /// Inserts `(address → Some(Account { balance, nonce, bytecode_hash: None }))` into the
+    /// snapshot's account map so BalDatabase-fallback reads resolve.
+    fn seed_snapshot_account(
+        pre: &mut BlockPreState,
+        addr: alloy_primitives::Address,
+        balance: U256,
+        nonce: u64,
+    ) {
+        pre.accounts.insert(
+            addr,
+            Some(reth_primitives_traits::Account { balance, nonce, bytecode_hash: None }),
+        );
+    }
+
+    /// Runs the canonical path on a block with real txs (no hash check) and returns the
+    /// composed BAL. Used to build the reference BAL for happy-path multi-tx tests.
+    fn reference_bal_for_block<Tx>(
+        evm_config: &EthEvmConfig,
+        mut db: CacheDB<EmptyDB>,
+        block: &SealedBlock<Block>,
+        txs: Vec<Tx>,
+    ) -> BlockAccessList
+    where
+        Tx: ExecutableTxFor<EthEvmConfig>,
+    {
+        use revm::database::State as RevmState;
+
+        let mut state = RevmState::builder()
+            .with_database(&mut db)
+            .with_bundle_update()
+            .with_bal_builder()
+            .build();
+
+        {
+            let mut executor =
+                evm_config.executor_for_block(&mut state, block).expect("build executor");
+            executor.apply_pre_execution_changes().expect("pre-exec");
+            for (i, tx) in txs.into_iter().enumerate() {
+                executor.evm_mut().db_mut().bump_bal_index();
+                executor
+                    .execute_transaction(tx)
+                    .unwrap_or_else(|e| panic!("tx {i} failed during reference build: {e:?}"));
+            }
+            executor.evm_mut().db_mut().bump_bal_index();
+            executor.apply_post_execution_changes().expect("post-exec");
+        }
+        state.take_built_alloy_bal().expect("with_bal_builder was set")
+    }
+
+    #[test]
+    fn multi_tx_happy_path_round_trip() {
+        // End-to-end with two value transfers from distinct senders to the same recipient.
+        //
+        // 1. Fund alice and bob in a fresh canonical DB + snapshot.
+        // 2. Sign tx1 (alice → carol, 100 wei) and tx2 (bob → carol, 200 wei).
+        // 3. Build the reference BAL by running the block through a canonical executor with
+        //    `with_bal_builder`.
+        // 4. Feed that BAL into `BalPayloadExecutor::execute_block` and assert 2 receipts + no
+        //    rejections.
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let coinbase = alloy_primitives::Address::ZERO;
+        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        // Generate keypairs + derive sender addresses.
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        // Canonical DB: system contracts + funded senders.
+        let mut canonical_db = system_contracts_db();
+        insert_funded(&mut canonical_db, alice, sender_balance);
+        insert_funded(&mut canonical_db, bob, sender_balance);
+
+        // Snapshot: same accounts — workers read through BalDatabase → SnapshotDatabase.
+        let mut snapshot_pre = BlockPreState::default();
+        seed_snapshot_account(&mut snapshot_pre, alice, sender_balance, 0);
+        seed_snapshot_account(&mut snapshot_pre, bob, sender_balance, 0);
+        seed_snapshot_account(&mut snapshot_pre, carol, U256::ZERO, 0);
+        seed_snapshot_account(&mut snapshot_pre, coinbase, U256::ZERO, 0);
+        let snapshot = Arc::new(snapshot_pre);
+
+        // Sign txs.
+        let chain_id = MAINNET.chain.id();
+        let gas_price = 1u128; // flat low price; block has no base fee in our test header.
+        let tx1 = sign_tx_with_key_pair(
+            alice_kp,
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(chain_id),
+                nonce: 0,
+                gas_price,
+                gas_limit: 21_000,
+                to: TxKind::Call(carol),
+                value: U256::from(100u64),
+                input: Default::default(),
+            }),
+        );
+        let tx2 = sign_tx_with_key_pair(
+            bob_kp,
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(chain_id),
+                nonce: 0,
+                gas_price,
+                gas_limit: 21_000,
+                to: TxKind::Call(carol),
+                value: U256::from(200u64),
+                input: Default::default(),
+            }),
+        );
+        let recovered1 = Recovered::new_unchecked(tx1, alice);
+        let recovered2 = Recovered::new_unchecked(tx2, bob);
+
+        // Reference BAL: run the block canonically through a separate executor.
+        let block_for_ref = empty_amsterdam_block(B256::ZERO);
+        let reference_bal = reference_bal_for_block::<Recovered<TransactionSigned>>(
+            &evm_config,
+            {
+                // Separate fresh DB for the reference run so we don't pollute canonical_db.
+                let mut db = system_contracts_db();
+                db.insert_account_info(
+                    alice,
+                    AccountInfo {
+                        nonce: 0,
+                        balance: sender_balance,
+                        code_hash: B256::ZERO,
+                        code: None,
+                        account_id: None,
+                    },
+                );
+                db.insert_account_info(
+                    bob,
+                    AccountInfo {
+                        nonce: 0,
+                        balance: sender_balance,
+                        code_hash: B256::ZERO,
+                        code: None,
+                        account_id: None,
+                    },
+                );
+                db
+            },
+            &block_for_ref,
+            vec![recovered1.clone(), recovered2.clone()],
+        );
+        assert!(!reference_bal.is_empty(), "expected BAL entries from pre-exec + txs");
+
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let block = empty_amsterdam_block(bal_hash);
+
+        let executor = BalPayloadExecutor::new(evm_config);
+        let result = executor.execute_block(
+            canonical_db,
+            snapshot,
+            reference_bal,
+            &block,
+            vec![recovered1, recovered2],
+            bal_hash,
+            30_000_000,
+        );
+
+        match result {
+            Ok(output) => {
+                assert_eq!(output.receipts.len(), 2, "expected 2 receipts");
+                assert!(output.gas_used >= 2 * 21_000, "expected at least 42k gas used");
+            }
+            Err(e) => panic!("expected success, got {e:?}"),
+        }
+    }
+
+    #[test]
+    fn final_hash_check_catches_missing_system_call_entries() {
+        // End-to-end: empty received BAL, but canonical pre-exec runs system calls (EIP-4788
+        // beacon-root, EIP-2935 blockhash, EIP-7002 withdrawal-request) that mutate state at
+        // bal_index = 0 and get recorded in the canonical `bal_builder`. The composed BAL
+        // therefore isn't empty — its hash differs from keccak(rlp([])), so check F fires.
+        //
+        // This proves the full canonical path runs (pre-exec, tx loop over zero txs,
+        // post-exec) and that `take_built_alloy_bal` + `compute_block_access_list_hash` +
+        // the comparison against the header are correctly wired.
+        let executor = BalPayloadExecutor::new(EthEvmConfig::mainnet());
+        let snapshot = Arc::new(BlockPreState::default());
+        let received_bal: BlockAccessList = Vec::new();
+        let empty_bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
+        let block = empty_amsterdam_block(empty_bal_hash);
+
+        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
+            system_contracts_db(),
+            snapshot,
+            received_bal,
+            &block,
+            Vec::new(),
+            empty_bal_hash,
+            30_000_000,
+        );
+
+        match result {
+            Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
+                rebuilt,
+                expected,
+            })) => {
+                assert_eq!(expected, empty_bal_hash);
+                assert_ne!(rebuilt, empty_bal_hash, "rebuilt BAL must be non-empty");
+            }
+            Err(e) => panic!("expected FinalHashMismatch, got error {e:?}"),
+            Ok(_) => panic!("expected FinalHashMismatch, got Ok"),
+        }
+    }
+}
