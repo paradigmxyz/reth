@@ -684,6 +684,271 @@ mod tests {
         }
     }
 
+    // ============================================================================
+    // Shadow-mode harness — runs a block through the serial `BasicBlockExecutor`
+    // and the BAL-path `BalPayloadExecutor`, asserts byte-equal outputs.
+    // ============================================================================
+
+    /// Output of one path in a shadow run. Both serial and BAL paths produce this shape so
+    /// the harness can compare field-by-field.
+    #[derive(Debug)]
+    struct ShadowOutput {
+        bundle_state: BundleState,
+        receipts: Vec<reth_ethereum_primitives::Receipt>,
+        gas_used: u64,
+        requests: alloy_eips::eip7685::Requests,
+    }
+
+    /// Runs the block through the serial path and captures its full output.
+    ///
+    /// Uses a manual state + executor (not `BasicBlockExecutor::execute_one`) so we can both
+    /// (a) capture the composed BAL for the BAL-path input and (b) pull the bundle out after.
+    fn run_serial_path(
+        evm_config: &EthEvmConfig,
+        canonical_db: CacheDB<EmptyDB>,
+        block: &SealedBlock<Block>,
+        txs: &[Recovered<TransactionSigned>],
+    ) -> (ShadowOutput, BlockAccessList) {
+        use revm::database::State as RevmState;
+
+        let mut state = RevmState::builder()
+            .with_database(canonical_db)
+            .with_bundle_update()
+            .with_bal_builder()
+            .build();
+
+        let block_result = {
+            let mut executor =
+                evm_config.executor_for_block(&mut state, block).expect("build serial executor");
+            executor.apply_pre_execution_changes().expect("serial pre-exec");
+            for (i, tx) in txs.iter().cloned().enumerate() {
+                executor.evm_mut().db_mut().bump_bal_index();
+                executor
+                    .execute_transaction(tx)
+                    .unwrap_or_else(|e| panic!("serial tx {i} failed: {e:?}"));
+            }
+            executor.evm_mut().db_mut().bump_bal_index();
+            executor.apply_post_execution_changes().expect("serial post-exec")
+        };
+
+        let bal = state.take_built_alloy_bal().expect("with_bal_builder was set");
+        state.merge_transitions(BundleRetention::Reverts);
+        let bundle_state = state.take_bundle();
+
+        (
+            ShadowOutput {
+                bundle_state,
+                receipts: block_result.receipts,
+                gas_used: block_result.gas_used,
+                requests: block_result.requests,
+            },
+            bal,
+        )
+    }
+
+    /// Shadow harness. Runs the block through both paths; asserts byte-equal outputs.
+    fn assert_shadow_equal(
+        evm_config: EthEvmConfig,
+        canonical_db_template: CacheDB<EmptyDB>,
+        snapshot: Arc<BlockPreState>,
+        block_header_only: SealedBlock<Block>,
+        txs: Vec<Recovered<TransactionSigned>>,
+        gas_limit: u64,
+    ) {
+        // Serial run: also produces the reference BAL we'll feed to the BAL path.
+        let (serial, reference_bal) =
+            run_serial_path(&evm_config, canonical_db_template.clone(), &block_header_only, &txs);
+
+        // BAL path: stamp the hash of the reference BAL onto the header.
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let block = empty_amsterdam_block(bal_hash); // same shape, updated hash
+
+        let executor = BalPayloadExecutor::new(evm_config);
+        let bal_out = executor
+            .execute_block(
+                canonical_db_template,
+                snapshot,
+                reference_bal,
+                &block,
+                txs,
+                bal_hash,
+                gas_limit,
+            )
+            .unwrap_or_else(|e| panic!("BAL path failed: {e:?}"));
+
+        // Byte-equal assertions. Any divergence surfaces the specific field that broke.
+        assert_eq!(
+            serial.receipts, bal_out.receipts,
+            "receipts diverge between serial and BAL paths",
+        );
+        assert_eq!(
+            serial.gas_used, bal_out.gas_used,
+            "gas_used differs: serial {} vs bal {}",
+            serial.gas_used, bal_out.gas_used,
+        );
+        assert_eq!(
+            serial.requests, bal_out.requests,
+            "requests (EIP-7685) diverge between serial and BAL paths",
+        );
+        assert_eq!(
+            serial.bundle_state, bal_out.bundle_state,
+            "bundle_state diverges — the canonical state transitions don't match",
+        );
+    }
+
+    #[test]
+    fn shadow_empty_block() {
+        // System calls only — no txs. Both paths should produce identical system-call
+        // side effects in their BundleState (beacon roots storage, history storage, etc.).
+        assert_shadow_equal(
+            EthEvmConfig::mainnet(),
+            system_contracts_db(),
+            Arc::new(BlockPreState::default()),
+            empty_amsterdam_block(B256::ZERO),
+            Vec::new(),
+            30_000_000,
+        );
+    }
+
+    #[test]
+    fn shadow_multi_value_transfer() {
+        // Two senders → same recipient. Byte-equal across paths means: worker-produced
+        // diffs commit identically to a directly-executed serial path.
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let coinbase = alloy_primitives::Address::ZERO;
+        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut db = system_contracts_db();
+        insert_funded(&mut db, alice, sender_balance);
+        insert_funded(&mut db, bob, sender_balance);
+
+        let mut snap = BlockPreState::default();
+        seed_snapshot_account(&mut snap, alice, sender_balance, 0);
+        seed_snapshot_account(&mut snap, bob, sender_balance, 0);
+        seed_snapshot_account(&mut snap, carol, U256::ZERO, 0);
+        seed_snapshot_account(&mut snap, coinbase, U256::ZERO, 0);
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, to, value, nonce: u64| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce,
+                    gas_price: 1,
+                    gas_limit: 21_000,
+                    to: TxKind::Call(to),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, carol, 100u64, 0), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, carol, 200u64, 0), bob);
+
+        assert_shadow_equal(
+            evm_config,
+            db,
+            Arc::new(snap),
+            empty_amsterdam_block(B256::ZERO),
+            vec![tx1, tx2],
+            30_000_000,
+        );
+    }
+
+    #[test]
+    fn shadow_tx_with_revert() {
+        // A tx that reverts in a deployed contract. Both paths must produce identical receipts
+        // (success = false, gas charged, state rolled back except for gas payment + nonce bump).
+        //
+        // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
+        // it; the call reverts; fees + nonce still apply.
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Bytes, TxKind};
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+        use revm::primitives::keccak256;
+
+        let evm_config = EthEvmConfig::mainnet();
+        let coinbase = alloy_primitives::Address::ZERO;
+        let revert_contract: alloy_primitives::Address =
+            alloy_primitives::Address::from([0xDE; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+
+        // Deploy the revert contract bytecode.
+        let revert_code: Bytes = Bytes::from_static(&[0x60, 0x00, 0x60, 0x00, 0xfd]);
+        let code_hash = keccak256(&revert_code);
+        let mut db = system_contracts_db();
+        insert_funded(&mut db, alice, sender_balance);
+        db.insert_account_info(
+            revert_contract,
+            AccountInfo {
+                nonce: 1,
+                balance: U256::ZERO,
+                code_hash,
+                code: Some(Bytecode::new_raw(revert_code.clone())),
+                account_id: None,
+            },
+        );
+
+        // Snapshot: alice + revert_contract (with its code) + coinbase.
+        let mut snap = BlockPreState::default();
+        seed_snapshot_account(&mut snap, alice, sender_balance, 0);
+        snap.accounts.insert(
+            revert_contract,
+            Some(reth_primitives_traits::Account {
+                balance: U256::ZERO,
+                nonce: 1,
+                bytecode_hash: Some(code_hash),
+            }),
+        );
+        snap.code.insert(code_hash, Some(reth_primitives_traits::Bytecode::new_raw(revert_code)));
+        seed_snapshot_account(&mut snap, coinbase, U256::ZERO, 0);
+
+        let tx = Recovered::new_unchecked(
+            sign_tx_with_key_pair(
+                alice_kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(MAINNET.chain.id()),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: 50_000,
+                    to: TxKind::Call(revert_contract),
+                    value: U256::ZERO,
+                    input: Default::default(),
+                }),
+            ),
+            alice,
+        );
+
+        assert_shadow_equal(
+            evm_config,
+            db,
+            Arc::new(snap),
+            empty_amsterdam_block(B256::ZERO),
+            vec![tx],
+            30_000_000,
+        );
+    }
+
     #[test]
     fn final_hash_check_catches_missing_system_call_entries() {
         // End-to-end: empty received BAL, but canonical pre-exec runs system calls (EIP-4788
