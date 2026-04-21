@@ -316,8 +316,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(self, block_number);
-
+        let mut state_provider =
+            HistoricalStateProviderRef::new(self, block_number, self.changeset_cache.clone());
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
         if let Some(prune_checkpoint_block_number) =
@@ -933,8 +933,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
             self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+        let changeset_cache = self.changeset_cache.clone();
 
-        let mut state_provider = HistoricalStateProvider::new(self, block_number);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number, changeset_cache);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -4970,7 +4971,9 @@ mod tests {
         assert_eq!(account_cs[0].address, address);
 
         let historical_value =
-            HistoricalStateProviderRef::new(&*provider_rw, 0).storage(address, slot_key).unwrap();
+            HistoricalStateProviderRef::new(&*provider_rw, 0, ChangesetCache::new())
+                .storage(address, slot_key)
+                .unwrap();
         assert_eq!(historical_value, None);
     }
 

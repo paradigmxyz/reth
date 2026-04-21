@@ -34,7 +34,12 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_provider::{
+    providers::ProviderFactoryBuilder, BlockHashReader, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, EthStorage, NodePrimitivesProvider,
+    PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StorageChangeSetReader,
+    StorageSettingsCache,
+};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -311,6 +316,17 @@ where
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
+    N::Provider: DatabaseProviderFactory,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockHashReader
+        + BlockNumReader
+        + BlockReader
+        + ChangeSetReader
+        + NodePrimitivesProvider
+        + PruneCheckpointReader
+        + RocksDBProviderFactory
+        + StageCheckpointReader
+        + StorageChangeSetReader
+        + StorageSettingsCache,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
@@ -385,6 +401,17 @@ where
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
+    N::Provider: DatabaseProviderFactory,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockHashReader
+        + BlockNumReader
+        + BlockReader
+        + ChangeSetReader
+        + NodePrimitivesProvider
+        + PruneCheckpointReader
+        + RocksDBProviderFactory
+        + StageCheckpointReader
+        + StorageChangeSetReader
+        + StorageSettingsCache,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
@@ -427,6 +454,17 @@ where
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
+    N::Provider: DatabaseProviderFactory,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockHashReader
+        + BlockNumReader
+        + BlockReader
+        + ChangeSetReader
+        + NodePrimitivesProvider
+        + PruneCheckpointReader
+        + RocksDBProviderFactory
+        + StageCheckpointReader
+        + StorageChangeSetReader
+        + StorageSettingsCache,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -449,7 +487,21 @@ where
     }
 }
 
-impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
+impl<N> DebugNode<N> for EthereumNode
+where
+    N: FullNodeComponents<Types = Self>,
+    N::Provider: DatabaseProviderFactory,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockHashReader
+        + BlockNumReader
+        + BlockReader
+        + ChangeSetReader
+        + NodePrimitivesProvider
+        + PruneCheckpointReader
+        + RocksDBProviderFactory
+        + StageCheckpointReader
+        + StorageChangeSetReader
+        + StorageSettingsCache,
+{
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {

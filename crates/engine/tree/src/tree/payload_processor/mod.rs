@@ -22,7 +22,10 @@ use reth_evm::{
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, DatabaseProviderROFactory, NodePrimitivesProvider,
+    PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StateProviderFactory,
+    StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
@@ -244,7 +247,21 @@ where
         bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory
+            + BlockReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
+        P::Provider: BlockHashReader
+            + BlockNumReader
+            + ChangeSetReader
+            + PruneCheckpointReader
+            + RocksDBProviderFactory
+            + StageCheckpointReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + NodePrimitivesProvider,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
@@ -294,7 +311,21 @@ where
         bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory
+            + BlockReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
+        P::Provider: BlockHashReader
+            + BlockNumReader
+            + ChangeSetReader
+            + PruneCheckpointReader
+            + RocksDBProviderFactory
+            + StageCheckpointReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + NodePrimitivesProvider,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
@@ -467,7 +498,21 @@ where
         bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory
+            + BlockReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
+        P::Provider: BlockHashReader
+            + BlockNumReader
+            + ChangeSetReader
+            + PruneCheckpointReader
+            + RocksDBProviderFactory
+            + StageCheckpointReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + NodePrimitivesProvider,
     {
         let skip_prewarm =
             self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
@@ -1236,7 +1281,12 @@ mod tests {
                 Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
                 std::convert::identity,
             ),
-            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            StateProviderBuilder::new(
+                provider_factory.clone(),
+                genesis_hash,
+                None,
+                ChangesetCache::new(),
+            ),
             OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
