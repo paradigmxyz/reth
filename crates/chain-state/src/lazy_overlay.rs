@@ -79,14 +79,21 @@ impl<N: NodePrimitives> LazyOverlay<N> {
         self.inputs.blocks.len()
     }
 
-    #[cfg(test)]
     /// Returns the oldest anchor hash this overlay can serve.
     ///
     /// This is the parent hash of the oldest block in the stored newest-to-oldest chain segment.
-    fn anchor_hash(&self) -> Option<B256> {
+    pub fn anchor_hash(&self) -> Option<B256> {
         self.inputs.blocks.last().map(|block| block.recovered_block().parent_hash())
     }
 
+    /// Returns true if there are no blocks in the overlay, or if one of the blocks has the given
+    /// hash as a parent hash.
+    pub fn has_anchor_hash(&self, hash: B256) -> bool {
+        self.inputs.blocks.is_empty() ||
+            self.inputs.blocks.iter().any(|b| b.recovered_block().parent_hash() == hash)
+    }
+
+    #[cfg(test)]
     /// Returns true if the overlay has already been computed for the requested anchor.
     pub fn is_computed(&self, anchor_hash: B256) -> bool {
         self.inner.contains_key(&anchor_hash)
@@ -119,6 +126,10 @@ impl<N: NodePrimitives> LazyOverlay<N> {
     /// Compute the trie input overlay.
     fn compute(&self, anchor_hash: B256) -> Arc<TrieInputSorted> {
         let blocks = &self.inputs.blocks;
+        if blocks.is_empty() {
+            return Default::default()
+        }
+
         let Some(last_index) =
             blocks.iter().position(|block| block.recovered_block().parent_hash() == anchor_hash)
         else {
@@ -218,15 +229,6 @@ mod tests {
             .enumerate()
             .map(|(index, block)| with_unique_state(&block, index as u8 + 1))
             .collect()
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "LazyOverlay does not contain a block whose parent hash matches requested anchor"
-    )]
-    fn empty_blocks_panic_for_any_anchor() {
-        let overlay = LazyOverlay::<EthPrimitives>::new(vec![]);
-        let _ = overlay.get(B256::ZERO);
     }
 
     #[test]
