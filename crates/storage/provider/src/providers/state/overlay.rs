@@ -431,6 +431,10 @@ impl<F> OverlayStateProviderFactory<F> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        if self.overlay_builder.block_hash.is_none() {
+            return self.overlay_builder.build_overlay(provider)
+        }
+
         let db_tip_block = self.overlay_builder.get_db_tip_block_number(provider)?;
 
         let overlay = match self.overlay_cache.entry(db_tip_block) {
