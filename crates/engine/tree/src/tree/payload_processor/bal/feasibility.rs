@@ -61,7 +61,11 @@ impl FeasibilityTracker {
 
     /// Records one tx's result and enforces feasibility: `gas_remaining >= r_remaining *
     /// ITEM_COST`.
-    pub fn record_and_check(&mut self, result: &ResultAndState) -> Result<(), RejectReason> {
+    ///
+    /// Generic over `HaltReason` so callers can pass any Evm's `ResultAndState` — the
+    /// feasibility invariant only depends on `gas_used` and touched-slots from `state`,
+    /// both of which are `HaltReason`-independent.
+    pub fn record_and_check<H>(&mut self, result: &ResultAndState<H>) -> Result<(), RejectReason> {
         self.gas_used = self.gas_used.saturating_add(result.result.tx_gas_used());
 
         // Intersect this tx's touched slots with the declared-reads set.
