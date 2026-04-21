@@ -80,11 +80,18 @@ echo "Using snapshot bucket: ${BUCKET}"
 echo "Using snapshot: ${SNAPSHOT_NAME}"
 
 # Fetch manifest and compute content hash for reliable freshness check
-MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
+XTRACE_WAS_ENABLED=false
+if [[ $- == *x* ]]; then
+  XTRACE_WAS_ENABLED=true
+  set +x
+fi
+
+if ! MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null); then
   echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
   exit 2
-}
-REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
+fi
+ORIGINAL_BASE_URL=$(printf '%s' "$MANIFEST_CONTENT" | jq -r '.base_url // empty')
+REMOTE_HASH=$(printf '%s' "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
 
 LOCAL_HASH=""
 [ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
@@ -113,13 +120,30 @@ if [ -z "$MINIO_ENDPOINT" ]; then
   echo "::error::Failed to resolve snapshot endpoint from mc alias '${BUCKET_ALIAS}'"
   exit 1
 fi
-BASE_URL="${MINIO_ENDPOINT%/}/${BUCKET_PATH}/${SNAPSHOT_NAME}"
 
-# Rewrite manifest's base_url with the runner-reachable endpoint
 MANIFEST_TMP=$(mktemp --suffix=.json)
 trap 'rm -f -- "$MANIFEST_TMP"' EXIT
-echo "$MANIFEST_CONTENT" \
-  | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
+if [[ "$MINIO_ENDPOINT" == *".r2.cloudflarestorage.com" ]]; then
+  # R2's S3 endpoint is not the public object-download URL. Keep the manifest's
+  # published base_url (for example r2.dev or a custom domain) for anonymous GETs.
+  printf '%s' "$MANIFEST_CONTENT" > "$MANIFEST_TMP"
+else
+  BASE_URL="${MINIO_ENDPOINT%/}/${BUCKET_PATH}/${SNAPSHOT_NAME}"
+  # Rewrite manifest's base_url with the runner-reachable endpoint.
+  printf '%s' "$MANIFEST_CONTENT" \
+    | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
+fi
+EFFECTIVE_BASE_URL=$(jq -r '.base_url // empty' "$MANIFEST_TMP")
+
+if [ "$XTRACE_WAS_ENABLED" = true ]; then
+  set -x
+fi
+
+echo "Manifest base_url before rewrite: ${ORIGINAL_BASE_URL:-<empty>}"
+if [[ "$MINIO_ENDPOINT" == *".r2.cloudflarestorage.com" ]]; then
+  echo "Using manifest base_url for R2 snapshot downloads"
+fi
+echo "Manifest base_url after rewrite: ${EFFECTIVE_BASE_URL:-<empty>}"
 
 # Prepare mount. If a previous run left the volume mounted, recover first.
 sudo schelk recover -y --kill || true
