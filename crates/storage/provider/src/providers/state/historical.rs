@@ -315,6 +315,14 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider:
             BlockHashReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache,
     {
+        if self.check_distance_against_limit(EPOCH_SLOTS)? {
+            tracing::warn!(
+                target: "providers::historical_sp",
+                target = self.block_number,
+                "Attempt to calculate state root for an old block might result in OOM"
+            );
+        }
+
         // Historical providers expose state at the start of `self.block_number`, so the overlay
         // builder needs the previous canonical block hash to preserve those semantics.
         let target_block = self.block_number.saturating_sub(1);
