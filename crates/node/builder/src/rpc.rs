@@ -32,11 +32,6 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_provider::{
-    BlockHashReader, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    NodePrimitivesProvider, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
-};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -1457,17 +1452,6 @@ where
             <Node::Types as NodeTypes>::Payload,
             Block = BlockTy<Node::Types>,
         > + Clone,
-    Node::Provider: DatabaseProviderFactory,
-    <Node::Provider as DatabaseProviderFactory>::Provider: BlockHashReader
-        + BlockNumReader
-        + BlockReader
-        + ChangeSetReader
-        + NodePrimitivesProvider
-        + PruneCheckpointReader
-        + RocksDBProviderFactory
-        + StageCheckpointReader
-        + StorageChangeSetReader
-        + StorageSettingsCache,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 

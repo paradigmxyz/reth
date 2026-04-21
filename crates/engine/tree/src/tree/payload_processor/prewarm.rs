@@ -28,10 +28,8 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader,
-    RocksDBProviderFactory, StageCheckpointReader, StateProvider, StateProviderFactory,
-    StateReader, StorageChangeSetReader, StorageSettingsCache,
+    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
+    StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -83,16 +81,7 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-    P::Provider: BlockHashReader
-        + BlockNumReader
-        + ChangeSetReader
-        + PruneCheckpointReader
-        + RocksDBProviderFactory
-        + StageCheckpointReader
-        + StorageChangeSetReader
-        + StorageSettingsCache
-        + NodePrimitivesProvider,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -557,16 +546,7 @@ type PrewarmEvmState<Evm> =
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-    P::Provider: BlockHashReader
-        + BlockNumReader
-        + ChangeSetReader
-        + PruneCheckpointReader
-        + RocksDBProviderFactory
-        + StageCheckpointReader
-        + StorageChangeSetReader
-        + StorageSettingsCache
-        + NodePrimitivesProvider,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.

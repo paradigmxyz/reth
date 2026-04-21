@@ -1,11 +1,9 @@
 use crate::{
-    providers::RocksDBProvider,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, ReceiptProviderIdExt, RocksDBProviderFactory, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
-    TransactionsProvider,
+    PruneCheckpointReader, ReceiptProviderIdExt, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -929,21 +927,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
     }
 
     fn set_storage_settings_cache(&self, _settings: StorageSettings) {}
-}
-
-impl<T: NodePrimitives, ChainSpec: Send + Sync> RocksDBProviderFactory
-    for MockEthProvider<T, ChainSpec>
-{
-    fn rocksdb_provider(&self) -> RocksDBProvider {
-        RocksDBProvider::new(std::env::temp_dir().join(format!("reth-mock-rocksdb-{:p}", self)))
-            .expect("failed to create mock RocksDB provider")
-    }
-
-    fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {}
-
-    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
-        Ok(())
-    }
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory

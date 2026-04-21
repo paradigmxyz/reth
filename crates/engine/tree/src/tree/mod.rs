@@ -29,9 +29,8 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, NodePrimitivesProvider,
-    ProviderError, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
+    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
@@ -352,16 +351,11 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    P::Provider: BlockHashReader
-        + BlockNumReader
-        + BlockReader<Block = N::Block, Header = N::BlockHeader>
+    P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StageCheckpointReader
-        + PruneCheckpointReader
         + ChangeSetReader
-        + RocksDBProviderFactory
         + StorageChangeSetReader
-        + StorageSettingsCache
-        + NodePrimitivesProvider,
+        + StorageSettingsCache,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T> + WaitForCaches,
@@ -2836,19 +2830,7 @@ where
     fn insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>>
-    where
-        P::Provider: BlockHashReader
-            + BlockNumReader
-            + ChangeSetReader
-            + PruneCheckpointReader
-            + RocksDBProviderFactory
-            + StageCheckpointReader
-            + StorageChangeSetReader
-            + StorageSettingsCache
-            + NodePrimitivesProvider
-            + 'static,
-    {
+    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             payload.block_with_parent(),
             payload,
@@ -2860,19 +2842,7 @@ where
     fn insert_block(
         &mut self,
         block: SealedBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>>
-    where
-        P::Provider: BlockHashReader
-            + BlockNumReader
-            + ChangeSetReader
-            + PruneCheckpointReader
-            + RocksDBProviderFactory
-            + StageCheckpointReader
-            + StorageChangeSetReader
-            + StorageSettingsCache
-            + NodePrimitivesProvider
-            + 'static,
-    {
+    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
             block,
@@ -2912,16 +2882,6 @@ where
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
-        P::Provider: BlockHashReader
-            + BlockNumReader
-            + ChangeSetReader
-            + PruneCheckpointReader
-            + RocksDBProviderFactory
-            + StageCheckpointReader
-            + StorageChangeSetReader
-            + StorageSettingsCache
-            + NodePrimitivesProvider
-            + 'static,
     {
         let block_insert_start = Instant::now();
         let block_num_hash = block_id.block;
@@ -3311,16 +3271,7 @@ where
         hash: B256,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>>
     where
-        P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone,
-        P::Provider: BlockHashReader
-            + BlockNumReader
-            + ChangeSetReader
-            + PruneCheckpointReader
-            + RocksDBProviderFactory
-            + StageCheckpointReader
-            + StorageChangeSetReader
-            + StorageSettingsCache
-            + NodePrimitivesProvider,
+        P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");

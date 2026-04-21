@@ -77,11 +77,10 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockHashReader, BlockNumReader,
-    BlockReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
-    HashedPostStateProvider, NodePrimitivesProvider, ProviderError, PruneCheckpointReader,
-    RocksDBProviderFactory, StageCheckpointReader, StateProvider, StateProviderFactory,
-    StateReader, StorageChangeSetReader, StorageSettingsCache,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
@@ -204,15 +203,12 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
-                          + RocksDBProviderFactory
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache
-                          + NodePrimitivesProvider,
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -1961,15 +1957,12 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
-                          + RocksDBProviderFactory
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache
-                          + NodePrimitivesProvider,
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
