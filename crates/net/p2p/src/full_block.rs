@@ -139,9 +139,7 @@ where
         FetchFullBlockWithAccessListsFuture {
             block: FetchFullBlockFuture::new(client.clone(), self.consensus.clone(), hash),
             block_result: None,
-            access_lists_state: AccessListsState::Pending(
-                client.get_block_access_lists(vec![hash]),
-            ),
+            bal_request_state: BalRequestState::Pending(client.get_block_access_lists(vec![hash])),
         }
     }
 }
@@ -299,7 +297,7 @@ where
 {
     block: FetchFullBlockFuture<Client>,
     block_result: Option<SealedBlock<Client::Block>>,
-    access_lists_state: AccessListsState<<Client as BlockAccessListsClient>::Output>,
+    bal_request_state: BalRequestState<<Client as BlockAccessListsClient>::Output>,
 }
 
 impl<Client> FetchFullBlockWithAccessListsFuture<Client>
@@ -316,27 +314,25 @@ impl<Client> FetchFullBlockWithAccessListsFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
 {
-    /// Keep retry work bounded so a single poll does not monopolize the executor.
-    const ACCESS_LIST_RETRY_BUDGET: usize = 4;
-
     /// If the header request is already complete, this returns the block number.
     pub fn block_number(&self) -> Option<u64> {
         self.block_result.as_ref().map(|block| block.number()).or_else(|| self.block.block_number())
     }
 
-    fn retry_access_lists_request(&mut self) {
+    fn send_bal_request(&mut self) {
         let hash = *self.block.hash();
-        self.access_lists_state =
-            AccessListsState::Pending(self.block.client.get_block_access_lists(vec![hash]));
+        self.bal_request_state =
+            BalRequestState::Pending(self.block.client.get_block_access_lists(vec![hash]));
     }
 
-    fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
-        let mut budget = Self::ACCESS_LIST_RETRY_BUDGET;
-
+    // This retries BAL failures inline instead of surfacing them to the outer future, so
+    // `FetchFullBlockWithAccessListsFuture` only makes progress once the BAL request either
+    // becomes pending again or resolves with a single access-list entry.
+    fn poll_bal_request(&mut self, cx: &mut Context<'_>) {
         loop {
-            let poll = match &mut self.access_lists_state {
-                AccessListsState::Pending(fut) => fut.poll_unpin(cx),
-                AccessListsState::Ready(_) => return,
+            let poll = match &mut self.bal_request_state {
+                BalRequestState::Pending(fut) => fut.poll_unpin(cx),
+                BalRequestState::Ready(_) => return,
             };
 
             match poll {
@@ -345,7 +341,7 @@ where
                     Ok(bal) => {
                         let (peer, access_lists) = bal.split();
                         if access_lists.0.len() == 1 {
-                            self.access_lists_state = AccessListsState::Ready(access_lists);
+                            self.bal_request_state = BalRequestState::Ready(access_lists);
                             return;
                         }
 
@@ -357,7 +353,7 @@ where
                             "Received wrong access list response",
                         );
                         self.block.client.report_bad_message(peer);
-                        self.retry_access_lists_request();
+                        self.send_bal_request();
                     }
                     Err(err) => {
                         debug!(
@@ -366,15 +362,9 @@ where
                             hash = ?self.block.hash(),
                             "Access list download failed",
                         );
-                        self.retry_access_lists_request();
+                        self.send_bal_request();
                     }
                 },
-            }
-
-            budget -= 1;
-            if budget == 0 {
-                cx.waker().wake_by_ref();
-                return
             }
         }
     }
@@ -382,11 +372,11 @@ where
     fn take_block_and_access_lists(
         &mut self,
     ) -> Option<(SealedBlock<Client::Block>, BlockAccessLists)> {
-        if self.block_result.is_some() && self.access_lists_state.is_ready() {
+        if self.block_result.is_some() && self.bal_request_state.is_ready() {
             let block = self.block_result.take().expect("block result should exist");
-            let access_lists = match &mut self.access_lists_state {
-                AccessListsState::Ready(access_lists) => std::mem::take(access_lists),
-                AccessListsState::Pending(_) => unreachable!("access lists should be ready"),
+            let access_lists = match &mut self.bal_request_state {
+                BalRequestState::Ready(access_lists) => std::mem::take(access_lists),
+                BalRequestState::Pending(_) => unreachable!("access lists should be ready"),
             };
             return Some((block, access_lists))
         }
@@ -410,7 +400,7 @@ where
             this.block_result = Some(block);
         }
 
-        this.poll_access_lists(cx);
+        this.poll_bal_request(cx);
 
         if let Some(res) = this.take_block_and_access_lists() {
             return Poll::Ready(res)
@@ -428,18 +418,18 @@ where
         f.debug_struct("FetchFullBlockWithAccessListsFuture")
             .field("hash", &self.block.hash())
             .field("block_ready", &self.block_result.is_some())
-            .field("access_lists_ready", &self.access_lists_state.is_ready())
+            .field("bal_request_ready", &self.bal_request_state.is_ready())
             .finish()
     }
 }
 
-/// Tracks the access-list request and its completed result.
-enum AccessListsState<Req> {
+/// Tracks the BAL request and its completed result.
+enum BalRequestState<Req> {
     Pending(Req),
     Ready(BlockAccessLists),
 }
 
-impl<Req> AccessListsState<Req> {
+impl<Req> BalRequestState<Req> {
     const fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
