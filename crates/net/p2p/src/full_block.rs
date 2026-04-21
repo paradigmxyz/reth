@@ -119,9 +119,10 @@ where
         let client = self.client.clone();
         FetchFullBlockWithAccessListsFuture {
             block: FetchFullBlockFuture::new(client.clone(), self.consensus.clone(), hash),
-            access_lists: Some(client.get_block_access_lists(vec![hash])),
+            access_lists_state: AccessListsState::Pending(
+                client.get_block_access_lists(vec![hash]),
+            ),
             block_result: None,
-            access_lists_result: None,
         }
     }
 }
@@ -297,9 +298,8 @@ where
     Client: BlockClient + BlockAccessListsClient,
 {
     block: FetchFullBlockFuture<Client>,
-    access_lists: Option<<Client as BlockAccessListsClient>::Output>,
+    access_lists_state: AccessListsState<<Client as BlockAccessListsClient>::Output>,
     block_result: Option<SealedBlock<Client::Block>>,
-    access_lists_result: Option<BlockAccessLists>,
 }
 
 impl<Client> FetchFullBlockWithAccessListsFuture<Client>
@@ -323,62 +323,60 @@ where
 
     fn retry_access_lists_request(&mut self) {
         let hash = *self.block.hash();
-        self.access_lists = Some(self.block.client.get_block_access_lists(vec![hash]));
+        self.access_lists_state =
+            AccessListsState::Pending(self.block.client.get_block_access_lists(vec![hash]));
     }
 
     fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
-        if self.access_lists_result.is_some() {
-            return
-        }
+        let poll = match &mut self.access_lists_state {
+            AccessListsState::Pending(fut) => fut.poll_unpin(cx),
+            AccessListsState::Ready(_) => return,
+        };
 
-        let Some(fut) = self.access_lists.as_mut() else { return };
-
-        match fut.poll_unpin(cx) {
+        match poll {
             Poll::Pending => {}
-            Poll::Ready(res) => {
-                self.access_lists = None;
-
-                match res {
-                    Ok(bal) => {
-                        let (peer, access_lists) = bal.split();
-                        if access_lists.0.len() == 1 {
-                            self.access_lists_result = Some(access_lists);
-                        } else {
-                            debug!(
-                                target: "downloaders",
-                                hash = ?self.block.hash(),
-                                expected = 1,
-                                received = access_lists.0.len(),
-                                "Received wrong access list response",
-                            );
-                            self.block.client.report_bad_message(peer);
-                            self.retry_access_lists_request();
-                            cx.waker().wake_by_ref();
-                        }
-                    }
-                    Err(err) => {
+            Poll::Ready(res) => match res {
+                Ok(bal) => {
+                    let (peer, access_lists) = bal.split();
+                    if access_lists.0.len() == 1 {
+                        self.access_lists_state = AccessListsState::Ready(access_lists);
+                    } else {
                         debug!(
                             target: "downloaders",
-                            %err,
                             hash = ?self.block.hash(),
-                            "Access list download failed",
+                            expected = 1,
+                            received = access_lists.0.len(),
+                            "Received wrong access list response",
                         );
+                        self.block.client.report_bad_message(peer);
                         self.retry_access_lists_request();
                         cx.waker().wake_by_ref();
                     }
                 }
-            }
+                Err(err) => {
+                    debug!(
+                        target: "downloaders",
+                        %err,
+                        hash = ?self.block.hash(),
+                        "Access list download failed",
+                    );
+                    self.retry_access_lists_request();
+                    cx.waker().wake_by_ref();
+                }
+            },
         }
     }
 
-    const fn take_block_and_access_lists(
+    fn take_block_and_access_lists(
         &mut self,
     ) -> Option<(SealedBlock<Client::Block>, BlockAccessLists)> {
-        if self.block_result.is_some() && self.access_lists_result.is_some() {
-            return Some((
-                self.block_result.take().expect("block result should exist"),
-                self.access_lists_result.take().expect("access lists result should exist"),
-            ))
+        if self.block_result.is_some() && self.access_lists_state.is_ready() {
+            let block = self.block_result.take().expect("block result should exist");
+            let access_lists = match &mut self.access_lists_state {
+                AccessListsState::Ready(access_lists) => std::mem::take(access_lists),
+                AccessListsState::Pending(_) => unreachable!("access lists should be ready"),
+            };
+            return Some((block, access_lists))
         }
 
         None
@@ -418,8 +416,20 @@ where
         f.debug_struct("FetchFullBlockWithAccessListsFuture")
             .field("hash", &self.block.hash())
             .field("block_ready", &self.block_result.is_some())
-            .field("access_lists_ready", &self.access_lists_result.is_some())
+            .field("access_lists_ready", &self.access_lists_state.is_ready())
             .finish()
+    }
+}
+
+/// Tracks the access-list request and its completed result.
+enum AccessListsState<Req> {
+    Pending(Req),
+    Ready(BlockAccessLists),
+}
+
+impl<Req> AccessListsState<Req> {
+    fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
     }
 }
 
