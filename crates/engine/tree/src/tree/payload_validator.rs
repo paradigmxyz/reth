@@ -772,11 +772,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                Self::compute_state_root_serial(
-                    provider_factory.clone(),
-                    overlay_builder.clone(),
-                    &hashed_state,
-                ),
+                Self::compute_state_root_serial(provider_factory, overlay_builder, &hashed_state),
                 block
             );
 

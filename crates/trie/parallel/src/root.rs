@@ -364,7 +364,7 @@ mod tests {
 
         let prefix_sets = hashed_state.construct_prefix_sets();
         overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            factory.clone(),
+            factory,
             overlay_builder.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted()))),
         );
 
