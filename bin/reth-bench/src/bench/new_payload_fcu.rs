@@ -137,7 +137,7 @@ struct ReorgState {
 }
 
 impl ReorgState {
-    fn new(depth: usize) -> Self {
+    const fn new(depth: usize) -> Self {
         Self {
             depth,
             active_branch: ActiveBranch::Canonical,
@@ -151,14 +151,14 @@ impl ReorgState {
         self.fork_parent_hash.unwrap_or(canonical_parent_hash)
     }
 
-    fn next_target_branch(&self) -> ActiveBranch {
+    const fn next_target_branch(&self) -> ActiveBranch {
         match self.active_branch {
             ActiveBranch::Canonical => ActiveBranch::Fork,
             ActiveBranch::Fork => ActiveBranch::Canonical,
         }
     }
 
-    fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
+    const fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
         if self.fork_length == 0 {
             self.branch_point_hash = Some(canonical_parent_hash);
         }
@@ -176,7 +176,7 @@ impl ReorgState {
         })
     }
 
-    fn reset(&mut self) {
+    const fn reset(&mut self) {
         self.fork_length = 0;
         self.branch_point_hash = None;
         self.fork_parent_hash = None;
@@ -611,7 +611,7 @@ fn built_payload_to_new_payload(
             let payload = execution_payload.payload_inner;
             if use_reth_namespace {
                 let execution_data = ExecutionData {
-                    payload: ExecutionPayload::V2(payload.clone()),
+                    payload: ExecutionPayload::V2(payload),
                     sidecar: ExecutionPayloadSidecar::none(),
                 };
                 Ok((
