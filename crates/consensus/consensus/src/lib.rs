@@ -104,6 +104,18 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
 
+    /// Returns `true` if the given consensus error is transient and may resolve on its own.
+    ///
+    /// On fast chains, clock skew between nodes can cause a valid block's timestamp to
+    /// appear briefly in the future. Caching such blocks as permanently invalid would
+    /// prevent them from being re-validated once the local clock catches up.
+    ///
+    /// Transient errors will not cause the block hash to be cached as permanently invalid,
+    /// allowing the block to be re-validated later.
+    fn is_transient_error(&self, _error: &ConsensusError) -> bool {
+        false
+    }
+
     /// Validate a block disregarding world state using an optional pre-computed transaction root.
     ///
     /// If `transaction_root` is provided, the implementation should use the pre-computed
