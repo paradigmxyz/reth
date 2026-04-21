@@ -3171,10 +3171,9 @@ mod tests {
             writer.commit()?;
         }
 
-        let provider = sf_rw.clone();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            let _ = done_tx.send(provider.walk_account_changeset_range(10..).next());
+            let _ = done_tx.send(sf_rw.walk_account_changeset_range(10..).next());
         });
 
         let result = done_rx.recv_timeout(std::time::Duration::from_secs(1))?;
@@ -3205,10 +3204,9 @@ mod tests {
             writer.commit()?;
         }
 
-        let provider = sf_rw.clone();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            let _ = done_tx.send(provider.walk_storage_changeset_range(10..).next());
+            let _ = done_tx.send(sf_rw.walk_storage_changeset_range(10..).next());
         });
 
         let result = done_rx.recv_timeout(std::time::Duration::from_secs(1))?;
