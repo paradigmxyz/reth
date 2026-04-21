@@ -101,6 +101,25 @@ where
     }
 }
 
+impl<Client> FetchFullBlockFuture<Client>
+where
+    Client: BlockClient,
+{
+    fn new(client: Client, consensus: Arc<dyn Consensus<Client::Block>>, hash: B256) -> Self {
+        Self {
+            hash,
+            consensus,
+            request: FullBlockRequest {
+                header: Some(client.get_header(hash.into())),
+                body: Some(client.get_block_body(hash)),
+            },
+            client,
+            header: None,
+            body: None,
+        }
+    }
+}
+
 impl<Client> FullBlockClient<Client>
 where
     Client: BlockClient + BlockAccessListsClient,
@@ -147,25 +166,6 @@ where
 impl<Client> FetchFullBlockFuture<Client>
 where
     Client: BlockClient,
-{
-    fn new(client: Client, consensus: Arc<dyn Consensus<Client::Block>>, hash: B256) -> Self {
-        Self {
-            hash,
-            consensus,
-            request: FullBlockRequest {
-                header: Some(client.get_header(hash.into())),
-                body: Some(client.get_block_body(hash)),
-            },
-            client,
-            header: None,
-            body: None,
-        }
-    }
-}
-
-impl<Client> FetchFullBlockFuture<Client>
-where
-    Client: BlockClient<Header: BlockHeader>,
 {
     /// Returns the hash of the block being requested.
     pub const fn hash(&self) -> &B256 {
