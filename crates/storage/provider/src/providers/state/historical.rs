@@ -323,14 +323,13 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             .block_hash(target_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
-        let TrieInputSorted { nodes, state, mut prefix_sets } = input;
+        let TrieInputSorted { nodes, state, prefix_sets } = input;
         let overlay_builder = OverlayBuilder::new(self._changeset_cache.clone())
             .with_block_hash(Some(block_hash))
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let Overlay { trie_updates, hashed_post_state } =
             overlay_builder.build_overlay(self.provider)?;
 
-        prefix_sets.extend(hashed_post_state.construct_prefix_sets());
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
 
