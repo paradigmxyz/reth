@@ -950,6 +950,92 @@ mod tests {
     }
 
     #[test]
+    fn shadow_tx_with_sstore() {
+        // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
+        // commit identically across serial and BAL paths — this is the first scenario that
+        // exercises a real storage diff, validating that our account-only pre-load path
+        // (`load_cache_account` in execute_block) is sufficient even when commits include
+        // storage writes.
+        //
+        // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Bytes, TxKind};
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+        use revm::primitives::keccak256;
+
+        let evm_config = EthEvmConfig::mainnet();
+        let coinbase = alloy_primitives::Address::ZERO;
+        let sstore_contract: alloy_primitives::Address =
+            alloy_primitives::Address::from([0x55; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+
+        // Deploy the SSTORE contract.
+        let sstore_code: Bytes = Bytes::from_static(&[0x60, 0x42, 0x60, 0x00, 0x55, 0x00]);
+        let code_hash = keccak256(&sstore_code);
+        let mut db = system_contracts_db();
+        insert_funded(&mut db, alice, sender_balance);
+        db.insert_account_info(
+            sstore_contract,
+            AccountInfo {
+                nonce: 1,
+                balance: U256::ZERO,
+                code_hash,
+                code: Some(Bytecode::new_raw(sstore_code.clone())),
+                account_id: None,
+            },
+        );
+
+        // Snapshot: alice + sstore_contract + coinbase. Workers read these via
+        // BalDatabase → SnapshotDatabase fallback when their EVM loads accounts.
+        let mut snap = BlockPreState::default();
+        seed_snapshot_account(&mut snap, alice, sender_balance, 0);
+        snap.accounts.insert(
+            sstore_contract,
+            Some(reth_primitives_traits::Account {
+                balance: U256::ZERO,
+                nonce: 1,
+                bytecode_hash: Some(code_hash),
+            }),
+        );
+        snap.code.insert(code_hash, Some(reth_primitives_traits::Bytecode::new_raw(sstore_code)));
+        seed_snapshot_account(&mut snap, coinbase, U256::ZERO, 0);
+        // Storage slot 0 of sstore_contract is read (SSTORE reads pre-value for the
+        // gas-cost calculation under EIP-2200), so the snapshot must contain it.
+        snap.storage.insert((sstore_contract, B256::ZERO), U256::ZERO);
+
+        let tx = Recovered::new_unchecked(
+            sign_tx_with_key_pair(
+                alice_kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(MAINNET.chain.id()),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(sstore_contract),
+                    value: U256::ZERO,
+                    input: Default::default(),
+                }),
+            ),
+            alice,
+        );
+
+        assert_shadow_equal(
+            evm_config,
+            db,
+            Arc::new(snap),
+            empty_amsterdam_block(B256::ZERO),
+            vec![tx],
+            30_000_000,
+        );
+    }
+
+    #[test]
     fn final_hash_check_catches_missing_system_call_entries() {
         // End-to-end: empty received BAL, but canonical pre-exec runs system calls (EIP-4788
         // beacon-root, EIP-2935 blockhash, EIP-7002 withdrawal-request) that mutate state at
