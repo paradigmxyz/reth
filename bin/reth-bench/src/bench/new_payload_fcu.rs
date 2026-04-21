@@ -12,7 +12,7 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
-        payload_to_new_payload, NewPayloadTimingBreakdown,
+        payload_to_new_payload,
     },
 };
 use alloy_consensus::TxEnvelope;
@@ -33,12 +33,9 @@ use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
-use reth_node_core::args::BenchmarkArgs;
+use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
-use std::{
-    collections::VecDeque,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
@@ -123,78 +120,49 @@ struct PreparedBuiltBlock {
     params: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ActiveBranch {
-    Canonical,
-    Fork,
-}
-
 #[derive(Debug)]
 struct ReorgState {
     depth: usize,
-    active_branch: ActiveBranch,
     fork_length: usize,
+    branch_point_hash: Option<B256>,
     fork_parent_hash: Option<B256>,
-    fork_block_hashes: VecDeque<B256>,
 }
 
 impl ReorgState {
     fn new(depth: usize) -> Self {
-        Self {
-            depth,
-            active_branch: ActiveBranch::Canonical,
-            fork_length: 0,
-            fork_parent_hash: None,
-            fork_block_hashes: VecDeque::with_capacity(65),
-        }
+        Self { depth, fork_length: 0, branch_point_hash: None, fork_parent_hash: None }
     }
 
     fn next_fork_parent_hash(&self, canonical_parent_hash: B256) -> B256 {
         self.fork_parent_hash.unwrap_or(canonical_parent_hash)
     }
 
-    fn push_fork_head(&mut self, fork_head_hash: B256) {
+    fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
+        if self.fork_length == 0 {
+            self.branch_point_hash = Some(canonical_parent_hash);
+        }
         self.fork_length += 1;
         self.fork_parent_hash = Some(fork_head_hash);
-        self.fork_block_hashes.push_back(fork_head_hash);
-        if self.fork_block_hashes.len() > 65 {
-            self.fork_block_hashes.pop_front();
-        }
     }
 
-    fn select_forkchoice_state(
-        &mut self,
-        canonical_forkchoice_state: ForkchoiceState,
-        fork_head_hash: B256,
-    ) -> (ForkchoiceState, Option<ActiveBranch>) {
-        if self.fork_length < self.depth {
-            return (canonical_forkchoice_state, None)
-        }
-
-        let next_branch = match self.active_branch {
-            ActiveBranch::Canonical => ActiveBranch::Fork,
-            ActiveBranch::Fork => ActiveBranch::Canonical,
-        };
-        self.active_branch = next_branch;
-
-        let forkchoice_state = match next_branch {
-            ActiveBranch::Canonical => canonical_forkchoice_state,
-            ActiveBranch::Fork => ForkchoiceState {
-                head_block_hash: fork_head_hash,
-                safe_block_hash: self.fork_branch_hash(32, fork_head_hash),
-                finalized_block_hash: self.fork_branch_hash(64, fork_head_hash),
-            },
-        };
-
-        (forkchoice_state, Some(next_branch))
+    fn should_switch_to_fork(&self) -> bool {
+        self.fork_length >= self.depth
     }
 
-    fn fork_branch_hash(&self, depth: usize, head_hash: B256) -> B256 {
-        self.fork_block_hashes
-            .len()
-            .checked_sub(depth + 1)
-            .and_then(|idx| self.fork_block_hashes.get(idx).copied())
-            .unwrap_or(head_hash)
+    fn forkchoice_state(&self, fork_head_hash: B256) -> eyre::Result<ForkchoiceState> {
+        let branch_point_hash = self.branch_point_hash.ok_or_eyre("missing reorg branch point")?;
+
+        Ok(ForkchoiceState {
+            head_block_hash: fork_head_hash,
+            safe_block_hash: branch_point_hash,
+            finalized_block_hash: branch_point_hash,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.fork_length = 0;
+        self.branch_point_hash = None;
+        self.fork_parent_hash = None;
     }
 }
 
@@ -308,8 +276,6 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
-        let reorg_enabled = reorg_state.is_some();
-
         while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
@@ -319,6 +285,7 @@ impl Command {
             let gas_used = block.header.gas_used;
             let gas_limit = block.header.gas_limit;
             let block_number = block.header.number;
+            let canonical_parent_hash = block.header.parent_hash;
             let transaction_count = block.transactions.len() as u64;
             let canonical_forkchoice_state = ForkchoiceState {
                 head_block_hash: head,
@@ -331,7 +298,7 @@ impl Command {
                     prepare_built_block(
                         &auth_provider,
                         &block,
-                        reorg_state.next_fork_parent_hash(block.header.parent_hash),
+                        reorg_state.next_fork_parent_hash(canonical_parent_hash),
                         reorg_extra_data(&block.header.extra_data),
                         use_reth_namespace,
                         wait_for_persistence,
@@ -363,65 +330,71 @@ impl Command {
             debug!(target: "reth-bench", ?block_number, "Sending payload");
 
             let start = Instant::now();
-            let mut aggregated_server_timings = NewPayloadTimingBreakdown::default();
+            let mut forkchoice_state = canonical_forkchoice_state;
+            let mut forkchoice_version = version;
 
             if let Some(prepared) = built_fork_block {
-                accumulate_server_timings(
-                    &mut aggregated_server_timings,
-                    call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
-                        .await?,
-                );
+                call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
+                    .await?;
 
                 if let Some(reorg_state) = reorg_state.as_mut() {
-                    reorg_state.push_fork_head(prepared.block_hash);
+                    reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
+
+                    if reorg_state.should_switch_to_fork() {
+                        forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
+                        forkchoice_version = prepared.version;
+
+                        info!(
+                            target: "reth-bench",
+                            block_number,
+                            branch_point = %forkchoice_state.safe_block_hash,
+                            fork_head = %prepared.block_hash,
+                            reorg_depth = reorg_state.depth,
+                            "Switching forkchoice to reorg branch"
+                        );
+
+                        reorg_state.reset();
+                    }
                 }
             }
 
-            accumulate_server_timings(
-                &mut aggregated_server_timings,
-                call_new_payload_with_reth(&auth_provider, version, params).await?,
-            );
-
-            let np_latency = if !reorg_enabled && !aggregated_server_timings.latency.is_zero() {
-                aggregated_server_timings.latency
-            } else {
-                start.elapsed()
-            };
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params).await?;
+            let np_latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
-                persistence_wait: aggregated_server_timings.persistence_wait,
-                execution_cache_wait: aggregated_server_timings.execution_cache_wait,
-                sparse_trie_wait: aggregated_server_timings.sparse_trie_wait,
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
             };
 
-            let (forkchoice_state, active_branch) = if let Some(reorg_state) = reorg_state.as_mut()
-            {
-                if let Some(fork_head_hash) = reorg_state.fork_parent_hash {
-                    reorg_state.select_forkchoice_state(canonical_forkchoice_state, fork_head_hash)
-                } else {
-                    (canonical_forkchoice_state, None)
-                }
-            } else {
-                (canonical_forkchoice_state, None)
-            };
-
-            if let Some(active_branch) = active_branch {
+            if forkchoice_state.head_block_hash != head {
                 info!(
                     target: "reth-bench",
                     block_number,
-                    active_branch = match active_branch {
-                        ActiveBranch::Canonical => "canonical",
-                        ActiveBranch::Fork => "fork",
-                    },
-                    "Switching forkchoice target"
+                    canonical_head = %head,
+                    active_head = %forkchoice_state.head_block_hash,
+                    "Submitting forkchoice update to alternate branch"
                 );
             }
 
             let fcu_start = Instant::now();
-            call_forkchoice_updated_with_reth(&auth_provider, version, forkchoice_state).await?;
+            call_forkchoice_updated_with_reth(&auth_provider, forkchoice_version, forkchoice_state)
+                .await?;
             let fcu_latency = fcu_start.elapsed();
-            let total_latency = np_latency + fcu_latency;
+            let total_latency =
+                if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,
@@ -494,7 +467,7 @@ async fn prepare_built_block(
     parent_block_hash: B256,
     extra_data: Bytes,
     use_reth_namespace: bool,
-    wait_for_persistence: reth_node_core::args::WaitForPersistence,
+    wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
     let version = build_block_target_version(block)?;
@@ -676,18 +649,6 @@ fn parse_reorg_depth(value: &str) -> Result<usize, String> {
     }
 
     Ok(depth)
-}
-
-fn accumulate_server_timings(
-    aggregate: &mut NewPayloadTimingBreakdown,
-    server_timings: Option<NewPayloadTimingBreakdown>,
-) {
-    let Some(server_timings) = server_timings else { return };
-
-    aggregate.latency += server_timings.latency;
-    aggregate.persistence_wait += server_timings.persistence_wait;
-    aggregate.execution_cache_wait += server_timings.execution_cache_wait;
-    aggregate.sparse_trie_wait += server_timings.sparse_trie_wait;
 }
 
 fn reth_new_payload_params(
