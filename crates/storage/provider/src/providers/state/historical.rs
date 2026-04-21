@@ -1,3 +1,4 @@
+use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -13,8 +14,9 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -305,6 +307,31 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         }
 
         hashed_storage_from_reverts_with_provider(self.provider, address, self.block_number)
+    }
+
+    #[allow(dead_code)]
+    fn build_overlay(&self, input: TrieInputSorted) -> ProviderResult<TrieInputSorted>
+    where
+        Provider:
+            BlockHashReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache,
+    {
+        // Historical providers expose state at the start of `self.block_number`, so the overlay
+        // builder needs the previous canonical block hash to preserve those semantics.
+        let target_block = self.block_number.saturating_sub(1);
+        let block_hash = self
+            .provider
+            .block_hash(target_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
+
+        let TrieInputSorted { nodes, state, mut prefix_sets } = input;
+        let overlay_builder = OverlayBuilder::new(self._changeset_cache.clone())
+            .with_block_hash(Some(block_hash))
+            .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
+        let Overlay { trie_updates, hashed_post_state } =
+            overlay_builder.build_overlay(self.provider)?;
+
+        prefix_sets.extend(hashed_post_state.construct_prefix_sets());
+        Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
 
     /// Set the lowest block number at which the account history is available.

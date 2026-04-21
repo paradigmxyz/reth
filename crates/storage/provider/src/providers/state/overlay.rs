@@ -51,9 +51,9 @@ pub(crate) struct OverlayStateProviderMetrics {
 
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
 #[derive(Debug, Clone)]
-struct Overlay {
-    trie_updates: Arc<TrieUpdatesSorted>,
-    hashed_post_state: Arc<HashedPostStateSorted>,
+pub(super) struct Overlay {
+    pub(super) trie_updates: Arc<TrieUpdatesSorted>,
+    pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -377,7 +377,7 @@ impl OverlayBuilder {
 
     /// Builds the effective overlay for the given provider.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn build_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    pub(super) fn build_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
