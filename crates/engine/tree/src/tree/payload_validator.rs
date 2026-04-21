@@ -523,10 +523,12 @@ where
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
-        let overlay_factory =
-            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
-                .with_anchor_hash(anchor_hash)
-                .with_lazy_overlay(lazy_overlay);
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            anchor_hash,
+            self.changeset_cache.clone(),
+        )
+        .with_lazy_overlay(lazy_overlay);
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -665,7 +667,6 @@ where
                     self.await_state_root_with_timeout(
                         &mut handle,
                         overlay_factory.clone(),
-                        anchor_hash,
                         &hashed_state,
                     ),
                     block
@@ -690,7 +691,6 @@ where
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
-                                anchor_hash,
                                 &hashed_state,
                                 trie_updates.as_ref().clone(),
                             );
@@ -729,11 +729,7 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(
-                    overlay_factory.clone(),
-                    anchor_hash,
-                    &hashed_state,
-                ) {
+                match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
                         info!(
@@ -769,11 +765,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                Self::compute_state_root_serial(
-                    overlay_factory.clone(),
-                    anchor_hash,
-                    &hashed_state
-                ),
+                Self::compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
 
@@ -1098,7 +1090,6 @@ where
     fn compute_state_root_parallel(
         &self,
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        anchor_hash: B256,
         hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
@@ -1109,10 +1100,8 @@ where
         let overlay_factory = if overlay_factory.has_overlay_source() {
             overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted())
         } else {
-            overlay_factory.with_hashed_state_overlay(
-                anchor_hash,
-                Some(Arc::new(hashed_state.clone_into_sorted())),
-            )
+            overlay_factory
+                .with_hashed_state_overlay(Some(Arc::new(hashed_state.clone_into_sorted())))
         };
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
             .incremental_root_with_updates()
@@ -1125,7 +1114,6 @@ where
     /// trie updates for this block.
     fn compute_state_root_serial(
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        anchor_hash: B256,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let hashed_state = hashed_state.get();
@@ -1136,10 +1124,8 @@ where
         let overlay_factory = if overlay_factory.has_overlay_source() {
             overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted())
         } else {
-            overlay_factory.with_hashed_state_overlay(
-                anchor_hash,
-                Some(Arc::new(hashed_state.clone_into_sorted())),
-            )
+            overlay_factory
+                .with_hashed_state_overlay(Some(Arc::new(hashed_state.clone_into_sorted())))
         };
 
         let provider = overlay_factory.database_provider_ro()?;
@@ -1172,7 +1158,6 @@ where
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        anchor_hash: B256,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         let Some(timeout) = self.config.state_root_task_timeout() else {
@@ -1200,11 +1185,7 @@ where
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
-                    let result = Self::compute_state_root_serial(
-                        seq_overlay,
-                        anchor_hash,
-                        &seq_hashed_state,
-                    );
+                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
                     let _ = seq_tx.send(result);
                 });
 
@@ -1269,13 +1250,12 @@ where
     fn compare_trie_updates_with_serial(
         &self,
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        anchor_hash: B256,
         hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
-        match Self::compute_state_root_serial(overlay_factory.clone(), anchor_hash, hashed_state) {
+        match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
             Ok((serial_root, serial_trie_updates)) => {
                 debug!(
                     target: "engine::tree::payload_validator",
@@ -2053,10 +2033,12 @@ where
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
-        let overlay_factory =
-            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
-                .with_anchor_hash(anchor_hash)
-                .with_lazy_overlay(lazy_overlay);
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            anchor_hash,
+            self.changeset_cache.clone(),
+        )
+        .with_lazy_overlay(lazy_overlay);
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
