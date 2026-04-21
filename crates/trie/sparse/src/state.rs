@@ -591,6 +591,8 @@ impl SparseStateTrie {
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
         } else if self.is_account_revealed(address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
+            // A revealed account path can still have no leaf when the account was created in this
+            // block but only its storage trie was materialized so far.
             if let Some(value) = self.get_account_value(&address) {
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
