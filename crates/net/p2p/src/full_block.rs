@@ -316,6 +316,9 @@ impl<Client> FetchFullBlockWithAccessListsFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
 {
+    /// Keep retry work bounded so a single poll does not monopolize the executor.
+    const ACCESS_LIST_RETRY_BUDGET: usize = 4;
+
     /// If the header request is already complete, this returns the block number.
     pub fn block_number(&self) -> Option<u64> {
         self.block_result.as_ref().map(|block| block.number()).or_else(|| self.block.block_number())
@@ -328,6 +331,8 @@ where
     }
 
     fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
+        let mut budget = Self::ACCESS_LIST_RETRY_BUDGET;
+
         loop {
             let poll = match &mut self.access_lists_state {
                 AccessListsState::Pending(fut) => fut.poll_unpin(cx),
@@ -364,6 +369,12 @@ where
                         self.retry_access_lists_request();
                     }
                 },
+            }
+
+            budget -= 1;
+            if budget == 0 {
+                cx.waker().wake_by_ref();
+                return
             }
         }
     }
