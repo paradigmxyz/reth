@@ -18,8 +18,10 @@
 
 pub mod error;
 pub mod pre_state;
+pub mod snapshot;
 pub mod validation;
 
 pub use error::RejectReason;
 pub use pre_state::{BlockPreState, RequiredReads};
+pub use snapshot::build_pre_state;
 pub use validation::{check_bal_hash, check_item_count, BAL_ITEM_COST};
