@@ -17,6 +17,7 @@
 //! place; orchestration follows in subsequent PRs.
 
 pub mod error;
+pub mod execute;
 pub mod feasibility;
 pub mod pre_state;
 pub mod snapshot;
@@ -25,6 +26,7 @@ pub mod validation;
 pub mod worker;
 
 pub use error::RejectReason;
+pub use execute::{BalExecutionError, BalExecutionOutput, BalPayloadExecutor, ReceiptFor};
 pub use pre_state::{BlockPreState, RequiredReads};
 pub use snapshot::build_pre_state;
 pub use snapshot_db::{SnapshotDatabase, SnapshotDbError};
