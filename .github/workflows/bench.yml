@@ -890,7 +890,7 @@ jobs:
 
       - name: Download custom snapshot
         if: env.BENCH_SNAPSHOT_URL != ''
-        id: snapshot-check
+        id: custom-snapshot
         run: |
           export BENCH_RETH_BINARY="${GITHUB_WORKSPACE}/../reth-feature/target/profiling/${BENCH_NODE_BIN}"
           .github/scripts/bench-reth-snapshot.sh
