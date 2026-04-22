@@ -529,6 +529,15 @@ async fn queue_fork_block(
         return Ok(None)
     }
 
+    if let Some(parent_block_hash) = parent_block_hash {
+        wait_for_canonical_block_hash(
+            local_rpc_provider,
+            block_number.saturating_sub(1),
+            parent_block_hash,
+        )
+        .await?;
+    }
+
     let future_block = block_provider
         .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
         .full()
@@ -548,6 +557,45 @@ async fn queue_fork_block(
         )
         .await?,
     }))
+}
+
+async fn wait_for_canonical_block_hash(
+    provider: &RootProvider<AnyNetwork>,
+    block_number: u64,
+    expected_hash: B256,
+) -> eyre::Result<()> {
+    const MAX_ATTEMPTS: usize = 50;
+    const RETRY_INTERVAL: Duration = Duration::from_millis(20);
+
+    for _ in 0..MAX_ATTEMPTS {
+        let block = provider
+            .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
+            .await
+            .wrap_err_with(|| {
+                format!("Failed to fetch local canonical block by number {block_number}")
+            })?;
+
+        if block.as_ref().is_some_and(|block| block.header.hash == expected_hash) {
+            return Ok(())
+        }
+
+        tokio::time::sleep(RETRY_INTERVAL).await;
+    }
+
+    let observed_hash = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
+        .await
+        .wrap_err_with(|| {
+            format!("Failed to fetch local canonical block by number {block_number}")
+        })?
+        .map(|block| block.header.hash);
+
+    bail!(
+        "local canonical block {} did not switch to expected hash {} (observed {:?})",
+        block_number,
+        expected_hash,
+        observed_hash
+    )
 }
 
 fn build_block_request(
