@@ -294,6 +294,10 @@ impl Command {
             let block_number = block.header.number;
             let canonical_parent_hash = block.header.parent_hash;
             let transaction_count = block.transactions.len() as u64;
+            let deferred_branch_start_block = reorg_state
+                .as_ref()
+                .filter(|state| state.fork_length == 0 && queued_fork_block.is_none())
+                .map(|_| block.clone());
             let canonical_forkchoice_state = ForkchoiceState {
                 head_block_hash: head,
                 safe_block_hash: safe,
@@ -357,6 +361,24 @@ impl Command {
             };
 
             if let Some(reorg_state) = reorg_state.as_mut() {
+                if queued_fork_block.is_none() && reorg_state.fork_length == 0 {
+                    // The first fork block after a reset uses a canonical parent, so it can be
+                    // rebuilt here instead of immediately after the reset FCU.
+                    let block = deferred_branch_start_block
+                        .as_ref()
+                        .ok_or_eyre("missing deferred fork block after reorg reset")?;
+                    queued_fork_block = Some(QueuedForkBlock {
+                        block_number,
+                        prepared: prepare_built_block(
+                            &local_rpc_provider,
+                            block,
+                            canonical_parent_hash,
+                            no_wait_for_caches,
+                        )
+                        .await?,
+                    });
+                }
+
                 let queued = queued_fork_block
                     .take()
                     .ok_or_eyre("missing queued fork block for reorg replay")?;
@@ -416,15 +438,7 @@ impl Command {
                     .await?;
 
                     reorg_state.reset();
-                    queued_fork_block = queue_fork_block(
-                        &block_provider,
-                        &local_rpc_provider,
-                        &benchmark_mode,
-                        next_fork_block_number,
-                        None,
-                        no_wait_for_caches,
-                    )
-                    .await?;
+                    queued_fork_block = None;
                 }
             }
 
