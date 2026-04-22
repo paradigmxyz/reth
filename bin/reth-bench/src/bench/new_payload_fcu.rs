@@ -23,8 +23,7 @@ use alloy_provider::{
     Provider, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
-    ForkchoiceState, PayloadAttributes,
+    ExecutionData, ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes,
 };
 use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
@@ -511,11 +510,8 @@ async fn prepare_built_block(
     let block_hash = payload.block_hash;
     let block_number = payload.block_number;
     let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
-    let execution_data = built_payload_to_execution_data(
-        built_payload,
-        target_version,
-        block.header.parent_beacon_block_root,
-    )?;
+    let execution_data =
+        built_payload_to_execution_data(built_payload, block.header.parent_beacon_block_root);
     let params = reth_new_payload_params(execution_data, wait_for_persistence, no_wait_for_caches)?;
     let forkchoice_version = if use_reth_namespace { None } else { Some(target_version) };
 
@@ -620,37 +616,11 @@ fn build_block_target_version(block: &AnyRpcBlock) -> eyre::Result<EngineApiMess
 
 fn built_payload_to_execution_data(
     built_payload: ExecutionPayloadEnvelopeV5,
-    target_version: EngineApiMessageVersion,
     parent_beacon_block_root: Option<B256>,
-) -> eyre::Result<ExecutionData> {
-    let execution_payload = built_payload.execution_payload.clone();
-
-    match target_version {
-        EngineApiMessageVersion::V1 => {
-            let payload = execution_payload.payload_inner.payload_inner;
-            Ok(ExecutionData {
-                payload: ExecutionPayload::V1(payload),
-                sidecar: ExecutionPayloadSidecar::none(),
-            })
-        }
-        EngineApiMessageVersion::V2 => {
-            let payload = execution_payload.payload_inner;
-            Ok(ExecutionData {
-                payload: ExecutionPayload::V2(payload),
-                sidecar: ExecutionPayloadSidecar::none(),
-            })
-        }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
-            let parent_beacon_block_root = parent_beacon_block_root
-                .ok_or_eyre("missing parent beacon block root for built fork block")?;
-            let (payload, sidecar) =
-                built_payload.into_payload_and_sidecar(parent_beacon_block_root);
-            Ok(ExecutionData { payload, sidecar })
-        }
-        EngineApiMessageVersion::V6 => {
-            bail!("--reorg does not support Amsterdam payload fields yet")
-        }
-    }
+) -> ExecutionData {
+    let (payload, sidecar) =
+        built_payload.into_payload_and_sidecar(parent_beacon_block_root.unwrap_or_default());
+    ExecutionData { payload, sidecar }
 }
 
 fn parse_reorg_depth(value: &str) -> Result<usize, String> {
