@@ -718,6 +718,13 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub disable_discv4_discovery: bool,
 
+    /// Enable Discv5 discovery.
+    ///
+    /// Discv5 is now enabled by default, so this flag is a no-op and will be removed in a future
+    /// release.
+    #[arg(long, conflicts_with = "disable_discovery", hide = true)]
+    pub enable_discv5_discovery: bool,
+
     /// Disable Discv5 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
     pub disable_discv5_discovery: bool,
@@ -895,6 +902,7 @@ impl Default for DiscoveryArgs {
             disable_discovery: false,
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
+            enable_discv5_discovery: false,
             disable_discv5_discovery: false,
             disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
