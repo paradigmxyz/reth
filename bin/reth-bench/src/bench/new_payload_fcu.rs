@@ -17,7 +17,7 @@ use crate::{
 };
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::B256;
 use alloy_provider::{
     ext::DebugApi,
     network::{AnyNetwork, AnyRpcBlock},
@@ -51,6 +51,7 @@ pub struct Command {
     ///
     /// This requires enabling the hidden `testing` RPC module on the target node,
     /// for example with `reth node --http --http.api eth,testing`.
+    /// Prague-era payloads may also require `--engine.accept-execution-requests-hash`.
     ///
     /// Passing `--reorg` with no value uses a depth of `8`.
     #[arg(
@@ -119,6 +120,12 @@ struct PreparedBuiltBlock {
     block_hash: B256,
     version: Option<EngineApiMessageVersion>,
     params: serde_json::Value,
+}
+
+#[derive(Debug)]
+struct QueuedForkBlock {
+    block_number: u64,
+    prepared: PreparedBuiltBlock,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +302,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
+        let mut queued_fork_block: Option<QueuedForkBlock> = None;
         while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
@@ -317,17 +325,35 @@ impl Command {
             let built_fork_block = if let (Some(reorg_state), Some(ActiveBranch::Fork)) =
                 (reorg_state.as_ref(), next_target_branch)
             {
-                Some(
-                    prepare_built_block(
-                        &local_rpc_provider,
-                        &block,
-                        reorg_state.next_fork_parent_hash(canonical_parent_hash),
-                        use_reth_namespace,
-                        wait_for_persistence,
-                        no_wait_for_caches,
+                if let Some(queued) = queued_fork_block.take() {
+                    if queued.block_number == block_number {
+                        Some(queued.prepared)
+                    } else {
+                        Some(
+                            prepare_built_block(
+                                &local_rpc_provider,
+                                &block,
+                                reorg_state.next_fork_parent_hash(canonical_parent_hash),
+                                use_reth_namespace,
+                                wait_for_persistence,
+                                no_wait_for_caches,
+                            )
+                            .await?,
+                        )
+                    }
+                } else {
+                    Some(
+                        prepare_built_block(
+                            &local_rpc_provider,
+                            &block,
+                            reorg_state.next_fork_parent_hash(canonical_parent_hash),
+                            use_reth_namespace,
+                            wait_for_persistence,
+                            no_wait_for_caches,
+                        )
+                        .await?,
                     )
-                    .await?,
-                )
+                }
             } else {
                 None
             };
@@ -352,6 +378,7 @@ impl Command {
             debug!(target: "reth-bench", ?block_number, "Sending payload");
             let mut forkchoice_state = canonical_forkchoice_state;
             let mut forkchoice_version = version;
+            let mut next_queued_fork_parent = None;
 
             if let Some(prepared) = built_fork_block {
                 call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
@@ -372,6 +399,14 @@ impl Command {
                         max_reorg_depth = reorg_state.depth,
                         "Switching forkchoice to reorg branch"
                     );
+
+                    let next_fork_block_number = block_number + 2;
+                    if reorg_state.fork_length < reorg_state.depth &&
+                        benchmark_mode.contains(next_fork_block_number)
+                    {
+                        next_queued_fork_parent =
+                            Some((next_fork_block_number, prepared.block_hash));
+                    }
                 }
             } else if let Some(reorg_state) = reorg_state.as_mut() &&
                 next_target_branch == Some(ActiveBranch::Canonical)
@@ -386,6 +421,7 @@ impl Command {
                         "Resetting reorg branch after switching back to canonical"
                     );
                     reorg_state.reset();
+                    queued_fork_block = None;
                 }
             }
 
@@ -425,6 +461,31 @@ impl Command {
             call_forkchoice_updated_with_reth(&auth_provider, forkchoice_version, forkchoice_state)
                 .await?;
             let fcu_latency = fcu_start.elapsed();
+
+            if let Some((future_block_number, parent_hash)) = next_queued_fork_parent {
+                let future_block = block_provider
+                    .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(future_block_number))
+                    .full()
+                    .await
+                    .wrap_err_with(|| {
+                        format!("Failed to fetch block by number {future_block_number}")
+                    })?
+                    .ok_or_eyre("Block not found")?;
+
+                queued_fork_block = Some(QueuedForkBlock {
+                    block_number: future_block_number,
+                    prepared: prepare_built_block(
+                        &local_rpc_provider,
+                        &future_block,
+                        parent_hash,
+                        use_reth_namespace,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )
+                    .await?,
+                });
+            }
+
             let total_latency =
                 if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
             let combined_result = CombinedResult {
@@ -536,12 +597,18 @@ fn build_block_request(
         .map(|tx| {
             let tx: TxEnvelope =
                 tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type in RPC block"))?;
-            Ok::<Bytes, eyre::Report>(tx.encoded_2718().into())
+            if tx.is_eip4844() {
+                return Ok(None)
+            }
+            Ok(Some(tx.encoded_2718().into()))
         })
+        .filter_map(|tx| tx.transpose())
         .collect::<eyre::Result<Vec<_>>>()?;
 
-    // Keep only 90% of the original transactions on the fork so the alternate branch produces a
-    // materially different post-state instead of only differing by header data.
+    // `testing_buildBlockV1` only takes raw transaction bytes, so we exclude blob transactions
+    // from the synthetic fork blocks rather than trying to reconstruct their sidecars.
+    // Keep only 90% of the remaining transactions so the alternate branch produces a materially
+    // different post-state instead of only differing by header data.
     let keep = transactions.len().saturating_mul(9) / 10;
     transactions.truncate(keep);
 
