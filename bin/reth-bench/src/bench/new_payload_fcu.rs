@@ -515,6 +515,14 @@ async fn prepare_built_block(
             match block_provider.client().request("testing_buildBlockV1", [request.clone()]).await {
                 Ok(payload) => break payload,
                 Err(err) if attempts_remaining > 1 && is_retryable_build_block_error(&err) => {
+                    warn!(
+                        target: "reth-bench",
+                        block_number = block.header.number,
+                        %parent_block_hash,
+                        attempts_remaining,
+                        error = %err,
+                        "Retrying testing_buildBlockV1 after transient fork build failure"
+                    );
                     attempts_remaining -= 1;
                     tokio::time::sleep(BUILD_RETRY_INTERVAL).await;
                 }
@@ -592,11 +600,19 @@ async fn call_new_payload_with_retries(
     const NEW_PAYLOAD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     let mut attempts_remaining = MAX_NEW_PAYLOAD_ATTEMPTS;
+    let method = version.map(|v| v.method_name()).unwrap_or("reth_newPayload");
 
     loop {
         match call_new_payload_with_reth(provider, version, params.clone()).await {
             Ok(timings) => return Ok(timings),
             Err(err) if attempts_remaining > 1 && is_retryable_new_payload_error(&err) => {
+                warn!(
+                    target: "reth-bench",
+                    method,
+                    attempts_remaining,
+                    error = %err,
+                    "Retrying newPayload after transient reorg import failure"
+                );
                 attempts_remaining -= 1;
                 tokio::time::sleep(NEW_PAYLOAD_RETRY_INTERVAL).await;
             }
