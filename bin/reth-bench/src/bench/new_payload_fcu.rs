@@ -270,19 +270,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
-        let mut queued_fork_block = if reorg_state.is_some() {
-            queue_fork_block(
-                &block_provider,
-                &local_rpc_provider,
-                &benchmark_mode,
-                next_block,
-                None,
-                no_wait_for_caches,
-            )
-            .await?
-        } else {
-            None
-        };
+        let mut queued_fork_block = None;
         while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
@@ -362,11 +350,11 @@ impl Command {
 
             if let Some(reorg_state) = reorg_state.as_mut() {
                 if queued_fork_block.is_none() && reorg_state.fork_length == 0 {
-                    // The first fork block after a reset uses a canonical parent, so it can be
-                    // rebuilt here instead of immediately after the reset FCU.
+                    // A branch start uses a canonical parent, so it can be built lazily here
+                    // instead of being queued ahead of time.
                     let block = deferred_branch_start_block
                         .as_ref()
-                        .ok_or_eyre("missing deferred fork block after reorg reset")?;
+                        .ok_or_eyre("missing deferred fork block for reorg branch start")?;
                     queued_fork_block = Some(QueuedForkBlock {
                         block_number,
                         prepared: prepare_built_block(
