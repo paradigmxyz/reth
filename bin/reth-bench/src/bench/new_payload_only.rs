@@ -54,6 +54,7 @@ impl Command {
             rlp_blocks,
             wait_for_persistence,
             no_wait_for_caches,
+            ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();

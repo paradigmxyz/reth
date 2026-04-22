@@ -46,8 +46,28 @@ on:
         required: false
         default: ""
         type: string
+      chain:
+        description: "Chain to run the benchmark node against"
+        required: false
+        default: "mainnet"
+        type: string
+      rpc_url:
+        description: "RPC URL to fetch benchmark blocks from"
+        required: false
+        default: "https://ethereum.reth.rs/rpc"
+        type: string
+      snapshot_url:
+        description: "Optional snapshot source URL passed to `reth download -u`"
+        required: false
+        default: ""
+        type: string
       wait_time:
         description: "Minimum interval between block submissions (e.g. 500ms, 1s)"
+        required: false
+        default: ""
+        type: string
+      bench_args:
+        description: "Extra CLI args for reth-bench (for example: --reorg=8)"
         required: false
         default: ""
         type: string
@@ -117,6 +137,9 @@ jobs:
       warmup: ${{ steps.args.outputs.warmup }}
       baseline: ${{ steps.args.outputs.baseline }}
       feature: ${{ steps.args.outputs.feature }}
+      chain: ${{ steps.args.outputs.chain }}
+      rpc-url: ${{ steps.args.outputs.rpc-url }}
+      snapshot-url: ${{ steps.args.outputs.snapshot-url }}
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
@@ -125,6 +148,7 @@ jobs:
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
+      bench-args: ${{ steps.args.outputs.bench-args }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
       abba: ${{ steps.args.outputs.abba }}
@@ -158,7 +182,7 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [chain=mainnet|sepolia|holesky|hoodi] [rpc-url=URL] [snapshot-url=URL] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [bench-args="..."] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
             let explicitWarmup = false;
 
@@ -169,6 +193,9 @@ jobs:
               if (warmup !== '200') explicitWarmup = true;
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
+              var chain = '${{ github.event.inputs.chain }}' || 'mainnet';
+              var rpcUrl = '${{ github.event.inputs.rpc_url }}' || 'https://ethereum.reth.rs/rpc';
+              var snapshotUrl = '${{ github.event.inputs.snapshot_url }}' || '';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
               var slack = '${{ github.event.inputs.slack }}' || 'never';
               cores = '${{ github.event.inputs.cores }}' || '0';
@@ -177,6 +204,7 @@ jobs:
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
               var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
+              var benchArgs = '${{ github.event.inputs.bench_args }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
 
@@ -204,8 +232,8 @@ jobs:
               const boolDefaultTrue = new Set(['abba', 'otlp']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
-              const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const stringArgs = new Set(['chain', 'rpc-url', 'snapshot-url', 'bench-args', 'baseline-args', 'feature-args']);
+              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', chain: 'mainnet', 'rpc-url': 'https://ethereum.reth.rs/rpc', 'snapshot-url': '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'bench-args': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -295,6 +323,7 @@ jobs:
               var abba = defaults.abba;
               var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
+              var benchArgs = defaults['bench-args'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
             }
@@ -352,6 +381,7 @@ jobs:
             core.setOutput('big-blocks', bigBlocks);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
+            core.setOutput('bench-args', benchArgs);
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
             core.setOutput('abba', abba);
@@ -544,6 +574,7 @@ jobs:
       BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
       BENCH_BAL: ${{ needs.reth-bench-ack.outputs.bal }}
       BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
+      BENCH_BENCH_ARGS: ${{ needs.reth-bench-ack.outputs.bench-args }}
       BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
@@ -618,12 +649,14 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const benchArgsVal = process.env.BENCH_BENCH_ARGS || '';
+            const benchArgsNote = benchArgsVal ? `, bench-args: \`${benchArgsVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${benchArgsNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
