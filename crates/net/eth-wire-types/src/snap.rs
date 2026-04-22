@@ -3,12 +3,40 @@
 //! facilitating the exchange of Ethereum state snapshots between peers
 //! Reference: [Ethereum Snapshot Protocol](https://github.com/ethereum/devp2p/blob/master/caps/snap.md#protocol-messages)
 //!
-//! Current version: snap/1
+//! This module currently includes snap/1 plus preparatory snap/2 message definitions.
 
+use crate::BlockAccessLists;
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs_derive::add_arbitrary_tests;
+
+/// Supported SNAP protocol versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
+pub enum SnapVersion {
+    /// The original snapshot protocol.
+    #[default]
+    V1 = 1,
+    /// BAL-based healing as proposed by EIP-8189.
+    V2 = 2,
+}
+
+impl SnapVersion {
+    /// Returns the number of messages supported by this version.
+    pub const fn message_count(self) -> u8 {
+        match self {
+            Self::V1 => 8,
+            Self::V2 => 10,
+        }
+    }
+
+    /// Returns the highest supported message id for this version.
+    pub const fn max_message_id(self) -> u8 {
+        self.message_count() - 1
+    }
+}
 
 /// Message IDs for the snap sync protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,9 +55,21 @@ pub enum SnapMessageId {
     /// Response for the number of requested contract codes.
     ByteCodes = 0x05,
     /// Request of the number of state (either account or storage) Merkle trie nodes by path.
+    ///
+    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
     GetTrieNodes = 0x06,
     /// Response for the number of requested state trie nodes.
+    ///
+    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
     TrieNodes = 0x07,
+    /// Request BALs for a list of block hashes.
+    ///
+    /// Only valid for `snap/2`.
+    GetBlockAccessLists = 0x08,
+    /// Response containing BALs for the requested block hashes.
+    ///
+    /// Only valid for `snap/2`.
+    BlockAccessLists = 0x09,
 }
 
 /// Request for a range of accounts from the state trie.
@@ -187,6 +227,30 @@ pub struct TrieNodesMessage {
     pub nodes: Vec<Bytes>,
 }
 
+/// Request BALs for the given block hashes.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct GetBlockAccessListsMessage {
+    /// Request ID to match up responses with.
+    pub request_id: u64,
+    /// Block hashes to retrieve BALs for.
+    pub block_hashes: Vec<B256>,
+    /// Soft limit at which to stop returning data (in bytes).
+    pub response_bytes: u64,
+}
+
+/// Response containing one BAL per requested block hash.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct BlockAccessListsMessage {
+    /// ID of the request this is a response for.
+    pub request_id: u64,
+    /// Raw BAL payloads in request order.
+    pub block_access_lists: BlockAccessLists,
+}
+
 /// Represents all types of messages in the snap sync protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapProtocolMessage {
@@ -203,9 +267,21 @@ pub enum SnapProtocolMessage {
     /// Response with contract codes - see [`ByteCodesMessage`]
     ByteCodes(ByteCodesMessage),
     /// Request for trie nodes - see [`GetTrieNodesMessage`]
+    ///
+    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
     GetTrieNodes(GetTrieNodesMessage),
     /// Response with trie nodes - see [`TrieNodesMessage`]
+    ///
+    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
     TrieNodes(TrieNodesMessage),
+    /// Request for block access lists - see [`GetBlockAccessListsMessage`]
+    ///
+    /// Only valid for `snap/2`.
+    GetBlockAccessLists(GetBlockAccessListsMessage),
+    /// Response with block access lists - see [`BlockAccessListsMessage`]
+    ///
+    /// Only valid for `snap/2`.
+    BlockAccessLists(BlockAccessListsMessage),
 }
 
 impl SnapProtocolMessage {
@@ -222,6 +298,8 @@ impl SnapProtocolMessage {
             Self::ByteCodes(_) => SnapMessageId::ByteCodes,
             Self::GetTrieNodes(_) => SnapMessageId::GetTrieNodes,
             Self::TrieNodes(_) => SnapMessageId::TrieNodes,
+            Self::GetBlockAccessLists(_) => SnapMessageId::GetBlockAccessLists,
+            Self::BlockAccessLists(_) => SnapMessageId::BlockAccessLists,
         }
     }
 
@@ -241,6 +319,8 @@ impl SnapProtocolMessage {
             Self::ByteCodes(msg) => msg.encode(&mut buf),
             Self::GetTrieNodes(msg) => msg.encode(&mut buf),
             Self::TrieNodes(msg) => msg.encode(&mut buf),
+            Self::GetBlockAccessLists(msg) => msg.encode(&mut buf),
+            Self::BlockAccessLists(msg) => msg.encode(&mut buf),
         }
 
         Bytes::from(buf)
@@ -314,6 +394,20 @@ impl SnapProtocolMessage {
             TrieNodes,
             TrieNodesMessage
         );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::GetBlockAccessLists,
+            GetBlockAccessLists,
+            GetBlockAccessListsMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::BlockAccessLists,
+            BlockAccessLists,
+            BlockAccessListsMessage
+        );
 
         Err(alloy_rlp::Error::Custom("Unknown message ID"))
     }
@@ -344,6 +438,9 @@ mod tests {
 
     #[test]
     fn test_all_message_roundtrips() {
+        assert_eq!(SnapVersion::V1.message_count(), 8);
+        assert_eq!(SnapVersion::V2.message_count(), 10);
+
         test_roundtrip(SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
             request_id: 42,
             root_hash: b256_from_u64(123),
@@ -403,6 +500,20 @@ mod tests {
         test_roundtrip(SnapProtocolMessage::TrieNodes(TrieNodesMessage {
             request_id: 42,
             nodes: vec![Bytes::from(vec![1, 2, 3])],
+        }));
+
+        test_roundtrip(SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id: 42,
+            block_hashes: vec![b256_from_u64(123), b256_from_u64(456)],
+            response_bytes: 4096,
+        }));
+
+        test_roundtrip(SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 42,
+            block_access_lists: BlockAccessLists(vec![
+                Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]),
+                Bytes::from_static(&[0xc1, alloy_rlp::EMPTY_LIST_CODE]),
+            ]),
         }));
     }
 

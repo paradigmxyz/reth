@@ -50,6 +50,8 @@ pub struct DefaultEngineValues {
     share_execution_cache_with_payload_builder: bool,
     share_sparse_trie_with_payload_builder: bool,
     suppress_persistence_during_build: bool,
+    bal_parallel_execution_disabled: bool,
+    bal_parallel_state_root_disabled: bool,
 }
 
 impl DefaultEngineValues {
@@ -233,6 +235,18 @@ impl DefaultEngineValues {
         self.suppress_persistence_during_build = v;
         self
     }
+
+    /// Set whether to disable BAL-based parallel execution by default
+    pub const fn with_bal_parallel_execution_disabled(mut self, v: bool) -> Self {
+        self.bal_parallel_execution_disabled = v;
+        self
+    }
+
+    /// Set whether to disable BAL-driven parallel state root by default
+    pub const fn with_bal_parallel_state_root_disabled(mut self, v: bool) -> Self {
+        self.bal_parallel_state_root_disabled = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -266,6 +280,8 @@ impl Default for DefaultEngineValues {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
+            bal_parallel_execution_disabled: false,
+            bal_parallel_state_root_disabled: false,
         }
     }
 }
@@ -478,6 +494,21 @@ pub struct EngineArgs {
     )]
     pub suppress_persistence_during_build: bool,
 
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. When set, falls back
+    /// to transaction-based prewarming even when a BAL is available.
+    #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
+    pub bal_parallel_execution_disabled: bool,
+
+    /// Disable BAL-driven parallel state root computation. When set, the BAL hashed post state
+    /// is not sent to the multiproof task for early parallel state root computation.
+    #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
+    pub bal_parallel_state_root_disabled: bool,
+
+    /// Disable BAL (Block Access List) batched IO during prewarming. When set, falls back
+    /// to individual per-slot storage reads instead of batched cursor reads.
+    #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
+    pub disable_bal_batch_io: bool,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -524,6 +555,8 @@ impl Default for EngineArgs {
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -560,6 +593,9 @@ impl Default for EngineArgs {
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
+            disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -610,7 +646,10 @@ impl EngineArgs {
             .with_share_sparse_trie_with_payload_builder(
                 self.share_sparse_trie_with_payload_builder,
             )
-            .with_suppress_persistence_during_build(self.suppress_persistence_during_build);
+            .with_suppress_persistence_during_build(self.suppress_persistence_during_build)
+            .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
+            .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
+            .without_bal_batch_io(self.disable_bal_batch_io);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -672,6 +711,9 @@ mod tests {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
+            bal_parallel_execution_disabled: true,
+            bal_parallel_state_root_disabled: true,
+            disable_bal_batch_io: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -714,6 +756,9 @@ mod tests {
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
+            "--engine.disable-bal-parallel-execution",
+            "--engine.disable-bal-parallel-state-root",
+            "--engine.disable-bal-batch-io",
         ])
         .args;
 
