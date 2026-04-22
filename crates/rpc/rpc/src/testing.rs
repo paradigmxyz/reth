@@ -32,12 +32,11 @@ use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
     AlloyBlockHeader as BlockTrait, TxTy,
 };
-use reth_provider::providers::HeaderAndStateProvider;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::BlockReader;
+use reth_storage_api::{BlockReader, HeaderProvider};
 use revm::context::Block;
 use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
@@ -79,9 +78,7 @@ impl<Eth, Evm> TestingApi<Eth, Evm> {
 impl<Eth, Evm> TestingApi<Eth, Evm>
 where
     Eth: Call<
-        Provider: BlockReader<Header = Header>
-                      + ChainSpecProvider<ChainSpec: EthereumHardforks>
-                      + HeaderAndStateProvider<Header = Header>,
+        Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,
@@ -94,15 +91,18 @@ where
         let skip_invalid_transactions = self.skip_invalid_transactions;
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
-            .spawn_blocking_io_fut(async move |eth_api| {
-                let (parent, state) = eth_api
-                    .provider()
-                    .sealed_header_and_state_by_hash(request.parent_block_hash)
-                    .map_err(Eth::Error::from_eth_err)?;
+            .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
+                let state = state.database.0;
                 let mut db = State::builder()
                     .with_bundle_update()
-                    .with_database(StateProviderDatabase::new(state.as_ref()))
+                    .with_database(StateProviderDatabase::new(&state))
                     .build();
+                let parent = eth_api
+                    .provider()
+                    .sealed_header_by_hash(request.parent_block_hash)?
+                    .ok_or_else(|| {
+                    EthApiError::HeaderNotFound(request.parent_block_hash.into())
+                })?;
 
                 let chain_spec = eth_api.provider().chain_spec();
                 let is_osaka =
@@ -206,8 +206,7 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome =
-                    builder.finish(state.as_ref(), None).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let sealed_block = Arc::new(outcome.block.into_sealed_block());
@@ -227,9 +226,7 @@ where
 impl<Eth, Evm> TestingApiServer for TestingApi<Eth, Evm>
 where
     Eth: Call<
-        Provider: BlockReader<Header = Header>
-                      + ChainSpecProvider<ChainSpec: EthereumHardforks>
-                      + HeaderAndStateProvider<Header = Header>,
+        Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,

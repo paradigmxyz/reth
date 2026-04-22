@@ -27,7 +27,7 @@ mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 mod blockchain_provider;
-pub use blockchain_provider::{BlockchainProvider, HeaderAndStateProvider};
+pub use blockchain_provider::BlockchainProvider;
 
 mod consistent;
 pub use consistent::ConsistentProvider;
