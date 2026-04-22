@@ -91,13 +91,13 @@ impl OverlaySource {
 /// collecting reverts. It is intentionally independent from any provider factory or overlay cache.
 #[derive(Debug, Clone)]
 pub struct OverlayBuilder {
-    /// Optional block hash for collecting reverts.
+    /// Optional block hash for collecting reverts
     block_hash: Option<B256>,
     /// Optional overlay source (lazy or immediate).
     overlay_source: Option<OverlaySource>,
-    /// Changeset cache handle for retrieving trie changesets.
+    /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
-    /// Metrics for tracking provider operations.
+    /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
 }
 
@@ -161,6 +161,7 @@ impl OverlayBuilder {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
             }
             Some(OverlaySource::Lazy(lazy)) => {
+                // Resolve lazy overlay and convert to immediate with extension
                 let (trie, mut state) = lazy.as_overlay();
                 Arc::make_mut(&mut state).extend_ref_and_sort(&other);
                 self.overlay_source = Some(OverlaySource::Immediate { trie, state });
@@ -234,10 +235,15 @@ impl OverlayBuilder {
     where
         Provider: PruneCheckpointReader,
     {
+        // If the requested block is the DB tip then there won't be any reverts necessary, and we
+        // can simply return Ok.
         if db_tip_block == requested_block {
             return Ok(false)
         }
 
+        // Check account history prune checkpoint to determine the lower bound of available data.
+        // The prune checkpoint's block_number is the highest pruned block, so data is available
+        // starting from the next block.
         let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let lower_bound = prune_checkpoint
             .and_then(|chk| chk.block_number)
@@ -246,6 +252,7 @@ impl OverlayBuilder {
 
         let available_range = lower_bound..=db_tip_block;
 
+        // Check if the requested block is within the available range
         if !available_range.contains(&requested_block) {
             return Err(ProviderError::InsufficientChangesets {
                 requested: requested_block,
@@ -277,11 +284,15 @@ impl OverlayBuilder {
             + PruneCheckpointReader
             + StorageSettingsCache,
     {
+        //
+        // Set up variables we'll use for recording metrics. There's two different code-paths here,
+        // and we want to make sure both record metrics, so we do metrics recording after.
         let retrieve_trie_reverts_duration;
         let retrieve_hashed_state_reverts_duration;
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
 
+        // If block_hash is provided, collect reverts
         let (trie_updates, hashed_post_state) = if let Some(from_block) =
             self.get_requested_block_number(provider)? &&
             self.reverts_required(provider, db_tip_block, from_block)?
@@ -296,12 +307,16 @@ impl OverlayBuilder {
                 "Collecting trie reverts for overlay state provider"
             );
 
+            // Collect trie reverts using changeset cache
             let mut trie_reverts = {
                 let _guard =
                     debug_span!(target: "providers::state::overlay", "retrieving_trie_reverts")
                         .entered();
 
                 let start = Instant::now();
+
+                // Use changeset cache to retrieve and accumulate reverts to restore state after
+                // from_block
                 let accumulated_reverts = self
                     .changeset_cache
                     .get_or_compute_range(provider, (from_block + 1)..=db_tip_block)?;
@@ -310,6 +325,7 @@ impl OverlayBuilder {
                 accumulated_reverts
             };
 
+            // Collect state reverts
             let mut hashed_state_reverts = {
                 let _guard = debug_span!(target: "providers::state::overlay", "retrieving_hashed_state_reverts").entered();
 
@@ -319,6 +335,8 @@ impl OverlayBuilder {
                 res
             };
 
+            // Resolve overlays (lazy or immediate) and extend reverts with them.
+            // If reverts are empty, use overlays directly to avoid cloning.
             let (overlay_trie, overlay_state) = self.resolve_overlays();
 
             let trie_updates = if trie_reverts.is_empty() {
@@ -353,6 +371,7 @@ impl OverlayBuilder {
 
             (trie_updates, hashed_state_updates)
         } else {
+            // If no block_hash, use overlays directly (resolving lazy if set)
             let (trie_updates, hashed_state) = self.resolve_overlays();
 
             retrieve_trie_reverts_duration = Duration::ZERO;
@@ -363,6 +382,7 @@ impl OverlayBuilder {
             (trie_updates, hashed_state)
         };
 
+        // Record metrics
         self.metrics
             .retrieve_trie_reverts_duration
             .record(retrieve_trie_reverts_duration.as_secs_f64());
@@ -431,6 +451,7 @@ impl<F> OverlayStateProviderFactory<F> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        // No anchor block — just resolve the in-memory overlay directly.
         if self.overlay_builder.block_hash.is_none() {
             return self.overlay_builder.build_overlay(provider)
         }
