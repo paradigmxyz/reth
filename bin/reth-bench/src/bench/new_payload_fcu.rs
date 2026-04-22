@@ -206,6 +206,7 @@ impl Command {
             benchmark_mode,
             block_provider,
             auth_provider,
+            local_rpc_provider,
             next_block,
             use_reth_namespace,
             rlp_blocks,
@@ -318,7 +319,7 @@ impl Command {
             {
                 Some(
                     prepare_built_block(
-                        &block_provider,
+                        &local_rpc_provider,
                         &block,
                         reorg_state.next_fork_parent_hash(canonical_parent_hash),
                         use_reth_namespace,
