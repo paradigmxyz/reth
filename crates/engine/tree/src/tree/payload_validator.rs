@@ -470,7 +470,6 @@ where
             )
             .into())
         };
-        let serial_state_provider_builder = provider_builder.clone();
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
@@ -536,7 +535,7 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-            provider_builder,
+            provider_builder.clone(),
             overlay_factory.clone(),
             strategy,
             block_access_list,
@@ -668,7 +667,7 @@ where
                 let task_result = ensure_ok_post_block!(
                     self.await_state_root_with_timeout(
                         &mut handle,
-                        serial_state_provider_builder.clone(),
+                        provider_builder.clone(),
                         &hashed_state,
                     ),
                     block
@@ -692,7 +691,7 @@ where
                         // Compare trie updates with serial computation if configured
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
-                                serial_state_provider_builder.clone(),
+                                provider_builder.clone(),
                                 provider_factory.clone(),
                                 overlay_builder.clone(),
                                 &hashed_state,
@@ -773,7 +772,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                serial_state_provider_builder
+                provider_builder
                     .build()
                     .and_then(|provider| Self::compute_state_root_serial(provider, &hashed_state)),
                 block
@@ -1174,10 +1173,9 @@ where
                 let (seq_tx, seq_rx) =
                     std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
 
-                let seq_state_provider_builder = state_provider_builder;
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
-                    let result = seq_state_provider_builder.build().and_then(|provider| {
+                    let result = state_provider_builder.build().and_then(|provider| {
                         Self::compute_state_root_serial(provider, &seq_hashed_state)
                     });
                     let _ = seq_tx.send(result);
