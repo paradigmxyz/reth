@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 reth-metrics.workspace = true
+reth-node-core.workspace = true
 reth-tasks.workspace = true
 
 metrics.workspace = true

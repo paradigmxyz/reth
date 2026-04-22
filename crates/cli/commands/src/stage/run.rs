@@ -19,10 +19,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
 use reth_node_builder::common::metrics_hooks;
-use reth_node_core::{
-    args::{NetworkArgs, StageEnum},
-    version::version_metadata,
-};
+use reth_node_core::args::{NetworkArgs, StageEnum};
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     server::{MetricServer, MetricServerConfig},
@@ -130,14 +127,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         if let Some(listen_addr) = self.metrics {
             let config = MetricServerConfig::new(
                 listen_addr,
-                VersionInfo {
-                    version: version_metadata().cargo_pkg_version.as_ref(),
-                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
-                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
-                    git_sha: version_metadata().vergen_git_sha.as_ref(),
-                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
-                    build_profile: version_metadata().build_profile_name.as_ref(),
-                },
+                VersionInfo::from_reth_metadata(),
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor,
                 metrics_hooks(&provider_factory),

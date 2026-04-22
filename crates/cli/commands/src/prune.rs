@@ -6,7 +6,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_node_builder::common::metrics_hooks;
-use reth_node_core::{args::MetricArgs, version::version_metadata};
+use reth_node_core::args::MetricArgs;
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     server::{MetricServer, MetricServerConfig},
@@ -43,14 +43,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         if let Some(listen_addr) = self.metrics.prometheus {
             let config = MetricServerConfig::new(
                 listen_addr,
-                VersionInfo {
-                    version: version_metadata().cargo_pkg_version.as_ref(),
-                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
-                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
-                    git_sha: version_metadata().vergen_git_sha.as_ref(),
-                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
-                    build_profile: version_metadata().build_profile_name.as_ref(),
-                },
+                VersionInfo::from_reth_metadata(),
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),
