@@ -518,6 +518,7 @@ async fn prepare_built_block(
     Ok(PreparedBuiltBlock { block_hash, forkchoice_version, params })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn queue_fork_block(
     block_provider: &RootProvider<AnyNetwork>,
     local_rpc_provider: &RootProvider<AnyNetwork>,
