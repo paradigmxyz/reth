@@ -12,16 +12,20 @@
 # Required env:
 #   SCHELK_MOUNT       – schelk mount point (e.g. /reth-bench)
 #   BENCH_RETH_BINARY  – path to the reth binary
+#   BENCH_CHAIN        – chain name passed to `reth download` (defaults to mainnet)
 #   GITHUB_TOKEN       – token for GitHub API calls (only for download)
 #   BENCH_COMMENT_ID   – PR comment ID to update (optional)
 #   BENCH_REPO         – owner/repo (e.g. paradigmxyz/reth)
 #   BENCH_JOB_URL      – link to the Actions job
 #   BENCH_ACTOR        – user who triggered the benchmark
 #   BENCH_CONFIG       – config summary line
+# Optional env:
+#   BENCH_SNAPSHOT_URL – source URL passed to `reth download -u` instead of the internal manifest
 set -euxo pipefail
 
 MC="mc"
 BUCKET="minio/reth-snapshots"
+CHAIN="${BENCH_CHAIN:-mainnet}"
 # Allow overriding the snapshot name (e.g. for big-blocks mode where the
 # big-blocks manifest specifies which base snapshot to use).
 SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable-previous}"
@@ -35,24 +39,33 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 HASH_FILE="$HOME/.reth-bench-snapshot-hash${HASH_MODE_SUFFIX}"
 
-# Fetch manifest and compute content hash for reliable freshness check
-MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
-  echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
-  exit 2
-}
-REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
+USE_CUSTOM_SNAPSHOT_SOURCE=false
+if [ -n "${BENCH_SNAPSHOT_URL:-}" ]; then
+  USE_CUSTOM_SNAPSHOT_SOURCE=true
+  echo "Using custom snapshot source ${BENCH_SNAPSHOT_URL} for chain ${CHAIN}"
+  if [ "${1:-}" = "--check" ]; then
+    exit 10
+  fi
+else
+  # Fetch manifest and compute content hash for reliable freshness check
+  MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
+    echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
+    exit 2
+  }
+  REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
 
-LOCAL_HASH=""
-[ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
+  LOCAL_HASH=""
+  [ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
 
-if [ "$REMOTE_HASH" = "$LOCAL_HASH" ]; then
-  echo "Snapshot is up-to-date (manifest hash: ${REMOTE_HASH:0:16}…)"
-  exit 0
-fi
+  if [ "$REMOTE_HASH" = "$LOCAL_HASH" ]; then
+    echo "Snapshot is up-to-date (manifest hash: ${REMOTE_HASH:0:16}…)"
+    exit 0
+  fi
 
-echo "Snapshot needs update (local: ${LOCAL_HASH:+${LOCAL_HASH:0:16}…}${LOCAL_HASH:-<none>}, remote: ${REMOTE_HASH:0:16}…)"
-if [ "${1:-}" = "--check" ]; then
-  exit 10
+  echo "Snapshot needs update (local: ${LOCAL_HASH:+${LOCAL_HASH:0:16}…}${LOCAL_HASH:-<none>}, remote: ${REMOTE_HASH:0:16}…)"
+  if [ "${1:-}" = "--check" ]; then
+    exit 10
+  fi
 fi
 
 RETH="${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set}"
@@ -61,21 +74,23 @@ if [ ! -x "$RETH" ]; then
   exit 1
 fi
 
-# Resolve the MinIO HTTP endpoint from the mc alias so reth can
-# fetch archives over HTTP (the manifest's embedded base_url points
-# to the cluster-internal address which is unreachable from runners).
-MINIO_ENDPOINT=$($MC alias list minio --json 2>/dev/null | jq -r '.URL // empty') || true
-if [ -z "$MINIO_ENDPOINT" ]; then
-  echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
-  exit 1
-fi
-BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/${SNAPSHOT_NAME}"
+if [ "$USE_CUSTOM_SNAPSHOT_SOURCE" = false ]; then
+  # Resolve the MinIO HTTP endpoint from the mc alias so reth can
+  # fetch archives over HTTP (the manifest's embedded base_url points
+  # to the cluster-internal address which is unreachable from runners).
+  MINIO_ENDPOINT=$($MC alias list minio --json 2>/dev/null | jq -r '.URL // empty') || true
+  if [ -z "$MINIO_ENDPOINT" ]; then
+    echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
+    exit 1
+  fi
+  BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/${SNAPSHOT_NAME}"
 
-# Rewrite manifest's base_url with the runner-reachable endpoint
-MANIFEST_TMP=$(mktemp --suffix=.json)
-trap 'rm -f -- "$MANIFEST_TMP"' EXIT
-echo "$MANIFEST_CONTENT" \
-  | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
+  # Rewrite manifest's base_url with the runner-reachable endpoint
+  MANIFEST_TMP=$(mktemp --suffix=.json)
+  trap 'rm -f -- "$MANIFEST_TMP"' EXIT
+  echo "$MANIFEST_CONTENT" \
+    | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
+fi
 
 # Prepare mount. If a previous run left the volume mounted, recover first.
 sudo schelk recover -y --kill || true
@@ -101,12 +116,21 @@ update_comment() {
 
 update_comment "Downloading snapshot…"
 
-# Download using reth download (manifest-path with rewritten base_url)
-"$RETH" download \
-  --manifest-path "$MANIFEST_TMP" \
-  -y \
-  --minimal \
-  --datadir "$DATADIR"
+if [ "$USE_CUSTOM_SNAPSHOT_SOURCE" = true ]; then
+  "$RETH" download \
+    --chain "$CHAIN" \
+    -u "$BENCH_SNAPSHOT_URL" \
+    -y \
+    --minimal \
+    --datadir "$DATADIR"
+else
+  # Download using reth download (manifest-path with rewritten base_url)
+  "$RETH" download \
+    --manifest-path "$MANIFEST_TMP" \
+    -y \
+    --minimal \
+    --datadir "$DATADIR"
+fi
 
 update_comment "Downloading snapshot… done"
 echo "Snapshot download complete"
@@ -124,6 +148,10 @@ fi
 sync
 sudo schelk promote -y
 
-# Save manifest hash
-echo "$REMOTE_HASH" > "$HASH_FILE"
-echo "Snapshot promoted to schelk baseline (manifest hash: ${REMOTE_HASH:0:16}…)"
+if [ "$USE_CUSTOM_SNAPSHOT_SOURCE" = true ]; then
+  echo "Snapshot promoted to schelk baseline from custom source ${BENCH_SNAPSHOT_URL}"
+else
+  # Save manifest hash
+  echo "$REMOTE_HASH" > "$HASH_FILE"
+  echo "Snapshot promoted to schelk baseline (manifest hash: ${REMOTE_HASH:0:16}…)"
+fi

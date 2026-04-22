@@ -323,6 +323,9 @@ jobs:
               var abba = defaults.abba;
               var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
+              var chain = defaults.chain;
+              var rpcUrl = defaults['rpc-url'];
+              var snapshotUrl = defaults['snapshot-url'];
               var benchArgs = defaults['bench-args'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
@@ -373,6 +376,9 @@ jobs:
             core.setOutput('warmup', warmup);
             core.setOutput('baseline', baseline);
             core.setOutput('feature', feature);
+            core.setOutput('chain', chain);
+            core.setOutput('rpc-url', rpcUrl);
+            core.setOutput('snapshot-url', snapshotUrl);
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
@@ -561,7 +567,9 @@ jobs:
     runs-on: [self-hosted, Linux, X64, available]
     timeout-minutes: 120
     env:
-      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      BENCH_RPC_URL: ${{ needs.reth-bench-ack.outputs.rpc-url }}
+      BENCH_CHAIN: ${{ needs.reth-bench-ack.outputs.chain }}
+      BENCH_SNAPSHOT_URL: ${{ needs.reth-bench-ack.outputs.snapshot-url }}
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
@@ -649,6 +657,12 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const chainVal = process.env.BENCH_CHAIN || 'mainnet';
+            const chainNote = chainVal ? `, chain: \`${chainVal}\`` : '';
+            const rpcUrlVal = process.env.BENCH_RPC_URL || '';
+            const rpcUrlNote = rpcUrlVal ? `, rpc-url: \`${rpcUrlVal}\`` : '';
+            const snapshotUrlVal = process.env.BENCH_SNAPSHOT_URL || '';
+            const snapshotUrlNote = snapshotUrlVal ? `, snapshot-url: \`${snapshotUrlVal}\`` : '';
             const benchArgsVal = process.env.BENCH_BENCH_ARGS || '';
             const benchArgsNote = benchArgsVal ? `, bench-args: \`${benchArgsVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
@@ -656,7 +670,7 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${benchArgsNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${chainNote}${rpcUrlNote}${snapshotUrlNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${benchArgsNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
