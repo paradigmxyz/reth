@@ -33,7 +33,7 @@ use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
 };
 
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -540,11 +540,12 @@ impl<
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
             let input = TrieInput::new(
-                (*input.nodes).clone().into(),
-                (*input.state).clone().into(),
-                input.prefix_sets,
+                Arc::unwrap_or_clone(nodes).into(),
+                Arc::unwrap_or_clone(state).into(),
+                prefix_sets,
             );
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
             proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
@@ -557,11 +558,12 @@ impl<
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
             let input = TrieInput::new(
-                (*input.nodes).clone().into(),
-                (*input.state).clone().into(),
-                input.prefix_sets,
+                Arc::unwrap_or_clone(nodes).into(),
+                Arc::unwrap_or_clone(state).into(),
+                prefix_sets,
             );
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
             proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
