@@ -40,6 +40,8 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+    /// Optional artificial delay applied to MDBX read operations.
+    read_delay: Option<Duration>,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -50,6 +52,7 @@ impl<K: TransactionKind> Tx<K> {
         inner: Transaction<K>,
         dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
+        read_delay: Option<Duration>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
             .map(|env_metrics| {
@@ -59,7 +62,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self { inner, dbis, metrics_handler, read_delay })
     }
 
     /// Returns a reference to the inner libmdbx transaction.
@@ -101,6 +104,7 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+            self.read_delay,
         ))
     }
 
@@ -169,6 +173,19 @@ impl<K: TransactionKind> Tx<K> {
         } else {
             f(&self.inner)
         }
+    }
+
+    fn execute_with_read_delay<T: Table, R>(
+        &self,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce(&Transaction<K>) -> R,
+    ) -> R {
+        self.execute_with_operation_metric::<T, _>(operation, value_size, |tx| {
+            let result = f(tx);
+            apply_read_delay(self.read_delay);
+            result
+        })
     }
 }
 
@@ -294,7 +311,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         &self,
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
-        self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
+        self.execute_with_read_delay::<T, _>(Operation::Get, None, |tx| {
             tx.get(self.get_dbi::<T>()?, key.as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decode_one::<T>)
@@ -447,7 +464,11 @@ mod tests {
     use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
-    use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
+    use std::{
+        sync::atomic::Ordering,
+        thread::sleep,
+        time::{Duration, Instant},
+    };
     use tempfile::tempdir;
 
     #[test]
@@ -497,5 +518,19 @@ mod tests {
             DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn read_delay_applies_to_get() {
+        let dir = tempdir().unwrap();
+        let args = DatabaseArguments::new(ClientVersion::default())
+            .with_read_delay(Some(Duration::from_millis(2)));
+        let mut db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap();
+        db.create_tables().unwrap();
+
+        let tx = db.tx().unwrap();
+        let start = Instant::now();
+        let _ = tx.get::<tables::Transactions>(0).unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(2));
     }
 }

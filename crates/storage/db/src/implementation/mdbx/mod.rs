@@ -119,6 +119,8 @@ pub struct DatabaseArguments {
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
     /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
+    /// Optional artificial delay applied to every MDBX read operation.
+    read_delay: Option<std::time::Duration>,
 }
 
 impl Default for DatabaseArguments {
@@ -143,6 +145,7 @@ impl DatabaseArguments {
             exclusive: None,
             max_readers: None,
             sync_mode: SyncMode::Durable,
+            read_delay: None,
         }
     }
 
@@ -187,6 +190,12 @@ impl DatabaseArguments {
             self.sync_mode = sync_mode;
         }
 
+        self
+    }
+
+    /// Sets an artificial delay applied to each MDBX read operation.
+    pub const fn with_read_delay(mut self, read_delay: Option<std::time::Duration>) -> Self {
+        self.read_delay = read_delay;
         self
     }
 
@@ -254,6 +263,8 @@ pub struct DatabaseEnv {
     dbis: Arc<HashMap<&'static str, ffi::MDBX_dbi>>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Optional artificial delay applied to every MDBX read operation.
+    read_delay: Option<std::time::Duration>,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
 }
@@ -267,6 +278,7 @@ impl Database for DatabaseEnv {
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
+            self.read_delay,
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -276,6 +288,7 @@ impl Database for DatabaseEnv {
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
+            self.read_delay,
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -537,6 +550,7 @@ impl DatabaseEnv {
             path: path.to_path_buf(),
             dbis: Arc::default(),
             metrics: None,
+            read_delay: args.read_delay,
             _lock_file,
         };
 

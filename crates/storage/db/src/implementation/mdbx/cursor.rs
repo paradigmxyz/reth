@@ -31,6 +31,8 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     buf: Vec<u8>,
     /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Optional artificial delay applied to MDBX read operations.
+    read_delay: Option<std::time::Duration>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
@@ -39,8 +41,9 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
     pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
+        read_delay: Option<std::time::Duration>,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+        Self { inner, buf: Vec::new(), metrics, read_delay, _dbi: PhantomData }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -58,6 +61,15 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         } else {
             f(self)
         }
+    }
+
+    fn execute_with_read_delay<R>(
+        &mut self,
+        f: impl FnOnce(&mut reth_libmdbx::Cursor<K>) -> R,
+    ) -> R {
+        let result = f(&mut self.inner);
+        apply_read_delay(self.read_delay);
+        result
     }
 }
 
@@ -90,39 +102,43 @@ macro_rules! compress_to_buf_or_ref {
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.first())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.first()))
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_key(key.encode().as_ref()))
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.set_key(key.encode().as_ref())))
     }
 
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_range(key.encode().as_ref()))
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.set_range(key.encode().as_ref())))
     }
 
     fn next(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.next()))
     }
 
     fn prev(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.prev()))
     }
 
     fn last(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.last())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.last()))
     }
 
     fn current(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.get_current())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.get_current()))
     }
 
     fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
-        let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref())).transpose()
-        } else {
-            self.first().transpose()
-        };
+        let start =
+            if let Some(start_key) = start_key {
+                decode::<T>(self.execute_with_read_delay(|cursor| {
+                    cursor.set_range(start_key.encode().as_ref())
+                }))
+                .transpose()
+            } else {
+                self.first().transpose()
+            };
 
         Ok(Walker::new(self, start))
     }
@@ -132,11 +148,13 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
         let start = match range.start_bound().cloned() {
-            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
+            Bound::Included(key) => {
+                self.execute_with_read_delay(|cursor| cursor.set_range(key.encode().as_ref()))
+            }
             Bound::Excluded(_key) => {
                 unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
             }
-            Bound::Unbounded => self.inner.first(),
+            Bound::Unbounded => self.execute_with_read_delay(|cursor| cursor.first()),
         };
         let start = decode::<T>(start).transpose();
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
@@ -146,12 +164,15 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         &mut self,
         start_key: Option<T::Key>,
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
-        let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref()))
-        } else {
-            self.last()
-        }
-        .transpose();
+        let start =
+            if let Some(start_key) = start_key {
+                decode::<T>(self.execute_with_read_delay(|cursor| {
+                    cursor.set_range(start_key.encode().as_ref())
+                }))
+            } else {
+                self.last()
+            }
+            .transpose();
 
         Ok(ReverseWalker::new(self, start))
     }
@@ -160,18 +181,17 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// Returns the previous `(key, value)` pair of a DUPSORT table.
     fn prev_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev_dup())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.prev_dup()))
     }
 
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_dup())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.next_dup()))
     }
 
     /// Returns the last `value` of the current duplicate `key`.
     fn last_dup(&mut self) -> ValueOnlyResult<T> {
-        self.inner
-            .last_dup()
+        self.execute_with_read_delay(|cursor| cursor.last_dup())
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
@@ -179,13 +199,12 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
     fn next_no_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_nodup())
+        decode::<T>(self.execute_with_read_delay(|cursor| cursor.next_nodup()))
     }
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
-        self.inner
-            .next_dup()
+        self.execute_with_read_delay(|cursor| cursor.next_dup())
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_value::<T>)
             .transpose()
@@ -196,11 +215,12 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         key: <T as Table>::Key,
         subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
-        self.inner
-            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
-            .map_err(|e| DatabaseError::Read(e.into()))?
-            .map(decode_one::<T>)
-            .transpose()
+        self.execute_with_read_delay(|cursor| {
+            cursor.get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+        })
+        .map_err(|e| DatabaseError::Read(e.into()))?
+        .map(decode_one::<T>)
+        .transpose()
     }
 
     /// Depending on its arguments, returns an iterator starting at:
@@ -216,25 +236,26 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 let encoded_key = key.encode();
-                self.inner
-                    .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
-                    .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
+                self.execute_with_read_delay(|cursor| {
+                    cursor.get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
+                })
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (Some(key), None) => {
                 let encoded_key = key.encode();
-                self.inner
-                    .set(encoded_key.as_ref())
+                self.execute_with_read_delay(|cursor| cursor.set(encoded_key.as_ref()))
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
                     let encoded_key = key.encode();
-                    self.inner
-                        .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
-                        .map_err(|e| DatabaseError::Read(e.into()))?
-                        .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
+                    self.execute_with_read_delay(|cursor| {
+                        cursor.get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
+                    })
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
                 } else {
                     Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
                 }
@@ -363,7 +384,7 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
 mod tests {
     use crate::{
         mdbx::{DatabaseArguments, DatabaseEnv, DatabaseEnvKind},
-        tables::StorageChangeSets,
+        tables::{self, StorageChangeSets},
         Database,
     };
     use alloy_primitives::{address, Address, B256, U256};
@@ -374,6 +395,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives_traits::StorageEntry;
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     fn create_test_db() -> DatabaseEnv {
@@ -462,5 +484,28 @@ mod tests {
             assert_eq!(copied_key, expected_key);
             assert_eq!(copied_value, expected_value);
         }
+    }
+
+    #[test]
+    fn read_delay_applies_to_cursor_reads() {
+        let path = TempDir::new().unwrap();
+        let mut db = DatabaseEnv::open(
+            path.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default())
+                .with_read_delay(Some(Duration::from_millis(2))),
+        )
+        .unwrap();
+        db.create_tables().unwrap();
+
+        let tx = db.tx_mut().unwrap();
+        tx.put::<tables::HeaderNumbers>(B256::ZERO, 1).unwrap();
+        tx.commit().unwrap();
+
+        let tx = db.tx().unwrap();
+        let mut cursor = tx.cursor_read::<tables::HeaderNumbers>().unwrap();
+        let start = Instant::now();
+        let _ = cursor.first().unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(2));
     }
 }

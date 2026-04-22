@@ -4,7 +4,10 @@ use crate::{
     table::{Decode, Decompress, Table, TableRow},
     DatabaseError,
 };
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    time::{Duration, Instant},
+};
 
 /// Helper function to decode a `(key, value)` pair.
 pub(crate) fn decoder<'a, T>(
@@ -49,4 +52,18 @@ where
         Cow::Borrowed(v) => Decompress::decompress(v)?,
         Cow::Owned(v) => Decompress::decompress_owned(v)?,
     })
+}
+
+/// Applies an artificial read delay.
+///
+/// This uses a short busy-wait instead of `thread::sleep` so hidden benchmark knobs like
+/// `--db.read-delay=500us` can approximate sub-millisecond latency without depending on OS sleep
+/// granularity.
+pub(crate) fn apply_read_delay(read_delay: Option<Duration>) {
+    let Some(read_delay) = read_delay.filter(|delay| !delay.is_zero()) else { return };
+
+    let start = Instant::now();
+    while start.elapsed() < read_delay {
+        std::hint::spin_loop();
+    }
 }

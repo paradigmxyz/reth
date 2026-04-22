@@ -60,6 +60,12 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
+    /// Hidden benchmark/debug knob that adds an artificial delay to each MDBX read operation.
+    ///
+    /// This is primarily intended for storage-latency simulation when kernel/device-level
+    /// shaping cannot represent sub-millisecond delays.
+    #[arg(long = "db.read-delay", value_parser = humantime::parse_duration, hide = true)]
+    pub read_delay: Option<Duration>,
 }
 
 impl DatabaseArgs {
@@ -89,6 +95,7 @@ impl DatabaseArgs {
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
+            .with_read_delay(self.read_delay)
     }
 }
 
@@ -434,5 +441,13 @@ mod tests {
         let result =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_read_delay() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.read-delay", "500us"])
+                .unwrap();
+        assert_eq!(cmd.args.read_delay, Some(Duration::from_micros(500)));
     }
 }
