@@ -10,6 +10,8 @@ ignore = [
     "RUSTSEC-2025-0141",
     # https://rustsec.org/advisories/RUSTSEC-2023-0089 atomic-polyfill is unmaintained, transitive dep via test-fuzz
     "RUSTSEC-2023-0089",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0104 rustls-webpki only affects CRL parsing, which reth does not use
+    "RUSTSEC-2026-0104",
 ]
 
 # This section is considered when running `cargo deny check bans`.
