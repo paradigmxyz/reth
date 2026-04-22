@@ -28,7 +28,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
 };
 use clap::Parser;
-use eyre::{bail, Context, OptionExt};
+use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
@@ -139,10 +139,6 @@ struct ReorgState {
 impl ReorgState {
     const fn new(depth: usize) -> Self {
         Self { depth, fork_length: 0, branch_point_hash: None, fork_parent_hash: None }
-    }
-
-    fn next_fork_parent_hash(&self, canonical_parent_hash: B256) -> B256 {
-        self.fork_parent_hash.unwrap_or(canonical_parent_hash)
     }
 
     const fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
@@ -281,7 +277,21 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
-        let mut queued_fork_block: Option<QueuedForkBlock> = None;
+        let mut queued_fork_block = if reorg_state.is_some() {
+            queue_fork_block(
+                &block_provider,
+                &local_rpc_provider,
+                &benchmark_mode,
+                next_block,
+                None,
+                use_reth_namespace,
+                wait_for_persistence,
+                no_wait_for_caches,
+            )
+            .await?
+        } else {
+            None
+        };
         while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
@@ -293,7 +303,6 @@ impl Command {
             let block_number = block.header.number;
             let canonical_parent_hash = block.header.parent_hash;
             let transaction_count = block.transactions.len() as u64;
-            let fork_block = reorg_state.as_ref().map(|_| block.clone());
             let canonical_forkchoice_state = ForkchoiceState {
                 head_block_hash: head,
                 safe_block_hash: safe,
@@ -357,34 +366,16 @@ impl Command {
             };
 
             if let Some(reorg_state) = reorg_state.as_mut() {
-                let fork_block = fork_block
-                    .as_ref()
-                    .ok_or_eyre("missing source block for reorg fork construction")?;
-                let prepared = if let Some(queued) = queued_fork_block.take() {
-                    if queued.block_number == block_number {
-                        queued.prepared
-                    } else {
-                        prepare_built_block(
-                            &local_rpc_provider,
-                            fork_block,
-                            reorg_state.next_fork_parent_hash(canonical_parent_hash),
-                            use_reth_namespace,
-                            wait_for_persistence,
-                            no_wait_for_caches,
-                        )
-                        .await?
-                    }
-                } else {
-                    prepare_built_block(
-                        &local_rpc_provider,
-                        fork_block,
-                        reorg_state.next_fork_parent_hash(canonical_parent_hash),
-                        use_reth_namespace,
-                        wait_for_persistence,
-                        no_wait_for_caches,
-                    )
-                    .await?
-                };
+                let queued = queued_fork_block
+                    .take()
+                    .ok_or_eyre("missing queued fork block for reorg replay")?;
+                ensure!(
+                    queued.block_number == block_number,
+                    "queued fork block {} does not match source block {}",
+                    queued.block_number,
+                    block_number
+                );
+                let prepared = queued.prepared;
 
                 call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
                     .await?;
@@ -411,33 +402,19 @@ impl Command {
                 .await?;
                 let _fork_fcu_latency = fcu_start.elapsed();
 
+                let next_fork_block_number = block_number + 1;
                 if reorg_state.fork_length < reorg_state.depth {
-                    let next_fork_block_number = block_number + 1;
-                    if benchmark_mode.contains(next_fork_block_number) {
-                        let future_block = block_provider
-                            .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(
-                                next_fork_block_number,
-                            ))
-                            .full()
-                            .await
-                            .wrap_err_with(|| {
-                                format!("Failed to fetch block by number {next_fork_block_number}")
-                            })?
-                            .ok_or_eyre("Block not found")?;
-
-                        queued_fork_block = Some(QueuedForkBlock {
-                            block_number: next_fork_block_number,
-                            prepared: prepare_built_block(
-                                &local_rpc_provider,
-                                &future_block,
-                                prepared.block_hash,
-                                use_reth_namespace,
-                                wait_for_persistence,
-                                no_wait_for_caches,
-                            )
-                            .await?,
-                        });
-                    }
+                    queued_fork_block = queue_fork_block(
+                        &block_provider,
+                        &local_rpc_provider,
+                        &benchmark_mode,
+                        next_fork_block_number,
+                        Some(prepared.block_hash),
+                        use_reth_namespace,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )
+                    .await?;
                 } else {
                     info!(
                         target: "reth-bench",
@@ -446,7 +423,17 @@ impl Command {
                         "Resetting reorg branch after reaching max depth"
                     );
                     reorg_state.reset();
-                    queued_fork_block = None;
+                    queued_fork_block = queue_fork_block(
+                        &block_provider,
+                        &local_rpc_provider,
+                        &benchmark_mode,
+                        next_fork_block_number,
+                        None,
+                        use_reth_namespace,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )
+                    .await?;
                 }
             }
 
@@ -536,6 +523,42 @@ async fn prepare_built_block(
     )?;
 
     Ok(PreparedBuiltBlock { block_hash, version, params })
+}
+
+async fn queue_fork_block(
+    block_provider: &RootProvider<AnyNetwork>,
+    local_rpc_provider: &RootProvider<AnyNetwork>,
+    benchmark_mode: &crate::bench_mode::BenchMode,
+    block_number: u64,
+    parent_block_hash: Option<B256>,
+    use_reth_namespace: bool,
+    wait_for_persistence: WaitForPersistence,
+    no_wait_for_caches: bool,
+) -> eyre::Result<Option<QueuedForkBlock>> {
+    if !benchmark_mode.contains(block_number) {
+        return Ok(None)
+    }
+
+    let future_block = block_provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
+        .full()
+        .await
+        .wrap_err_with(|| format!("Failed to fetch block by number {block_number}"))?
+        .ok_or_eyre("Block not found")?;
+    let parent_block_hash = parent_block_hash.unwrap_or(future_block.header.parent_hash);
+
+    Ok(Some(QueuedForkBlock {
+        block_number,
+        prepared: prepare_built_block(
+            local_rpc_provider,
+            &future_block,
+            parent_block_hash,
+            use_reth_namespace,
+            wait_for_persistence,
+            no_wait_for_caches,
+        )
+        .await?,
+    }))
 }
 
 fn build_block_request(
