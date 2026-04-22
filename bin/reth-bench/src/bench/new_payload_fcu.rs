@@ -12,7 +12,6 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
-        payload_to_new_payload,
     },
 };
 use alloy_consensus::TxEnvelope;
@@ -646,9 +645,7 @@ fn built_payload_to_execution_data(
                 .ok_or_eyre("missing parent beacon block root for built fork block")?;
             let (payload, sidecar) =
                 built_payload.into_payload_and_sidecar(parent_beacon_block_root);
-            let (_, _, execution_data) =
-                payload_to_new_payload(payload, sidecar, Some(target_version))?;
-            Ok(execution_data)
+            Ok(ExecutionData { payload, sidecar })
         }
         EngineApiMessageVersion::V6 => {
             bail!("--reorg does not support Amsterdam payload fields yet")
