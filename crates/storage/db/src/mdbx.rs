@@ -15,7 +15,7 @@ const ORPHAN_TABLES: &[&str] = &["AccountsTrieChangeSets", "StoragesTrieChangeSe
 /// Checks if the given path resides on a ZFS filesystem and logs a warning.
 ///
 /// ZFS uses copy-on-write (COW) semantics which conflict with MDBX's write patterns, leading to
-/// significant performance degradation and database bloat.
+/// significant performance degradation.
 fn warn_if_zfs(path: &Path) {
     if matches!(is_zfs(path), Ok(true)) {
         warn!(
