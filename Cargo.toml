@@ -699,3 +699,6 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+ruint = { git = "https://github.com/pepyakin/uint", rev = "a4e192a9f151a8b8347db83bafae571c331a5044" }

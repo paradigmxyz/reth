@@ -10785,8 +10785,7 @@ checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
 [[package]]
 name = "ruint"
 version = "1.17.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c141e807189ad38a07276942c6623032d3753c8859c146104ac2e4d68865945a"
+source = "git+https://github.com/pepyakin/uint?rev=a4e192a9f151a8b8347db83bafae571c331a5044#a4e192a9f151a8b8347db83bafae571c331a5044"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
