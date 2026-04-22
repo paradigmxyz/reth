@@ -410,6 +410,16 @@ impl Command {
                         reorg_depth = reorg_state.depth,
                         "Resetting reorg branch after reaching max depth"
                     );
+
+                    // `testing_buildBlockV1` resolves the parent from canonical state, so switch
+                    // back to the source chain before reseeding the next queued fork block.
+                    call_forkchoice_updated_with_reth(
+                        &auth_provider,
+                        version,
+                        canonical_forkchoice_state,
+                    )
+                    .await?;
+
                     reorg_state.reset();
                     queued_fork_block = queue_fork_block(
                         &block_provider,
