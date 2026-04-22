@@ -139,6 +139,24 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 }
 
+/// Provides the sealed header and canonical state for a block hash from one consistent snapshot.
+pub trait HeaderAndStateProvider: HeaderProvider + StateProviderFactory {
+    /// Returns the sealed header and canonical state for the given block hash.
+    fn sealed_header_and_state_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<(SealedHeader<Self::Header>, StateProviderBox)>;
+}
+
+impl<N: ProviderNodeTypes> HeaderAndStateProvider for BlockchainProvider<N> {
+    fn sealed_header_and_state_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<(SealedHeader<Self::Header>, StateProviderBox)> {
+        self.consistent_provider()?.sealed_header_and_state_by_hash(block_hash)
+    }
+}
+
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }

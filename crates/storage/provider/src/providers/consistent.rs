@@ -462,6 +462,19 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         storage_provider.try_into_history_at_block(block_number)
     }
+
+    /// Consumes the provider and returns the sealed header and state provider for a canonical
+    /// block hash from the same snapshot.
+    pub fn sealed_header_and_state_by_hash(
+        self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<(SealedHeader<HeaderTy<N>>, StateProviderBox)> {
+        let header = self
+            .sealed_header_by_hash(block_hash)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
+        let state = self.into_state_provider_at_block_hash(block_hash)?;
+        Ok((header, state))
+    }
 }
 
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
