@@ -7,6 +7,7 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
+#               BENCH_CHAIN (chain passed to `reth node`, defaults to mainnet behavior)
 #               BENCH_BAL (false/true/feature/baseline; only used with big blocks)
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BENCH_ARGS (extra reth-bench args for warmup and benchmark runs)
@@ -130,6 +131,10 @@ RETH_ARGS=(
   --disable-discovery
   --no-persist-peers
 )
+
+if [ -n "${BENCH_CHAIN:-}" ]; then
+  RETH_ARGS+=(--chain "$BENCH_CHAIN")
+fi
 
 # Gate flag on binary support (older baselines may not have it).
 # Uses --help which exits immediately via clap without node init.
