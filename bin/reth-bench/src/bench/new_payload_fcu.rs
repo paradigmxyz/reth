@@ -495,7 +495,7 @@ async fn prepare_built_block(
     block_provider: &RootProvider<AnyNetwork>,
     block: &AnyRpcBlock,
     parent_block_hash: B256,
-    wait_for_persistence: WaitForPersistence,
+    _wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
     let request = build_block_request(block, parent_block_hash)?;
@@ -506,11 +506,12 @@ async fn prepare_built_block(
 
     let payload = &built_payload.execution_payload.payload_inner.payload_inner;
     let block_hash = payload.block_hash;
-    let block_number = payload.block_number;
-    let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
     let execution_data =
         built_payload_to_execution_data(built_payload, block.header.parent_beacon_block_root);
-    let params = reth_new_payload_params(execution_data, wait_for_persistence, no_wait_for_caches)?;
+    // Fork payloads are built immediately before the next `testing_buildBlockV1` call. Leaving
+    // reth's default persistence wait enabled here gives the regular RPC side a consistent base
+    // state for the next synthetic fork block build.
+    let params = reth_new_payload_params(execution_data, None, no_wait_for_caches)?;
 
     Ok(PreparedBuiltBlock { block_hash, params })
 }
