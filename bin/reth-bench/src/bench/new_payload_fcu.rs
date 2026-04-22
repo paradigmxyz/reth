@@ -318,7 +318,7 @@ impl Command {
             {
                 Some(
                     prepare_built_block(
-                        &auth_provider,
+                        &block_provider,
                         &block,
                         reorg_state.next_fork_parent_hash(canonical_parent_hash),
                         use_reth_namespace,
@@ -493,7 +493,7 @@ impl Command {
 }
 
 async fn prepare_built_block(
-    auth_provider: &RootProvider<AnyNetwork>,
+    block_provider: &RootProvider<AnyNetwork>,
     block: &AnyRpcBlock,
     parent_block_hash: B256,
     use_reth_namespace: bool,
@@ -503,7 +503,7 @@ async fn prepare_built_block(
     let version = build_block_target_version(block)?;
     let request = build_block_request(block, parent_block_hash)?;
     let built_payload: ExecutionPayloadEnvelopeV5 =
-        auth_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
+        block_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
             || format!("Failed to build block {} via testing_buildBlockV1", block.header.number),
         )?;
 
