@@ -536,6 +536,10 @@ where
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// Whether to disable BAL-driven parallel state root computation.
+    pub disable_bal_parallel_state_root: bool,
+    /// Whether BAL batched IO is disabled.
+    pub disable_bal_batch_io: bool,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -631,6 +635,9 @@ where
         account_changes: &alloy_eip7928::AccountChanges,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
+        if self.disable_bal_parallel_state_root {
+            return;
+        }
         let address = account_changes.address;
         let mut hashed_address = None;
 

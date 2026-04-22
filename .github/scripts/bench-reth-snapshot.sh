@@ -21,11 +21,6 @@
 set -euxo pipefail
 
 MC="mc"
-BUCKET="minio/reth-snapshots"
-# Allow overriding the snapshot name (e.g. for big-blocks mode where the
-# big-blocks manifest specifies which base snapshot to use).
-SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable-previous}"
-MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
 DATADIR_NAME="datadir"
 HASH_MODE_SUFFIX=""
 if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
@@ -35,12 +30,68 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 HASH_FILE="$HOME/.reth-bench-snapshot-hash${HASH_MODE_SUFFIX}"
 
-# Fetch manifest and compute content hash for reliable freshness check
-MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
-  echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
+resolve_bucket() {
+  local candidate
+
+  for candidate in \
+    "${BENCH_SNAPSHOT_BUCKET:-}" \
+    "r2-reth-snapshots/reth-snapshots" \
+    "minio/reth-snapshots"; do
+    if [ -n "$candidate" ] && $MC ls "$candidate" >/dev/null 2>&1; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  echo "::error::Failed to find a readable snapshot bucket via mc ls"
   exit 2
 }
-REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
+
+resolve_snapshot_name() {
+  local bucket="$1"
+
+  # Big-block benchmarks pin the base snapshot via BENCH_SNAPSHOT_NAME.
+  if [ -n "${BENCH_SNAPSHOT_NAME:-}" ]; then
+    echo "$BENCH_SNAPSHOT_NAME"
+    return 0
+  fi
+
+  mapfile -t snapshots < <(
+    $MC ls "$bucket" 2>/dev/null \
+      | awk '$NF ~ /\/$/ { print $NF }' \
+      | sed 's:/$::'
+  )
+
+  if [ "${#snapshots[@]}" -lt 2 ]; then
+    echo "::error::Need at least two snapshots in ${bucket} to resolve the previous snapshot"
+    exit 2
+  fi
+
+  echo "${snapshots[$(( ${#snapshots[@]} - 2 ))]}"
+}
+
+BUCKET="$(resolve_bucket)"
+SNAPSHOT_NAME="$(resolve_snapshot_name "$BUCKET")"
+MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
+BUCKET_ALIAS="${BUCKET%%/*}"
+BUCKET_PATH="${BUCKET#*/}"
+
+echo "Using snapshot bucket: ${BUCKET}"
+echo "Using snapshot: ${SNAPSHOT_NAME}"
+
+# Fetch manifest and compute content hash for reliable freshness check
+XTRACE_WAS_ENABLED=false
+if [[ $- == *x* ]]; then
+  XTRACE_WAS_ENABLED=true
+  set +x
+fi
+
+if ! MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null); then
+  echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
+  exit 2
+fi
+ORIGINAL_BASE_URL=$(printf '%s' "$MANIFEST_CONTENT" | jq -r '.base_url // empty')
+REMOTE_HASH=$(printf '%s' "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
 
 LOCAL_HASH=""
 [ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
@@ -64,18 +115,35 @@ fi
 # Resolve the MinIO HTTP endpoint from the mc alias so reth can
 # fetch archives over HTTP (the manifest's embedded base_url points
 # to the cluster-internal address which is unreachable from runners).
-MINIO_ENDPOINT=$($MC alias list minio --json 2>/dev/null | jq -r '.URL // empty') || true
+MINIO_ENDPOINT=$($MC alias list "$BUCKET_ALIAS" --json 2>/dev/null | jq -r '.URL // empty') || true
 if [ -z "$MINIO_ENDPOINT" ]; then
-  echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
+  echo "::error::Failed to resolve snapshot endpoint from mc alias '${BUCKET_ALIAS}'"
   exit 1
 fi
-BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/${SNAPSHOT_NAME}"
 
-# Rewrite manifest's base_url with the runner-reachable endpoint
 MANIFEST_TMP=$(mktemp --suffix=.json)
 trap 'rm -f -- "$MANIFEST_TMP"' EXIT
-echo "$MANIFEST_CONTENT" \
-  | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
+if [[ "$MINIO_ENDPOINT" == *".r2.cloudflarestorage.com" ]]; then
+  # R2's S3 endpoint is not the public object-download URL. Keep the manifest's
+  # published base_url (for example r2.dev or a custom domain) for anonymous GETs.
+  printf '%s' "$MANIFEST_CONTENT" > "$MANIFEST_TMP"
+else
+  BASE_URL="${MINIO_ENDPOINT%/}/${BUCKET_PATH}/${SNAPSHOT_NAME}"
+  # Rewrite manifest's base_url with the runner-reachable endpoint.
+  printf '%s' "$MANIFEST_CONTENT" \
+    | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
+fi
+EFFECTIVE_BASE_URL=$(jq -r '.base_url // empty' "$MANIFEST_TMP")
+
+if [ "$XTRACE_WAS_ENABLED" = true ]; then
+  set -x
+fi
+
+echo "Manifest base_url before rewrite: ${ORIGINAL_BASE_URL:-<empty>}"
+if [[ "$MINIO_ENDPOINT" == *".r2.cloudflarestorage.com" ]]; then
+  echo "Using manifest base_url for R2 snapshot downloads"
+fi
+echo "Manifest base_url after rewrite: ${EFFECTIVE_BASE_URL:-<empty>}"
 
 # Prepare mount. If a previous run left the volume mounted, recover first.
 sudo schelk recover -y --kill || true

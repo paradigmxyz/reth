@@ -196,8 +196,6 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         payload: Payload::ExecutionData,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
-        /// When this message was enqueued, used to measure backpressure wait time.
-        enqueued_at: Instant,
     },
     /// Message with new payload used by `reth_newPayload` endpoint.
     ///
@@ -290,11 +288,7 @@ where
         payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
-            payload,
-            tx,
-            enqueued_at: Instant::now(),
-        });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 

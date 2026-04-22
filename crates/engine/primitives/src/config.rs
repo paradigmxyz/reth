@@ -170,6 +170,23 @@ pub struct TreeConfig {
     share_execution_cache_with_payload_builder: bool,
     /// Whether to share sparse trie with the payload builder.
     share_sparse_trie_with_payload_builder: bool,
+    /// Whether to suppress persistence cycles while building a payload.
+    ///
+    /// When enabled, persistence is deferred from the moment an FCU with payload attributes
+    /// arrives until the next FCU without attributes. This avoids persistence I/O competing
+    /// with block building on latency-sensitive chains.
+    suppress_persistence_during_build: bool,
+    /// Whether to disable BAL (Block Access List, EIP-7928) based parallel execution.
+    /// When disabled, falls back to transaction-based prewarming even when a BAL is available.
+    disable_bal_parallel_execution: bool,
+    /// Whether to disable BAL-driven parallel state root computation.
+    /// When disabled, the BAL hashed post state is not sent to the multiproof task for
+    /// early parallel state root computation.
+    disable_bal_parallel_state_root: bool,
+    /// Whether to disable BAL (Block Access List) batched IO during prewarming.
+    /// When disabled, falls back to individual per-slot storage reads instead of
+    /// batched cursor reads via `storage_range`.
+    disable_bal_batch_io: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -212,6 +229,10 @@ impl Default for TreeConfig {
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
+            suppress_persistence_during_build: false,
+            disable_bal_parallel_execution: false,
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -283,6 +304,10 @@ impl TreeConfig {
             state_root_task_timeout,
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build: false,
+            disable_bal_parallel_execution: false,
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -643,6 +668,56 @@ impl TreeConfig {
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
         self.share_sparse_trie_with_payload_builder = share_sparse_trie_with_payload_builder;
+        self
+    }
+
+    /// Returns whether persistence is suppressed during payload building.
+    pub const fn suppress_persistence_during_build(&self) -> bool {
+        self.suppress_persistence_during_build
+    }
+
+    /// Setter for whether to suppress persistence during payload building.
+    pub const fn with_suppress_persistence_during_build(mut self, value: bool) -> Self {
+        self.suppress_persistence_during_build = value;
+        self
+    }
+
+    /// Returns whether BAL-based parallel execution is disabled.
+    pub const fn disable_bal_parallel_execution(&self) -> bool {
+        self.disable_bal_parallel_execution
+    }
+
+    /// Setter for whether to disable BAL-based parallel execution.
+    pub const fn without_bal_parallel_execution(
+        mut self,
+        disable_bal_parallel_execution: bool,
+    ) -> Self {
+        self.disable_bal_parallel_execution = disable_bal_parallel_execution;
+        self
+    }
+
+    /// Returns whether BAL-driven parallel state root computation is disabled.
+    pub const fn disable_bal_parallel_state_root(&self) -> bool {
+        self.disable_bal_parallel_state_root
+    }
+
+    /// Setter for whether to disable BAL-driven parallel state root computation.
+    pub const fn without_bal_parallel_state_root(
+        mut self,
+        disable_bal_parallel_state_root: bool,
+    ) -> Self {
+        self.disable_bal_parallel_state_root = disable_bal_parallel_state_root;
+        self
+    }
+
+    /// Returns whether BAL batched IO is disabled.
+    pub const fn disable_bal_batch_io(&self) -> bool {
+        self.disable_bal_batch_io
+    }
+
+    /// Setter for whether to disable BAL batched IO.
+    pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
+        self.disable_bal_batch_io = disable_bal_batch_io;
         self
     }
 

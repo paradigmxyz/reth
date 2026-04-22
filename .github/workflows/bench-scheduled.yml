@@ -975,6 +975,11 @@ jobs:
               }),
             });
 
+      - name: Clean build outputs
+        if: always()
+        run: |
+          sudo rm -rf ../reth-baseline/target ../reth-feature/target "$BENCH_WORK_DIR" 2>/dev/null || true
+
       - name: Restore system settings
         if: always()
         run: |
