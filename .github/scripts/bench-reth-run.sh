@@ -9,6 +9,7 @@
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
 #               BENCH_BAL (false/true/feature/baseline; only used with big blocks)
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
+#               BENCH_REORG (reorg depth for measured new-payload-fcu runs)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
@@ -253,6 +254,15 @@ if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
 
+BENCH_ONLY_ARGS=()
+if [ -n "${BENCH_REORG:-}" ]; then
+  if [ "$BIG_BLOCKS" = "true" ]; then
+    echo "::error::BENCH_REORG is not supported with big-blocks mode"
+    exit 1
+  fi
+  BENCH_ONLY_ARGS+=(--reorg "$BENCH_REORG")
+fi
+
 if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
@@ -346,6 +356,7 @@ else
     --jwt-secret "$DATADIR/jwt.hex" \
     --advance "$BENCH_BLOCKS" \
     "${EXTRA_BENCH_ARGS[@]}" \
+    "${BENCH_ONLY_ARGS[@]}" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
 fi
 

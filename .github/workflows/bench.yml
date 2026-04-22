@@ -51,6 +51,11 @@ on:
         required: false
         default: ""
         type: string
+      reorg:
+        description: "Reorg depth for new-payload-fcu (empty disables reorg mode)"
+        required: false
+        default: ""
+        type: string
       baseline_args:
         description: "Extra CLI args for the baseline reth node"
         required: false
@@ -125,6 +130,7 @@ jobs:
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
+      reorg: ${{ steps.args.outputs.reorg }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
       abba: ${{ steps.args.outputs.abba }}
@@ -177,6 +183,7 @@ jobs:
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
               var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
+              var reorg = '${{ github.event.inputs.reorg }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
 
@@ -295,6 +302,7 @@ jobs:
               var abba = defaults.abba;
               var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
+              var reorg = '';
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
             }
@@ -352,6 +360,7 @@ jobs:
             core.setOutput('big-blocks', bigBlocks);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
+            core.setOutput('reorg', reorg);
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
             core.setOutput('abba', abba);
@@ -544,6 +553,7 @@ jobs:
       BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
       BENCH_BAL: ${{ needs.reth-bench-ack.outputs.bal }}
       BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
+      BENCH_REORG: ${{ needs.reth-bench-ack.outputs.reorg }}
       BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
