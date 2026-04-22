@@ -125,7 +125,7 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     /// Database provider
     provider: &'b Provider,
     /// Changeset cache handle for retrieving trie changesets.
-    _changeset_cache: ChangesetCache,
+    changeset_cache: ChangesetCache,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
@@ -143,7 +143,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     ) -> Self {
         Self {
             provider,
-            _changeset_cache: changeset_cache,
+            changeset_cache,
             block_number,
             lowest_available_blocks: Default::default(),
         }
@@ -157,7 +157,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         lowest_available_blocks: LowestAvailableBlocks,
         changeset_cache: ChangesetCache,
     ) -> Self {
-        Self { provider, _changeset_cache: changeset_cache, block_number, lowest_available_blocks }
+        Self { provider, changeset_cache, block_number, lowest_available_blocks }
     }
 
     /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
@@ -288,7 +288,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
         let TrieInputSorted { nodes, state, prefix_sets } = input;
-        let overlay_builder = OverlayBuilder::new(self._changeset_cache.clone())
+        let overlay_builder = OverlayBuilder::new(self.changeset_cache.clone())
             .with_block_hash(Some(block_hash))
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let Overlay { trie_updates, hashed_post_state } =
