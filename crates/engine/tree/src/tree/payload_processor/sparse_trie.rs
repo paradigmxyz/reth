@@ -983,11 +983,12 @@ mod tests {
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let overlay_factory = OverlayStateProviderFactory::<_, reth_chain_state::EthPrimitives>::new(
-            provider_factory,
-            B256::ZERO,
-            ChangesetCache::new(),
-        );
+        let overlay_factory =
+            OverlayStateProviderFactory::<_, reth_chain_state::EthPrimitives>::new(
+                provider_factory,
+                B256::ZERO,
+                ChangesetCache::new(),
+            );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
 
