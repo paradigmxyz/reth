@@ -718,9 +718,9 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub disable_discv4_discovery: bool,
 
-    /// Enable Discv5 discovery.
+    /// Disable Discv5 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
-    pub enable_discv5_discovery: bool,
+    pub disable_discv5_discovery: bool,
 
     /// Disable Nat discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
@@ -852,15 +852,15 @@ impl DiscoveryArgs {
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
-    /// Returns true if discv5 discovery should be configured
+    /// Returns true if discv5 discovery should be configured.
+    ///
+    /// Discv5 is enabled by default and can be disabled with `--disable-discv5-discovery`.
     const fn should_enable_discv5(&self) -> bool {
-        if self.disable_discovery {
+        if self.disable_discovery || self.disable_discv5_discovery {
             return false;
         }
 
-        self.enable_discv5_discovery ||
-            self.discv5_addr.is_some() ||
-            self.discv5_addr_ipv6.is_some()
+        true
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
@@ -895,7 +895,7 @@ impl Default for DiscoveryArgs {
             disable_discovery: false,
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
-            enable_discv5_discovery: false,
+            disable_discv5_discovery: false,
             disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
