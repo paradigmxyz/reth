@@ -12,6 +12,7 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+        NewPayloadTimingBreakdown,
     },
 };
 use alloy_consensus::TxEnvelope;
@@ -30,6 +31,7 @@ use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
+use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
 use std::time::{Duration, Instant};
@@ -273,6 +275,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
+        let reorg_enabled = reorg_state.is_some();
         let mut queued_fork_block = if reorg_state.is_some() {
             queue_fork_block(
                 &block_provider,
@@ -323,8 +326,11 @@ impl Command {
 
             debug!(target: "reth-bench", ?block_number, "Sending payload");
             let start = Instant::now();
-            let server_timings =
-                call_new_payload_with_reth(&auth_provider, version, params).await?;
+            let server_timings = if reorg_enabled {
+                call_new_payload_with_retries(&auth_provider, version, params).await?
+            } else {
+                call_new_payload_with_reth(&auth_provider, version, params).await?
+            };
             let np_latency =
                 server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
             let new_payload_result = NewPayloadResult {
@@ -372,7 +378,7 @@ impl Command {
                 );
                 let prepared = queued.prepared;
 
-                call_new_payload_with_reth(&auth_provider, None, prepared.params).await?;
+                call_new_payload_with_retries(&auth_provider, None, prepared.params).await?;
 
                 reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
                 let forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
@@ -575,6 +581,33 @@ fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool
     let message = err.to_string();
     message.contains("block not found: hash") ||
         message.contains("block hash not found for block number")
+}
+
+async fn call_new_payload_with_retries(
+    provider: &RootProvider<AnyNetwork>,
+    version: Option<EngineApiMessageVersion>,
+    params: serde_json::Value,
+) -> eyre::Result<Option<NewPayloadTimingBreakdown>> {
+    const MAX_NEW_PAYLOAD_ATTEMPTS: usize = 10;
+    const NEW_PAYLOAD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+    let mut attempts_remaining = MAX_NEW_PAYLOAD_ATTEMPTS;
+
+    loop {
+        match call_new_payload_with_reth(provider, version, params.clone()).await {
+            Ok(timings) => return Ok(timings),
+            Err(err) if attempts_remaining > 1 && is_retryable_new_payload_error(&err) => {
+                attempts_remaining -= 1;
+                tokio::time::sleep(NEW_PAYLOAD_RETRY_INTERVAL).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn is_retryable_new_payload_error(err: &eyre::Report) -> bool {
+    let message = err.to_string();
+    message.contains("block hash not found for block number")
 }
 
 fn build_block_request(
