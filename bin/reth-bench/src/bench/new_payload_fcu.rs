@@ -128,16 +128,9 @@ struct QueuedForkBlock {
     prepared: PreparedBuiltBlock,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActiveBranch {
-    Canonical,
-    Fork,
-}
-
 #[derive(Debug)]
 struct ReorgState {
     depth: usize,
-    active_branch: ActiveBranch,
     fork_length: usize,
     branch_point_hash: Option<B256>,
     fork_parent_hash: Option<B256>,
@@ -145,24 +138,11 @@ struct ReorgState {
 
 impl ReorgState {
     const fn new(depth: usize) -> Self {
-        Self {
-            depth,
-            active_branch: ActiveBranch::Canonical,
-            fork_length: 0,
-            branch_point_hash: None,
-            fork_parent_hash: None,
-        }
+        Self { depth, fork_length: 0, branch_point_hash: None, fork_parent_hash: None }
     }
 
     fn next_fork_parent_hash(&self, canonical_parent_hash: B256) -> B256 {
         self.fork_parent_hash.unwrap_or(canonical_parent_hash)
-    }
-
-    const fn next_target_branch(&self) -> ActiveBranch {
-        match self.active_branch {
-            ActiveBranch::Canonical => ActiveBranch::Fork,
-            ActiveBranch::Fork => ActiveBranch::Canonical,
-        }
     }
 
     const fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
@@ -187,7 +167,6 @@ impl ReorgState {
         self.fork_length = 0;
         self.branch_point_hash = None;
         self.fork_parent_hash = None;
-        self.active_branch = ActiveBranch::Canonical;
     }
 }
 
@@ -314,48 +293,11 @@ impl Command {
             let block_number = block.header.number;
             let canonical_parent_hash = block.header.parent_hash;
             let transaction_count = block.transactions.len() as u64;
+            let fork_block = reorg_state.as_ref().map(|_| block.clone());
             let canonical_forkchoice_state = ForkchoiceState {
                 head_block_hash: head,
                 safe_block_hash: safe,
                 finalized_block_hash: finalized,
-            };
-
-            let next_target_branch = reorg_state.as_ref().map(ReorgState::next_target_branch);
-
-            let built_fork_block = if let (Some(reorg_state), Some(ActiveBranch::Fork)) =
-                (reorg_state.as_ref(), next_target_branch)
-            {
-                if let Some(queued) = queued_fork_block.take() {
-                    if queued.block_number == block_number {
-                        Some(queued.prepared)
-                    } else {
-                        Some(
-                            prepare_built_block(
-                                &local_rpc_provider,
-                                &block,
-                                reorg_state.next_fork_parent_hash(canonical_parent_hash),
-                                use_reth_namespace,
-                                wait_for_persistence,
-                                no_wait_for_caches,
-                            )
-                            .await?,
-                        )
-                    }
-                } else {
-                    Some(
-                        prepare_built_block(
-                            &local_rpc_provider,
-                            &block,
-                            reorg_state.next_fork_parent_hash(canonical_parent_hash),
-                            use_reth_namespace,
-                            wait_for_persistence,
-                            no_wait_for_caches,
-                        )
-                        .await?,
-                    )
-                }
-            } else {
-                None
             };
 
             let bal = if rlp.is_none() &&
@@ -376,55 +318,6 @@ impl Command {
             )?;
 
             debug!(target: "reth-bench", ?block_number, "Sending payload");
-            let mut forkchoice_state = canonical_forkchoice_state;
-            let mut forkchoice_version = version;
-            let mut next_queued_fork_parent = None;
-
-            if let Some(prepared) = built_fork_block {
-                call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
-                    .await?;
-
-                if let Some(reorg_state) = reorg_state.as_mut() {
-                    reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
-                    forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
-                    forkchoice_version = prepared.version;
-                    reorg_state.active_branch = ActiveBranch::Fork;
-
-                    info!(
-                        target: "reth-bench",
-                        block_number,
-                        branch_point = %forkchoice_state.safe_block_hash,
-                        fork_head = %prepared.block_hash,
-                        fork_depth = reorg_state.fork_length,
-                        max_reorg_depth = reorg_state.depth,
-                        "Switching forkchoice to reorg branch"
-                    );
-
-                    let next_fork_block_number = block_number + 2;
-                    if reorg_state.fork_length < reorg_state.depth &&
-                        benchmark_mode.contains(next_fork_block_number)
-                    {
-                        next_queued_fork_parent =
-                            Some((next_fork_block_number, prepared.block_hash));
-                    }
-                }
-            } else if let Some(reorg_state) = reorg_state.as_mut() &&
-                next_target_branch == Some(ActiveBranch::Canonical)
-            {
-                reorg_state.active_branch = ActiveBranch::Canonical;
-
-                if reorg_state.fork_length >= reorg_state.depth {
-                    info!(
-                        target: "reth-bench",
-                        block_number,
-                        reorg_depth = reorg_state.depth,
-                        "Resetting reorg branch after switching back to canonical"
-                    );
-                    reorg_state.reset();
-                    queued_fork_block = None;
-                }
-            }
-
             let start = Instant::now();
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;
@@ -447,44 +340,10 @@ impl Command {
                     .unwrap_or_default(),
             };
 
-            if forkchoice_state.head_block_hash != head {
-                info!(
-                    target: "reth-bench",
-                    block_number,
-                    canonical_head = %head,
-                    active_head = %forkchoice_state.head_block_hash,
-                    "Submitting forkchoice update to alternate branch"
-                );
-            }
-
             let fcu_start = Instant::now();
-            call_forkchoice_updated_with_reth(&auth_provider, forkchoice_version, forkchoice_state)
+            call_forkchoice_updated_with_reth(&auth_provider, version, canonical_forkchoice_state)
                 .await?;
             let fcu_latency = fcu_start.elapsed();
-
-            if let Some((future_block_number, parent_hash)) = next_queued_fork_parent {
-                let future_block = block_provider
-                    .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(future_block_number))
-                    .full()
-                    .await
-                    .wrap_err_with(|| {
-                        format!("Failed to fetch block by number {future_block_number}")
-                    })?
-                    .ok_or_eyre("Block not found")?;
-
-                queued_fork_block = Some(QueuedForkBlock {
-                    block_number: future_block_number,
-                    prepared: prepare_built_block(
-                        &local_rpc_provider,
-                        &future_block,
-                        parent_hash,
-                        use_reth_namespace,
-                        wait_for_persistence,
-                        no_wait_for_caches,
-                    )
-                    .await?,
-                });
-            }
 
             let total_latency =
                 if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
@@ -496,6 +355,100 @@ impl Command {
                 fcu_latency,
                 total_latency,
             };
+
+            if let Some(reorg_state) = reorg_state.as_mut() {
+                let fork_block = fork_block
+                    .as_ref()
+                    .ok_or_eyre("missing source block for reorg fork construction")?;
+                let prepared = if let Some(queued) = queued_fork_block.take() {
+                    if queued.block_number == block_number {
+                        queued.prepared
+                    } else {
+                        prepare_built_block(
+                            &local_rpc_provider,
+                            fork_block,
+                            reorg_state.next_fork_parent_hash(canonical_parent_hash),
+                            use_reth_namespace,
+                            wait_for_persistence,
+                            no_wait_for_caches,
+                        )
+                        .await?
+                    }
+                } else {
+                    prepare_built_block(
+                        &local_rpc_provider,
+                        fork_block,
+                        reorg_state.next_fork_parent_hash(canonical_parent_hash),
+                        use_reth_namespace,
+                        wait_for_persistence,
+                        no_wait_for_caches,
+                    )
+                    .await?
+                };
+
+                call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
+                    .await?;
+
+                reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
+                let forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
+
+                info!(
+                    target: "reth-bench",
+                    block_number,
+                    branch_point = %forkchoice_state.safe_block_hash,
+                    fork_head = %prepared.block_hash,
+                    fork_depth = reorg_state.fork_length,
+                    max_reorg_depth = reorg_state.depth,
+                    "Switching forkchoice to reorg branch"
+                );
+
+                let fcu_start = Instant::now();
+                call_forkchoice_updated_with_reth(
+                    &auth_provider,
+                    prepared.version,
+                    forkchoice_state,
+                )
+                .await?;
+                let _fork_fcu_latency = fcu_start.elapsed();
+
+                if reorg_state.fork_length < reorg_state.depth {
+                    let next_fork_block_number = block_number + 1;
+                    if benchmark_mode.contains(next_fork_block_number) {
+                        let future_block = block_provider
+                            .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(
+                                next_fork_block_number,
+                            ))
+                            .full()
+                            .await
+                            .wrap_err_with(|| {
+                                format!("Failed to fetch block by number {next_fork_block_number}")
+                            })?
+                            .ok_or_eyre("Block not found")?;
+
+                        queued_fork_block = Some(QueuedForkBlock {
+                            block_number: next_fork_block_number,
+                            prepared: prepare_built_block(
+                                &local_rpc_provider,
+                                &future_block,
+                                prepared.block_hash,
+                                use_reth_namespace,
+                                wait_for_persistence,
+                                no_wait_for_caches,
+                            )
+                            .await?,
+                        });
+                    }
+                } else {
+                    info!(
+                        target: "reth-bench",
+                        block_number,
+                        reorg_depth = reorg_state.depth,
+                        "Resetting reorg branch after reaching max depth"
+                    );
+                    reorg_state.reset();
+                    queued_fork_block = None;
+                }
+            }
 
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
             // We want to measure engine throughput, not RPC fetch latency.
