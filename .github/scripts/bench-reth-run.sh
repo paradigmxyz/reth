@@ -11,6 +11,7 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_EXTRA_ARGS (extra CLI args for reth-bench)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 #               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
@@ -252,6 +253,10 @@ EXTRA_BENCH_ARGS=(--reth-new-payload)
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
+if [ -n "${BENCH_EXTRA_ARGS:-}" ]; then
+  # shellcheck disable=SC2206
+  EXTRA_BENCH_ARGS+=($BENCH_EXTRA_ARGS)
+fi
 
 if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
@@ -261,6 +266,10 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   BB_BENCH_ARGS=(--reth-new-payload)
   if [ -n "${BENCH_WAIT_TIME:-}" ]; then
     BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+  fi
+  if [ -n "${BENCH_EXTRA_ARGS:-}" ]; then
+    # shellcheck disable=SC2206
+    BB_BENCH_ARGS+=($BENCH_EXTRA_ARGS)
   fi
   case "$BENCH_BAL_MODE" in
     false)
