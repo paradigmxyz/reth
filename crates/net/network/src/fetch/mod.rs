@@ -13,6 +13,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
+    block_access_lists::client::BalRequirement,
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
@@ -195,28 +196,39 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         Some(*best_peer.0)
     }
 
+    /// Returns whether any connected peer can serve BAL requests.
+    fn has_bal_capable_peer(&self) -> bool {
+        self.peers.values().any(|peer| {
+            !matches!(peer.state, PeerState::Closing) &&
+                peer.capabilities.supports_eth_at_least(&EthVersion::Eth71)
+        })
+    }
+
     /// Returns the next action to return
     fn poll_action(&mut self) -> PollAction {
-        // we only check and not pop here since we don't know yet whether a peer is available.
-        if self.queued_requests.is_empty() {
-            return PollAction::NoRequests
+        loop {
+            // we only check and not pop here since we don't know yet whether a peer is available.
+            if self.queued_requests.is_empty() {
+                return PollAction::NoRequests
+            }
+
+            let request = self.queued_requests.pop_front().expect("not empty");
+            let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
+                if request.should_complete_without_capable_peer(self.has_bal_capable_peer()) {
+                    request.send_err_response(RequestError::UnsupportedCapability);
+                    continue
+                }
+
+                // no peer matches this request's requirements; requeue at the back so other
+                // queued requests get a chance on the next poll instead of head-of-line blocking.
+                self.queued_requests.push_back(request);
+                return PollAction::NoPeersAvailable
+            };
+
+            let request = self.prepare_block_request(peer_id, request);
+
+            return PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
         }
-
-        if self.peers.is_empty() {
-            return PollAction::NoPeersAvailable
-        }
-
-        let request = self.queued_requests.pop_front().expect("not empty");
-        let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
-            // no peer matches this request's requirements; requeue at the back so other
-            // queued requests get a chance on the next poll instead of head-of-line blocking.
-            self.queued_requests.push_back(request);
-            return PollAction::NoPeersAvailable
-        };
-
-        let request = self.prepare_block_request(peer_id, request);
-
-        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
     }
 
     /// Advance the state the syncer
@@ -602,6 +614,7 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         request: Vec<B256>,
         response: oneshot::Sender<PeerRequestResult<BlockAccessLists>>,
         priority: Priority,
+        requirement: BalRequirement,
     },
     /// Download receipts for the given block hashes and send response through channel
     GetReceipts {
@@ -637,6 +650,22 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns `true` if this request is normal priority.
     const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
+    }
+
+    /// Returns whether the request may complete locally when no capable peer exists.
+    const fn should_complete_without_capable_peer(&self, has_bal_capable_peer: bool) -> bool {
+        matches!(self, Self::GetBlockAccessLists { requirement: BalRequirement::Optional, .. }) &&
+            !has_bal_capable_peer
+    }
+
+    /// Sends an error response to the waiting caller.
+    fn send_err_response(self, err: RequestError) {
+        let _ = match self {
+            Self::GetBlockHeaders { response, .. } => response.send(Err(err)).ok(),
+            Self::GetBlockBodies { response, .. } => response.send(Err(err)).ok(),
+            Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
+            Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
+        };
     }
 
     /// Returns the best peer requirements for this request.
@@ -1541,6 +1570,7 @@ mod tests {
             request: vec![],
             response: tx,
             priority: Priority::Normal,
+            requirement: BalRequirement::Mandatory,
         });
 
         let waker = noop_waker();
@@ -1582,5 +1612,77 @@ mod tests {
         if let Poll::Ready(FetchAction::BlockRequest { peer_id, .. }) = fetcher.poll(&mut cx) {
             assert_eq!(peer_id, peer_71);
         }
+    }
+
+    #[tokio::test]
+    async fn test_optional_bal_request_completes_without_capable_peer() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_old = B512::random();
+        let caps_old = Arc::new(Capabilities::new(vec![]));
+        fetcher.new_active_peer(
+            peer_old,
+            B256::random(),
+            100,
+            caps_old,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        let (tx, rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
+            request: vec![],
+            response: tx,
+            priority: Priority::Normal,
+            requirement: BalRequirement::Optional,
+        });
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert!(fetcher.queued_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[tokio::test]
+    async fn test_optional_bal_request_waits_for_busy_capable_peer() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_71 = B512::random();
+        let caps_71 = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+        fetcher.new_active_peer(
+            peer_71,
+            B256::random(),
+            100,
+            caps_71,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+        fetcher.peers.get_mut(&peer_71).expect("peer exists").state = PeerState::GetBlockHeaders;
+
+        let (tx, _rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
+            request: vec![],
+            response: tx,
+            priority: Priority::Normal,
+            requirement: BalRequirement::Optional,
+        });
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert_eq!(fetcher.queued_requests.len(), 1);
     }
 }
