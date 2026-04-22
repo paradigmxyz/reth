@@ -692,8 +692,8 @@ where
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 provider_builder.clone(),
-                                provider_factory.clone(),
-                                overlay_builder.clone(),
+                                provider_factory,
+                                overlay_builder,
                                 &hashed_state,
                                 trie_updates.as_ref().clone(),
                             );
@@ -733,8 +733,8 @@ where
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
-                    provider_factory.clone(),
-                    overlay_builder.clone(),
+                    provider_factory,
+                    overlay_builder,
                     &hashed_state,
                 ) {
                     Ok(result) => {
@@ -1118,7 +1118,8 @@ where
     /// Compute state root for the given hashed post state in serial.
     ///
     /// Uses the same provider construction path as main execution and computes the state root and
-    /// trie updates for this block directly via [`StateProvider::state_root_with_updates`].
+    /// trie updates for this block directly via
+    /// [`reth_provider::StateRootProvider::state_root_with_updates`].
     fn compute_state_root_serial(
         state_provider: StateProviderBox,
         hashed_state: &LazyHashedPostState,
