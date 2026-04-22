@@ -30,8 +30,7 @@ fn warn_if_zfs(path: &Path) {
 /// Returns `true` if the given path is on a ZFS filesystem.
 #[cfg(target_os = "linux")]
 fn is_zfs(path: &Path) -> std::io::Result<bool> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     /// ZFS filesystem magic number.
     const ZFS_SUPER_MAGIC: i64 = 0x2fc12fc1;
@@ -52,8 +51,7 @@ fn is_zfs(path: &Path) -> std::io::Result<bool> {
 /// Returns `true` if the given path is on a ZFS filesystem.
 #[cfg(target_os = "macos")]
 fn is_zfs(path: &Path) -> std::io::Result<bool> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     let c_path = CString::new(path.as_os_str().as_bytes())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -69,7 +67,7 @@ fn is_zfs(path: &Path) -> std::io::Result<bool> {
     }
 }
 
-/// Returns `true` if the given path is on a ZFS filesystem.
+/// ZFS detection is unsupported on this platform, always returns `Ok(false)`.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn is_zfs(_path: &Path) -> std::io::Result<bool> {
     Ok(false)
