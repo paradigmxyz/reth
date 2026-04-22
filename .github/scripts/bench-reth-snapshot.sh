@@ -37,8 +37,8 @@ snapshot_ready() {
 
 EXPECTED_SNAPSHOT="$(describe_snapshot)"
 
-sudo schelk recover -y --kill || true
-sudo schelk mount -y
+sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+sudo schelk mount -y || true
 
 if snapshot_ready; then
   echo "Found local ${EXPECTED_SNAPSHOT} at ${DATADIR}"
