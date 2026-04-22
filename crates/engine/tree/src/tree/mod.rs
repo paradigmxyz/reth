@@ -11,7 +11,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError};
+use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -305,6 +305,9 @@ where
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
     execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
+    /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
+    /// Suppresses persistence cycles during payload building.
+    building_payload: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -396,6 +399,7 @@ where
             evm_config,
             changeset_cache,
             execution_timing_stats: HashMap::new(),
+            building_payload: false,
             runtime,
         }
     }
@@ -1111,6 +1115,8 @@ where
         attrs: Option<T::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
+
+        self.building_payload = attrs.is_some() && self.config.suppress_persistence_during_build();
 
         // Record metrics
         self.record_forkchoice_metrics();
@@ -2005,9 +2011,13 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold and
-    /// backfill is not running.
+    /// block is greater than or equal to the persistence threshold,
+    /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
+        if self.building_payload {
+            return false
+        }
+
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
             return false
@@ -3009,8 +3019,14 @@ where
         );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
-        // keep track of the invalid header
-        self.state.invalid_headers.insert(block.block_with_parent());
+        // keep track of the invalid header unless the consensus impl considers it transient
+        let is_transient = match &validation_err {
+            InsertBlockValidationError::Consensus(err) => self.consensus.is_transient_error(err),
+            _ => false,
+        };
+        if !is_transient {
+            self.state.invalid_headers.insert(block.block_with_parent());
+        }
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));

@@ -1056,6 +1056,20 @@ Engine:
 
           The builder also anchors the trie at the built block's state root, so if the next `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
 
+      --engine.suppress-persistence-during-build
+          Suppress persistence while building a payload.
+
+          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
+
+      --engine.disable-bal-parallel-execution
+          Disable BAL (Block Access List, EIP-7928) based parallel execution. When set, falls back to transaction-based prewarming even when a BAL is available
+
+      --engine.disable-bal-parallel-state-root
+          Disable BAL-driven parallel state root computation. When set, the BAL hashed post state is not sent to the multiproof task for early parallel state root computation
+
+      --engine.disable-bal-batch-io
+          Disable BAL (Block Access List) batched IO during prewarming. When set, falls back to individual per-slot storage reads instead of batched cursor reads
+
 ERA:
       --era.enable
           Enable import from ERA1 files
