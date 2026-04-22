@@ -7820,6 +7820,7 @@ dependencies = [
  "assert_matches",
  "derive_more",
  "eyre",
+ "libc",
  "metrics",
  "page_size",
  "parking_lot",
