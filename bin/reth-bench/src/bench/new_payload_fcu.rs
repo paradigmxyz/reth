@@ -498,31 +498,11 @@ async fn prepare_built_block(
     _wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
-    const MAX_BUILD_ATTEMPTS: usize = 10;
-    const BUILD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-
     let request = build_block_request(block, parent_block_hash)?;
-    let built_payload: ExecutionPayloadEnvelopeV5 = {
-        let mut attempts_remaining = MAX_BUILD_ATTEMPTS;
-
-        loop {
-            match block_provider.client().request("testing_buildBlockV1", [request.clone()]).await {
-                Ok(payload) => break payload,
-                Err(err) if attempts_remaining > 1 && is_retryable_build_block_error(&err) => {
-                    attempts_remaining -= 1;
-                    tokio::time::sleep(BUILD_RETRY_INTERVAL).await;
-                }
-                Err(err) => {
-                    return Err(err).wrap_err_with(|| {
-                        format!(
-                            "Failed to build block {} via testing_buildBlockV1",
-                            block.header.number
-                        )
-                    })
-                }
-            }
-        }
-    };
+    let built_payload: ExecutionPayloadEnvelopeV5 =
+        block_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
+            || format!("Failed to build block {} via testing_buildBlockV1", block.header.number),
+        )?;
 
     let payload = &built_payload.execution_payload.payload_inner.payload_inner;
     let block_hash = payload.block_hash;
@@ -550,6 +530,15 @@ async fn queue_fork_block(
         return Ok(None)
     }
 
+    if let Some(parent_block_hash) = parent_block_hash {
+        wait_for_canonical_block_hash(
+            local_rpc_provider,
+            block_number.saturating_sub(1),
+            parent_block_hash,
+        )
+        .await?;
+    }
+
     let future_block = block_provider
         .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
         .full()
@@ -571,10 +560,43 @@ async fn queue_fork_block(
     }))
 }
 
-fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool {
-    let message = err.to_string();
-    message.contains("block not found: hash") ||
-        message.contains("block hash not found for block number")
+async fn wait_for_canonical_block_hash(
+    provider: &RootProvider<AnyNetwork>,
+    block_number: u64,
+    expected_hash: B256,
+) -> eyre::Result<()> {
+    const MAX_ATTEMPTS: usize = 50;
+    const RETRY_INTERVAL: Duration = Duration::from_millis(20);
+
+    for _ in 0..MAX_ATTEMPTS {
+        let block = provider
+            .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
+            .await
+            .wrap_err_with(|| {
+                format!("Failed to fetch local canonical block by number {block_number}")
+            })?;
+
+        if block.as_ref().is_some_and(|block| block.header.hash == expected_hash) {
+            return Ok(())
+        }
+
+        tokio::time::sleep(RETRY_INTERVAL).await;
+    }
+
+    let observed_hash = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
+        .await
+        .wrap_err_with(|| {
+            format!("Failed to fetch local canonical block by number {block_number}")
+        })?
+        .map(|block| block.header.hash);
+
+    bail!(
+        "local canonical block {} did not switch to expected hash {} (observed {:?})",
+        block_number,
+        expected_hash,
+        observed_hash
+    )
 }
 
 fn build_block_request(
