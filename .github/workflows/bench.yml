@@ -51,6 +51,16 @@ on:
         required: false
         default: ""
         type: string
+      disk_read_delay_ms:
+        description: "Apply dm-delay read latency to the schelk volume (milliseconds)"
+        required: false
+        default: ""
+        type: string
+      disk_write_delay_ms:
+        description: "Apply dm-delay write latency to the schelk volume (milliseconds)"
+        required: false
+        default: ""
+        type: string
       baseline_args:
         description: "Extra CLI args for the baseline reth node"
         required: false
@@ -125,6 +135,8 @@ jobs:
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
+      disk-read-delay-ms: ${{ steps.args.outputs.disk-read-delay-ms }}
+      disk-write-delay-ms: ${{ steps.args.outputs.disk-write-delay-ms }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
       abba: ${{ steps.args.outputs.abba }}
@@ -158,7 +170,7 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [disk-read-delay-ms=N] [disk-write-delay-ms=N] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
             let explicitWarmup = false;
 
@@ -177,6 +189,8 @@ jobs:
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
               var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
+              var diskReadDelayMs = '${{ github.event.inputs.disk_read_delay_ms }}' || '';
+              var diskWriteDelayMs = '${{ github.event.inputs.disk_write_delay_ms }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
 
@@ -204,8 +218,9 @@ jobs:
               const boolDefaultTrue = new Set(['abba', 'otlp']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
+              const optionalIntArgs = new Set(['disk-read-delay-ms', 'disk-write-delay-ms']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'disk-read-delay-ms': '', 'disk-write-delay-ms': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -243,6 +258,12 @@ jobs:
                     defaults[key] = value;
                   } else {
                     invalid.push(`\`${key}=${value}\` (must be a duration like 500ms, 1s, 2m)`);
+                  }
+                } else if (optionalIntArgs.has(key)) {
+                  if (!/^\d+$/.test(value)) {
+                    invalid.push(`\`${key}=${value}\` (must be a non-negative integer in milliseconds)`);
+                  } else {
+                    defaults[key] = value;
                   }
                 } else if (enumArgs.has(key)) {
                   if (enumArgs.get(key).has(value)) {
@@ -295,6 +316,8 @@ jobs:
               var abba = defaults.abba;
               var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
+              var diskReadDelayMs = defaults['disk-read-delay-ms'];
+              var diskWriteDelayMs = defaults['disk-write-delay-ms'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
             }
@@ -352,6 +375,8 @@ jobs:
             core.setOutput('big-blocks', bigBlocks);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
+            core.setOutput('disk-read-delay-ms', diskReadDelayMs);
+            core.setOutput('disk-write-delay-ms', diskWriteDelayMs);
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
             core.setOutput('abba', abba);
@@ -427,12 +452,16 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const diskReadDelayVal = '${{ steps.args.outputs.disk-read-delay-ms }}';
+            const diskReadDelayNote = diskReadDelayVal && diskReadDelayVal !== '0' ? `, disk-read-delay: \`${diskReadDelayVal}ms\`` : '';
+            const diskWriteDelayVal = '${{ steps.args.outputs.disk-write-delay-ms }}';
+            const diskWriteDelayNote = diskWriteDelayVal && diskWriteDelayVal !== '0' ? `, disk-write-delay: \`${diskWriteDelayVal}ms\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${diskReadDelayNote}${diskWriteDelayNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -471,12 +500,16 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const diskReadDelayVal = '${{ steps.args.outputs.disk-read-delay-ms }}';
+            const diskReadDelayNote = diskReadDelayVal && diskReadDelayVal !== '0' ? `, disk-read-delay: \`${diskReadDelayVal}ms\`` : '';
+            const diskWriteDelayVal = '${{ steps.args.outputs.disk-write-delay-ms }}';
+            const diskWriteDelayNote = diskWriteDelayVal && diskWriteDelayVal !== '0' ? `, disk-write-delay: \`${diskWriteDelayVal}ms\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${diskReadDelayNote}${diskWriteDelayNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -544,6 +577,8 @@ jobs:
       BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
       BENCH_BAL: ${{ needs.reth-bench-ack.outputs.bal }}
       BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
+      BENCH_DISK_READ_DELAY_MS: ${{ needs.reth-bench-ack.outputs.disk-read-delay-ms }}
+      BENCH_DISK_WRITE_DELAY_MS: ${{ needs.reth-bench-ack.outputs.disk-write-delay-ms }}
       BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
@@ -618,12 +653,16 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const diskReadDelayVal = process.env.BENCH_DISK_READ_DELAY_MS || '';
+            const diskReadDelayNote = diskReadDelayVal && diskReadDelayVal !== '0' ? `, disk-read-delay: \`${diskReadDelayVal}ms\`` : '';
+            const diskWriteDelayVal = process.env.BENCH_DISK_WRITE_DELAY_MS || '';
+            const diskWriteDelayNote = diskWriteDelayVal && diskWriteDelayVal !== '0' ? `, disk-write-delay: \`${diskWriteDelayVal}ms\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${diskReadDelayNote}${diskWriteDelayNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -684,7 +723,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in schelk cpupower taskset stdbuf python3 curl make uv jq; do
+          for cmd in schelk cpupower taskset stdbuf python3 curl make uv jq dmsetup; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then

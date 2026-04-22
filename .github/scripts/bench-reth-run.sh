@@ -28,6 +28,127 @@ mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+DELAY_DM_NAME=""
+
+mount_fs() {
+  local source="$1"
+  local target="$2"
+  local fstype="$3"
+  local options="$4"
+
+  local -a mount_cmd=(sudo mount -t "$fstype")
+  if [ -n "$options" ]; then
+    mount_cmd+=(-o "$options")
+  fi
+  mount_cmd+=("$source" "$target")
+  "${mount_cmd[@]}"
+}
+
+wait_for_block_device() {
+  local device="$1"
+  local timeout_s="${2:-5}"
+
+  for _ in $(seq 1 "$timeout_s"); do
+    if [ -b "$device" ]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+resolve_dm_block_device() {
+  local device_name="$1"
+  local devno
+
+  devno="$(sudo dmsetup info -C --noheadings --separator : -o major,minor "$device_name" 2>/dev/null | tr -d '[:space:]')"
+  if [ -z "$devno" ]; then
+    return 1
+  fi
+
+  printf '/dev/block/%s\n' "$devno"
+}
+
+setup_delay_target() {
+  local read_delay_ms="${BENCH_DISK_READ_DELAY_MS:-0}"
+  local write_delay_ms="${BENCH_DISK_WRITE_DELAY_MS:-0}"
+  read_delay_ms="${read_delay_ms:-0}"
+  write_delay_ms="${write_delay_ms:-0}"
+
+  if ! [[ "$read_delay_ms" =~ ^[0-9]+$ && "$write_delay_ms" =~ ^[0-9]+$ ]]; then
+    echo "::error::BENCH_DISK_READ_DELAY_MS and BENCH_DISK_WRITE_DELAY_MS must be non-negative integers"
+    exit 1
+  fi
+
+  if [ "$read_delay_ms" = "0" ] && [ "$write_delay_ms" = "0" ]; then
+    return
+  fi
+
+  local mount_source
+  local mount_fstype
+  local mount_options
+  mount_source="$(findmnt -no SOURCE --target "$SCHELK_MOUNT")"
+  mount_fstype="$(findmnt -no FSTYPE --target "$SCHELK_MOUNT")"
+  mount_options="$(findmnt -no OPTIONS --target "$SCHELK_MOUNT")"
+  local sectors
+  sectors="$(sudo blockdev --getsz "$mount_source")"
+
+  DELAY_DM_NAME="reth-bench-delay-${LABEL}-$$"
+  local delayed_device=""
+  local table="0 ${sectors} delay ${mount_source} 0 ${read_delay_ms} ${mount_source} 0 ${write_delay_ms}"
+
+  echo "Applying dm-delay to ${mount_source}: read=${read_delay_ms}ms write=${write_delay_ms}ms"
+  sudo umount "$SCHELK_MOUNT"
+  if ! sudo dmsetup create "$DELAY_DM_NAME" --addnodeoncreate --table "$table"; then
+    DELAY_DM_NAME=""
+    mount_fs "$mount_source" "$SCHELK_MOUNT" "$mount_fstype" "$mount_options"
+    echo "::error::Failed to create dm-delay target"
+    exit 1
+  fi
+
+  delayed_device="$(resolve_dm_block_device "$DELAY_DM_NAME" || true)"
+  if [ -z "$delayed_device" ]; then
+    local failed_device_name="$DELAY_DM_NAME"
+    sudo dmsetup remove "$DELAY_DM_NAME" || true
+    DELAY_DM_NAME=""
+    mount_fs "$mount_source" "$SCHELK_MOUNT" "$mount_fstype" "$mount_options"
+    echo "::error::Failed to resolve delayed device node for ${failed_device_name}"
+    exit 1
+  fi
+
+  if ! wait_for_block_device "$delayed_device"; then
+    delayed_device="$(resolve_dm_block_device "$DELAY_DM_NAME" || true)"
+    if ! wait_for_block_device "$delayed_device"; then
+      sudo dmsetup remove "$DELAY_DM_NAME" || true
+      DELAY_DM_NAME=""
+      mount_fs "$mount_source" "$SCHELK_MOUNT" "$mount_fstype" "$mount_options"
+      echo "::error::Delayed device node did not appear: ${delayed_device}"
+      exit 1
+    fi
+  fi
+
+  if ! mount_fs "$delayed_device" "$SCHELK_MOUNT" "$mount_fstype" "$mount_options"; then
+    sudo dmsetup remove "$DELAY_DM_NAME" || true
+    DELAY_DM_NAME=""
+    mount_fs "$mount_source" "$SCHELK_MOUNT" "$mount_fstype" "$mount_options"
+    echo "::error::Failed to remount delayed device"
+    exit 1
+  fi
+}
+
+teardown_delay_target() {
+  if [ -z "$DELAY_DM_NAME" ]; then
+    return
+  fi
+
+  echo "Removing dm-delay target ${DELAY_DM_NAME}"
+  if mountpoint -q "$SCHELK_MOUNT"; then
+    sudo umount "$SCHELK_MOUNT" || true
+  fi
+  sudo dmsetup remove "$DELAY_DM_NAME" || sudo dmsetup remove -f "$DELAY_DM_NAME" || true
+  DELAY_DM_NAME=""
+}
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
@@ -76,6 +197,7 @@ cleanup() {
   sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
   # Fix ownership of reth-created files (reth runs as root)
   sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
+  teardown_delay_target
   # Let schelk recover the mounted volume in place so dm-era can restore only
   # the changed blocks and clean up its own state.
   sudo schelk recover -y --kill || true
@@ -92,6 +214,7 @@ sudo schelk recover -y --kill || sudo schelk full-recover -y || true
 
 # Mount
 sudo schelk mount -y || true
+setup_delay_target
 if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
   echo "::error::Failed to mount benchmark datadir at ${DATADIR}"
   ls -la "$SCHELK_MOUNT" || true
