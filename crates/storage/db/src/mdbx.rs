@@ -17,7 +17,7 @@ const ORPHAN_TABLES: &[&str] = &["AccountsTrieChangeSets", "StoragesTrieChangeSe
 /// ZFS uses copy-on-write (COW) semantics which conflict with MDBX's write patterns, leading to
 /// significant performance degradation and database bloat.
 fn warn_if_zfs(path: &Path) {
-    if let Ok(true) = is_zfs(path) {
+    if matches!(is_zfs(path), Ok(true)) {
         warn!(
             target: "reth::db",
             path = %path.display(),
@@ -41,7 +41,7 @@ fn is_zfs(path: &Path) -> std::io::Result<bool> {
 
     unsafe {
         let mut stat: libc::statfs = std::mem::zeroed();
-        if libc::statfs(c_path.as_ptr(), &mut stat) == 0 {
+        if libc::statfs(c_path.as_ptr(), &raw mut stat) == 0 {
             Ok(stat.f_type == ZFS_SUPER_MAGIC)
         } else {
             Err(std::io::Error::last_os_error())
@@ -60,7 +60,7 @@ fn is_zfs(path: &Path) -> std::io::Result<bool> {
 
     unsafe {
         let mut stat: libc::statfs = std::mem::zeroed();
-        if libc::statfs(c_path.as_ptr(), &mut stat) == 0 {
+        if libc::statfs(c_path.as_ptr(), &raw mut stat) == 0 {
             let fstype = std::ffi::CStr::from_ptr(stat.f_fstypename.as_ptr());
             Ok(fstype.to_bytes() == b"zfs")
         } else {
