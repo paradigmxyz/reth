@@ -85,7 +85,7 @@ impl BenchContext {
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
 
-        let local_rpc_url = derive_local_rpc_url(&bench_args.engine_rpc_url)?;
+        let local_rpc_url = Url::parse(&bench_args.local_rpc_url)?;
         info!(target: "reth-bench", "Connecting to local regular RPC at {} for testing namespace calls", local_rpc_url);
         let local_rpc_provider =
             RootProvider::<AnyNetwork>::new(ClientBuilder::default().http(local_rpc_url));
@@ -175,26 +175,4 @@ impl BenchContext {
             no_wait_for_caches,
         })
     }
-}
-
-fn derive_local_rpc_url(engine_rpc_url: &str) -> eyre::Result<Url> {
-    let mut url = Url::parse(engine_rpc_url)?;
-    match url.scheme() {
-        "http" | "https" => {}
-        "ws" => {
-            url.set_scheme("http").map_err(|_| eyre::eyre!("invalid ws engine RPC URL"))?;
-        }
-        "wss" => {
-            url.set_scheme("https").map_err(|_| eyre::eyre!("invalid wss engine RPC URL"))?;
-        }
-        scheme => {
-            return Err(eyre::eyre!("unsupported engine RPC URL scheme: {scheme}"));
-        }
-    }
-
-    if url.port_or_known_default() == Some(8551) {
-        url.set_port(Some(8545)).map_err(|_| eyre::eyre!("invalid engine RPC URL port"))?;
-    }
-
-    Ok(url)
 }

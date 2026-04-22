@@ -12,7 +12,6 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
-        NewPayloadTimingBreakdown,
     },
 };
 use alloy_consensus::TxEnvelope;
@@ -31,8 +30,7 @@ use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
-use reth_node_api::EngineApiMessageVersion;
-use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
+use reth_node_core::args::BenchmarkArgs;
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -50,9 +48,6 @@ pub struct Command {
     ///
     /// This requires enabling the hidden `testing` RPC module on the target node,
     /// for example with `reth node --http --http.api eth,testing`.
-    /// Prague-era payloads may also require `--engine.accept-execution-requests-hash`.
-    ///
-    /// Passing `--reorg` with no value uses a depth of `8`.
     #[arg(
         long,
         value_name = "DEPTH",
@@ -275,7 +270,6 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
-        let reorg_enabled = reorg_state.is_some();
         let mut queued_fork_block = if reorg_state.is_some() {
             queue_fork_block(
                 &block_provider,
@@ -283,7 +277,6 @@ impl Command {
                 &benchmark_mode,
                 next_block,
                 None,
-                wait_for_persistence,
                 no_wait_for_caches,
             )
             .await?
@@ -326,11 +319,8 @@ impl Command {
 
             debug!(target: "reth-bench", ?block_number, "Sending payload");
             let start = Instant::now();
-            let server_timings = if reorg_enabled {
-                call_new_payload_with_retries(&auth_provider, version, params).await?
-            } else {
-                call_new_payload_with_reth(&auth_provider, version, params).await?
-            };
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params).await?;
             let np_latency =
                 server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
             let new_payload_result = NewPayloadResult {
@@ -378,7 +368,7 @@ impl Command {
                 );
                 let prepared = queued.prepared;
 
-                call_new_payload_with_retries(&auth_provider, None, prepared.params).await?;
+                call_new_payload_with_reth(&auth_provider, None, prepared.params).await?;
 
                 reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
                 let forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
@@ -405,7 +395,6 @@ impl Command {
                         &benchmark_mode,
                         next_fork_block_number,
                         Some(prepared.block_hash),
-                        wait_for_persistence,
                         no_wait_for_caches,
                     )
                     .await?;
@@ -433,7 +422,6 @@ impl Command {
                         &benchmark_mode,
                         next_fork_block_number,
                         None,
-                        wait_for_persistence,
                         no_wait_for_caches,
                     )
                     .await?;
@@ -501,7 +489,6 @@ async fn prepare_built_block(
     block_provider: &RootProvider<AnyNetwork>,
     block: &AnyRpcBlock,
     parent_block_hash: B256,
-    _wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
     const MAX_BUILD_ATTEMPTS: usize = 10;
@@ -540,12 +527,16 @@ async fn prepare_built_block(
 
     let payload = &built_payload.execution_payload.payload_inner.payload_inner;
     let block_hash = payload.block_hash;
-    let execution_data =
-        built_payload_to_execution_data(built_payload, block.header.parent_beacon_block_root);
+    let (payload, sidecar) = built_payload
+        .into_payload_and_sidecar(block.header.parent_beacon_block_root.unwrap_or_default());
     // Fork payloads are built immediately before the next `testing_buildBlockV1` call. Leaving
     // reth's default persistence wait enabled here gives the regular RPC side a consistent base
     // state for the next synthetic fork block build.
-    let params = reth_new_payload_params(execution_data, None, no_wait_for_caches)?;
+    let params = serde_json::to_value((
+        RethNewPayloadInput::ExecutionData(ExecutionData { payload, sidecar }),
+        None::<bool>,
+        no_wait_for_caches.then_some(false),
+    ))?;
 
     Ok(PreparedBuiltBlock { block_hash, params })
 }
@@ -557,7 +548,6 @@ async fn queue_fork_block(
     benchmark_mode: &crate::bench_mode::BenchMode,
     block_number: u64,
     parent_block_hash: Option<B256>,
-    wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<Option<QueuedForkBlock>> {
     if !benchmark_mode.contains(block_number) {
@@ -578,7 +568,6 @@ async fn queue_fork_block(
             local_rpc_provider,
             &future_block,
             parent_block_hash,
-            wait_for_persistence,
             no_wait_for_caches,
         )
         .await?,
@@ -589,41 +578,6 @@ fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool
     let message = err.to_string();
     message.contains("block not found: hash") ||
         message.contains("block hash not found for block number")
-}
-
-async fn call_new_payload_with_retries(
-    provider: &RootProvider<AnyNetwork>,
-    version: Option<EngineApiMessageVersion>,
-    params: serde_json::Value,
-) -> eyre::Result<Option<NewPayloadTimingBreakdown>> {
-    const MAX_NEW_PAYLOAD_ATTEMPTS: usize = 10;
-    const NEW_PAYLOAD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-
-    let mut attempts_remaining = MAX_NEW_PAYLOAD_ATTEMPTS;
-    let method = version.map(|v| v.method_name()).unwrap_or("reth_newPayload");
-
-    loop {
-        match call_new_payload_with_reth(provider, version, params.clone()).await {
-            Ok(timings) => return Ok(timings),
-            Err(err) if attempts_remaining > 1 && is_retryable_new_payload_error(&err) => {
-                warn!(
-                    target: "reth-bench",
-                    method,
-                    attempts_remaining,
-                    error = %err,
-                    "Retrying newPayload after transient reorg import failure"
-                );
-                attempts_remaining -= 1;
-                tokio::time::sleep(NEW_PAYLOAD_RETRY_INTERVAL).await;
-            }
-            Err(err) => return Err(err),
-        }
-    }
-}
-
-fn is_retryable_new_payload_error(err: &eyre::Report) -> bool {
-    let message = err.to_string();
-    message.contains("block hash not found for block number")
 }
 
 fn build_block_request(
@@ -670,15 +624,6 @@ fn build_block_request(
     })
 }
 
-fn built_payload_to_execution_data(
-    built_payload: ExecutionPayloadEnvelopeV5,
-    parent_beacon_block_root: Option<B256>,
-) -> ExecutionData {
-    let (payload, sidecar) =
-        built_payload.into_payload_and_sidecar(parent_beacon_block_root.unwrap_or_default());
-    ExecutionData { payload, sidecar }
-}
-
 fn parse_reorg_depth(value: &str) -> Result<usize, String> {
     let depth = value
         .trim()
@@ -690,16 +635,4 @@ fn parse_reorg_depth(value: &str) -> Result<usize, String> {
     }
 
     Ok(depth)
-}
-
-fn reth_new_payload_params(
-    execution_data: ExecutionData,
-    wait_for_persistence: Option<bool>,
-    no_wait_for_caches: bool,
-) -> eyre::Result<serde_json::Value> {
-    Ok(serde_json::to_value((
-        RethNewPayloadInput::ExecutionData(execution_data),
-        wait_for_persistence,
-        no_wait_for_caches.then_some(false),
-    ))?)
 }
