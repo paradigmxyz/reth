@@ -24,8 +24,8 @@ use alloy_provider::{
     Provider, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5, ExecutionPayloadInputV2,
-    ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
+    ForkchoiceState, PayloadAttributes,
 };
 use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
@@ -118,7 +118,7 @@ pub struct Command {
 #[derive(Debug)]
 struct PreparedBuiltBlock {
     block_hash: B256,
-    version: Option<EngineApiMessageVersion>,
+    forkchoice_version: Option<EngineApiMessageVersion>,
     params: serde_json::Value,
 }
 
@@ -377,8 +377,7 @@ impl Command {
                 );
                 let prepared = queued.prepared;
 
-                call_new_payload_with_reth(&auth_provider, prepared.version, prepared.params)
-                    .await?;
+                call_new_payload_with_reth(&auth_provider, None, prepared.params).await?;
 
                 reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
                 let forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
@@ -396,7 +395,7 @@ impl Command {
                 let fcu_start = Instant::now();
                 call_forkchoice_updated_with_reth(
                     &auth_provider,
-                    prepared.version,
+                    prepared.forkchoice_version,
                     forkchoice_state,
                 )
                 .await?;
@@ -502,7 +501,7 @@ async fn prepare_built_block(
     wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
-    let version = build_block_target_version(block)?;
+    let target_version = build_block_target_version(block)?;
     let request = build_block_request(block, parent_block_hash)?;
     let built_payload: ExecutionPayloadEnvelopeV5 =
         block_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
@@ -513,16 +512,15 @@ async fn prepare_built_block(
     let block_hash = payload.block_hash;
     let block_number = payload.block_number;
     let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
-    let (version, params) = built_payload_to_new_payload(
+    let execution_data = built_payload_to_execution_data(
         built_payload,
-        version,
-        use_reth_namespace,
-        wait_for_persistence,
-        no_wait_for_caches,
+        target_version,
         block.header.parent_beacon_block_root,
     )?;
+    let params = reth_new_payload_params(execution_data, wait_for_persistence, no_wait_for_caches)?;
+    let forkchoice_version = if use_reth_namespace { None } else { Some(target_version) };
 
-    Ok(PreparedBuiltBlock { block_hash, version, params })
+    Ok(PreparedBuiltBlock { block_hash, forkchoice_version, params })
 }
 
 async fn queue_fork_block(
@@ -621,79 +619,36 @@ fn build_block_target_version(block: &AnyRpcBlock) -> eyre::Result<EngineApiMess
     })
 }
 
-fn built_payload_to_new_payload(
+fn built_payload_to_execution_data(
     built_payload: ExecutionPayloadEnvelopeV5,
     target_version: EngineApiMessageVersion,
-    use_reth_namespace: bool,
-    wait_for_persistence: Option<bool>,
-    no_wait_for_caches: bool,
     parent_beacon_block_root: Option<B256>,
-) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+) -> eyre::Result<ExecutionData> {
     let execution_payload = built_payload.execution_payload.clone();
 
     match target_version {
         EngineApiMessageVersion::V1 => {
             let payload = execution_payload.payload_inner.payload_inner;
-            if use_reth_namespace {
-                let execution_data = ExecutionData {
-                    payload: ExecutionPayload::V1(payload),
-                    sidecar: ExecutionPayloadSidecar::none(),
-                };
-                Ok((
-                    None,
-                    reth_new_payload_params(
-                        execution_data,
-                        wait_for_persistence,
-                        no_wait_for_caches,
-                    )?,
-                ))
-            } else {
-                Ok((Some(EngineApiMessageVersion::V1), serde_json::to_value((payload,))?))
-            }
+            Ok(ExecutionData {
+                payload: ExecutionPayload::V1(payload),
+                sidecar: ExecutionPayloadSidecar::none(),
+            })
         }
         EngineApiMessageVersion::V2 => {
             let payload = execution_payload.payload_inner;
-            if use_reth_namespace {
-                let execution_data = ExecutionData {
-                    payload: ExecutionPayload::V2(payload),
-                    sidecar: ExecutionPayloadSidecar::none(),
-                };
-                Ok((
-                    None,
-                    reth_new_payload_params(
-                        execution_data,
-                        wait_for_persistence,
-                        no_wait_for_caches,
-                    )?,
-                ))
-            } else {
-                let payload = ExecutionPayloadInputV2 {
-                    execution_payload: payload.payload_inner,
-                    withdrawals: Some(payload.withdrawals),
-                };
-                Ok((Some(EngineApiMessageVersion::V2), serde_json::to_value((payload,))?))
-            }
+            Ok(ExecutionData {
+                payload: ExecutionPayload::V2(payload),
+                sidecar: ExecutionPayloadSidecar::none(),
+            })
         }
         EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
             let parent_beacon_block_root = parent_beacon_block_root
                 .ok_or_eyre("missing parent beacon block root for built fork block")?;
             let (payload, sidecar) =
                 built_payload.into_payload_and_sidecar(parent_beacon_block_root);
-            let (version, params, execution_data) =
+            let (_, _, execution_data) =
                 payload_to_new_payload(payload, sidecar, Some(target_version))?;
-
-            if use_reth_namespace {
-                Ok((
-                    None,
-                    reth_new_payload_params(
-                        execution_data,
-                        wait_for_persistence,
-                        no_wait_for_caches,
-                    )?,
-                ))
-            } else {
-                Ok((Some(version), params))
-            }
+            Ok(execution_data)
         }
         EngineApiMessageVersion::V6 => {
             bail!("--reorg does not support Amsterdam payload fields yet")
