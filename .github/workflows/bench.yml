@@ -844,6 +844,7 @@ jobs:
           echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
 
       - name: Validate local snapshot
+        if: env.BENCH_SNAPSHOT_URL == ''
         id: snapshot-check
         run: .github/scripts/bench-reth-snapshot.sh
 
@@ -886,6 +887,13 @@ jobs:
             echo "::error::One or more build tasks failed"
             exit 1
           fi
+
+      - name: Download custom snapshot
+        if: env.BENCH_SNAPSHOT_URL != ''
+        id: snapshot-check
+        run: |
+          export BENCH_RETH_BINARY="${GITHUB_WORKSPACE}/../reth-feature/target/profiling/${BENCH_NODE_BIN}"
+          .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
