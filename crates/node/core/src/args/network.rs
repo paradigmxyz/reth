@@ -870,10 +870,12 @@ impl DiscoveryArgs {
         true
     }
 
-    /// Set the discovery port to zero, to allow the OS to assign a random unused port when
-    /// discovery binds to the socket.
+    /// Set the discovery ports to zero, to allow the OS to assign random unused ports when
+    /// discovery binds to the sockets.
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
+        self.discv5_port = 0;
+        self.discv5_port_ipv6 = 0;
         self
     }
 
