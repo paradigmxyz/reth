@@ -30,7 +30,6 @@ use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
-use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
 use std::time::{Duration, Instant};
@@ -116,7 +115,6 @@ pub struct Command {
 #[derive(Debug)]
 struct PreparedBuiltBlock {
     block_hash: B256,
-    forkchoice_version: Option<EngineApiMessageVersion>,
     params: serde_json::Value,
 }
 
@@ -282,7 +280,6 @@ impl Command {
                 &benchmark_mode,
                 next_block,
                 None,
-                use_reth_namespace,
                 wait_for_persistence,
                 no_wait_for_caches,
             )
@@ -391,12 +388,7 @@ impl Command {
                 );
 
                 let fcu_start = Instant::now();
-                call_forkchoice_updated_with_reth(
-                    &auth_provider,
-                    prepared.forkchoice_version,
-                    forkchoice_state,
-                )
-                .await?;
+                call_forkchoice_updated_with_reth(&auth_provider, None, forkchoice_state).await?;
                 let _fork_fcu_latency = fcu_start.elapsed();
 
                 let next_fork_block_number = block_number + 1;
@@ -407,7 +399,6 @@ impl Command {
                         &benchmark_mode,
                         next_fork_block_number,
                         Some(prepared.block_hash),
-                        use_reth_namespace,
                         wait_for_persistence,
                         no_wait_for_caches,
                     )
@@ -426,7 +417,6 @@ impl Command {
                         &benchmark_mode,
                         next_fork_block_number,
                         None,
-                        use_reth_namespace,
                         wait_for_persistence,
                         no_wait_for_caches,
                     )
@@ -495,11 +485,9 @@ async fn prepare_built_block(
     block_provider: &RootProvider<AnyNetwork>,
     block: &AnyRpcBlock,
     parent_block_hash: B256,
-    use_reth_namespace: bool,
     wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<PreparedBuiltBlock> {
-    let target_version = build_block_target_version(block)?;
     let request = build_block_request(block, parent_block_hash)?;
     let built_payload: ExecutionPayloadEnvelopeV5 =
         block_provider.client().request("testing_buildBlockV1", [request]).await.wrap_err_with(
@@ -513,9 +501,8 @@ async fn prepare_built_block(
     let execution_data =
         built_payload_to_execution_data(built_payload, block.header.parent_beacon_block_root);
     let params = reth_new_payload_params(execution_data, wait_for_persistence, no_wait_for_caches)?;
-    let forkchoice_version = if use_reth_namespace { None } else { Some(target_version) };
 
-    Ok(PreparedBuiltBlock { block_hash, forkchoice_version, params })
+    Ok(PreparedBuiltBlock { block_hash, params })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -525,7 +512,6 @@ async fn queue_fork_block(
     benchmark_mode: &crate::bench_mode::BenchMode,
     block_number: u64,
     parent_block_hash: Option<B256>,
-    use_reth_namespace: bool,
     wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<Option<QueuedForkBlock>> {
@@ -547,7 +533,6 @@ async fn queue_fork_block(
             local_rpc_provider,
             &future_block,
             parent_block_hash,
-            use_reth_namespace,
             wait_for_persistence,
             no_wait_for_caches,
         )
@@ -596,22 +581,6 @@ fn build_block_request(
         },
         transactions,
         extra_data: Some(block.header.extra_data.clone()),
-    })
-}
-
-fn build_block_target_version(block: &AnyRpcBlock) -> eyre::Result<EngineApiMessageVersion> {
-    if block.header.block_access_list_hash.is_some() || block.header.slot_number.is_some() {
-        bail!("--reorg does not support Amsterdam payload fields with block access lists yet")
-    }
-
-    Ok(if block.header.requests_hash.is_some() {
-        EngineApiMessageVersion::V4
-    } else if block.header.parent_beacon_block_root.is_some() {
-        EngineApiMessageVersion::V3
-    } else if block.header.withdrawals_root.is_some() {
-        EngineApiMessageVersion::V2
-    } else {
-        EngineApiMessageVersion::V1
     })
 }
 
