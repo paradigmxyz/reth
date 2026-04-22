@@ -32,7 +32,7 @@ describe_snapshot() {
 }
 
 snapshot_ready() {
-  [ -d "$DATADIR/db" ] && [ -d "$DATADIR/static_files" ] && [ -f "$DATADIR/jwt.hex" ]
+  [ -d "$DATADIR/db" ] && [ -d "$DATADIR/static_files" ]
 }
 
 EXPECTED_SNAPSHOT="$(describe_snapshot)"
