@@ -446,9 +446,7 @@ impl SparseTrie for ParallelSparseTrie {
                 .get(&Nibbles::default())
                 .and_then(|node| node.cached_rlp_node())
         {
-            return rlp_node
-                .as_hash()
-                .expect("RLP-encoding of the root node cannot be less than 32 bytes")
+            return rlp_node.as_hash().unwrap_or(EMPTY_ROOT_HASH)
         }
 
         // Update all lower subtrie hashes
