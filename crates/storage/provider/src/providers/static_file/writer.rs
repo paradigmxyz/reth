@@ -704,6 +704,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
         // there's no block data in static files.
+        //
+        // We also skip this heuristic when there are no existing static files for this segment.
+        // This handles migration (e.g. v1→v2) where we open a writer starting at a non-zero block
+        // but there is no previous file on disk. Without this guard, `StaticFileProviderInner::
+        // update_index` would try to load the (non-existent) previous range's `.conf` file and
+        // return an ENOENT error.
+        let segment = self.writer.user_header().segment();
+        let reader = self.reader();
         let segment_max_block = self
             .writer
             .user_header()
@@ -711,12 +719,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .as_ref()
             .map(|block_range| block_range.end())
             .or_else(|| {
-                (self.writer.user_header().expected_block_start() >
-                    self.reader().genesis_block_number())
-                .then(|| self.writer.user_header().expected_block_start() - 1)
+                let expected_start = self.writer.user_header().expected_block_start();
+                let has_previous_files = reader.get_highest_static_file_block(segment).is_some();
+                (expected_start > reader.genesis_block_number() && has_previous_files)
+                    .then(|| expected_start - 1)
             });
 
-        self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
+        reader.update_index(segment, segment_max_block)
     }
 
     /// Ensures that the writer is positioned at the specified block number.

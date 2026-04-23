@@ -809,4 +809,39 @@ mod tests {
             "Should have 7 blocks * 5 changes = 35 rows"
         );
     }
+
+    /// Regression test for <https://github.com/paradigmxyz/reth/issues/23691>.
+    ///
+    /// When `migrate-v2` is run on a pruned full node the `AccountChangeSets` segment starts
+    /// at a non-zero block (the block after the prune checkpoint). If that starting block is the
+    /// first block of a new static-file range, `update_index` used to compute
+    /// `segment_max_block = expected_block_start - 1`, which falls in the *previous* range.
+    /// It then tried to `NippyJar::load` that previous range's file — which never existed — and
+    /// returned ENOENT.
+    ///
+    /// The fix: skip the "previous file" heuristic when no static files for the segment exist yet.
+    #[test]
+    fn test_get_writer_at_range_boundary_without_previous_file() {
+        // Use blocks_per_file=10 so block 10 is the first block of the second range (10..=19).
+        // We never write anything to range 0..=9, mimicking a pruned node where those
+        // changesets were pruned before migration.
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 10);
+
+        // This must not fail with "No such file or directory" for range 0..=9.
+        let mut writer = provider
+            .get_writer(10, StaticFileSegment::AccountChangeSets)
+            .expect("get_writer at range boundary should succeed when no previous file exists");
+
+        // Write a block and commit to confirm the writer is fully functional.
+        let changeset = generate_test_changeset(10, 3);
+        writer.append_account_changeset(changeset, 10).unwrap();
+        writer.commit().unwrap();
+
+        // The index should reflect block 10 as the current highest.
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            Some(10),
+        );
+    }
 }
