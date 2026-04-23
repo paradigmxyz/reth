@@ -60,6 +60,13 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
+    /// `RocksDB` block cache size (e.g., 512MB, 4GB).
+    ///
+    /// Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks.
+    /// A larger cache reduces repeated decompression of hot blocks, improving read
+    /// performance for history lookups.
+    #[arg(long = "db.rocksdb-block-cache-size", value_parser = parse_byte_size)]
+    pub rocksdb_block_cache_size: Option<usize>,
 }
 
 impl DatabaseArgs {
