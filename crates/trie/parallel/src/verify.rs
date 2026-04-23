@@ -12,7 +12,10 @@ use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{depth_first, DepthFirstTrieIterator, TrieCursor, TrieCursorFactory},
+    trie_cursor::{
+        depth_first, noop::NoopTrieCursorFactory, DepthFirstTrieIterator, TrieCursor,
+        TrieCursorFactory,
+    },
     updates::TrieUpdates,
     verify::Output,
     walker::TrieWalker,
@@ -357,9 +360,13 @@ where
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
 
-    let walker: TrieWalker<_> =
-        TrieWalker::state_trie(trie_cursor_factory.account_trie_cursor()?, Default::default())
-            .with_deletions_retained(true);
+    // Rebuild the account trie from hashed state alone so the collected updates represent the
+    // full canonical trie, not an incremental diff against the current trie tables.
+    let walker: TrieWalker<_> = TrieWalker::state_trie(
+        NoopTrieCursorFactory::default().account_trie_cursor()?,
+        Default::default(),
+    )
+    .with_deletions_retained(true);
     let mut account_node_iter =
         TrieNodeIter::state_trie(walker, hashed_cursor_factory.hashed_account_cursor()?);
     let mut hash_builder = HashBuilder::default().with_updates(true);
@@ -542,9 +549,12 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::verify::Verifier;
-    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, TrieWriter};
+    use reth_trie::{verify::Verifier, StateRoot};
+    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory};
+
+    type DbStateRoot<'a, TX, A> =
+        StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
     fn non_progress(outputs: Vec<Output>) -> Vec<String> {
         let mut outputs = outputs
@@ -704,6 +714,79 @@ mod tests {
                 .unwrap(),
             )
         };
+
+        let mut actual = Vec::new();
+        ParallelTrieVerifier::new(factory.clone())
+            .verify(|output| {
+                actual.push(output);
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(expected, non_progress(actual));
+    }
+
+    #[test]
+    fn parallel_verifier_uses_full_account_trie_on_populated_tables() {
+        let factory = create_test_provider_factory();
+        let address_with_storage = "0x1000000000000000000000000000000000000001".parse().unwrap();
+        let address_without_storage = "0x2000000000000000000000000000000000000002".parse().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_account_for_hashing([
+                (
+                    address_with_storage,
+                    Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+                ),
+                (
+                    address_without_storage,
+                    Some(Account { nonce: 2, balance: U256::from(20), bytecode_hash: None }),
+                ),
+            ])
+            .unwrap();
+        provider_rw
+            .insert_storage_for_hashing([(
+                address_with_storage,
+                [StorageEntry { key: B256::from([0x33; 32]), value: U256::from(1) }],
+            )])
+            .unwrap();
+
+        let updates = reth_trie_db::with_adapter!(provider_rw, |A| {
+            let (_root, updates) =
+                DbStateRoot::<_, A>::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
+            updates
+        });
+        provider_rw.write_trie_updates(updates).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap().disable_long_read_transaction_safety();
+        let expected = if provider.cached_storage_settings().is_v2() {
+            let trie_cursor_factory =
+                DatabaseTrieCursorFactory::<_, PackedKeyAdapter>::new(provider.tx_ref());
+            non_progress(
+                Verifier::new(
+                    &trie_cursor_factory,
+                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                )
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            )
+        } else {
+            let trie_cursor_factory =
+                DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(provider.tx_ref());
+            non_progress(
+                Verifier::new(
+                    &trie_cursor_factory,
+                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                )
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            )
+        };
+        assert!(expected.is_empty());
 
         let mut actual = Vec::new();
         ParallelTrieVerifier::new(factory.clone())
