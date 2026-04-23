@@ -534,7 +534,7 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-            provider_builder,
+            provider_builder.clone(),
             overlay_factory.clone(),
             strategy,
         ));
@@ -764,8 +764,17 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                Self::compute_state_root_serial(overlay_factory.clone(), &hashed_state),
+                Self::compute_state_root_serial_with_provider(
+                    provider_builder.clone(),
+                    &hashed_state
+                ),
                 block
+            );
+
+            self.compare_trie_updates_with_serial(
+                overlay_factory.clone(),
+                &hashed_state,
+                updates.clone(),
             );
 
             if state_root_task_failed {
@@ -1124,6 +1133,14 @@ where
         Ok(StateRoot::new(&provider, &provider)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()?)
+    }
+
+    fn compute_state_root_serial_with_provider(
+        provider_builder: StateProviderBuilder<N, P>,
+        hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let provider = provider_builder.build()?;
+        provider.state_root_with_updates(hashed_state.get().clone())
     }
 
     /// Awaits the state root from the background task, with an optional timeout fallback.
