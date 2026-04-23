@@ -22,6 +22,7 @@ pub mod feasibility;
 pub mod pre_state;
 pub mod snapshot;
 pub mod snapshot_db;
+pub mod sparse_trie_stream;
 pub mod validation;
 pub mod worker;
 
@@ -30,5 +31,6 @@ pub use execute::{BalExecutionError, BalExecutionOutput, BalPayloadExecutor, Rec
 pub use pre_state::{BlockPreState, RequiredReads};
 pub use snapshot::build_pre_state;
 pub use snapshot_db::{SnapshotDatabase, SnapshotDbError};
+pub use sparse_trie_stream::spawn_stream_bal_to_sparse_trie;
 pub use validation::{check_bal_hash, check_item_count, BAL_ITEM_COST};
 pub use worker::{BalBlockExecutor, WorkerError};
