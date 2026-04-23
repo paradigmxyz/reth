@@ -15,6 +15,9 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
+/// Default number of cache hits before an invalid header entry is evicted and reprocessed.
+pub const DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
+
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
 
@@ -102,6 +105,11 @@ pub struct TreeConfig {
     block_buffer_limit: u32,
     /// Number of invalid headers to keep in cache.
     max_invalid_header_cache_length: u32,
+    /// Number of cache hits before an invalid header entry is evicted and reprocessed.
+    ///
+    /// Setting this to `0` effectively disables the cache because entries are evicted on the
+    /// first lookup.
+    invalid_header_hit_eviction_threshold: u8,
     /// Maximum number of blocks to execute sequentially in a batch.
     ///
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
@@ -206,6 +214,7 @@ impl Default for TreeConfig {
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
+            invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
@@ -248,6 +257,7 @@ impl TreeConfig {
         persistence_backpressure_threshold: u64,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
+        invalid_header_hit_eviction_threshold: u8,
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
@@ -281,6 +291,7 @@ impl TreeConfig {
             persistence_backpressure_threshold,
             block_buffer_limit,
             max_invalid_header_cache_length,
+            invalid_header_hit_eviction_threshold,
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
@@ -336,6 +347,14 @@ impl TreeConfig {
     /// Return the maximum invalid cache header length.
     pub const fn max_invalid_header_cache_length(&self) -> u32 {
         self.max_invalid_header_cache_length
+    }
+
+    /// Return the invalid header cache hit eviction threshold.
+    ///
+    /// Setting this to `0` effectively disables the cache because entries are evicted on the
+    /// first lookup.
+    pub const fn invalid_header_hit_eviction_threshold(&self) -> u8 {
+        self.invalid_header_hit_eviction_threshold
     }
 
     /// Return the maximum execute block batch size.
@@ -465,6 +484,15 @@ impl TreeConfig {
         max_invalid_header_cache_length: u32,
     ) -> Self {
         self.max_invalid_header_cache_length = max_invalid_header_cache_length;
+        self
+    }
+
+    /// Setter for the invalid header cache hit eviction threshold.
+    pub const fn with_invalid_header_hit_eviction_threshold(
+        mut self,
+        invalid_header_hit_eviction_threshold: u8,
+    ) -> Self {
+        self.invalid_header_hit_eviction_threshold = invalid_header_hit_eviction_threshold;
         self
     }
 

@@ -4,8 +4,9 @@ use clap::{builder::Resettable, Args};
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
-    DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS, DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -25,6 +26,7 @@ pub struct DefaultEngineValues {
     persistence_threshold: u64,
     persistence_backpressure_threshold: u64,
     memory_block_buffer_target: u64,
+    invalid_header_hit_eviction_threshold: u8,
     legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
@@ -80,6 +82,12 @@ impl DefaultEngineValues {
     /// Set the default memory block buffer target
     pub const fn with_memory_block_buffer_target(mut self, v: u64) -> Self {
         self.memory_block_buffer_target = v;
+        self
+    }
+
+    /// Set the invalid header cache hit eviction threshold
+    pub const fn with_invalid_header_hit_eviction_threshold(mut self, v: u8) -> Self {
+        self.invalid_header_hit_eviction_threshold = v;
         self
     }
 
@@ -255,6 +263,7 @@ impl Default for DefaultEngineValues {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
             prewarming_disabled: false,
@@ -308,6 +317,14 @@ pub struct EngineArgs {
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
     pub memory_block_buffer_target: u64,
+
+    /// Configure how many cache hits an invalid header can accumulate before it is evicted and
+    /// reprocessed.
+    ///
+    /// Set to `0` to effectively disable the cache because entries are evicted on the first
+    /// lookup.
+    #[arg(long = "engine.invalid-header-cache-hit-eviction-threshold", default_value_t = DefaultEngineValues::get_global().invalid_header_hit_eviction_threshold)]
+    pub invalid_header_hit_eviction_threshold: u8,
 
     /// Enable legacy state root
     #[arg(long = "engine.legacy-state-root", default_value_t = DefaultEngineValues::get_global().legacy_state_root_task_enabled)]
@@ -530,6 +547,7 @@ impl Default for EngineArgs {
             persistence_threshold,
             persistence_backpressure_threshold,
             memory_block_buffer_target,
+            invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
             state_cache_disabled,
             prewarming_disabled,
@@ -562,6 +580,7 @@ impl Default for EngineArgs {
             persistence_threshold,
             persistence_backpressure_threshold,
             memory_block_buffer_target,
+            invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
             state_root_task_compare_updates,
             caching_and_prewarming_enabled: true,
@@ -620,6 +639,7 @@ impl EngineArgs {
             .with_persistence_threshold(self.persistence_threshold)
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -682,6 +702,7 @@ mod tests {
             persistence_threshold: 100,
             persistence_backpressure_threshold: 101,
             memory_block_buffer_target: 50,
+            invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
@@ -726,6 +747,8 @@ mod tests {
             "101",
             "--engine.memory-block-buffer-target",
             "50",
+            "--engine.invalid-header-cache-hit-eviction-threshold",
+            "7",
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
@@ -806,6 +829,28 @@ mod tests {
         ])
         .args;
         assert_eq!(args.slow_block_threshold, Some(Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn test_parse_invalid_header_hit_eviction_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(
+            args.invalid_header_hit_eviction_threshold,
+            DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD
+        );
+        assert_eq!(
+            args.tree_config().invalid_header_hit_eviction_threshold(),
+            DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD
+        );
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.invalid-header-cache-hit-eviction-threshold",
+            "0",
+        ])
+        .args;
+        assert_eq!(args.invalid_header_hit_eviction_threshold, 0);
+        assert_eq!(args.tree_config().invalid_header_hit_eviction_threshold(), 0);
     }
 
     #[test]

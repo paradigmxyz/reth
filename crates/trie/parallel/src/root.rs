@@ -275,7 +275,6 @@ mod tests {
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpec;
-    use reth_db_common::init::init_genesis;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory_with_chain_spec, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
@@ -284,12 +283,13 @@ mod tests {
     #[tokio::test]
     async fn random_parallel_root() {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let genesis_hash = init_genesis(&factory).unwrap();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::<_>::new(
+        let overlay_builder = reth_provider::providers::OverlayBuilder::<
+            reth_ethereum_primitives::EthPrimitives,
+        >::new(changeset_cache);
+        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
             factory.clone(),
-            genesis_hash,
-            changeset_cache,
+            overlay_builder.clone(),
         );
 
         let mut rng = rand::rng();
@@ -366,8 +366,10 @@ mod tests {
         }
 
         let prefix_sets = hashed_state.construct_prefix_sets();
-        overlay_factory =
-            overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
+        overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            factory,
+            overlay_builder.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted()))),
+        );
 
         assert_eq!(
             ParallelStateRoot::new(overlay_factory, prefix_sets.freeze(), runtime)

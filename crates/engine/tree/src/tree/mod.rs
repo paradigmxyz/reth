@@ -151,11 +151,15 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     fn new(
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
+        invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
     ) -> Self {
         Self {
-            invalid_headers: InvalidHeaderCache::new(max_invalid_header_cache_length),
+            invalid_headers: InvalidHeaderCache::new(
+                max_invalid_header_cache_length,
+                invalid_header_hit_eviction_threshold,
+            ),
             buffer: BlockBuffer::new(block_buffer_limit),
             tree_state: TreeState::new(canonical_block, engine_kind),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
@@ -436,6 +440,7 @@ where
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
+            config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
         );

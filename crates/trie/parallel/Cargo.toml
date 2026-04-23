@@ -52,6 +52,7 @@ rand = { workspace = true, optional = true }
 # reth
 reth-chainspec.workspace = true
 reth-db-common.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-db.workspace = true
@@ -79,4 +80,5 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-chainspec/test-utils",
     "reth-trie-sparse?/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]
