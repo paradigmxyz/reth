@@ -1,3 +1,6 @@
+use alloy_consensus::EMPTY_ROOT_HASH;
+use alloy_primitives::B256;
+use alloy_rlp::{BufMut, Encodable};
 use clap::Parser;
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
@@ -5,6 +8,7 @@ use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -20,17 +24,28 @@ use reth_node_metrics::{
 };
 use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, StageCheckpointReader};
 use reth_stages::StageId;
-use reth_storage_api::StorageSettingsCache;
+use reth_storage_api::{DBProvider, StorageSettingsCache};
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{Output, Verifier},
-    Nibbles,
+    hashed_cursor::HashedCursorFactory,
+    metrics::TrieRootMetrics,
+    node_iter::{TrieElement, TrieNodeIter},
+    trie_cursor::{depth_first, DepthFirstTrieIterator, TrieCursor, TrieCursorFactory},
+    updates::TrieUpdates,
+    verify::Output,
+    walker::TrieWalker,
+    BranchNodeCompact, HashBuilder, Nibbles, StorageRoot, TrieType, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieTableAdapter,
 };
 use std::{
+    cmp::Ordering,
+    collections::BTreeMap,
     net::SocketAddr,
+    num::NonZeroUsize,
+    sync::{mpsc, Arc, Mutex},
+    thread,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -82,7 +97,6 @@ impl Command {
                     pprof_dump_dir,
                 );
 
-                // Spawn the metrics server
                 if let Err(e) = MetricServer::new(config).serve().await {
                     tracing::error!("Metrics server error: {}", e);
                 }
@@ -104,7 +118,6 @@ impl Command {
 }
 
 fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
-    // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
         .provider_factory
         .provider()?
@@ -112,55 +125,43 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
         .unwrap_or_default();
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
-    // Get a database transaction directly from the database
-    let db = tool.provider_factory.db_ref();
-    let mut tx = db.tx()?;
-    tx.disable_long_read_transaction_safety();
-
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(&tx))
-}
-
-fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
-    // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
-
     let metrics = RepairTrieMetrics::new();
-
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
     let mut last_progress_time = Instant::now();
 
-    // Iterate over the verifier and repair inconsistencies
-    for output_result in verifier {
-        let output = output_result?;
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| {
+        parallel_verify::<A, _, _, _>(
+            &|| Ok(tool.provider_factory.provider()?.disable_long_read_transaction_safety()),
+            |output| {
+                if let Output::Progress(path) = output {
+                    if last_progress_time.elapsed() > PROGRESS_PERIOD {
+                        output_progress(path, start_time, inconsistent_nodes);
+                        last_progress_time = Instant::now();
+                    }
+                } else {
+                    warn!("Inconsistency found: {output:?}");
+                    inconsistent_nodes += 1;
 
-        if let Output::Progress(path) = output {
-            if last_progress_time.elapsed() > PROGRESS_PERIOD {
-                output_progress(path, start_time, inconsistent_nodes);
-                last_progress_time = Instant::now();
-            }
-        } else {
-            warn!("Inconsistency found: {output:?}");
-            inconsistent_nodes += 1;
+                    match output {
+                        Output::AccountExtra(_, _) |
+                        Output::AccountWrong { .. } |
+                        Output::AccountMissing(_, _) => {
+                            metrics.account_inconsistencies.increment(1);
+                        }
+                        Output::StorageExtra(_, _, _) |
+                        Output::StorageWrong { .. } |
+                        Output::StorageMissing(_, _, _) => {
+                            metrics.storage_inconsistencies.increment(1);
+                        }
+                        Output::Progress(_) => unreachable!(),
+                    }
+                }
 
-            // Record metrics based on output type
-            match output {
-                Output::AccountExtra(_, _) |
-                Output::AccountWrong { .. } |
-                Output::AccountMissing(_, _) => {
-                    metrics.account_inconsistencies.increment(1);
-                }
-                Output::StorageExtra(_, _, _) |
-                Output::StorageWrong { .. } |
-                Output::StorageMissing(_, _, _) => {
-                    metrics.storage_inconsistencies.increment(1);
-                }
-                Output::Progress(_) => unreachable!(),
-            }
-        }
-    }
+                Ok(())
+            },
+        )
+    })?;
 
     info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
 
@@ -204,19 +205,18 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
 }
 
 fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
-    // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
 
-    // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
-    // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
     let inconsistent_nodes = reth_trie_db::with_adapter!(tool.provider_factory, |A| {
-        do_verify_and_repair::<_, A>(&mut provider_rw)?
-    });
+        do_verify_and_repair::<_, A, _, _>(&mut provider_rw, &|| {
+            Ok(tool.provider_factory.provider()?.disable_long_read_transaction_safety())
+        })
+    })?;
 
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
@@ -228,42 +228,31 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     Ok(())
 }
 
-fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
+fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter + Send, P, F>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
+    make_provider: &F,
 ) -> eyre::Result<usize>
 where
-    <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
+    P: DBProvider + Send,
+    P::Tx: DbTx,
+    F: Fn() -> eyre::Result<P> + Sync,
+    <N::DB as Database>::TXMut: DbTxMut + DbTx,
 {
-    // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
     let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
-    // Create the cursor factories. These cannot accept the `&mut` tx above because they
-    // require it to be AsRef.
-    let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-
-    // Create the verifier
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
-
     let metrics = RepairTrieMetrics::new();
-
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
     let mut last_progress_time = Instant::now();
 
-    // Iterate over the verifier and repair inconsistencies
-    for output_result in verifier {
-        let output = output_result?;
-
+    parallel_verify::<A, _, _, _>(make_provider, |output| {
         if !matches!(output, Output::Progress(_)) {
             warn!("Inconsistency found, will repair: {output:?}");
             inconsistent_nodes += 1;
 
-            // Record metrics based on output type
             match &output {
                 Output::AccountExtra(_, _) |
                 Output::AccountWrong { .. } |
@@ -281,14 +270,12 @@ where
 
         match output {
             Output::AccountExtra(path, _node) => {
-                // Extra account node in trie, remove it
                 let key: A::AccountKey = path.into();
                 if account_trie_cursor.seek_exact(key)?.is_some() {
                     account_trie_cursor.delete_current()?;
                 }
             }
             Output::StorageExtra(account, path, _node) => {
-                // Extra storage node in trie, remove it
                 let subkey: A::StorageSubKey = path.into();
                 if storage_trie_cursor
                     .seek_by_key_subkey(account, subkey.clone())?
@@ -300,15 +287,11 @@ where
             }
             Output::AccountWrong { path, expected: node, .. } |
             Output::AccountMissing(path, node) => {
-                // Wrong/missing account node value, upsert it
                 let key: A::AccountKey = path.into();
                 account_trie_cursor.upsert(key, &node)?;
             }
             Output::StorageWrong { account, path, expected: node, .. } |
             Output::StorageMissing(account, path, node) => {
-                // Wrong/missing storage node value, upsert it
-                // (We can't just use `upsert` method with a dup cursor, it's not properly
-                // supported)
                 let subkey: A::StorageSubKey = path.into();
                 let entry = A::StorageValue::new(subkey.clone(), node);
                 if storage_trie_cursor
@@ -327,24 +310,446 @@ where
                 }
             }
         }
-    }
+
+        Ok(())
+    })?;
 
     Ok(inconsistent_nodes as usize)
 }
 
+type StorageResult = eyre::Result<StorageMessage>;
+
+#[derive(Debug)]
+enum StorageMessage {
+    Root { account: B256, root: B256 },
+    Output(Output),
+}
+
+#[derive(Debug)]
+struct RepairTrieCursorVerifier<I> {
+    account: Option<B256>,
+    trie_iter: I,
+    curr: Option<(Nibbles, BranchNodeCompact)>,
+}
+
+impl<C: TrieCursor> RepairTrieCursorVerifier<DepthFirstTrieIterator<C>> {
+    fn new(account: Option<B256>, trie_cursor: C) -> eyre::Result<Self> {
+        let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
+        let curr = trie_iter.next().transpose()?;
+        Ok(Self { account, trie_iter, curr })
+    }
+
+    const fn output_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
+        if let Some(account) = self.account {
+            Output::StorageExtra(account, path, node)
+        } else {
+            Output::AccountExtra(path, node)
+        }
+    }
+
+    const fn output_wrong(
+        &self,
+        path: Nibbles,
+        expected: BranchNodeCompact,
+        found: BranchNodeCompact,
+    ) -> Output {
+        if let Some(account) = self.account {
+            Output::StorageWrong { account, path, expected, found }
+        } else {
+            Output::AccountWrong { path, expected, found }
+        }
+    }
+
+    const fn output_missing(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
+        if let Some(account) = self.account {
+            Output::StorageMissing(account, path, node)
+        } else {
+            Output::AccountMissing(path, node)
+        }
+    }
+
+    fn next(&mut self, path: Nibbles, node: BranchNodeCompact) -> eyre::Result<Vec<Output>> {
+        let mut outputs = Vec::new();
+
+        loop {
+            if self.curr.is_none() {
+                outputs.push(self.output_missing(path, node));
+                return Ok(outputs)
+            }
+
+            let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
+            match depth_first::cmp(&path, curr_path) {
+                Ordering::Less => {
+                    outputs.push(self.output_missing(path, node));
+                    return Ok(outputs)
+                }
+                Ordering::Equal => {
+                    if *curr_node != node {
+                        outputs.push(self.output_wrong(path, node, curr_node.clone()));
+                    }
+                    self.curr = self.trie_iter.next().transpose()?;
+                    return Ok(outputs)
+                }
+                Ordering::Greater => {
+                    outputs.push(self.output_extra(*curr_path, curr_node.clone()));
+                    self.curr = self.trie_iter.next().transpose()?;
+                }
+            }
+        }
+    }
+
+    fn finalize(&mut self) -> eyre::Result<Vec<Output>> {
+        let mut outputs = Vec::new();
+        while let Some((curr_path, curr_node)) = self.curr.take() {
+            outputs.push(self.output_extra(curr_path, curr_node));
+            self.curr = self.trie_iter.next().transpose()?;
+        }
+        Ok(outputs)
+    }
+}
+
+fn parallel_verify<A, P, F, O>(make_provider: &F, mut on_output: O) -> eyre::Result<()>
+where
+    A: TrieTableAdapter + Send,
+    P: DBProvider + Send,
+    P::Tx: DbTx,
+    F: Fn() -> eyre::Result<P> + Sync,
+    O: FnMut(Output) -> eyre::Result<()>,
+{
+    let storage_workers = storage_worker_count();
+    info!(storage_workers, "Verifying storage tries in parallel");
+
+    let (job_tx, job_rx) = mpsc::sync_channel(storage_workers.saturating_mul(2).max(1));
+    let job_rx = Arc::new(Mutex::new(job_rx));
+    let (result_tx, result_rx) = mpsc::channel();
+
+    thread::scope(|scope| -> eyre::Result<()> {
+        {
+            let result_tx = result_tx.clone();
+            let job_tx = job_tx.clone();
+            scope.spawn(move || {
+                if let Err(err) =
+                    dispatch_storage_jobs::<A, P, F>(make_provider, &job_tx, &result_tx)
+                {
+                    let _ = result_tx.send(Err(err));
+                }
+            });
+        }
+
+        for _ in 0..storage_workers {
+            let job_rx = Arc::clone(&job_rx);
+            let result_tx = result_tx.clone();
+
+            scope.spawn(move || loop {
+                let account = match job_rx.lock().expect("poisoned storage job receiver").recv() {
+                    Ok(account) => account,
+                    Err(_) => break,
+                };
+
+                let result = (|| -> eyre::Result<()> {
+                    let provider = make_provider()?.disable_long_read_transaction_safety();
+                    verify_storage_account::<A, _>(&provider, account, &result_tx)
+                })();
+
+                if let Err(err) = result {
+                    let _ = result_tx.send(Err(err));
+                    break;
+                }
+            });
+        }
+
+        drop(job_tx);
+        drop(result_tx);
+
+        verify_accounts::<A, _, _, _>(make_provider, &result_rx, &mut on_output)
+    })
+}
+
+fn dispatch_storage_jobs<A, P, F>(
+    make_provider: &F,
+    job_tx: &mpsc::SyncSender<B256>,
+    result_tx: &mpsc::Sender<StorageResult>,
+) -> eyre::Result<()>
+where
+    A: TrieTableAdapter,
+    P: DBProvider,
+    P::Tx: DbTx,
+    F: Fn() -> eyre::Result<P>,
+{
+    let provider = make_provider()?.disable_long_read_transaction_safety();
+    let tx = provider.tx_ref();
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+    let mut account_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
+    let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
+
+    let mut next_storage_account = storage_cursor.first()?.map(|entry| entry.0);
+    let mut next_account = account_cursor.first()?;
+
+    while let Some((account, _)) = next_account {
+        while next_storage_account.is_some_and(|storage_account| storage_account < account) {
+            next_storage_account = storage_cursor.next_no_dup()?.map(|entry| entry.0);
+        }
+
+        if next_storage_account == Some(account) {
+            job_tx.send(account).map_err(|_| eyre::eyre!("storage worker queue closed"))?;
+            next_storage_account = storage_cursor.next_no_dup()?.map(|entry| entry.0);
+        } else {
+            emit_empty_storage_inconsistencies(
+                account,
+                trie_cursor_factory.storage_trie_cursor(account)?,
+                result_tx,
+            )?;
+            result_tx
+                .send(Ok(StorageMessage::Root { account, root: EMPTY_ROOT_HASH }))
+                .map_err(|_| eyre::eyre!("storage results channel closed"))?;
+        }
+
+        next_account = account_cursor.next()?;
+    }
+
+    Ok(())
+}
+
+fn verify_storage_account<A, P>(
+    provider: &P,
+    account: B256,
+    result_tx: &mpsc::Sender<StorageResult>,
+) -> eyre::Result<()>
+where
+    A: TrieTableAdapter,
+    P: DBProvider,
+    P::Tx: DbTx,
+{
+    let tx = provider.tx_ref();
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+
+    let (root, _, updates) = StorageRoot::new_hashed(
+        trie_cursor_factory.clone(),
+        hashed_cursor_factory,
+        account,
+        Default::default(),
+        TrieRootMetrics::new(TrieType::Storage),
+    )
+    .root_with_updates()?;
+
+    emit_storage_updates(
+        account,
+        trie_cursor_factory.storage_trie_cursor(account)?,
+        sorted_branch_nodes(updates.storage_nodes.into_iter()),
+        result_tx,
+    )?;
+
+    result_tx
+        .send(Ok(StorageMessage::Root { account, root }))
+        .map_err(|_| eyre::eyre!("storage results channel closed"))?;
+
+    Ok(())
+}
+
+fn verify_accounts<A, P, F, O>(
+    make_provider: &F,
+    result_rx: &mpsc::Receiver<StorageResult>,
+    on_output: &mut O,
+) -> eyre::Result<()>
+where
+    A: TrieTableAdapter,
+    P: DBProvider,
+    P::Tx: DbTx,
+    F: Fn() -> eyre::Result<P>,
+    O: FnMut(Output) -> eyre::Result<()>,
+{
+    let provider = make_provider()?.disable_long_read_transaction_safety();
+    let tx = provider.tx_ref();
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+
+    let walker: TrieWalker<_> =
+        TrieWalker::state_trie(trie_cursor_factory.account_trie_cursor()?, Default::default())
+            .with_deletions_retained(true);
+    let mut account_node_iter =
+        TrieNodeIter::state_trie(walker, hashed_cursor_factory.hashed_account_cursor()?);
+    let mut hash_builder = HashBuilder::default().with_updates(true);
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+    let mut pending_roots = BTreeMap::new();
+    let mut pending_outputs = BTreeMap::new();
+
+    while let Some(node) = account_node_iter.try_next()? {
+        match node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                let storage_root = wait_for_storage_root(
+                    hashed_address,
+                    result_rx,
+                    &mut pending_roots,
+                    &mut pending_outputs,
+                    on_output,
+                )?;
+
+                account_rlp.clear();
+                account.into_trie_account(storage_root).encode(&mut account_rlp as &mut dyn BufMut);
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+                on_output(Output::Progress(Nibbles::unpack(hashed_address)))?;
+            }
+        }
+    }
+
+    let removed_keys = account_node_iter.walker.take_removed_keys();
+    let mut trie_updates = TrieUpdates::default();
+    trie_updates.finalize(hash_builder, removed_keys, Default::default());
+
+    let mut account_verifier =
+        RepairTrieCursorVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?;
+    for (path, node) in sorted_branch_nodes(trie_updates.account_nodes.into_iter()) {
+        for output in account_verifier.next(path, node)? {
+            on_output(output)?;
+        }
+    }
+    for output in account_verifier.finalize()? {
+        on_output(output)?;
+    }
+
+    Ok(())
+}
+
+fn wait_for_storage_root<O>(
+    account: B256,
+    result_rx: &mpsc::Receiver<StorageResult>,
+    pending_roots: &mut BTreeMap<B256, B256>,
+    pending_outputs: &mut BTreeMap<B256, Vec<Output>>,
+    on_output: &mut O,
+) -> eyre::Result<B256>
+where
+    O: FnMut(Output) -> eyre::Result<()>,
+{
+    if let Some(root) = pending_roots.remove(&account) {
+        flush_pending_outputs(account, pending_outputs, on_output)?;
+        return Ok(root)
+    }
+
+    loop {
+        // `Root` is the end-of-account marker: a producer must emit all storage inconsistencies
+        // for that account before its root, so flushing buffered outputs here is sufficient.
+        match result_rx.recv().map_err(|_| eyre::eyre!("storage results channel closed"))?? {
+            StorageMessage::Root { account: root_account, root } => {
+                if root_account == account {
+                    flush_pending_outputs(account, pending_outputs, on_output)?;
+                    return Ok(root)
+                }
+
+                pending_roots.insert(root_account, root);
+            }
+            StorageMessage::Output(output) => {
+                let output_account = output_storage_account(&output)
+                    .expect("storage worker emitted non-storage output");
+                if output_account == account {
+                    on_output(output)?;
+                } else {
+                    pending_outputs.entry(output_account).or_default().push(output);
+                }
+            }
+        }
+    }
+}
+
+fn flush_pending_outputs<O>(
+    account: B256,
+    pending_outputs: &mut BTreeMap<B256, Vec<Output>>,
+    on_output: &mut O,
+) -> eyre::Result<()>
+where
+    O: FnMut(Output) -> eyre::Result<()>,
+{
+    if let Some(outputs) = pending_outputs.remove(&account) {
+        for output in outputs {
+            on_output(output)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn emit_storage_updates<C>(
+    account: B256,
+    cursor: C,
+    expected_nodes: Vec<(Nibbles, BranchNodeCompact)>,
+    result_tx: &mpsc::Sender<StorageResult>,
+) -> eyre::Result<()>
+where
+    C: TrieCursor,
+{
+    let mut verifier = RepairTrieCursorVerifier::new(Some(account), cursor)?;
+    for (path, node) in expected_nodes {
+        for output in verifier.next(path, node)? {
+            result_tx
+                .send(Ok(StorageMessage::Output(output)))
+                .map_err(|_| eyre::eyre!("storage results channel closed"))?;
+        }
+    }
+
+    for output in verifier.finalize()? {
+        result_tx
+            .send(Ok(StorageMessage::Output(output)))
+            .map_err(|_| eyre::eyre!("storage results channel closed"))?;
+    }
+
+    Ok(())
+}
+
+fn emit_empty_storage_inconsistencies<C>(
+    account: B256,
+    cursor: C,
+    result_tx: &mpsc::Sender<StorageResult>,
+) -> eyre::Result<()>
+where
+    C: TrieCursor,
+{
+    let mut verifier = RepairTrieCursorVerifier::new(Some(account), cursor)?;
+    for output in verifier.finalize()? {
+        result_tx
+            .send(Ok(StorageMessage::Output(output)))
+            .map_err(|_| eyre::eyre!("storage results channel closed"))?;
+    }
+
+    Ok(())
+}
+
+fn sorted_branch_nodes<I>(nodes: I) -> Vec<(Nibbles, BranchNodeCompact)>
+where
+    I: IntoIterator<Item = (Nibbles, BranchNodeCompact)>,
+{
+    let mut nodes = nodes.into_iter().collect::<Vec<_>>();
+    nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
+    nodes
+}
+
+fn output_storage_account(output: &Output) -> Option<B256> {
+    match output {
+        Output::StorageExtra(account, ..) |
+        Output::StorageMissing(account, ..) |
+        Output::StorageWrong { account, .. } => Some(*account),
+        Output::AccountExtra(..) |
+        Output::AccountMissing(..) |
+        Output::AccountWrong { .. } |
+        Output::Progress(..) => None,
+    }
+}
+
+fn storage_worker_count() -> usize {
+    let available = thread::available_parallelism().map(NonZeroUsize::get).unwrap_or(1);
+    available.saturating_sub(2).max(1)
+}
+
 /// Output progress information based on the last seen account path.
 fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_nodes: u64) {
-    // Calculate percentage based on position in the trie path space
-    // For progress estimation, we'll use the first few nibbles as an approximation
-
-    // Convert the first 16 nibbles (8 bytes) to a u64 for progress calculation
     let mut current_value: u64 = 0;
     let nibbles_to_use = last_account.len().min(16);
 
     for i in 0..nibbles_to_use {
         current_value = (current_value << 4) | (last_account.get(i).unwrap_or(0) as u64);
     }
-    // Shift left to fill remaining bits if we have fewer than 16 nibbles
     if nibbles_to_use < 16 {
         current_value <<= (16 - nibbles_to_use) * 4;
     }
@@ -352,7 +757,6 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
     let progress_percent = current_value as f64 / u64::MAX as f64 * 100.0;
     let progress_percent_str = format!("{progress_percent:.2}");
 
-    // Calculate ETA based on current speed
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
 
@@ -388,5 +792,72 @@ impl RepairTrieMetrics {
                 "type" => "storage"
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_for_storage_root_buffers_future_accounts() {
+        let target_account = B256::from([0x11; 32]);
+        let future_account = B256::from([0x22; 32]);
+        let target_root = B256::from([0xaa; 32]);
+        let future_root = B256::from([0xbb; 32]);
+        let target_output = Output::StorageExtra(
+            target_account,
+            Nibbles::from_nibbles([0x1]),
+            BranchNodeCompact::default(),
+        );
+        let future_output = Output::StorageExtra(
+            future_account,
+            Nibbles::from_nibbles([0x2]),
+            BranchNodeCompact::default(),
+        );
+
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(StorageMessage::Output(future_output.clone()))).unwrap();
+        tx.send(Ok(StorageMessage::Root { account: future_account, root: future_root })).unwrap();
+        tx.send(Ok(StorageMessage::Output(target_output.clone()))).unwrap();
+        tx.send(Ok(StorageMessage::Root { account: target_account, root: target_root })).unwrap();
+
+        let mut pending_roots = BTreeMap::new();
+        let mut pending_outputs = BTreeMap::new();
+        let mut seen_outputs = Vec::new();
+
+        let root = wait_for_storage_root(
+            target_account,
+            &rx,
+            &mut pending_roots,
+            &mut pending_outputs,
+            &mut |output| {
+                seen_outputs.push(output);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(root, target_root);
+        assert_eq!(seen_outputs, vec![target_output]);
+
+        seen_outputs.clear();
+
+        let root = wait_for_storage_root(
+            future_account,
+            &rx,
+            &mut pending_roots,
+            &mut pending_outputs,
+            &mut |output| {
+                seen_outputs.push(output);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(root, future_root);
+        assert_eq!(seen_outputs, vec![future_output]);
+        assert!(pending_roots.is_empty());
+        assert!(pending_outputs.is_empty());
     }
 }
