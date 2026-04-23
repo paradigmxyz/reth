@@ -64,7 +64,7 @@ impl HttpClient for FailingClient {
         Ok(futures::stream::iter(vec![Ok(match url.as_str() {
             "https://mainnet.era1.nimbus.team/" => Bytes::from_static(crate::ERA1_NIMBUS),
             "https://era1.ethportal.net/" => Bytes::from_static(crate::ERA1_ETH_PORTAL),
-            "https://era.ithaca.xyz/era1/index.html" => Bytes::from_static(crate::ERA1_ITHACA),
+            "https://era.ithaca.xyz/era1/index.html" |
             "https://snapshots.reth.rs/history/mainnet/" => Bytes::from_static(crate::ERA1_ITHACA),
             "https://mainnet.era1.nimbus.team/checksums.txt" |
             "https://era1.ethportal.net/checksums.txt" |
