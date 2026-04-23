@@ -17,7 +17,6 @@ reth-primitives-traits = { workspace = true, features = ["dashmap", "std"] }
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
-reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
@@ -46,6 +45,7 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # `trie-debug` feature
+reth-trie-sparse = { workspace = true, optional = true, features = ["trie-debug"] }
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -63,13 +63,17 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
 default = ["metrics"]
-metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics", "reth-trie-sparse/metrics"]
-trie-debug = ["dep:rand", "reth-trie-sparse/trie-debug"]
+metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
+trie-debug = [
+    "dep:rand",
+    "dep:reth-trie-sparse",
+    "reth-trie-sparse?/trie-debug",
+]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-trie-db/test-utils",
-    "reth-trie-sparse/test-utils",
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
+    "reth-trie-sparse?/test-utils",
 ]

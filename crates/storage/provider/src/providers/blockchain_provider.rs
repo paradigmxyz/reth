@@ -3,13 +3,13 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
+    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -50,6 +50,8 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    /// Store for BALs associated with this provider view.
+    pub(crate) bal_store: BalStoreHandle,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
@@ -57,6 +59,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
         Self {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            bal_store: self.bal_store.clone(),
         }
     }
 }
@@ -108,6 +111,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
+            bal_store: BalStoreHandle::default(),
         })
     }
 
@@ -137,6 +141,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
+}
+
+impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
+    }
 }
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {

@@ -48,7 +48,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::Bal, BlockAccessList};
+use alloy_eip7928::{
+    bal::{Bal, DecodedBal},
+    BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -487,6 +490,12 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
+        // Extract the decoded BAL, if valid and available.
+        let decoded_bal = ensure_ok!(input
+            .try_decoded_access_list()
+            .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }))
+        .map(Arc::new);
+
         let env = ExecutionEnv {
             evm_env,
             hash: input.hash(),
@@ -495,6 +504,7 @@ where
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
+            decoded_bal,
         };
 
         // Plan the strategy used for state root computation.
@@ -508,14 +518,6 @@ where
 
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
-
-        // Extract the BAL, if valid and available
-        let block_access_list = ensure_ok!(input
-            .block_access_list()
-            .transpose()
-            // Eventually gets converted to a `InsertBlockErrorKind::Other`
-            .map_err(Box::<dyn std::error::Error + Send + Sync>::from))
-        .map(Arc::new);
 
         // Create lazy overlay from ancestors - this doesn't block, allowing execution to start
         // before the trie data is ready. The overlay will be computed on first access.
@@ -535,7 +537,6 @@ where
             provider_builder,
             overlay_factory.clone(),
             strategy,
-            block_access_list,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -1439,7 +1440,6 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P>,
         strategy: StateRootStrategy,
-        block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1459,7 +1459,6 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
-                    block_access_list,
                 );
 
                 // record prewarming initialization duration
@@ -1472,12 +1471,8 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle = self.payload_processor.spawn_cache_exclusive(
-                    env,
-                    txs,
-                    provider_builder,
-                    block_access_list,
-                );
+                let handle =
+                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
 
                 // Record prewarming initialization duration
                 self.metrics
@@ -2107,6 +2102,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
             }),
             Self::Block(_) => None,
+        }
+    }
+
+    /// Returns the decoded block access list, if present and successfully decoded.
+    pub fn try_decoded_access_list(&self) -> Result<Option<DecodedBal>, alloy_rlp::Error> {
+        match self {
+            Self::Payload(payload) => payload
+                .block_access_list()
+                .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
+                .transpose(),
+            Self::Block(_) => Ok(None),
         }
     }
 

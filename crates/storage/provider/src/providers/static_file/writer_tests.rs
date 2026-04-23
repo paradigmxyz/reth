@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(get_header_block_count(&provider, 0), 5);
 
         // Verify offsets are correct
-        let mut reader = ChangesetOffsetReader::new(&sidecar_path, 5).unwrap();
+        let reader = ChangesetOffsetReader::new(&sidecar_path, 5).unwrap();
 
         let o0 = reader.get(0).unwrap().unwrap();
         assert_eq!(o0.offset(), 0);
