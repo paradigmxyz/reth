@@ -700,9 +700,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 }
             };
 
-            if is_eth68_message
-                && let Some((actual_ty_byte, _)) = *metadata_ref_mut
-            {
+            if is_eth68_message && let Some((actual_ty_byte, _)) = *metadata_ref_mut {
                 match TxType::try_from(actual_ty_byte) {
                     Ok(parsed_tx_type) => tx_types_counter.increase_by_tx_type(parsed_tx_type),
                     Err(_) => tx_types_counter.increase_other(),
