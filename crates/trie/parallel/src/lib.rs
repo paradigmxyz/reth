@@ -17,6 +17,9 @@ pub mod stats;
 /// Implementation of parallel state root computation.
 pub mod root;
 
+/// Implementation of parallel trie verification.
+pub mod verify;
+
 /// Implementation of parallel proof computation.
 pub mod proof_task;
 
@@ -33,3 +36,5 @@ pub mod metrics;
 /// Proof task manager metrics.
 #[cfg(feature = "metrics")]
 pub mod proof_task_metrics;
+
+pub use verify::{ParallelTrieVerifier, ParallelTrieVerifyError};

@@ -53,6 +53,7 @@ reth-tasks.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-parallel.workspace = true
 reth-trie-common = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 reth-discv4.workspace = true
