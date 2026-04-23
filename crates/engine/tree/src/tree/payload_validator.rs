@@ -84,7 +84,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -688,24 +688,6 @@ where
                             trie_debug_recorders = debug_recorders;
                         }
 
-                        // Compare trie updates with serial computation if configured
-                        if self.config.always_compare_trie_updates() {
-                            let _has_diff = self.compare_trie_updates_with_serial(
-                                provider_builder.clone(),
-                                provider_factory,
-                                overlay_builder,
-                                &hashed_state,
-                                trie_updates.as_ref().clone(),
-                            );
-                            #[cfg(feature = "trie-debug")]
-                            if _has_diff {
-                                Self::write_trie_debug_recorders(
-                                    block.header().number(),
-                                    &trie_debug_recorders,
-                                );
-                            }
-                        }
-
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
@@ -733,8 +715,8 @@ where
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
-                    provider_factory,
-                    overlay_builder,
+                    provider_factory.clone(),
+                    overlay_builder.clone(),
                     &hashed_state,
                 ) {
                     Ok(result) => {
@@ -772,10 +754,18 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                provider_builder
-                    .build()
-                    .and_then(|provider| Self::compute_state_root_serial(provider, &hashed_state)),
+                Self::compute_state_root_serial_with_provider(
+                    provider_builder.clone(),
+                    &hashed_state
+                ),
                 block
+            );
+
+            self.compare_trie_updates_with_serial(
+                provider_factory.clone(),
+                overlay_builder.clone(),
+                &hashed_state,
+                updates.clone(),
             );
 
             if state_root_task_failed {
@@ -1127,6 +1117,14 @@ where
         state_provider.state_root_with_updates(hashed_state.get().clone())
     }
 
+    fn compute_state_root_serial_with_provider(
+        provider_builder: StateProviderBuilder<N, P>,
+        hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let provider = provider_builder.build()?;
+        provider.state_root_with_updates(hashed_state.get().clone())
+    }
+
     /// Awaits the state root from the background task, with an optional timeout fallback.
     ///
     /// If a timeout is configured (`state_root_task_timeout`), this method first waits for the
@@ -1242,7 +1240,6 @@ where
     /// updates.
     fn compare_trie_updates_with_serial(
         &self,
-        state_provider_builder: StateProviderBuilder<N, P>,
         provider_factory: P,
         overlay_builder: OverlayBuilder,
         hashed_state: &LazyHashedPostState,
@@ -1250,53 +1247,41 @@ where
     ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
-        match state_provider_builder
-            .build()
-            .and_then(|provider| Self::compute_state_root_serial(provider, hashed_state))
-        {
-            Ok((serial_root, serial_trie_updates)) => {
-                debug!(
-                    target: "engine::tree::payload_validator",
-                    ?serial_root,
-                    "Serial state root computation finished for comparison"
-                );
+        let hashed_state = hashed_state.get();
+        // The `hashed_state` argument will be taken into account as part of the overlay, but we
+        // need to use the prefix sets which were generated from it to indicate to the
+        // StateRoot which parts of the trie need to be recomputed.
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let overlay_builder =
+            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
 
-                // Get a database provider to use as trie cursor factory
-                let overlay_factory =
-                    OverlayStateProviderFactory::new(provider_factory, overlay_builder);
-                match overlay_factory.database_provider_ro() {
-                    Ok(provider) => {
-                        match super::trie_updates::compare_trie_updates(
-                            &provider,
-                            task_trie_updates,
-                            serial_trie_updates,
-                        ) {
-                            Ok(has_diff) => return has_diff,
-                            Err(err) => {
-                                warn!(
-                                    target: "engine::tree::payload_validator",
-                                    %err,
-                                    "Error comparing trie updates"
-                                );
-                                return true;
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        warn!(
-                            target: "engine::tree::payload_validator",
-                            %err,
-                            "Failed to get database provider for trie update comparison"
-                        );
-                    }
-                }
-            }
+        let provider = overlay_factory.database_provider_ro().unwrap();
+
+        let (serial_root, serial_trie_updates) = StateRoot::new(&provider, &provider)
+            .with_prefix_sets(prefix_sets)
+            .root_with_updates()
+            .unwrap();
+
+        debug!(
+            target: "engine::tree::payload_validator",
+            ?serial_root,
+            "Serial state root computation finished for comparison"
+        );
+
+        match super::trie_updates::compare_trie_updates(
+            &provider,
+            task_trie_updates,
+            serial_trie_updates,
+        ) {
+            Ok(has_diff) => return has_diff,
             Err(err) => {
                 warn!(
                     target: "engine::tree::payload_validator",
                     %err,
-                    "Failed to compute serial state root for comparison"
+                    "Error comparing trie updates"
                 );
+                return true;
             }
         }
         false
