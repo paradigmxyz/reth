@@ -9,7 +9,6 @@ use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
-    try_join,
 };
 
 /// Downloaded index page filename
@@ -53,7 +52,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     ///
-    /// The file type is auto-detected from the URL. Use
+    /// The initial file type hint is inferred from the URL. File lists and downloads re-detect
+    /// the effective type from filenames when possible. Use
     /// [`with_era_type`](Self::with_era_type) to override.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
         let era_type = EraFileType::from_url(url.as_str());
@@ -79,6 +79,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
             .next_back()
             .ok_or_eyre("empty path segments")?;
         let path = path.join(file_name);
+        let file_type = self.file_type_from_name(file_name);
 
         if !self.is_downloaded(file_name, &path).await? {
             let number = self
@@ -107,7 +108,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
 
-            if self.era_type == EraFileType::Era1 {
+            if file_type == EraFileType::Era1 {
                 self.assert_checksum(number, actual_checksum?)
                     .await
                     .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
@@ -161,12 +162,16 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     /// Returns the number of files in the `folder`.
     pub async fn files_count(&self) -> usize {
         let mut count = 0usize;
-
-        let file_extension = self.era_type.extension().trim_start_matches('.');
+        let file_type = self.stored_era_type().await;
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if entry.path().extension() == Some(file_extension.as_ref()) {
+                if entry
+                    .file_name()
+                    .to_str()
+                    .and_then(EraFileType::from_filename)
+                    .is_some_and(|entry_type| entry_type == file_type)
+                {
                     count += 1;
                 }
             }
@@ -183,26 +188,28 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let index_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
+        self.download_file_to_path(self.url.clone(), &index_path).await?;
+
+        let era_type = self.detect_era_type_from_index(&index_path).await?;
+
         // Only for era1, we download also checksums file
-        if self.era_type == EraFileType::Era1 {
+        if era_type == EraFileType::Era1 {
             let checksums_url = self.url.join(Self::CHECKSUMS)?;
-            try_join!(
-                self.download_file_to_path(self.url.clone(), &index_path),
-                self.download_file_to_path(checksums_url, &checksums_path)
-            )?;
-        } else {
-            // Download only index file
-            self.download_file_to_path(self.url.clone(), &index_path).await?;
+            self.download_file_to_path(checksums_url, &checksums_path).await?;
         }
 
         // Parse and extract era filenames from index.html
-        self.extract_era_filenames(&index_path).await?;
+        self.extract_era_filenames(&index_path, era_type).await?;
 
         Ok(())
     }
 
     /// Extracts ERA filenames from `index.html` and writes them to the index file
-    async fn extract_era_filenames(&self, index_path: &Path) -> eyre::Result<()> {
+    async fn extract_era_filenames(
+        &self,
+        index_path: &Path,
+        era_type: EraFileType,
+    ) -> eyre::Result<()> {
         let file = File::open(index_path).await?;
         let reader = io::BufReader::new(file);
         let mut lines = reader.lines();
@@ -211,15 +218,9 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let file = File::create(&path).await?;
         let mut writer = io::BufWriter::new(file);
 
-        let ext = self.era_type.extension();
-        let ext_len = ext.len();
-
         while let Some(line) = lines.next_line().await? {
-            if let Some(j) = line.find(ext) &&
-                let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
-            {
-                let era = &line[i + 1..j + ext_len];
-                writer.write_all(era.as_bytes()).await?;
+            if let Some(file_name) = era_file_name_from_line(&line, era_type) {
+                writer.write_all(file_name.as_bytes()).await?;
                 writer.write_all(b"\n").await?;
             }
         }
@@ -258,7 +259,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         match File::open(path).await {
             Ok(file) => {
-                if self.era_type == EraFileType::Era1 {
+                if self.file_type_from_name(name) == EraFileType::Era1 {
                     let number = self
                         .file_name_to_number(name)
                         .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
@@ -328,6 +329,65 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     fn file_name_to_number(&self, file_name: &str) -> Option<usize> {
         file_name.split('-').nth(1).and_then(|v| usize::from_str(v).ok())
     }
+
+    fn file_type_from_name(&self, file_name: &str) -> EraFileType {
+        EraFileType::from_filename(file_name).unwrap_or(self.era_type)
+    }
+
+    async fn detect_era_type_from_index(&self, index_path: &Path) -> eyre::Result<EraFileType> {
+        let file = File::open(index_path).await?;
+        let reader = io::BufReader::new(file);
+        let mut lines = reader.lines();
+        let mut detected = None;
+
+        while let Some(line) = lines.next_line().await? {
+            if let Some(file_name) = era_file_name_from_line(&line, EraFileType::Era1)
+                .or_else(|| era_file_name_from_line(&line, EraFileType::Era))
+            {
+                let file_type =
+                    EraFileType::from_filename(file_name).expect("filtered ERA file names");
+
+                if let Some(current) = detected {
+                    if current != file_type {
+                        return Err(eyre!("Mixed ERA file types found in {}", index_path.display()));
+                    }
+                } else {
+                    detected = Some(file_type);
+                }
+            }
+        }
+
+        Ok(detected.unwrap_or(self.era_type))
+    }
+
+    async fn stored_era_type(&self) -> EraFileType {
+        let index_path = self.folder.to_path_buf().join("index");
+
+        if let Ok(file) = File::open(&index_path).await {
+            let reader = io::BufReader::new(file);
+            let mut lines = reader.lines();
+
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(file_type) = EraFileType::from_filename(line.trim()) {
+                    return file_type;
+                }
+            }
+        }
+
+        let index_html_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
+        if fs::metadata(&index_html_path).await.is_ok() &&
+            let Ok(file_type) = self.detect_era_type_from_index(&index_html_path).await
+        {
+            return file_type;
+        }
+
+        self.era_type
+    }
+}
+
+fn era_file_name_from_line(line: &str, era_type: EraFileType) -> Option<&str> {
+    line.split(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '.')
+        .find(|token| EraFileType::from_filename(token) == Some(era_type))
 }
 
 async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {

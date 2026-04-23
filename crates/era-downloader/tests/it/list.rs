@@ -9,6 +9,7 @@ use test_case::test_case;
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[test_case("https://era.ithaca.xyz/era1/index.html"; "ithaca")]
+#[test_case("https://snapshots.reth.rs/history/mainnet/"; "url-without-era1-substring")]
 #[tokio::test]
 async fn test_getting_era1_file_name_after_fetching_file_list(url: &str) {
     let url = Url::from_str(url).unwrap();

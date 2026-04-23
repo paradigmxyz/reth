@@ -10,6 +10,7 @@ use test_case::test_case;
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[test_case("https://era.ithaca.xyz/era1/index.html"; "ithaca")]
+#[test_case("https://snapshots.reth.rs/history/mainnet/"; "url-without-era1-substring")]
 #[tokio::test]
 async fn test_invalid_checksum_returns_error(url: &str) {
     let base_url = Url::from_str(url).unwrap();
@@ -64,17 +65,23 @@ impl HttpClient for FailingClient {
             "https://mainnet.era1.nimbus.team/" => Bytes::from_static(crate::ERA1_NIMBUS),
             "https://era1.ethportal.net/" => Bytes::from_static(crate::ERA1_ETH_PORTAL),
             "https://era.ithaca.xyz/era1/index.html" => Bytes::from_static(crate::ERA1_ITHACA),
+            "https://snapshots.reth.rs/history/mainnet/" => Bytes::from_static(crate::ERA1_ITHACA),
             "https://mainnet.era1.nimbus.team/checksums.txt" |
             "https://era1.ethportal.net/checksums.txt" |
-            "https://era.ithaca.xyz/era1/checksums.txt" => Bytes::from_static(CHECKSUMS),
+            "https://era.ithaca.xyz/era1/checksums.txt" |
+            "https://snapshots.reth.rs/history/mainnet/checksums.txt" => {
+                Bytes::from_static(CHECKSUMS)
+            }
             "https://era1.ethportal.net/mainnet-00000-5ec1ffb8.era1" |
             "https://mainnet.era1.nimbus.team/mainnet-00000-5ec1ffb8.era1" |
-            "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" => {
+            "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" |
+            "https://snapshots.reth.rs/history/mainnet/mainnet-00000-5ec1ffb8.era1" => {
                 Bytes::from_static(crate::ERA1_MAINNET_0)
             }
             "https://era1.ethportal.net/mainnet-00001-a5364e9a.era1" |
             "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1" |
-            "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
+            "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" |
+            "https://snapshots.reth.rs/history/mainnet/mainnet-00001-a5364e9a.era1" => {
                 Bytes::from_static(crate::ERA1_MAINNET_1)
             }
             v => unimplemented!("Unexpected URL \"{v}\""),
