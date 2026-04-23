@@ -274,9 +274,16 @@ where
             halve_workers,
             config,
         );
-        // If no BALs are present or we have them explicitly disabled, we use sparse trie task and
-        // need to send the updates to it via state hook
-        let install_state_hook = env.decoded_bal.is_none() || self.disable_bal_parallel_state_root;
+        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
+        // consumes the BAL. If BAL execution is disabled, treat the BAL as absent here so the
+        // block follows today's sequential execution and transaction-prewarm path.
+        //
+        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
+        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
+        // prewarm, not this dispatch decision.
+        let parallel_bal_execution =
+            !config.disable_bal_parallel_execution() && env.decoded_bal.is_some();
+        let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
