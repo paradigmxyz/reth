@@ -266,6 +266,7 @@ where
                     ommers: &[],
                     withdrawals: ctx.withdrawals.map(|w| std::borrow::Cow::Owned(w.into_owned())),
                     extra_data: ctx.extra_data,
+                    slot_number: ctx.slot_number,
                 };
                 BigBlockSegment { start_tx, evm_env, ctx }
             })

@@ -11,7 +11,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, ExecutableTx, OnStateHook, StateChangeSource, StateDB,
+        BlockExecutorFor, ExecutableTx, GasOutput, OnStateHook, StateChangeSource, StateDB,
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
@@ -238,6 +238,7 @@ where
             withdrawals: prev_segment.ctx.withdrawals.clone(),
             extra_data: prev_segment.ctx.extra_data.clone(),
             tx_count_hint: prev_segment.ctx.tx_count_hint,
+            slot_number: prev_segment.ctx.slot_number,
         };
 
         // Clone the next segment's data before we consume inner.
@@ -252,6 +253,7 @@ where
             withdrawals: new_segment.ctx.withdrawals.clone(),
             extra_data: new_segment.ctx.extra_data.clone(),
             tx_count_hint: new_segment.ctx.tx_count_hint,
+            slot_number: new_segment.ctx.slot_number,
         };
 
         plan.next_segment += 1;
@@ -364,6 +366,7 @@ where
                 withdrawals: seg0.ctx.withdrawals.clone(),
                 extra_data: seg0.ctx.extra_data.clone(),
                 tx_count_hint: seg0.ctx.tx_count_hint,
+                slot_number: seg0.ctx.slot_number,
             };
 
             let inner = self.inner_mut();
@@ -386,7 +389,10 @@ where
         self.inner_mut().execute_transaction_without_commit(tx)
     }
 
-    fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
+    fn commit_transaction(
+        &mut self,
+        output: Self::Result,
+    ) -> Result<GasOutput, BlockExecutionError> {
         let gas_used = self.inner_mut().commit_transaction(output)?;
 
         // Fix up cumulative_gas_used on the just-committed receipt so that
@@ -419,6 +425,7 @@ where
                 withdrawals: last_seg.ctx.withdrawals.clone(),
                 extra_data: last_seg.ctx.extra_data.clone(),
                 tx_count_hint: last_seg.ctx.tx_count_hint,
+                slot_number: last_seg.ctx.slot_number,
             };
             self.inner_mut().ctx = last_ctx;
         }

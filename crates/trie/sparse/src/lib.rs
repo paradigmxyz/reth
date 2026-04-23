@@ -26,8 +26,6 @@ pub use parallel::*;
 
 mod lower;
 
-pub mod provider;
-
 #[cfg(feature = "metrics")]
 mod metrics;
 

@@ -4,7 +4,7 @@
 use crate::{
     bench::{
         context::BenchContext,
-        helpers::parse_duration,
+        helpers::{fetch_block_access_list, parse_duration},
         metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
@@ -74,6 +74,10 @@ pub struct Command {
         verbatim_doc_comment
     )]
     rpc_block_buffer_size: usize,
+
+    /// Weather to enable bal by default or not.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    enable_bal: bool,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -198,12 +202,21 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
+            let bal = if rlp.is_none() &&
+                (block.header.block_access_list_hash.is_some() || self.enable_bal)
+            {
+                Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+            } else {
+                None
+            };
+
             let (version, params) = block_to_new_payload(
                 block,
                 rlp,
                 use_reth_namespace,
                 wait_for_persistence,
                 no_wait_for_caches,
+                bal,
             )?;
             let start = Instant::now();
             let server_timings =

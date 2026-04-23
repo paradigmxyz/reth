@@ -119,6 +119,7 @@ where
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),
+                    slot_number: request.payload_attributes.slot_number,
                 };
 
                 let mut builder = evm_config
@@ -212,7 +213,7 @@ where
 
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(sealed_block, total_fees, requests)
+                EthBuiltPayload::new(sealed_block, total_fees, requests, None)
                     .try_into_v5()
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)

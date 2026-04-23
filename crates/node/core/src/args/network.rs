@@ -82,6 +82,8 @@ pub struct DefaultNetworkArgs {
     pub tx_ingress_policy: TransactionIngressPolicy,
     /// Default transaction propagation mode.
     pub propagation_mode: TransactionPropagationMode,
+    /// Default enforce ENR fork ID setting.
+    pub enforce_enr_fork_id: bool,
 }
 
 impl DefaultNetworkArgs {
@@ -184,6 +186,12 @@ impl DefaultNetworkArgs {
         self.propagation_mode = v;
         self
     }
+
+    /// Set the default enforce ENR fork ID setting.
+    pub const fn with_enforce_enr_fork_id(mut self, v: bool) -> Self {
+        self.enforce_enr_fork_id = v;
+        self
+    }
 }
 
 impl Default for DefaultNetworkArgs {
@@ -205,6 +213,7 @@ impl Default for DefaultNetworkArgs {
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
+            enforce_enr_fork_id: false,
         }
     }
 }
@@ -403,7 +412,7 @@ pub struct NetworkArgs {
     /// When enabled, peers discovered without a confirmed fork ID are not added to the peer set
     /// until their fork ID is verified via EIP-868 ENR request. This filters out peers from other
     /// networks that pollute the discovery table.
-    #[arg(long)]
+    #[arg(long, default_value_t = DefaultNetworkArgs::get_global().enforce_enr_fork_id)]
     pub enforce_enr_fork_id: bool,
 }
 
@@ -654,6 +663,7 @@ impl Default for NetworkArgs {
             tx_propagation_policy,
             tx_ingress_policy,
             propagation_mode,
+            enforce_enr_fork_id,
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
@@ -688,7 +698,7 @@ impl Default for NetworkArgs {
             network_id: None,
             eth_max_message_size: None,
             netrestrict: None,
-            enforce_enr_fork_id: false,
+            enforce_enr_fork_id,
         }
     }
 }
@@ -709,8 +719,15 @@ pub struct DiscoveryArgs {
     pub disable_discv4_discovery: bool,
 
     /// Enable Discv5 discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    ///
+    /// Discv5 is now enabled by default, so this flag is a no-op and will be removed in a future
+    /// release.
+    #[arg(long, conflicts_with = "disable_discovery", hide = true)]
     pub enable_discv5_discovery: bool,
+
+    /// Disable Discv5 discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_discv5_discovery: bool,
 
     /// Disable Nat discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
@@ -842,21 +859,23 @@ impl DiscoveryArgs {
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
-    /// Returns true if discv5 discovery should be configured
+    /// Returns true if discv5 discovery should be configured.
+    ///
+    /// Discv5 is enabled by default and can be disabled with `--disable-discv5-discovery`.
     const fn should_enable_discv5(&self) -> bool {
-        if self.disable_discovery {
+        if self.disable_discovery || self.disable_discv5_discovery {
             return false;
         }
 
-        self.enable_discv5_discovery ||
-            self.discv5_addr.is_some() ||
-            self.discv5_addr_ipv6.is_some()
+        true
     }
 
-    /// Set the discovery port to zero, to allow the OS to assign a random unused port when
-    /// discovery binds to the socket.
+    /// Set the discovery ports to zero, to allow the OS to assign random unused ports when
+    /// discovery binds to the sockets.
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
+        self.discv5_port = 0;
+        self.discv5_port_ipv6 = 0;
         self
     }
 
@@ -886,6 +905,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_discv5_discovery: false,
             disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,

@@ -1,4 +1,4 @@
-use alloy_primitives::{hex, BlockHash};
+use alloy_primitives::{hex, Address, BlockHash, B256};
 use clap::Parser;
 use reth_db::{
     static_file::{
@@ -10,6 +10,7 @@ use reth_db::{
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decompress, DupSort, Table},
     tables,
     transaction::DbTx,
@@ -19,7 +20,10 @@ use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_primitives_traits::ValueWithSubKey;
-use reth_provider::{providers::ProviderNodeTypes, ChangeSetReader, StaticFileProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, ChangeSetReader, RocksDBProviderFactory,
+    StaticFileProviderFactory,
+};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::StorageChangeSetReader;
 use tracing::error;
@@ -73,6 +77,55 @@ enum Subcommand {
         #[arg(long)]
         raw: bool,
     },
+    /// Gets the content of a RocksDB table for the given key
+    ///
+    /// For history tables (accounts-history, storages-history), you can pass a plain address
+    /// instead of a full JSON ShardedKey. Use --block to query a specific block number
+    /// (seeks to the shard containing that block), or --all-shards to list all shards for
+    /// the address.
+    ///
+    /// Examples:
+    ///   reth db get rocksdb accounts-history 0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29
+    ///   reth db get rocksdb accounts-history 0xdBBE...Eb29 --block 1000000
+    ///   reth db get rocksdb accounts-history 0xdBBE...Eb29 --all-shards
+    ///   reth db get rocksdb storages-history 0xdBBE...Eb29 --storage-key 0x0000...0003
+    Rocksdb {
+        /// The RocksDB table
+        #[arg(value_enum)]
+        table: RocksDbTable,
+
+        /// The key to get content for. For history tables, this can be a plain address.
+        #[arg(value_parser = maybe_json_value_parser)]
+        key: String,
+
+        /// Target block number for history tables. Seeks to the shard containing this block.
+        /// Defaults to the latest shard if not specified.
+        #[arg(long)]
+        block: Option<u64>,
+
+        /// Storage key for storages-history table lookups.
+        #[arg(long)]
+        storage_key: Option<String>,
+
+        /// List all shards for the given key (history tables only).
+        #[arg(long)]
+        all_shards: bool,
+
+        /// Output bytes instead of human-readable decoded value
+        #[arg(long)]
+        raw: bool,
+    },
+}
+
+/// RocksDB tables that can be queried.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum RocksDbTable {
+    /// Transaction hash to transaction number mapping
+    TransactionHashNumbers,
+    /// Account history indices
+    AccountsHistory,
+    /// Storage history indices
+    StoragesHistory,
 }
 
 impl Command {
@@ -81,6 +134,9 @@ impl Command {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
+            }
+            Subcommand::Rocksdb { table, key, block, storage_key, all_shards, raw } => {
+                get_rocksdb(tool, table, &key, block, storage_key.as_deref(), all_shards, raw)?;
             }
             Subcommand::StaticFile { segment, key, subkey, raw } => {
                 if let StaticFileSegment::StorageChangeSets = segment {
@@ -244,6 +300,208 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// Gets a value from a RocksDB table by key.
+fn get_rocksdb<N: ProviderNodeTypes>(
+    tool: &DbTool<N>,
+    table: RocksDbTable,
+    key: &str,
+    block: Option<u64>,
+    storage_key: Option<&str>,
+    all_shards: bool,
+    raw: bool,
+) -> eyre::Result<()> {
+    let rocksdb = tool.provider_factory.rocksdb_provider();
+
+    match table {
+        RocksDbTable::TransactionHashNumbers => {
+            if block.is_some() || all_shards || storage_key.is_some() {
+                return Err(eyre::eyre!(
+                    "--block, --all-shards, and --storage-key are only supported for history tables"
+                ));
+            }
+            get_rocksdb_table::<tables::TransactionHashNumbers>(&rocksdb, key, raw)
+        }
+        RocksDbTable::AccountsHistory => {
+            if storage_key.is_some() {
+                return Err(eyre::eyre!("--storage-key is only supported for storages-history"));
+            }
+            get_rocksdb_account_history(&rocksdb, key, block, all_shards, raw)
+        }
+        RocksDbTable::StoragesHistory => {
+            get_rocksdb_storage_history(&rocksdb, key, storage_key, block, all_shards, raw)
+        }
+    }
+}
+
+/// Try to parse a key string as a plain address, falling back to JSON `ShardedKey` parsing.
+fn parse_address(key: &str) -> eyre::Result<Address> {
+    // Strip surrounding quotes that `maybe_json_value_parser` may have added
+    let stripped = key.trim_matches('"');
+    stripped.parse::<Address>().map_err(|e| eyre::eyre!("failed to parse address: {e}"))
+}
+
+/// Gets account history from RocksDB with ergonomic key parsing.
+///
+/// Accepts a plain address and uses seek to find the relevant shard.
+fn get_rocksdb_account_history(
+    rocksdb: &reth_provider::providers::RocksDBProvider,
+    key: &str,
+    block: Option<u64>,
+    all_shards: bool,
+    raw: bool,
+) -> eyre::Result<()> {
+    // Try parsing as a plain address first, fall back to full JSON ShardedKey
+    match parse_address(key) {
+        Ok(address) => {
+            let block_number = block.unwrap_or(u64::MAX);
+            let seek_key = ShardedKey::new(address, block_number);
+
+            if all_shards {
+                // Iterate all shards: seek from (address, 0) until address changes
+                let start = ShardedKey::new(address, 0);
+                let iter = rocksdb.iter_from::<tables::AccountsHistory>(start)?;
+                for result in iter {
+                    let (k, v) = result?;
+                    if k.key != address {
+                        break;
+                    }
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "highest_block_number": k.highest_block_number,
+                            "value": v,
+                        }))?
+                    );
+                }
+            } else {
+                // Seek to the first shard with highest_block_number >= target
+                let mut iter = rocksdb.iter_from::<tables::AccountsHistory>(seek_key)?;
+                match iter.next() {
+                    Some(Ok((k, v))) if k.key == address => {
+                        if raw {
+                            let raw_val = rocksdb.get_raw::<tables::AccountsHistory>(k)?;
+                            if let Some(bytes) = raw_val {
+                                println!("{}", hex::encode_prefixed(&bytes));
+                            }
+                        } else {
+                            println!("{}", serde_json::to_string_pretty(&v)?);
+                        }
+                    }
+                    _ => {
+                        error!(target: "reth::cli", "No content for the given table key.");
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(_) => {
+            // Fall back to full JSON key parsing (e.g.
+            // `{"key":"0x...","highest_block_number":...}`)
+            if all_shards || block.is_some() {
+                return Err(eyre::eyre!(
+                    "--block and --all-shards require a plain address, not a JSON key"
+                ));
+            }
+            get_rocksdb_table::<tables::AccountsHistory>(rocksdb, key, raw)
+        }
+    }
+}
+
+/// Gets storage history from RocksDB with ergonomic key parsing.
+///
+/// Accepts a plain address + optional `--storage-key` and uses seek.
+fn get_rocksdb_storage_history(
+    rocksdb: &reth_provider::providers::RocksDBProvider,
+    key: &str,
+    storage_key: Option<&str>,
+    block: Option<u64>,
+    all_shards: bool,
+    raw: bool,
+) -> eyre::Result<()> {
+    match parse_address(key) {
+        Ok(address) => {
+            let storage_key = storage_key
+                .map(|s| s.trim_matches('"').parse::<B256>())
+                .transpose()
+                .map_err(|e| eyre::eyre!("failed to parse storage key: {e}"))?
+                .unwrap_or_default();
+            let block_number = block.unwrap_or(u64::MAX);
+            let seek_key = StorageShardedKey::new(address, storage_key, block_number);
+
+            if all_shards {
+                let start = StorageShardedKey::new(address, storage_key, 0);
+                let iter = rocksdb.iter_from::<tables::StoragesHistory>(start)?;
+                for result in iter {
+                    let (k, v) = result?;
+                    if k.address != address || k.sharded_key.key != storage_key {
+                        break;
+                    }
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "highest_block_number": k.sharded_key.highest_block_number,
+                            "value": v,
+                        }))?
+                    );
+                }
+            } else {
+                let mut iter = rocksdb.iter_from::<tables::StoragesHistory>(seek_key)?;
+                match iter.next() {
+                    Some(Ok((k, v)))
+                        if k.address == address && k.sharded_key.key == storage_key =>
+                    {
+                        if raw {
+                            let raw_val = rocksdb.get_raw::<tables::StoragesHistory>(k)?;
+                            if let Some(bytes) = raw_val {
+                                println!("{}", hex::encode_prefixed(&bytes));
+                            }
+                        } else {
+                            println!("{}", serde_json::to_string_pretty(&v)?);
+                        }
+                    }
+                    _ => {
+                        error!(target: "reth::cli", "No content for the given table key.");
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(_) => {
+            if all_shards || block.is_some() || storage_key.is_some() {
+                return Err(eyre::eyre!(
+                    "--block, --all-shards, and --storage-key require a plain address, not a JSON key"
+                ));
+            }
+            get_rocksdb_table::<tables::StoragesHistory>(rocksdb, key, raw)
+        }
+    }
+}
+
+/// Gets a value from a specific RocksDB table by exact key and prints it.
+fn get_rocksdb_table<T: Table>(
+    rocksdb: &reth_provider::providers::RocksDBProvider,
+    key_str: &str,
+    raw: bool,
+) -> eyre::Result<()> {
+    let key = table_key::<T>(key_str)?;
+
+    if raw {
+        let content = rocksdb.get_raw::<T>(key)?;
+        match content {
+            Some(bytes) => println!("{}", hex::encode_prefixed(&bytes)),
+            None => error!(target: "reth::cli", "No content for the given table key."),
+        }
+    } else {
+        let content = rocksdb.get::<T>(key)?;
+        match content {
+            Some(value) => println!("{}", serde_json::to_string_pretty(&value)?),
+            None => error!(target: "reth::cli", "No content for the given table key."),
+        }
+    }
+
+    Ok(())
 }
 
 /// Get an instance of key for given table

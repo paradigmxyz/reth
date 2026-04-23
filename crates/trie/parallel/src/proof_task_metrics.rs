@@ -11,10 +11,6 @@ use std::time::Duration;
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.proof_task")]
 pub struct ProofTaskTrieMetrics {
-    /// A histogram for the number of blinded account nodes fetched.
-    blinded_account_nodes: Histogram,
-    /// A histogram for the number of blinded storage nodes fetched.
-    blinded_storage_nodes: Histogram,
     /// Histogram for storage worker idle time in seconds (waiting for proof jobs).
     storage_worker_idle_time_seconds: Histogram,
     /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
@@ -35,16 +31,6 @@ pub struct ProofTaskTrieMetrics {
 }
 
 impl ProofTaskTrieMetrics {
-    /// Record account nodes fetched.
-    pub fn record_account_nodes(&self, count: usize) {
-        self.blinded_account_nodes.record(count as f64);
-    }
-
-    /// Record storage nodes fetched.
-    pub fn record_storage_nodes(&self, count: usize) {
-        self.blinded_storage_nodes.record(count as f64);
-    }
-
     /// Record storage worker idle time.
     pub fn record_storage_worker_idle_time(&self, duration: Duration) {
         self.storage_worker_idle_time_seconds.record(duration.as_secs_f64());

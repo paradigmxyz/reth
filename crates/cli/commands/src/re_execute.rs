@@ -19,6 +19,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::stages::calculate_gas_used_from_headers;
+use reth_storage_api::{DBProvider, TryIntoHistoricalStateProvider};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -112,7 +113,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let provider_factory = provider_factory.clone();
             move |block_number: u64| {
                 StateProviderDatabase(
-                    provider_factory.history_by_block_number(block_number).unwrap(),
+                    provider_factory
+                        .provider()
+                        .unwrap()
+                        .disable_long_read_transaction_safety()
+                        .try_into_history_at_block(block_number)
+                        .unwrap(),
                 )
             }
         };
@@ -138,7 +144,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let cancellation = cancellation.clone();
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
-                let executor_lifetime = Duration::from_secs(120);
+                let executor_lifetime = Duration::from_secs(600);
 
                 loop {
                     if cancellation.is_cancelled() {
@@ -245,7 +251,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let _ = stats_tx.send(block.gas_used());
 
                         // Reset DB once in a while to avoid OOM or read tx timeouts
-                        if executor.size_hint() > 1_000_000 ||
+                        if executor.size_hint() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             executor =
