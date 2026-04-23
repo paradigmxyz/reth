@@ -319,6 +319,9 @@ where
 
 type StorageResult = eyre::Result<StorageMessage>;
 
+// Each account's storage result stream must come from exactly one producer, and that producer must
+// send every inconsistency before it sends the final root for the account. `wait_for_storage_root`
+// relies on that ordering when it buffers future-account messages.
 #[derive(Debug)]
 enum StorageMessage {
     Root { account: B256, root: B256 },
@@ -440,20 +443,27 @@ where
             let job_rx = Arc::clone(&job_rx);
             let result_tx = result_tx.clone();
 
-            scope.spawn(move || loop {
-                let account = match job_rx.lock().expect("poisoned storage job receiver").recv() {
-                    Ok(account) => account,
-                    Err(_) => break,
+            scope.spawn(move || {
+                let provider = match make_provider() {
+                    Ok(provider) => provider.disable_long_read_transaction_safety(),
+                    Err(err) => {
+                        let _ = result_tx.send(Err(err));
+                        return;
+                    }
                 };
 
-                let result = (|| -> eyre::Result<()> {
-                    let provider = make_provider()?.disable_long_read_transaction_safety();
-                    verify_storage_account::<A, _>(&provider, account, &result_tx)
-                })();
+                loop {
+                    let account = match job_rx.lock().expect("poisoned storage job receiver").recv()
+                    {
+                        Ok(account) => account,
+                        Err(_) => break,
+                    };
 
-                if let Err(err) = result {
-                    let _ = result_tx.send(Err(err));
-                    break;
+                    if let Err(err) = verify_storage_account::<A, _>(&provider, account, &result_tx)
+                    {
+                        let _ = result_tx.send(Err(err));
+                        break;
+                    }
                 }
             });
         }
