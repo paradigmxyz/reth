@@ -39,41 +39,57 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Re-export tracing crates
 pub use tracing;
+#[cfg(feature = "std")]
 pub use tracing_appender;
+#[cfg(feature = "std")]
 pub use tracing_subscriber;
 
 #[cfg(feature = "tracy")]
 tracy_client::register_demangler!();
 
-// Re-export our types
+#[cfg(feature = "std")]
 pub use formatter::LogFormat;
+#[cfg(feature = "std")]
 pub use layers::{FileInfo, FileWorkerGuard, Layers};
+#[cfg(feature = "std")]
 pub use log_handle::{
     install_log_handle, log_handle_available, set_log_verbosity, set_log_vmodule,
     LogFilterReloadHandle,
 };
+#[cfg(feature = "std")]
 pub use test_tracer::TestTracer;
 
+#[cfg(feature = "std")]
 #[doc(hidden)]
 pub mod __private {
     pub use super::throttle::*;
 }
 
+#[cfg(feature = "std")]
 mod formatter;
+#[cfg(feature = "std")]
 mod layers;
+#[cfg(feature = "std")]
 pub mod log_handle;
+#[cfg(feature = "std")]
 mod test_tracer;
+#[cfg(feature = "std")]
 mod throttle;
 
+#[cfg(feature = "std")]
 use tracing::level_filters::LevelFilter;
+#[cfg(feature = "std")]
 use tracing_appender::non_blocking::WorkerGuard;
+#[cfg(feature = "std")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+#[cfg(feature = "std")]
 ///  Tracer for application logging.
 ///
 ///  Manages the configuration and initialization of logging layers,
@@ -91,6 +107,7 @@ pub struct RethTracer {
     enable_reload: bool,
 }
 
+#[cfg(feature = "std")]
 impl RethTracer {
     /// Constructs a new `Tracer` with default settings.
     ///
@@ -156,12 +173,14 @@ impl RethTracer {
     }
 }
 
+#[cfg(feature = "std")]
 impl Default for RethTracer {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "std")]
 ///  Configuration for a logging layer.
 ///
 ///  This struct holds configuration parameters for a tracing layer, including
@@ -174,6 +193,7 @@ pub struct LayerInfo {
     color: Option<String>,
 }
 
+#[cfg(feature = "std")]
 impl LayerInfo {
     ///  Constructs a new `LayerInfo`.
     ///
@@ -195,6 +215,7 @@ impl LayerInfo {
     }
 }
 
+#[cfg(feature = "std")]
 impl Default for LayerInfo {
     ///  Provides default values for `LayerInfo`.
     ///
@@ -210,6 +231,7 @@ impl Default for LayerInfo {
     }
 }
 
+#[cfg(feature = "std")]
 /// Trait defining a general interface for logging configuration.
 ///
 /// The `Tracer` trait provides a standardized way to initialize logging configurations
@@ -241,6 +263,7 @@ pub trait Tracer: Sized {
     fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>>;
 }
 
+#[cfg(feature = "std")]
 impl Tracer for RethTracer {
     fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
         // Configure stdout layer - reloadable if requested for runtime log level changes
@@ -286,6 +309,7 @@ impl Tracer for RethTracer {
     }
 }
 
+#[cfg(feature = "std")]
 ///  Initializes a tracing subscriber for tests.
 ///
 ///  The filter is configurable via `RUST_LOG`.
