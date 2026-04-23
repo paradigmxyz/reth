@@ -264,8 +264,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
     /// truncating static files from checkpoints on the next startup.
     ///
-    /// For `storage_v2`, this waits after the MDBX commit so readers holding older MDBX-visible
-    /// views cannot overlap the `RocksDB` unwind.
+    /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
+    /// later cross-store unwind steps.
     ///
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
@@ -274,11 +274,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let reader_txn_tracker = self.reader_txn_tracker.clone();
         self.tx.commit()?;
 
-        if storage_v2 {
-            if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-                reader_txn_tracker.wait_for_pre_commit_readers();
-            }
+        if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+            reader_txn_tracker.wait_for_pre_commit_readers();
+        }
 
+        if storage_v2 {
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
@@ -3961,7 +3961,6 @@ mod tests {
     #[test]
     fn unwind_commit_waits_for_pre_commit_readers() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let reader = factory.provider().unwrap();
         let provider_rw = factory.unwind_provider_rw().unwrap();
