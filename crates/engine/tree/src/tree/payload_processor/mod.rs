@@ -273,7 +273,12 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = env.decoded_bal.is_none();
+        // When the BAL execute path will dispatch this block, the BAL execute path will spawn
+        // its own sparse-trie streaming task fed from the snapshot. So we skip per-tx state
+        // hooks for that case. Otherwise (no BAL, or BAL present but kill switch on), state
+        // hooks fire from the canonical executor and feed the sparse trie directly.
+        let install_state_hook =
+            !(config.bal_execute_path_enabled() && env.decoded_bal.is_some());
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,

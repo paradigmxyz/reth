@@ -195,6 +195,9 @@ pub struct TreeConfig {
     /// When disabled, falls back to individual per-slot storage reads instead of
     /// batched cursor reads via `storage_range`.
     disable_bal_batch_io: bool,
+    /// Whether the BAL-driven block execution path is enabled. When false, BAL blocks fall
+    /// back to the serial executor. Default false (kill switch for staged rollout).
+    bal_execute_path_enabled: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -242,6 +245,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: true,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_execute_path_enabled: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -319,6 +323,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: true,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_execute_path_enabled: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -746,6 +751,17 @@ impl TreeConfig {
     /// Setter for whether to disable BAL batched IO.
     pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
         self.disable_bal_batch_io = disable_bal_batch_io;
+        self
+    }
+
+    /// Returns whether the BAL-driven block execution path is enabled.
+    pub const fn bal_execute_path_enabled(&self) -> bool {
+        self.bal_execute_path_enabled
+    }
+
+    /// Setter for whether the BAL-driven block execution path is enabled.
+    pub const fn with_bal_execute_path_enabled(mut self, enabled: bool) -> Self {
+        self.bal_execute_path_enabled = enabled;
         self
     }
 
