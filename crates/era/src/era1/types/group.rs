@@ -102,8 +102,8 @@ pub struct Era1Id {
     /// Number of blocks in the file
     pub block_count: u32,
 
-    /// Optional hash identifier for this file
-    /// First 4 bytes of the last historical root in the last state in the era file
+    /// Optional hash identifier for this file.
+    /// First 4 bytes of the accumulator root hash.
     pub hash: Option<[u8; 4]>,
 
     /// Whether to include era count in filename

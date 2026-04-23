@@ -8281,6 +8281,7 @@ dependencies = [
  "reqwest 0.13.2",
  "reth-era-downloader",
  "reth-ethereum-primitives",
+ "sha2",
  "snap",
  "tempfile",
  "test-case",
