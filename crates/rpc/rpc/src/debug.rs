@@ -5,7 +5,9 @@ use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{
+    ExecutionWitness, StorageMap, StorageRangeResult as RpcStorageRangeResult, StorageResult,
+};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -25,21 +27,29 @@ use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{
+        storage_diff_inspector::{StorageDiffInspector, StorageDiffs},
+        storage_overlay::StorageRangeOverlay,
+        EthTransactions, TraceExt,
+    },
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, TransactionVariant,
+    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRangeProvider,
+    StorageRangeResult as ProviderStorageRangeResult, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -204,6 +214,133 @@ where
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
+    }
+
+    /// Replays the transactions of `block_id` with [`StorageDiffInspector`] and returns the
+    /// collected diffs.
+    ///
+    /// If `highest_tx_index` is provided, execution stops after the transaction at that index has
+    /// been applied (inclusive).
+    pub async fn run_with_storage_diff_inspector(
+        &self,
+        block_id: BlockId,
+        highest_tx_index: Option<u64>,
+    ) -> Result<StorageDiffs, Eth::Error> {
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
+
+        let max_index = match highest_tx_index {
+            Some(idx) => Some(usize::try_from(idx).map_err(|_| {
+                Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                    "tx index exceeds architecture limits".to_string(),
+                ))
+            })?),
+            None => None,
+        };
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                let mut inspector = StorageDiffInspector::new();
+                for (idx, tx) in block.transactions_recovered().enumerate() {
+                    if let Some(limit) = max_index &&
+                        idx > limit
+                    {
+                        break
+                    }
+
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    {
+                        let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
+                            &mut db,
+                            evm_env.clone(),
+                            &mut inspector,
+                        );
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    }
+                    inspector.finish_transaction();
+                }
+
+                Ok::<_, Eth::Error>(inspector.into_diffs())
+            })
+            .await
+    }
+
+    /// Computes the storage range for the given block, transaction index and account, taking into
+    /// account the writes performed up to the specified transaction.
+    pub async fn storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> Result<RpcStorageRangeResult, Eth::Error> {
+        if max_result == 0 {
+            return Err(
+                EthApiError::InvalidParams("maxResult must be greater than zero".into()).into()
+            )
+        }
+
+        let block_id: BlockId = block_hash.into();
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let tx_count = block.body().transactions().len();
+        if tx_idx >= tx_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "transaction index {tx_idx} out of bounds for block with {tx_count} transactions"
+            ))
+            .into())
+        }
+
+        let diffs = self.run_with_storage_diff_inspector(block_id, Some(tx_idx as u64)).await?;
+        let max_slots = usize::try_from(max_result).map_err(|_| {
+            Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                "maxResult exceeds supported limits".to_string(),
+            ))
+        })?;
+        let start_key = key_start;
+        let parent_hash = block.parent_hash();
+
+        self.eth_api()
+            .spawn_blocking_io(move |this| {
+                let storage_provider = this
+                    .provider()
+                    .storage_range_by_block_hash(parent_hash)
+                    .map_err(Eth::Error::from_eth_err)?;
+                let base = storage_provider.as_ref();
+
+                let overlay_slots = StorageRangeOverlay::merged_slots_for_account(
+                    base,
+                    contract_address,
+                    &diffs,
+                    tx_idx,
+                )
+                .map_err(Eth::Error::from_eth_err)?;
+
+                if let Some(overlay_slots) = overlay_slots {
+                    let mut overlay = StorageRangeOverlay::new(base);
+                    overlay.add_account_overlay(contract_address, overlay_slots);
+                    return overlay
+                        .storage_range(contract_address, start_key, max_slots)
+                        .map(convert_storage_range)
+                        .map_err(Eth::Error::from_eth_err);
+                }
+
+                storage_provider
+                    .storage_range(contract_address, start_key, max_slots)
+                    .map(convert_storage_range)
+                    .map_err(Eth::Error::from_eth_err)
+            })
+            .await
     }
 
     /// Trace the transaction according to the provided options.
@@ -1053,13 +1190,15 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<RpcStorageRangeResult> {
+        Self::storage_range_at(self, block_hash, tx_idx, contract_address, key_start, max_result)
+            .await
+            .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(
@@ -1118,6 +1257,18 @@ impl<Eth: RpcNodeCore> Clone for DebugApi<Eth> {
     }
 }
 
+fn convert_storage_range(range: ProviderStorageRangeResult) -> RpcStorageRangeResult {
+    let mut storage = BTreeMap::new();
+    for entry in range.slots {
+        storage.insert(
+            entry.hash,
+            StorageResult { key: entry.key, value: B256::from(entry.value.to_be_bytes()) },
+        );
+    }
+
+    RpcStorageRangeResult { storage: StorageMap(storage), next_key: range.next_key }
+}
+
 struct DebugApiInner<Eth: RpcNodeCore> {
     /// The implementation of `eth` API
     eth_api: Eth,
@@ -1173,5 +1324,247 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_primitives::{keccak256, StorageKey, StorageValue, TxKind, U256};
+    use futures::stream::empty;
+    use reth_chainspec::ChainSpec;
+    use reth_db_api::models::StoredBlockBodyIndices;
+    use reth_ethereum_primitives::{
+        Block as EthBlock, BlockBody as EthBlockBody, Transaction as EthTransaction,
+    };
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_storage_api::StorageRangeEntry as ProviderStorageRangeEntry;
+    use reth_tasks::Runtime;
+    use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
+    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+
+    type TestRpcNode = RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>;
+    type TestEthApi = EthApi<TestRpcNode, EthRpcConverter<ChainSpec>>;
+
+    fn make_sstore_code(slot: u8, value: u8) -> Bytes {
+        Bytes::from(vec![0x60, value, 0x60, slot, 0x55, 0x00])
+    }
+
+    fn build_debug_api_with_contract_writes(
+        writes: &[(u8, u8)],
+    ) -> (DebugApi<TestEthApi>, BlockId, Vec<Address>) {
+        let provider = MockEthProvider::default();
+        let mut rng = generators::rng();
+        let keypair = generators::generate_key(&mut rng);
+        let sender = public_key_to_address(keypair.public_key());
+        provider.add_account(
+            sender,
+            ExtendedAccount::new(0, U256::from(1_000_000_000_000_000_000u128)),
+        );
+
+        let mut contract_addresses = Vec::new();
+        let mut txs = Vec::new();
+        for (idx, (slot, value)) in writes.iter().copied().enumerate() {
+            let address = Address::repeat_byte(0x80 + idx as u8);
+            contract_addresses.push(address);
+            provider.add_account(
+                address,
+                ExtendedAccount::new(0, U256::ZERO).with_bytecode(make_sstore_code(slot, value)),
+            );
+            let tx = EthTransaction::Legacy(TxLegacy {
+                chain_id: Some(1),
+                nonce: idx as u64,
+                gas_price: 1,
+                gas_limit: 100_000,
+                to: TxKind::Call(address),
+                value: U256::ZERO,
+                input: Bytes::new(),
+            });
+            txs.push(sign_tx_with_key_pair(keypair, tx));
+        }
+
+        let mut header = Header {
+            number: 1,
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(1),
+            ..Header::default()
+        };
+        header.parent_hash = B256::with_last_byte(0xAA);
+        let parent = Header { number: 0, ..Header::default() };
+        provider.add_header(header.parent_hash, parent);
+        let block = EthBlock {
+            header: header.clone(),
+            body: EthBlockBody { transactions: txs.clone(), ..Default::default() },
+        };
+        let block_hash = header.hash_slow();
+        provider.add_block(block_hash, block);
+        provider.add_block_body_indices(
+            header.number,
+            StoredBlockBodyIndices { first_tx_num: 0, tx_count: txs.len() as u64 },
+        );
+
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let eth_api =
+            EthApi::builder(provider, testing_pool(), NoopNetwork::default(), evm_config).build();
+
+        let executor = Runtime::test();
+        let events = empty::<ConsensusEngineEvent<<TestEthApi as RpcNodeCore>::Primitives>>();
+        let debug_api = DebugApi::new(eth_api, BlockingTaskGuard::new(4), &executor, events);
+        (debug_api, BlockId::Hash(block_hash.into()), contract_addresses)
+    }
+
+    fn build_debug_api_with_base_storage(
+        base_storage: &[(u8, u64)],
+        write: (u8, u8),
+    ) -> (DebugApi<TestEthApi>, B256, Address) {
+        let provider = MockEthProvider::default();
+        let mut rng = generators::rng();
+        let keypair = generators::generate_key(&mut rng);
+        let sender = public_key_to_address(keypair.public_key());
+        provider.add_account(
+            sender,
+            ExtendedAccount::new(0, U256::from(1_000_000_000_000_000_000u128)),
+        );
+
+        let contract = Address::repeat_byte(0x99);
+        let base_storage = base_storage
+            .iter()
+            .map(|(slot, value)| (StorageKey::with_last_byte(*slot), StorageValue::from(*value)));
+        provider.add_account(
+            contract,
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(make_sstore_code(write.0, write.1))
+                .extend_storage(base_storage),
+        );
+
+        let tx = sign_tx_with_key_pair(
+            keypair,
+            EthTransaction::Legacy(TxLegacy {
+                chain_id: Some(1),
+                nonce: 0,
+                gas_price: 1,
+                gas_limit: 100_000,
+                to: TxKind::Call(contract),
+                value: U256::ZERO,
+                input: Bytes::new(),
+            }),
+        );
+        let mut header = Header {
+            number: 1,
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(1),
+            ..Header::default()
+        };
+        header.parent_hash = B256::with_last_byte(0xBB);
+        let parent = Header { number: 0, ..Header::default() };
+        provider.add_header(header.parent_hash, parent);
+        let block = EthBlock {
+            header: header.clone(),
+            body: EthBlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = header.hash_slow();
+        provider.add_block(block_hash, block);
+        provider.add_block_body_indices(
+            header.number,
+            StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 },
+        );
+
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let eth_api =
+            EthApi::builder(provider, testing_pool(), NoopNetwork::default(), evm_config).build();
+
+        let executor = Runtime::test();
+        let events = empty::<ConsensusEngineEvent<<TestEthApi as RpcNodeCore>::Primitives>>();
+        let debug_api = DebugApi::new(eth_api, BlockingTaskGuard::new(4), &executor, events);
+        (debug_api, block_hash, contract)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn collects_storage_diffs_for_block() {
+        let (api, block_id, contracts) = build_debug_api_with_contract_writes(&[(1, 0x2A)]);
+        let diffs = api.run_with_storage_diff_inspector(block_id, None).await.unwrap();
+        assert_eq!(diffs.len(), 1);
+
+        let slot = StorageKey::with_last_byte(1);
+        let value = StorageValue::from(0x2A);
+        let slots = diffs[0].get(&contracts[0]).expect("contract entry must exist");
+        assert_eq!(slots.get(&slot), Some(&value));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn respects_tx_index_limit() {
+        let (api, block_id, contracts) =
+            build_debug_api_with_contract_writes(&[(1, 0x10), (2, 0x20)]);
+
+        let capped = api.run_with_storage_diff_inspector(block_id, Some(0)).await.unwrap();
+        assert_eq!(capped.len(), 1);
+        let first_contract_diff = capped[0].get(&contracts[0]).expect("first tx diff missing");
+        assert_eq!(
+            first_contract_diff.get(&StorageKey::with_last_byte(1)),
+            Some(&StorageValue::from(0x10))
+        );
+        assert!(!capped[0].contains_key(&contracts[1]));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn storage_range_at_merges_parent_state_and_overlay() {
+        let (api, block_hash, contract) = build_debug_api_with_base_storage(&[(1, 10)], (2, 42));
+
+        let range = api.storage_range_at(block_hash, 0, contract, B256::ZERO, 10).await.unwrap();
+
+        assert_eq!(range.next_key, None);
+        assert_eq!(range.storage.len(), 2);
+        assert_eq!(
+            range.storage.get(&keccak256(StorageKey::with_last_byte(1))).unwrap(),
+            &StorageResult {
+                key: StorageKey::with_last_byte(1),
+                value: B256::from(StorageValue::from(10).to_be_bytes()),
+            }
+        );
+        assert_eq!(
+            range.storage.get(&keccak256(StorageKey::with_last_byte(2))).unwrap(),
+            &StorageResult {
+                key: StorageKey::with_last_byte(2),
+                value: B256::from(StorageValue::from(42).to_be_bytes()),
+            }
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn storage_range_at_supports_pagination() {
+        let (api, block_hash, contract) =
+            build_debug_api_with_base_storage(&[(1, 10), (2, 20)], (3, 30));
+
+        let range = api.storage_range_at(block_hash, 0, contract, B256::ZERO, 2).await.unwrap();
+
+        assert_eq!(range.storage.len(), 2);
+        assert_eq!(range.next_key, Some(keccak256(StorageKey::with_last_byte(3))));
+    }
+
+    #[test]
+    fn converts_storage_range_result() {
+        let entry = ProviderStorageRangeEntry {
+            hash: B256::from(U256::from(4)),
+            key: B256::from(U256::from(1)),
+            value: U256::from(2),
+        };
+        let range = ProviderStorageRangeResult {
+            slots: vec![entry.clone()],
+            next_key: Some(StorageKey::from(B256::from(U256::from(3)))),
+        };
+
+        let rpc = convert_storage_range(range);
+        assert_eq!(rpc.next_key, Some(B256::from(U256::from(3))));
+        assert_eq!(rpc.storage.len(), 1);
+        let (key, slot) = rpc.storage.0.iter().next().unwrap();
+        assert_eq!(key, &entry.hash);
+        assert_eq!(slot.key, entry.key);
+        assert_eq!(slot.value, B256::from(entry.value.to_be_bytes()));
     }
 }

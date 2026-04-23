@@ -35,7 +35,8 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    StorageChangeSetReader, StorageRangeEntry, StorageRangeProvider, StorageRangeProviderBox,
+    StorageRangeResult, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -674,18 +675,22 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
     fn recovered_block(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.block(id)?
+            .map(|block| block.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError))
+            .transpose()
     }
 
     fn sealed_block_with_senders(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.block(id)?
+            .map(|block| block.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError))
+            .transpose()
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -901,6 +906,47 @@ where
     }
 }
 
+impl<T, ChainSpec> StorageRangeProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult> {
+        if max_slots == 0 {
+            return Ok(StorageRangeResult::empty())
+        }
+
+        let lock = self.accounts.lock();
+        let Some(account) = lock.get(&account) else { return Ok(StorageRangeResult::empty()) };
+
+        let mut slots = Vec::with_capacity(max_slots);
+        let mut next_key = None;
+
+        let mut entries = account
+            .storage
+            .iter()
+            .filter(|(_, value)| !value.is_zero())
+            .map(|(key, value)| (keccak256(*key), *key, *value))
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by_key(|(hash, _, _)| *hash);
+
+        for (hash, key, value) in entries.into_iter().filter(|(hash, _, _)| *hash >= start_key) {
+            if slots.len() == max_slots {
+                next_key = Some(hash);
+                break;
+            }
+            slots.push(StorageRangeEntry { hash, key, value });
+        }
+
+        Ok(StorageRangeResult { slots, next_key })
+    }
+}
+
 impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
@@ -969,6 +1015,13 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn storage_range_by_block_hash(
+        &self,
+        _block: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
         Ok(Box::new(self.clone()))
     }
 

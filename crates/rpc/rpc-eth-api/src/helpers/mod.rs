@@ -26,6 +26,10 @@ pub mod receipt;
 pub mod signer;
 pub mod spec;
 pub mod state;
+/// Inspector for collecting per-transaction storage diffs during replay.
+pub mod storage_diff_inspector;
+/// Overlay helpers for applying in-block storage diffs to paged storage range queries.
+pub mod storage_overlay;
 pub mod trace;
 pub mod transaction;
 
