@@ -428,7 +428,19 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // Because the transactions are not finalized, the corresponding blobs are still in
                 // blob store (if we previously received them from the network)
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
-                let _ = pool.add_external_transactions(pruned_old_transactions).await;
+                let outcomes = pool.add_external_transactions(pruned_old_transactions).await;
+                let failed = outcomes.iter().filter(|r| r.is_err()).count();
+                if failed > 0 {
+                    warn!(
+                        target: "txpool",
+                        failed,
+                        total = outcomes.len(),
+                        "failed to re-inject transactions after reorg",
+                    );
+                    for err in outcomes.iter().filter_map(|r| r.as_ref().err()) {
+                        debug!(target: "txpool", %err, "reorg re-injection error");
+                    }
+                }
 
                 // keep track of new mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&new_blocks);
