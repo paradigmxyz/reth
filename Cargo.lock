@@ -10443,7 +10443,6 @@ dependencies = [
  "rand 0.9.4",
  "rayon",
  "reth-chainspec",
- "reth-db-common",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-metrics",
