@@ -206,24 +206,22 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Returns the next action to return
     fn poll_action(&mut self) -> PollAction {
-        loop {
-            // we only check and not pop here since we don't know yet whether a peer is available.
-            if self.queued_requests.is_empty() {
-                return PollAction::NoRequests
-            }
-
-            let request = self.queued_requests.pop_front().expect("not empty");
-            let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
-                // no peer matches this request's requirements; requeue at the back so other
-                // queued requests get a chance on the next poll instead of head-of-line blocking.
-                self.queued_requests.push_back(request);
-                return PollAction::NoPeersAvailable
-            };
-
-            let request = self.prepare_block_request(peer_id, request);
-
-            return PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+        // We only pop once we know the queue is non-empty.
+        if self.queued_requests.is_empty() {
+            return PollAction::NoRequests
         }
+
+        let request = self.queued_requests.pop_front().expect("not empty");
+        let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
+            // no peer matches this request's requirements; requeue at the back so other
+            // queued requests get a chance on the next poll instead of head-of-line blocking.
+            self.queued_requests.push_back(request);
+            return PollAction::NoPeersAvailable
+        };
+
+        let request = self.prepare_block_request(peer_id, request);
+
+        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
     }
 
     /// Advance the state the syncer
