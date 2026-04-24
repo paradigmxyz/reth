@@ -5,6 +5,7 @@ use crate::common::{
     EnvironmentArgs,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
+use alloy_primitives::{Address, B256, U256};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -12,15 +13,19 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
+use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
     StaticFileProviderFactory, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{states::reverts::AccountInfoRevert, BundleState},
+};
 use reth_stages::stages::calculate_gas_used_from_headers;
-use reth_storage_api::DBProvider;
+use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use std::{
+    collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -255,11 +260,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         if executor.size_hint() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
-                            executor =
-                                evm_config.batch_executor(db_at(block.number()));
+                            let last_block = block.number();
+                            let old_executor = std::mem::replace(
+                                &mut executor,
+                                evm_config.batch_executor(db_at(last_block)),
+                            );
+                            let bundle = old_executor.into_state().take_bundle();
+                            verify_bundle_against_changesets(
+                                &provider,
+                                &bundle,
+                                last_block,
+                            )?;
                             executor_created = Instant::now();
                         }
                     }
+
+                    // Full verification at chunk end for remaining unverified blocks
+                    let bundle = executor.into_state().take_bundle();
+                    verify_bundle_against_changesets(
+                        &provider,
+                        &bundle,
+                        chunk_end - 1,
+                    )?;
                 }
 
                 eyre::Ok(())
@@ -339,4 +361,99 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         Ok(())
     }
+}
+
+/// Verifies reverts against database changesets.
+///
+/// For each block, reverts must match changeset entries exactly. No extra slots/accounts
+/// in reverts for non-destroyed accounts. Destroyed accounts may have extra changeset slots
+/// (from DB storage wipe) absent from reverts.
+fn verify_bundle_against_changesets<P>(
+    provider: &P,
+    bundle: &BundleState,
+    last_block: u64,
+) -> eyre::Result<()>
+where
+    P: ChangeSetReader + StorageChangeSetReader,
+{
+    // Verify reverts against changesets per block
+    for (i, block_reverts) in bundle.reverts.iter().rev().enumerate() {
+        let block_number = last_block - i as u64;
+
+        let mut cs_accounts: HashMap<Address, Option<Account>> = provider
+            .account_block_changeset(block_number)?
+            .into_iter()
+            .map(|cs| (cs.address, cs.info))
+            .collect();
+
+        let mut cs_storage: HashMap<Address, HashMap<B256, U256>> = HashMap::new();
+        for (bna, entry) in provider.storage_changeset(block_number)? {
+            cs_storage.entry(bna.address()).or_default().insert(entry.key, entry.value);
+        }
+
+        for (addr, revert) in block_reverts {
+            // Verify account info
+            match &revert.account {
+                AccountInfoRevert::DoNothing => {
+                    eyre::ensure!(
+                        !cs_accounts.contains_key(addr),
+                        "Block {block_number}: account {addr} in changeset but revert is DoNothing",
+                    );
+                }
+                AccountInfoRevert::DeleteIt => {
+                    let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
+                        eyre::eyre!("Block {block_number}: account {addr} revert is DeleteIt but not in changeset")
+                    })?;
+                    eyre::ensure!(
+                        cs_info.is_none(),
+                        "Block {block_number}: account {addr} revert is DeleteIt but changeset has {cs_info:?}",
+                    );
+                }
+                AccountInfoRevert::RevertTo(info) => {
+                    let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
+                        eyre::eyre!("Block {block_number}: account {addr} revert is RevertTo but not in changeset")
+                    })?;
+                    let revert_acct = Some(Account::from(info));
+                    eyre::ensure!(
+                        revert_acct == cs_info,
+                        "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",
+                    );
+                }
+            }
+
+            // Verify storage slots — remove matched changeset entries as we go
+            let mut cs_slots = cs_storage.get_mut(addr);
+            for (slot_key, revert_slot) in &revert.storage {
+                let b256_key = B256::from(*slot_key);
+                match cs_slots.as_mut().and_then(|s| s.remove(&b256_key)) {
+                    Some(cs_value) => eyre::ensure!(
+                        revert_slot.to_previous_value() == cs_value,
+                        "Block {block_number}: {addr} slot {b256_key} mismatch: \
+                         revert={} cs={cs_value}",
+                        revert_slot.to_previous_value(),
+                    ),
+                    None => eyre::ensure!(
+                        revert.wipe_storage,
+                        "Block {block_number}: {addr} slot {b256_key} in reverts but not in changeset",
+                    ),
+                }
+            }
+
+            // Any remaining cs_storage slots for this address must be from a destroyed account
+            if let Some(remaining) = cs_slots.filter(|s| !s.is_empty()) {
+                eyre::ensure!(
+                    revert.wipe_storage,
+                    "Block {block_number}: {addr} has {} unmatched storage slots in changeset",
+                    remaining.len(),
+                );
+            }
+        }
+
+        // Any remaining cs_accounts entries had no corresponding revert
+        if let Some(addr) = cs_accounts.keys().next() {
+            eyre::bail!("Block {block_number}: account {addr} in changeset but not in reverts");
+        }
+    }
+
+    Ok(())
 }
