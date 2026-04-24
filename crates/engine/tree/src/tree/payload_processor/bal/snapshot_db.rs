@@ -1,7 +1,8 @@
 //! Revm [`Database`] adapter over an [`Arc<BlockPreState>`].
 //!
-//! `SnapshotDatabase` is the pre-block fallback layer for revm's `BalDatabase`. The worker's
-//! read chain is:
+//! `SnapshotDatabase` is the BAL path's pre-block read source. Workers layer revm's
+//! `BalDatabase` on top of it, while the canonical executor uses it directly. The worker read
+//! chain is:
 //!
 //! ```text
 //! EVM → State → BalDatabase(received_bal, fallback = SnapshotDatabase)
@@ -12,10 +13,9 @@
 //! pre-block value. Reads for keys not declared in the BAL short-circuit inside `BalDatabase`
 //! with `BalError::AccountNotFound` and never reach us.
 //!
-//! This means a miss here is always a snapshot-fill bug: the caller built a snapshot that
-//! didn't cover every key the BAL declared. We surface it as a [`SnapshotDbError`] rather than
-//! silently returning defaults; the worker will propagate it upward as an engine internal
-//! error (distinct from `RejectReason::UndeclaredAccess`, which comes from `BalDatabase`).
+//! This means a miss here is always a snapshot-fill bug or an invalid BAL: the caller built a
+//! snapshot that didn't cover every key the block execution needs. We surface it as a
+//! [`SnapshotDbError`] rather than silently returning defaults.
 
 use super::pre_state::BlockPreState;
 use alloy_primitives::{Address, B256, U256};
