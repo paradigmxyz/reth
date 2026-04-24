@@ -124,6 +124,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
 impl ConfigureEvm for CustomEvmConfig {
     type Primitives = <EthEvmConfig as ConfigureEvm>::Primitives;
+    type TxExecutionResult = <EthEvmConfig as ConfigureEvm>::TxExecutionResult;
     type Error = <EthEvmConfig as ConfigureEvm>::Error;
     type NextBlockEnvCtx = <EthEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
@@ -162,6 +163,34 @@ impl ConfigureEvm for CustomEvmConfig {
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
         self.inner.context_for_next_block(parent, attributes)
+    }
+
+    fn sendable_executor_for_block<'a, DB: reth_ethereum::evm::primitives::Database>(
+        &'a self,
+        db: &'a mut reth_ethereum::evm::revm::State<DB>,
+        block: &'a SealedBlock<Block>,
+    ) -> Result<
+        impl BlockExecutorFor<
+                'a,
+                Self::BlockExecutorFactory,
+                &'a mut reth_ethereum::evm::revm::State<DB>,
+            > + BlockExecutor<Result = Self::TxExecutionResult>,
+        Self::Error,
+    > {
+        // Construct `CustomBlockExecutor` directly so the return type is concrete and the
+        // compiler can see `Result = EthTxResult<HaltReason, TxType>`. Going through
+        // `BlockExecutorFactory::create_executor` hides the concrete type behind an opaque
+        // `impl Trait` without a `Result` constraint, which would fail the trait bound here.
+        let evm = self.evm_for_block(db, block.header())?;
+        let ctx = self.context_for_block(block)?;
+        Ok(CustomBlockExecutor {
+            inner: EthBlockExecutor::new(
+                evm,
+                ctx,
+                self.inner.chain_spec(),
+                self.inner.executor_factory.receipt_builder(),
+            ),
+        })
     }
 }
 
