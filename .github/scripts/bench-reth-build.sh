@@ -53,7 +53,7 @@ build_node_binary() {
 
   # shellcheck disable=SC2086
   RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
-    cargo build --profile profiling $NODE_PKG $workspace_arg $features_arg
+    cargo build --locked --profile profiling $NODE_PKG $workspace_arg $features_arg
 }
 
 case "$MODE" in
