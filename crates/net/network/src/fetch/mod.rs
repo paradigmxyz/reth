@@ -499,7 +499,6 @@ impl Peer {
     fn satisfies(&self, requirement: &BestPeerRequirements) -> bool {
         match requirement {
             BestPeerRequirements::EthVersion(ver) => self.capabilities.supports_eth_at_least(ver),
-            BestPeerRequirements::Snap => self.capabilities.supports_snap(),
             BestPeerRequirements::None |
             BestPeerRequirements::FullBlock |
             BestPeerRequirements::FullBlockRange(_) => true,
@@ -682,10 +681,6 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetBlockBodies { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
-            Self::GetAccountRange { response, .. } |
-            Self::GetStorageRanges { response, .. } |
-            Self::GetByteCodes { response, .. } |
-            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
