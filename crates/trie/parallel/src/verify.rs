@@ -1,6 +1,5 @@
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::B256;
-use alloy_rlp::{BufMut, Encodable};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
@@ -9,26 +8,20 @@ use reth_db_api::{
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_api::{DBProvider, StorageSettingsCache};
 use reth_storage_errors::db::DatabaseError;
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{
-        depth_first, noop::NoopTrieCursorFactory, DepthFirstTrieIterator, TrieCursor,
-        TrieCursorFactory,
-    },
-    updates::TrieUpdates,
-    verify::Output,
-    walker::TrieWalker,
-    BranchNodeCompact, HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
-};
 #[cfg(feature = "metrics")]
 use reth_trie::{metrics::TrieRootMetrics, TrieType};
+use reth_trie::{
+    trie_cursor::{noop::NoopTrieCursorFactory, TrieCursor, TrieCursorFactory},
+    verify::{
+        rebuild_account_nodes_from_hashed_state, sorted_branch_nodes, Output, TrieCursorVerifier,
+    },
+    BranchNodeCompact, Nibbles, StorageRoot,
+};
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter,
     TrieTableAdapter,
 };
 use std::{
-    cmp::Ordering,
     collections::BTreeMap,
     num::NonZeroUsize,
     sync::{mpsc, Arc, Mutex},
@@ -166,93 +159,6 @@ enum StorageMessage {
     Output(Output),
 }
 
-#[derive(Debug)]
-struct RepairTrieCursorVerifier<I> {
-    account: Option<B256>,
-    trie_iter: I,
-    curr: Option<(Nibbles, BranchNodeCompact)>,
-}
-
-impl<C: TrieCursor> RepairTrieCursorVerifier<DepthFirstTrieIterator<C>> {
-    fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
-        let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
-        let curr = trie_iter.next().transpose()?;
-        Ok(Self { account, trie_iter, curr })
-    }
-
-    const fn output_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
-        if let Some(account) = self.account {
-            Output::StorageExtra(account, path, node)
-        } else {
-            Output::AccountExtra(path, node)
-        }
-    }
-
-    const fn output_wrong(
-        &self,
-        path: Nibbles,
-        expected: BranchNodeCompact,
-        found: BranchNodeCompact,
-    ) -> Output {
-        if let Some(account) = self.account {
-            Output::StorageWrong { account, path, expected, found }
-        } else {
-            Output::AccountWrong { path, expected, found }
-        }
-    }
-
-    const fn output_missing(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
-        if let Some(account) = self.account {
-            Output::StorageMissing(account, path, node)
-        } else {
-            Output::AccountMissing(path, node)
-        }
-    }
-
-    fn next(
-        &mut self,
-        path: Nibbles,
-        node: BranchNodeCompact,
-    ) -> Result<Vec<Output>, DatabaseError> {
-        let mut outputs = Vec::new();
-
-        loop {
-            if self.curr.is_none() {
-                outputs.push(self.output_missing(path, node));
-                return Ok(outputs)
-            }
-
-            let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
-            match depth_first::cmp(&path, curr_path) {
-                Ordering::Less => {
-                    outputs.push(self.output_missing(path, node));
-                    return Ok(outputs)
-                }
-                Ordering::Equal => {
-                    if *curr_node != node {
-                        outputs.push(self.output_wrong(path, node, curr_node.clone()));
-                    }
-                    self.curr = self.trie_iter.next().transpose()?;
-                    return Ok(outputs)
-                }
-                Ordering::Greater => {
-                    outputs.push(self.output_extra(*curr_path, curr_node.clone()));
-                    self.curr = self.trie_iter.next().transpose()?;
-                }
-            }
-        }
-    }
-
-    fn finalize(&mut self) -> Result<Vec<Output>, DatabaseError> {
-        let mut outputs = Vec::new();
-        while let Some((curr_path, curr_node)) = self.curr.take() {
-            outputs.push(self.output_extra(curr_path, curr_node));
-            self.curr = self.trie_iter.next().transpose()?;
-        }
-        Ok(outputs)
-    }
-}
-
 fn open_provider<Factory>(factory: &Factory) -> Result<Factory::Provider, ParallelTrieVerifyError>
 where
     Factory: DatabaseProviderROFactory,
@@ -361,58 +267,37 @@ where
     let tx = provider.tx_ref();
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-
-    // Rebuild the account trie from hashed state alone so the collected updates represent the
-    // full canonical trie, not an incremental diff against the current trie tables.
-    let walker: TrieWalker<_> = TrieWalker::state_trie(
-        NoopTrieCursorFactory::default().account_trie_cursor()?,
-        Default::default(),
-    )
-    .with_deletions_retained(true);
-    let mut account_node_iter =
-        TrieNodeIter::state_trie(walker, hashed_cursor_factory.hashed_account_cursor()?);
-    let mut hash_builder = HashBuilder::default().with_updates(true);
-    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
     let mut pending_roots = BTreeMap::new();
     let mut pending_outputs = BTreeMap::new();
 
-    while let Some(node) = account_node_iter.try_next()? {
-        match node {
-            TrieElement::Branch(node) => {
-                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
-            }
-            TrieElement::Leaf(hashed_address, account) => {
-                let storage_root = wait_for_storage_root(
-                    hashed_address,
-                    result_rx,
-                    &mut pending_roots,
-                    &mut pending_outputs,
-                    on_output,
-                )?;
-
-                account_rlp.clear();
-                account.into_trie_account(storage_root).encode(&mut account_rlp as &mut dyn BufMut);
-                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                on_output(Output::Progress(Nibbles::unpack(hashed_address)))?;
-            }
-        }
-    }
-
-    // Finalize the rebuilt trie so the hash builder flushes any remaining top-level branch nodes
-    // into its collected updates before we compare against the trie tables.
-    let _ = hash_builder.root();
-    let removed_keys = account_node_iter.walker.take_removed_keys();
-    let mut trie_updates = TrieUpdates::default();
-    trie_updates.finalize(hash_builder, removed_keys, Default::default());
+    let expected_account_nodes = rebuild_account_nodes_from_hashed_state(
+        hashed_cursor_factory,
+        |hashed_address| -> Result<B256, ParallelTrieVerifyError> {
+            let storage_root = wait_for_storage_root(
+                hashed_address,
+                result_rx,
+                &mut pending_roots,
+                &mut pending_outputs,
+                on_output,
+            )?;
+            on_output(Output::Progress(Nibbles::unpack(hashed_address)))?;
+            Ok(storage_root)
+        },
+    )?;
 
     let mut account_verifier =
-        RepairTrieCursorVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?;
-    for (path, node) in sorted_branch_nodes(trie_updates.account_nodes.into_iter()) {
-        for output in account_verifier.next(path, node)? {
+        TrieCursorVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?;
+    let mut outputs = Vec::new();
+    for (path, node) in expected_account_nodes {
+        outputs.clear();
+        account_verifier.next(&mut outputs, path, node)?;
+        for output in outputs.drain(..) {
             on_output(output)?;
         }
     }
-    for output in account_verifier.finalize()? {
+    outputs.clear();
+    account_verifier.finalize(&mut outputs)?;
+    for output in outputs {
         on_output(output)?;
     }
 
@@ -449,8 +334,8 @@ where
                 pending_roots.insert(root_account, root);
             }
             StorageMessage::Output(output) => {
-                let output_account = output_storage_account(&output)
-                    .expect("storage worker emitted non-storage output");
+                let output_account =
+                    output.storage_account().expect("storage worker emitted non-storage output");
                 if output_account == account {
                     on_output(output)?;
                 } else {
@@ -487,16 +372,21 @@ fn emit_storage_updates<C>(
 where
     C: TrieCursor,
 {
-    let mut verifier = RepairTrieCursorVerifier::new(Some(account), cursor)?;
+    let mut verifier = TrieCursorVerifier::new(Some(account), cursor)?;
+    let mut outputs = Vec::new();
     for (path, node) in expected_nodes {
-        for output in verifier.next(path, node)? {
+        outputs.clear();
+        verifier.next(&mut outputs, path, node)?;
+        for output in outputs.drain(..) {
             result_tx.send(Ok(StorageMessage::Output(output))).map_err(|_| {
                 ParallelTrieVerifyError::Other("storage results channel closed".into())
             })?;
         }
     }
 
-    for output in verifier.finalize()? {
+    outputs.clear();
+    verifier.finalize(&mut outputs)?;
+    for output in outputs {
         result_tx
             .send(Ok(StorageMessage::Output(output)))
             .map_err(|_| ParallelTrieVerifyError::Other("storage results channel closed".into()))?;
@@ -513,35 +403,16 @@ fn emit_empty_storage_inconsistencies<C>(
 where
     C: TrieCursor,
 {
-    let mut verifier = RepairTrieCursorVerifier::new(Some(account), cursor)?;
-    for output in verifier.finalize()? {
+    let mut verifier = TrieCursorVerifier::new(Some(account), cursor)?;
+    let mut outputs = Vec::new();
+    verifier.finalize(&mut outputs)?;
+    for output in outputs {
         result_tx
             .send(Ok(StorageMessage::Output(output)))
             .map_err(|_| ParallelTrieVerifyError::Other("storage results channel closed".into()))?;
     }
 
     Ok(())
-}
-
-fn sorted_branch_nodes<I>(nodes: I) -> Vec<(Nibbles, BranchNodeCompact)>
-where
-    I: IntoIterator<Item = (Nibbles, BranchNodeCompact)>,
-{
-    let mut nodes = nodes.into_iter().collect::<Vec<_>>();
-    nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
-    nodes
-}
-
-fn output_storage_account(output: &Output) -> Option<B256> {
-    match output {
-        Output::StorageExtra(account, ..) |
-        Output::StorageMissing(account, ..) |
-        Output::StorageWrong { account, .. } => Some(*account),
-        Output::AccountExtra(..) |
-        Output::AccountMissing(..) |
-        Output::AccountWrong { .. } |
-        Output::Progress(..) => None,
-    }
 }
 
 fn storage_worker_count() -> usize {

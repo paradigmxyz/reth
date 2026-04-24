@@ -1,5 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
+    node_iter::{TrieElement, TrieNodeIter},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie::StateRoot,
     trie_cursor::{
@@ -7,9 +8,12 @@ use crate::{
         noop::NoopTrieCursorFactory,
         TrieCursor, TrieCursorFactory,
     },
-    Nibbles,
+    updates::TrieUpdates,
+    walker::TrieWalker,
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::B256;
+use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
@@ -185,17 +189,89 @@ pub enum Output {
     Progress(Nibbles),
 }
 
+impl Output {
+    /// Returns the hashed account for storage trie verification outputs.
+    pub const fn storage_account(&self) -> Option<B256> {
+        match self {
+            Self::StorageExtra(account, ..) |
+            Self::StorageMissing(account, ..) |
+            Self::StorageWrong { account, .. } => Some(*account),
+            Self::AccountExtra(..) |
+            Self::AccountMissing(..) |
+            Self::AccountWrong { .. } |
+            Self::Progress(..) => None,
+        }
+    }
+}
+
+/// Collects branch nodes into depth-first order so they can be compared against trie cursors.
+pub fn sorted_branch_nodes<I>(nodes: I) -> Vec<(Nibbles, BranchNodeCompact)>
+where
+    I: IntoIterator<Item = (Nibbles, BranchNodeCompact)>,
+{
+    let mut nodes = nodes.into_iter().collect::<Vec<_>>();
+    nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
+    nodes
+}
+
+/// Rebuilds the canonical account trie branch nodes from hashed state and externally supplied
+/// storage roots.
+pub fn rebuild_account_nodes_from_hashed_state<H, S, E>(
+    hashed_cursor_factory: H,
+    mut storage_root: S,
+) -> Result<Vec<(Nibbles, BranchNodeCompact)>, E>
+where
+    H: HashedCursorFactory,
+    S: FnMut(B256) -> Result<B256, E>,
+    E: From<DatabaseError>,
+{
+    let walker: TrieWalker<_> = TrieWalker::state_trie(
+        NoopTrieCursorFactory::default().account_trie_cursor().map_err(E::from)?,
+        Default::default(),
+    )
+    .with_deletions_retained(true);
+    let mut account_node_iter =
+        TrieNodeIter::state_trie(walker, hashed_cursor_factory.hashed_account_cursor()?);
+    let mut hash_builder = HashBuilder::default().with_updates(true);
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+
+    while let Some(node) = account_node_iter.try_next()? {
+        match node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                let storage_root = storage_root(hashed_address)?;
+
+                account_rlp.clear();
+                account.into_trie_account(storage_root).encode(&mut account_rlp as &mut dyn BufMut);
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+            }
+        }
+    }
+
+    // Finalize the rebuilt trie so the hash builder flushes any remaining top-level branch nodes
+    // into its collected updates before they are compared against the trie tables.
+    let _ = hash_builder.root();
+    let removed_keys = account_node_iter.walker.take_removed_keys();
+    let mut trie_updates = TrieUpdates::default();
+    trie_updates.finalize(hash_builder, removed_keys, Default::default());
+
+    Ok(sorted_branch_nodes(trie_updates.account_nodes.into_iter()))
+}
+
 /// Verifies the contents of a trie table against some other data source which is able to produce
 /// stored trie nodes.
 #[derive(Debug)]
-struct SingleVerifier<I> {
+pub struct TrieCursorVerifier<I> {
     account: Option<B256>, // None for accounts trie
     trie_iter: I,
     curr: Option<(Nibbles, BranchNodeCompact)>,
 }
 
-impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
-    fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
+impl<C: TrieCursor> TrieCursorVerifier<DepthFirstTrieIterator<C>> {
+    /// Creates a verifier for either the account trie or a specific storage trie.
+    pub fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
         let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
         let curr = trie_iter.next().transpose()?;
         Ok(Self { account, trie_iter, curr })
@@ -235,7 +311,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     /// inconsistent with that given.
     ///
     /// `next` must be called with paths in depth-first order.
-    fn next(
+    pub fn next(
         &mut self,
         outputs: &mut Vec<Output>,
         path: Nibbles,
@@ -285,7 +361,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 
     /// Must be called once there are no more calls to `next` to made. All further nodes produced
     /// by the iterator will be considered extraneous.
-    fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), DatabaseError> {
+    pub fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), DatabaseError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
                 outputs.push(self.output_extra(curr_path, curr_node));
@@ -306,8 +382,8 @@ pub struct Verifier<'a, T: TrieCursorFactory, H> {
     hashed_cursor_factory: H,
     branch_node_iter: StateRootBranchNodesIter<H>,
     outputs: Vec<Output>,
-    account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
-    storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor<'a>>>)>,
+    account: TrieCursorVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
+    storage: Option<(B256, TrieCursorVerifier<DepthFirstTrieIterator<T::StorageTrieCursor<'a>>>)>,
     complete: bool,
 }
 
@@ -322,7 +398,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
             hashed_cursor_factory: hashed_cursor_factory.clone(),
             branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
             outputs: Default::default(),
-            account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
+            account: TrieCursorVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
             storage: None,
             complete: false,
         })
@@ -337,7 +413,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError> {
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(account)?;
-        let mut storage = SingleVerifier::new(Some(account), trie_cursor)?;
+        let mut storage = TrieCursorVerifier::new(Some(account), trie_cursor)?;
         storage.next(&mut self.outputs, path, node)?;
         self.storage = Some((account, storage));
         Ok(())
@@ -375,17 +451,9 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
                 trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
 
-                let mut storage_cursor =
-                    self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
-                let mut seeked = false;
-                while let Some((path, node)) = if seeked {
-                    storage_cursor.next()?
-                } else {
-                    seeked = true;
-                    storage_cursor.seek(Nibbles::new())?
-                } {
-                    self.outputs.push(Output::StorageExtra(curr_account, path, node));
-                }
+                let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
+                let mut verifier = TrieCursorVerifier::new(Some(curr_account), trie_cursor)?;
+                verifier.finalize(&mut self.outputs)?;
             } else {
                 return Ok(())
             }
@@ -663,14 +731,14 @@ mod tests {
 
     #[test]
     fn test_single_verifier_new() {
-        // Test creating a new SingleVerifier for account trie
+        // Test creating a new TrieCursorVerifier for account trie
         let trie_nodes = BTreeMap::from([(
             Nibbles::from_nibbles([0x1]),
             test_branch_node(0b1111, 0, 0, vec![]),
         )]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let verifier = SingleVerifier::new(None, cursor).unwrap();
+        let verifier = TrieCursorVerifier::new(None, cursor).unwrap();
 
         // Should have seeked to the beginning and found the first node
         assert!(verifier.curr.is_some());
@@ -688,7 +756,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with the exact node that exists
@@ -707,7 +775,7 @@ mod tests {
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), node_in_trie.clone())]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with different node value
@@ -731,7 +799,7 @@ mod tests {
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x3]), node1)]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with a node that comes before any in the trie
@@ -763,7 +831,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
@@ -808,7 +876,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
@@ -836,14 +904,14 @@ mod tests {
 
     #[test]
     fn test_single_verifier_storage_trie() {
-        // Test SingleVerifier for storage trie (with account set)
+        // Test TrieCursorVerifier for storage trie (with account set)
         let account = B256::from([42u8; 32]);
         let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
 
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), node)]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(Some(account), cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(Some(account), cursor).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with missing node
@@ -864,7 +932,7 @@ mod tests {
         // Test with empty trie cursor
         let trie_nodes = BTreeMap::new();
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // Any node should be marked as missing
@@ -901,7 +969,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces nodes in post-order (children before parents)
@@ -941,7 +1009,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // Process in WRONG order (skip root, provide child before processing all nodes correctly)
@@ -981,7 +1049,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = TrieCursorVerifier::new(None, cursor).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces nodes in post-order (children before parents)
