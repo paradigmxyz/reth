@@ -7,7 +7,7 @@ use crate::tree::{
     CacheWaitDurations, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
     PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig, WaitForCaches,
 };
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -250,7 +250,6 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-        bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -273,13 +272,12 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = bal.is_none();
+        let install_state_hook = env.decoded_bal.is_none();
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
-            bal,
         );
 
         PayloadHandle {
@@ -300,14 +298,13 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-        bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal);
+        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -465,7 +462,7 @@ where
         level = "debug",
         target = "engine::tree::payload_processor",
         skip_all,
-        fields(bal=%bal.is_some())
+        fields(bal=%env.decoded_bal.is_some())
     )]
     fn spawn_caching_with<P>(
         &self,
@@ -473,7 +470,6 @@ where
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
-        bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -484,7 +480,7 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
-
+        let maybe_decoded_bal = env.decoded_bal.clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -507,15 +503,16 @@ where
             prewarm_ctx,
             to_sparse_trie_task,
         );
-
         {
             let to_prewarm_task = to_prewarm_task.clone();
             let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
-                } else if let Some(bal) = bal.filter(|_| !disable_bal_parallel_execution) {
-                    PrewarmMode::BlockAccessList(bal)
+                } else if let Some(decoded_bal) =
+                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
+                {
+                    PrewarmMode::BlockAccessList(decoded_bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
                 };
@@ -936,6 +933,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Optional decoded BAL for the block.
+    /// Used to validate and optimize execution.
+    pub decoded_bal: Option<Arc<DecodedBal>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -953,6 +953,7 @@ where
             transaction_count: 0,
             gas_used: 0,
             withdrawals: None,
+            decoded_bal: None,
         }
     }
 }
@@ -974,7 +975,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
-        providers::{BlockchainProvider, OverlayStateProviderFactory},
+        providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
@@ -1249,9 +1250,11 @@ mod tests {
                 std::convert::identity,
             ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
+            OverlayStateProviderFactory::new(
+                provider_factory,
+                OverlayBuilder::new(ChangesetCache::new()),
+            ),
             &TreeConfig::default(),
-            None, // No BAL for test
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
