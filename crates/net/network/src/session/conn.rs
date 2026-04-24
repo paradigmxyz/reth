@@ -93,6 +93,15 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
         }
     }
+
+    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
+    /// RLP decoding to avoid memory amplification from deserializing blocks that will be discarded.
+    pub fn set_reject_block_announcements(&mut self, reject: bool) {
+        match self {
+            Self::EthOnly(conn) => conn.set_reject_block_announcements(reject),
+            Self::Satellite(conn) => conn.primary_mut().set_reject_block_announcements(reject),
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> From<EthPeerConnection<N>> for EthRlpxConnection<N> {

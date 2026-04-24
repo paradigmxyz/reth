@@ -327,7 +327,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state);
+        let mut swarm = Swarm::new(incoming, sessions, state);
+
+        // On PoS networks, reject NewBlock/NewBlockHashes before RLP decoding to prevent
+        // memory amplification from deserialized blocks that would be immediately discarded.
+        if network_mode.is_stake() {
+            swarm.sessions_mut().set_reject_block_announcements(true);
+        }
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
