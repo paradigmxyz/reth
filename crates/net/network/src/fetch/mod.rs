@@ -214,11 +214,6 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
             let request = self.queued_requests.pop_front().expect("not empty");
             let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
-                if request.should_complete_without_capable_peer(self.has_bal_capable_peer()) {
-                    request.send_err_response(RequestError::UnsupportedCapability);
-                    continue
-                }
-
                 // no peer matches this request's requirements; requeue at the back so other
                 // queued requests get a chance on the next poll instead of head-of-line blocking.
                 self.queued_requests.push_back(request);
@@ -244,21 +239,34 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             loop {
                 // poll incoming requests
                 match self.download_requests_rx.poll_next_unpin(cx) {
-                    Poll::Ready(Some(request)) => match request.get_priority() {
-                        Priority::High => {
-                            // find the first normal request and queue before, add this request to
-                            // the back of the high-priority queue
-                            let pos = self
-                                .queued_requests
-                                .iter()
-                                .position(|req| req.is_normal_priority())
-                                .unwrap_or(0);
-                            self.queued_requests.insert(pos, request);
+                    Poll::Ready(Some(request)) => {
+                        if matches!(
+                            request,
+                            DownloadRequest::GetBlockAccessLists {
+                                requirement: BalRequirement::Optional,
+                                ..
+                            }
+                        ) && !self.has_bal_capable_peer()
+                        {
+                            request.send_err_response(RequestError::UnsupportedCapability);
+                            continue
                         }
-                        Priority::Normal => {
-                            self.queued_requests.push_back(request);
+
+                        match request.get_priority() {
+                            Priority::High => {
+                                // Queue before the first normal request.
+                                let pos = self
+                                    .queued_requests
+                                    .iter()
+                                    .position(|req| req.is_normal_priority())
+                                    .unwrap_or(0);
+                                self.queued_requests.insert(pos, request);
+                            }
+                            Priority::Normal => {
+                                self.queued_requests.push_back(request);
+                            }
                         }
-                    },
+                    }
                     Poll::Ready(None) => {
                         unreachable!("channel can't close")
                     }
@@ -650,12 +658,6 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns `true` if this request is normal priority.
     const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
-    }
-
-    /// Returns whether the request may complete locally when no capable peer exists.
-    const fn should_complete_without_capable_peer(&self, has_bal_capable_peer: bool) -> bool {
-        matches!(self, Self::GetBlockAccessLists { requirement: BalRequirement::Optional, .. }) &&
-            !has_bal_capable_peer
     }
 
     /// Sends an error response to the waiting caller.
@@ -1615,7 +1617,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optional_bal_request_completes_without_capable_peer() {
+    async fn test_optional_bal_request_rejected_without_eth71_peer() {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
@@ -1635,12 +1637,15 @@ mod tests {
         );
 
         let (tx, rx) = oneshot::channel();
-        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
-            request: vec![],
-            response: tx,
-            priority: Priority::Normal,
-            requirement: BalRequirement::Optional,
-        });
+        fetcher
+            .download_requests_tx
+            .send(DownloadRequest::GetBlockAccessLists {
+                request: vec![],
+                response: tx,
+                priority: Priority::Normal,
+                requirement: BalRequirement::Optional,
+            })
+            .unwrap();
 
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -1651,7 +1656,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optional_bal_request_waits_for_busy_capable_peer() {
+    async fn test_optional_bal_request_waits_for_busy_eth71_peer() {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
@@ -1672,12 +1677,15 @@ mod tests {
         fetcher.peers.get_mut(&peer_71).expect("peer exists").state = PeerState::GetBlockHeaders;
 
         let (tx, _rx) = oneshot::channel();
-        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
-            request: vec![],
-            response: tx,
-            priority: Priority::Normal,
-            requirement: BalRequirement::Optional,
-        });
+        fetcher
+            .download_requests_tx
+            .send(DownloadRequest::GetBlockAccessLists {
+                request: vec![],
+                response: tx,
+                priority: Priority::Normal,
+                requirement: BalRequirement::Optional,
+            })
+            .unwrap();
 
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
