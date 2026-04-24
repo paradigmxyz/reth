@@ -320,8 +320,10 @@ where
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
 
+    // Rebuild the storage trie from hashed state alone so the collected updates represent the
+    // full canonical storage trie, not an incremental diff against the current trie tables.
     let (root, _, updates) = StorageRoot::new_hashed(
-        trie_cursor_factory.clone(),
+        NoopTrieCursorFactory::default(),
         hashed_cursor_factory,
         account,
         Default::default(),
@@ -396,6 +398,9 @@ where
         }
     }
 
+    // Finalize the rebuilt trie so the hash builder flushes any remaining top-level branch nodes
+    // into its collected updates before we compare against the trie tables.
+    let _ = hash_builder.root();
     let removed_keys = account_node_iter.walker.take_removed_keys();
     let mut trie_updates = TrieUpdates::default();
     trie_updates.finalize(hash_builder, removed_keys, Default::default());
@@ -748,7 +753,11 @@ mod tests {
         provider_rw
             .insert_storage_for_hashing([(
                 address_with_storage,
-                [StorageEntry { key: B256::from([0x33; 32]), value: U256::from(1) }],
+                [
+                    StorageEntry { key: B256::from([0x11; 32]), value: U256::from(1) },
+                    StorageEntry { key: B256::from([0x22; 32]), value: U256::from(2) },
+                    StorageEntry { key: B256::from([0x33; 32]), value: U256::from(3) },
+                ],
             )])
             .unwrap();
 

@@ -57,6 +57,7 @@ impl Command {
         task_executor: TaskExecutor,
         data_dir: &ChainPath<DataDirPath>,
     ) -> eyre::Result<()> {
+        // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
             let chain_name = tool.provider_factory.chain_spec().chain().to_string();
             let executor = task_executor.clone();
@@ -79,6 +80,7 @@ impl Command {
                     pprof_dump_dir,
                 );
 
+                // Spawn the metrics server
                 if let Err(e) = MetricServer::new(config).serve().await {
                     tracing::error!("Metrics server error: {}", e);
                 }
@@ -100,6 +102,7 @@ impl Command {
 }
 
 fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
         .provider_factory
         .provider()?
@@ -122,6 +125,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
             warn!("Inconsistency found: {output:?}");
             inconsistent_nodes += 1;
 
+            // Record metrics based on output type
             match output {
                 Output::AccountExtra(_, _) |
                 Output::AccountWrong { .. } |
@@ -182,11 +186,14 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
 }
 
 fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
 
+    // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
+    // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
     let inconsistent_nodes = reth_trie_db::with_adapter!(tool.provider_factory, |A| {
@@ -210,6 +217,7 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
 where
     <N::DB as Database>::TXMut: DbTxMut + DbTx,
 {
+    // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
     let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
@@ -225,6 +233,7 @@ where
             warn!("Inconsistency found, will repair: {output:?}");
             inconsistent_nodes += 1;
 
+            // Record metrics based on output type
             match &output {
                 Output::AccountExtra(_, _) |
                 Output::AccountWrong { .. } |
@@ -242,12 +251,14 @@ where
 
         match output {
             Output::AccountExtra(path, _node) => {
+                // Extra account node in trie, remove it
                 let key: A::AccountKey = path.into();
                 if account_trie_cursor.seek_exact(key)?.is_some() {
                     account_trie_cursor.delete_current()?;
                 }
             }
             Output::StorageExtra(account, path, _node) => {
+                // Extra storage node in trie, remove it
                 let subkey: A::StorageSubKey = path.into();
                 if storage_trie_cursor
                     .seek_by_key_subkey(account, subkey.clone())?
@@ -259,11 +270,15 @@ where
             }
             Output::AccountWrong { path, expected: node, .. } |
             Output::AccountMissing(path, node) => {
+                // Wrong/missing account node value, upsert it
                 let key: A::AccountKey = path.into();
                 account_trie_cursor.upsert(key, &node)?;
             }
             Output::StorageWrong { account, path, expected: node, .. } |
             Output::StorageMissing(account, path, node) => {
+                // Wrong/missing storage node value, upsert it
+                // (We can't just use `upsert` method with a dup cursor, it's not properly
+                // supported)
                 let subkey: A::StorageSubKey = path.into();
                 let entry = A::StorageValue::new(subkey.clone(), node);
                 if storage_trie_cursor
@@ -291,12 +306,17 @@ where
 
 /// Output progress information based on the last seen account path.
 fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_nodes: u64) {
+    // Calculate percentage based on position in the trie path space
+    // For progress estimation, we'll use the first few nibbles as an approximation
+
+    // Convert the first 16 nibbles (8 bytes) to a u64 for progress calculation
     let mut current_value: u64 = 0;
     let nibbles_to_use = last_account.len().min(16);
 
     for i in 0..nibbles_to_use {
         current_value = (current_value << 4) | (last_account.get(i).unwrap_or(0) as u64);
     }
+    // Shift left to fill remaining bits if we have fewer than 16 nibbles
     if nibbles_to_use < 16 {
         current_value <<= (16 - nibbles_to_use) * 4;
     }
@@ -304,6 +324,7 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
     let progress_percent = current_value as f64 / u64::MAX as f64 * 100.0;
     let progress_percent_str = format!("{progress_percent:.2}");
 
+    // Calculate ETA based on current speed
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
 
