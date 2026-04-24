@@ -55,14 +55,8 @@ pub struct BenchmarkArgs {
     )]
     pub local_rpc_url: String,
 
-    /// The `WebSocket` RPC URL to use for persistence subscriptions.
-    ///
-    /// If not provided, will attempt to derive from engine-rpc-url by:
-    /// - Converting http/https to ws/wss
-    /// - Using port 8546 (standard RPC `WebSocket` port)
-    ///
-    /// Example: `ws://localhost:8546`
-    #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
+    #[doc(hidden)]
+    #[arg(skip)]
     pub ws_rpc_url: Option<String>,
 
     /// The path to the output directory for granular benchmark results.
@@ -95,11 +89,8 @@ pub struct BenchmarkArgs {
     /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     ///
     /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
-    /// directly, waits for persistence and cache updates to complete before processing,
-    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
-    ///
-    /// Cannot be used with `--wait-for-persistence` because `reth_newPayload` already
-    /// waits for persistence by default.
+    /// directly and returns server-side timing breakdowns for latency, persistence waits,
+    /// and cache waits.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
 
