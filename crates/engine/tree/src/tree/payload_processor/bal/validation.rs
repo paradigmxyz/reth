@@ -3,7 +3,7 @@
 //! Both run before any state I/O, letting us reject adversarial BALs without spending storage
 //! bandwidth. See `BAL.md` §Validation chain, checks A and B.
 
-use alloy_eip7928::{compute_block_access_list_hash, total_bal_items, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, total_bal_items, AccountChanges};
 use alloy_primitives::B256;
 
 use super::RejectReason;
@@ -12,11 +12,13 @@ use super::RejectReason;
 /// 2100 gas so the gate is tighter than raw opcode cost.
 pub const BAL_ITEM_COST: u64 = 2000;
 
-/// Check A: `keccak256(rlp(received_bal)) == header.block_access_list_hash`.
+/// Check A: `keccak256(raw_rlp_of_received_bal) == header.block_access_list_hash`.
 ///
-/// Runs at payload decode time with zero I/O.
-pub fn check_bal_hash(bal: &BlockAccessList, expected: B256) -> Result<(), RejectReason> {
-    let computed = compute_block_access_list_hash(bal);
+/// Uses [`DecodedBal`]'s cached hash (`keccak256` of the raw RLP bytes captured at decode
+/// time) — the same pre-image the header commits to. Zero I/O; first call computes the hash,
+/// subsequent calls are free.
+pub fn check_bal_hash(bal: &DecodedBal, expected: B256) -> Result<(), RejectReason> {
+    let computed = bal.hash();
     if computed == expected {
         Ok(())
     } else {
@@ -29,7 +31,7 @@ pub fn check_bal_hash(bal: &BlockAccessList, expected: B256) -> Result<(), Rejec
 /// `unique_storage_keys` dedupes `storage_reads ∪ storage_changes` per account (delegated to
 /// `alloy_eip7928::total_bal_items`). Saturating arithmetic defends against adversarial BALs
 /// whose raw item count would overflow `u64` — they reject cleanly instead of panicking.
-pub fn check_item_count(bal: &BlockAccessList, block_gas_limit: u64) -> Result<(), RejectReason> {
+pub fn check_item_count(bal: &[AccountChanges], block_gas_limit: u64) -> Result<(), RejectReason> {
     let bal_items = total_bal_items(bal);
     let total_cost = bal_items.saturating_mul(BAL_ITEM_COST);
     if total_cost <= block_gas_limit {
@@ -42,7 +44,7 @@ pub fn check_item_count(bal: &BlockAccessList, block_gas_limit: u64) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eip7928::{AccountChanges, SlotChanges, StorageChange};
+    use alloy_eip7928::{bal::Bal as AlloyBal, AccountChanges, SlotChanges, StorageChange};
     use alloy_primitives::{b256, Address, U256};
 
     fn addr(byte: u8) -> Address {
@@ -55,26 +57,35 @@ mod tests {
         U256::from(byte)
     }
 
+    /// Wraps a `Vec<AccountChanges>` into a `DecodedBal` by RLP-encoding the contents — same
+    /// path a real block takes through `DecodedBal::from_rlp_bytes`, so the cached hash stays
+    /// faithful to what the header would commit to.
+    fn to_decoded(bal: Vec<AccountChanges>) -> DecodedBal {
+        let alloy_bal: AlloyBal = bal.into();
+        let raw = alloy_rlp::encode(&alloy_bal).into();
+        DecodedBal::new(alloy_bal, raw)
+    }
+
     // ---- check_bal_hash ----
 
     #[test]
     fn check_bal_hash_accepts_matching_hash() {
-        let bal: Vec<AccountChanges> = vec![AccountChanges::new(addr(1))];
-        let computed = compute_block_access_list_hash(&bal);
-        assert_eq!(check_bal_hash(&bal, computed), Ok(()));
+        let decoded = to_decoded(vec![AccountChanges::new(addr(1))]);
+        let computed = decoded.hash();
+        assert_eq!(check_bal_hash(&decoded, computed), Ok(()));
     }
 
     #[test]
     fn check_bal_hash_rejects_with_populated_fields() {
-        let bal: Vec<AccountChanges> = vec![AccountChanges::new(addr(1))];
+        let decoded = to_decoded(vec![AccountChanges::new(addr(1))]);
         let expected = b256!("0xdeadbeef00000000000000000000000000000000000000000000000000000000");
 
-        let err = check_bal_hash(&bal, expected).unwrap_err();
+        let err = check_bal_hash(&decoded, expected).unwrap_err();
 
         match err {
             RejectReason::HeaderHashMismatch { computed, expected: got } => {
                 assert_eq!(got, expected);
-                assert_eq!(computed, compute_block_access_list_hash(&bal));
+                assert_eq!(computed, decoded.hash());
                 assert_ne!(computed, expected);
             }
             other => panic!("expected HeaderHashMismatch, got {other:?}"),
@@ -83,16 +94,16 @@ mod tests {
 
     #[test]
     fn check_bal_hash_handles_empty_bal() {
-        let bal: Vec<AccountChanges> = Vec::new();
-        let computed = compute_block_access_list_hash(&bal);
-        assert_eq!(check_bal_hash(&bal, computed), Ok(()));
+        let decoded = to_decoded(Vec::new());
+        let computed = decoded.hash();
+        assert_eq!(check_bal_hash(&decoded, computed), Ok(()));
     }
 
     // ---- check_item_count ----
 
     #[test]
     fn check_item_count_accepts_empty_bal_with_zero_limit() {
-        assert_eq!(check_item_count(&BlockAccessList::new(), 0), Ok(()));
+        assert_eq!(check_item_count(&[], 0), Ok(()));
     }
 
     #[test]

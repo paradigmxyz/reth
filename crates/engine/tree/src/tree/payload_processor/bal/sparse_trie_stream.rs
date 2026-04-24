@@ -8,7 +8,7 @@
 use super::pre_state::BlockPreState;
 use crate::tree::payload_processor::multiproof::StateRootMessage;
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_eip7928::{AccountChanges, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, AccountChanges};
 use alloy_primitives::{keccak256, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use rayon::prelude::*;
@@ -23,12 +23,12 @@ use tokio::sync::oneshot;
 pub fn spawn_stream_bal_to_sparse_trie(
     pool: &WorkerPool,
     snapshot: Arc<BlockPreState>,
-    bal: Arc<BlockAccessList>,
+    decoded_bal: Arc<DecodedBal>,
     to_sparse_trie_task: CrossbeamSender<StateRootMessage>,
 ) -> oneshot::Receiver<()> {
     let (tx, rx) = oneshot::channel();
     pool.spawn(move || {
-        bal.par_iter().for_each(|account_changes| {
+        decoded_bal.as_bal().par_iter().for_each(|account_changes| {
             stream_bal_account(&snapshot, account_changes, &to_sparse_trie_task);
         });
         let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);

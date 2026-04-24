@@ -48,7 +48,7 @@ use super::{
     validation::{check_bal_hash, check_item_count},
     RejectReason,
 };
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, TxResult},
     Evm,
@@ -146,7 +146,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         &self,
         canonical_db: DB,
         snapshot: Arc<BlockPreState>,
-        received_bal: BlockAccessList,
+        received_bal: Arc<DecodedBal>,
         block: &SealedBlock<<Evm::Primitives as NodePrimitives>::Block>,
         txs: Vec<Tx>,
         header_bal_hash: B256,
@@ -157,10 +157,13 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         Tx: ExecutableTxFor<Evm>,
     {
         check_bal_hash(&received_bal, header_bal_hash)?;
-        check_item_count(&received_bal, block_gas_limit)?;
+        let bal = received_bal.as_bal();
+        check_item_count(bal, block_gas_limit)?;
 
+        // Single clone from alloy `Bal` into revm `Bal` — needed because the revm state
+        // machine owns its `Bal` by value for BAL-aware commits.
         let received_bal_revm: Arc<Bal> = Arc::new(
-            Bal::try_from(received_bal.clone())
+            Bal::try_from(Vec::<_>::from(bal.clone()))
                 .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
         );
 
@@ -177,7 +180,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         // EVM loads the account itself during execution, but in option (a) the worker runs
         // the EVM on its own state and we only feed the diff to canonical — canonical never
         // read those accounts, so they aren't in its cache.
-        for account_changes in &received_bal {
+        for account_changes in bal {
             canonical_state
                 .load_cache_account(account_changes.address)
                 .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
@@ -204,7 +207,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
 
             canonical_executor.apply_pre_execution_changes()?;
 
-            let mut feasibility = FeasibilityTracker::new(&received_bal, block_gas_limit);
+            let mut feasibility = FeasibilityTracker::new(bal, block_gas_limit);
 
             for (i, tx) in txs.into_iter().enumerate() {
                 let tx_index = i as u64 + 1;
@@ -301,6 +304,7 @@ unsafe fn reinterpret_result<From, To>(src: From) -> To {
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
@@ -314,6 +318,15 @@ mod tests {
         database::{CacheDB, EmptyDB},
         state::{AccountInfo, Bytecode},
     };
+
+    /// Wraps a `BlockAccessList` (Vec of account changes) into an `Arc<DecodedBal>` by
+    /// RLP-encoding the data. `execute_block` now takes the decoded form; tests still build the
+    /// underlying `Vec` the natural way.
+    fn to_arc_decoded(bal: BlockAccessList) -> Arc<DecodedBal> {
+        let alloy_bal: AlloyBal = bal.into();
+        let raw = alloy_rlp::encode(&alloy_bal).into();
+        Arc::new(DecodedBal::new(alloy_bal, raw))
+    }
 
     /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
     /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
@@ -390,7 +403,7 @@ mod tests {
         let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
             system_contracts_db(),
             snapshot,
-            received_bal,
+            to_arc_decoded(received_bal),
             &block,
             Vec::new(),
             wrong_hash,
@@ -427,7 +440,7 @@ mod tests {
         let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
             system_contracts_db(),
             snapshot,
-            received_bal,
+            to_arc_decoded(received_bal),
             &block,
             Vec::new(),
             bal_hash,
@@ -487,7 +500,7 @@ mod tests {
         let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
             system_contracts_db(),
             snapshot,
-            received_bal,
+            to_arc_decoded(received_bal),
             &block,
             Vec::new(),
             bal_hash,
@@ -671,7 +684,7 @@ mod tests {
         let result = executor.execute_block(
             canonical_db,
             snapshot,
-            reference_bal,
+            to_arc_decoded(reference_bal),
             &block,
             vec![recovered1, recovered2],
             bal_hash,
@@ -771,7 +784,7 @@ mod tests {
             .execute_block(
                 canonical_db_template,
                 snapshot,
-                reference_bal,
+                to_arc_decoded(reference_bal),
                 &block,
                 txs,
                 bal_hash,
@@ -1057,7 +1070,7 @@ mod tests {
         let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
             system_contracts_db(),
             snapshot,
-            received_bal,
+            to_arc_decoded(received_bal),
             &block,
             Vec::new(),
             empty_bal_hash,
