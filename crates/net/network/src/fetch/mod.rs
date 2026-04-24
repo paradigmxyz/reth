@@ -237,6 +237,8 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 // poll incoming requests
                 match self.download_requests_rx.poll_next_unpin(cx) {
                     Poll::Ready(Some(request)) => {
+                        // Optional BAL requests should not wait for future peer churn if no
+                        // connected peer can serve them right now.
                         if request.is_optional_bal() && !self.has_eth71_peer() {
                             request.send_err_response(RequestError::UnsupportedCapability);
                             continue
