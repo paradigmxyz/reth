@@ -25,29 +25,16 @@ use super::{
     validation::{check_bal_hash, check_item_count},
     RejectReason,
 };
-use alloy_consensus::{Header, TransactionEnvelope};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, TxResult},
-    eth::{spec::EthExecutorSpec, EthBlockExecutor, EthTxResult},
-    Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    Evm,
 };
 use alloy_primitives::B256;
-use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_ethereum_primitives::{Block, TransactionSigned};
-use reth_evm::{
-    execute::ExecutableTxFor, noop::NoopEvmConfig, precompiles::PrecompilesMap, ConfigureEvm,
-    EvmFor, HaltReasonFor, TransactionEnvMut,
-};
-use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm};
+use reth_primitives_traits::{BlockTy, SealedBlock};
 use reth_tasks::{pool::WorkerPool, Runtime};
-use revm::{
-    context::BlockEnv,
-    database::{states::bundle_state::BundleRetention, BundleState, State},
-    primitives::hardfork::SpecId,
-    Database,
-};
+use revm::database::{states::bundle_state::BundleRetention, BundleState, State};
 use revm_state::bal::Bal;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -58,11 +45,6 @@ use std::sync::{
 /// associated type — DB-independent.
 pub type ReceiptFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Receipt;
-
-type EthBalResult<C, EvmF> = EthTxResult<
-    HaltReasonFor<EthEvmConfig<C, EvmF>>,
-    <TransactionSigned as TransactionEnvelope>::TxType,
->;
 
 /// Output of a successful BAL-path block execution.
 #[expect(missing_debug_implementations)]
@@ -128,55 +110,20 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
     pub fn new(runtime: Runtime, evm_config: Evm) -> Self {
         Self { evm_config, runtime }
     }
-}
 
-/// EVM configs that can drive BAL execution from the engine validator.
-pub trait BalExecuteEvm: ConfigureEvm {
-    /// Executes one block on the BAL path.
-    fn execute_bal_block<Tx>(
-        &self,
-        runtime: Runtime,
-        snapshot: Arc<BlockPreState>,
-        received_bal: Arc<DecodedBal>,
-        block: &SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-        txs: Vec<Tx>,
-        header_bal_hash: B256,
-        block_gas_limit: u64,
-    ) -> Result<BalExecutionOutput<Self>, BalExecutionError>
-    where
-        Tx: ExecutableTxFor<Self> + Send;
-}
-
-impl<C, EvmF> BalPayloadExecutor<EthEvmConfig<C, EvmF>>
-where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + core::fmt::Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
-{
     /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
     #[expect(clippy::too_many_arguments)]
     pub fn execute_block<Tx>(
         &self,
         snapshot: Arc<BlockPreState>,
         received_bal: Arc<DecodedBal>,
-        block: &SealedBlock<Block>,
+        block: &SealedBlock<BlockTy<Evm::Primitives>>,
         txs: Vec<Tx>,
         header_bal_hash: B256,
         block_gas_limit: u64,
-    ) -> Result<BalExecutionOutput<EthEvmConfig<C, EvmF>>, BalExecutionError>
+    ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
     where
-        Tx: ExecutableTxFor<EthEvmConfig<C, EvmF>> + Send,
+        Tx: ExecutableTxFor<Evm> + Send,
     {
         self.execute_block_in_pool(
             self.runtime.bal_streaming_pool(),
@@ -196,13 +143,13 @@ where
         worker_pool: &WorkerPool,
         snapshot: Arc<BlockPreState>,
         received_bal: Arc<DecodedBal>,
-        block: &SealedBlock<Block>,
+        block: &SealedBlock<BlockTy<Evm::Primitives>>,
         txs: Vec<Tx>,
         header_bal_hash: B256,
         block_gas_limit: u64,
-    ) -> Result<BalExecutionOutput<EthEvmConfig<C, EvmF>>, BalExecutionError>
+    ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
     where
-        Tx: ExecutableTxFor<EthEvmConfig<C, EvmF>> + Send,
+        Tx: ExecutableTxFor<Evm> + Send,
     {
         check_bal_hash(&received_bal, header_bal_hash)?;
         let bal = received_bal.as_bal();
@@ -234,8 +181,10 @@ where
 
         let block_result = {
             let worker_evm_config = self.evm_config.clone();
-            let mut canonical_executor =
-                eth_executor_for_block(&self.evm_config, &mut canonical_state, block)?;
+            let mut canonical_executor = self
+                .evm_config
+                .sendable_executor_for_block(&mut canonical_state, block)
+                .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
 
             canonical_executor.apply_pre_execution_changes()?;
 
@@ -250,39 +199,25 @@ where
                 for (i, tx) in txs.into_iter().enumerate() {
                     let tx_index = i as u64 + 1;
                     let error_tx = error_tx.clone();
-                    let (result_tx, result_rx) = crossbeam_channel::bounded(1);
                     let abort = Arc::clone(&abort);
                     let snapshot = Arc::clone(&snapshot);
                     let received_bal_revm = Arc::clone(&received_bal_revm);
                     let evm_config = worker_evm_config.clone();
-                    result_rxs.push(result_rx);
+                    let result_rx = spawn_worker(scope, abort, error_tx, move || {
+                        let mut worker_state = State::builder()
+                            .with_database(SnapshotDatabase::new(snapshot))
+                            .with_bal(received_bal_revm)
+                            .with_bundle_update()
+                            .build();
+                        worker_state.set_bal_index(tx_index);
 
-                    scope.spawn(move |_| {
-                        if abort.load(Ordering::Relaxed) {
-                            return;
-                        }
-
-                        let worker_result = (|| {
-                            let mut worker_state = State::builder()
-                                .with_database(SnapshotDatabase::new(snapshot))
-                                .with_bal(received_bal_revm)
-                                .with_bundle_update()
-                                .build();
-                            worker_state.set_bal_index(tx_index);
-
-                            execute_eth_worker_tx(&evm_config, &mut worker_state, block, tx)
-                        })();
-
-                        match worker_result {
-                            Ok(result) => {
-                                let _ = result_tx.send(result);
-                            }
-                            Err(err) => {
-                                abort.store(true, Ordering::Relaxed);
-                                let _ = error_tx.send(err);
-                            }
-                        }
+                        evm_config
+                            .sendable_executor_for_block(&mut worker_state, block)
+                            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
+                            .execute_transaction_without_commit(tx)
+                            .map_err(BalExecutionError::Evm)
                     });
+                    result_rxs.push(result_rx);
                 }
                 for result_rx in result_rxs {
                     crossbeam_channel::select! {
@@ -335,134 +270,35 @@ where
     }
 }
 
-impl<C, EvmF> BalExecuteEvm for EthEvmConfig<C, EvmF>
+fn spawn_worker<'scope, R, F>(
+    scope: &rayon::Scope<'scope>,
+    abort: Arc<AtomicBool>,
+    error_tx: crossbeam_channel::Sender<BalExecutionError>,
+    run: F,
+) -> crossbeam_channel::Receiver<R>
 where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + core::fmt::Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
+    R: Send + 'scope,
+    F: FnOnce() -> Result<R, BalExecutionError> + Send + 'scope,
 {
-    fn execute_bal_block<Tx>(
-        &self,
-        runtime: Runtime,
-        snapshot: Arc<BlockPreState>,
-        received_bal: Arc<DecodedBal>,
-        block: &SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-        txs: Vec<Tx>,
-        header_bal_hash: B256,
-        block_gas_limit: u64,
-    ) -> Result<BalExecutionOutput<Self>, BalExecutionError>
-    where
-        Tx: ExecutableTxFor<Self> + Send,
-    {
-        BalPayloadExecutor::new(runtime, self.clone()).execute_block(
-            snapshot,
-            received_bal,
-            block,
-            txs,
-            header_bal_hash,
-            block_gas_limit,
-        )
-    }
-}
+    let (result_tx, result_rx) = crossbeam_channel::bounded(1);
 
-impl<Inner> BalExecuteEvm for NoopEvmConfig<Inner>
-where
-    Inner: ConfigureEvm,
-{
-    fn execute_bal_block<Tx>(
-        &self,
-        _runtime: Runtime,
-        _snapshot: Arc<BlockPreState>,
-        _received_bal: Arc<DecodedBal>,
-        _block: &SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-        _txs: Vec<Tx>,
-        _header_bal_hash: B256,
-        _block_gas_limit: u64,
-    ) -> Result<BalExecutionOutput<Self>, BalExecutionError>
-    where
-        Tx: ExecutableTxFor<Self> + Send,
-    {
-        unimplemented!("BAL execute path should never be used with NoopEvmConfig")
-    }
-}
-fn eth_executor_for_block<'a, C, EvmF, DB>(
-    evm_config: &'a EthEvmConfig<C, EvmF>,
-    db: &'a mut State<DB>,
-    block: &'a SealedBlock<Block>,
-) -> Result<
-    EthBlockExecutor<
-        'a,
-        EvmFor<EthEvmConfig<C, EvmF>, &'a mut State<DB>>,
-        &'a Arc<C>,
-        &'a RethReceiptBuilder,
-    >,
-    BalExecutionError,
->
-where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + core::fmt::Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
-    DB: Database + core::fmt::Debug,
-{
-    let evm = evm_config
-        .evm_for_block(db, block.header())
-        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
-    let ctx = evm_config
-        .context_for_block(block)
-        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
-    let factory = &evm_config.executor_factory;
-    Ok(EthBlockExecutor::new(evm, ctx, factory.spec(), factory.receipt_builder()))
-}
+    scope.spawn(move |_| {
+        if abort.load(Ordering::Relaxed) {
+            return;
+        }
 
-fn execute_eth_worker_tx<C, EvmF, DB, Tx>(
-    evm_config: &EthEvmConfig<C, EvmF>,
-    db: &mut State<DB>,
-    block: &SealedBlock<Block>,
-    tx: Tx,
-) -> Result<EthBalResult<C, EvmF>, BalExecutionError>
-where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + core::fmt::Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
-    DB: Database + core::fmt::Debug,
-    Tx: ExecutableTxFor<EthEvmConfig<C, EvmF>>,
-{
-    eth_executor_for_block(evm_config, db, block)?
-        .execute_transaction_without_commit(tx)
-        .map_err(BalExecutionError::Evm)
+        match run() {
+            Ok(result) => {
+                let _ = result_tx.send(result);
+            }
+            Err(err) => {
+                abort.store(true, Ordering::Relaxed);
+                let _ = error_tx.send(err);
+            }
+        }
+    });
+
+    result_rx
 }
 
 fn commit_worker_result<E>(

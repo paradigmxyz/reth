@@ -27,9 +27,7 @@ pub mod validation;
 pub mod worker;
 
 pub use error::RejectReason;
-pub use execute::{
-    BalExecuteEvm, BalExecutionError, BalExecutionOutput, BalPayloadExecutor, ReceiptFor,
-};
+pub use execute::{BalExecutionError, BalExecutionOutput, BalPayloadExecutor, ReceiptFor};
 pub use pre_state::{BlockPreState, RequiredReads};
 pub use snapshot::build_pre_state;
 pub use snapshot_db::{SnapshotDatabase, SnapshotDbError};
