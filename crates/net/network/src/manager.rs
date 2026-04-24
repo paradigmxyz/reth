@@ -329,8 +329,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
         let mut swarm = Swarm::new(incoming, sessions, state);
 
-        // On PoS networks, reject NewBlock/NewBlockHashes before RLP decoding to prevent
-        // memory amplification from deserialized blocks that would be immediately discarded.
         if network_mode.is_stake() {
             swarm.sessions_mut().set_reject_block_announcements(true);
         }
