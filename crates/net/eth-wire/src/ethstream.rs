@@ -151,10 +151,9 @@ where
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
 
-        if self.reject_block_announcements
-            && let Some(&id) = bytes.first()
-            && (id == EthMessageID::NewBlock.to_u8() ||
-                id == EthMessageID::NewBlockHashes.to_u8())
+        if self.reject_block_announcements &&
+            let Some(&id) = bytes.first() &&
+            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
         {
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
