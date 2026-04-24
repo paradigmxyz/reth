@@ -396,7 +396,6 @@ where
         unimplemented!("BAL execute path should never be used with NoopEvmConfig")
     }
 }
-
 fn eth_executor_for_block<'a, C, EvmF, DB>(
     evm_config: &'a EthEvmConfig<C, EvmF>,
     db: &'a mut State<DB>,
