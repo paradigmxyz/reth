@@ -589,9 +589,6 @@ pub fn spawn_populate_kbuckets_bg(
         // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
         // log2distance from local node
         for i in (0..bootstrap_lookup_countdown).rev() {
-            let Some(discv5_handle) = discv5.upgrade() else {
-                return;
-            };
             let target = discv5::enr::NodeId::random();
 
             trace!(target: "net::discv5",
@@ -601,16 +598,18 @@ pub fn spawn_populate_kbuckets_bg(
                 "starting bootstrap boost lookup query"
             );
 
-            lookup(target, &discv5_handle, &metrics).await;
+            {
+                let Some(discv5_handle) = discv5.upgrade() else {
+                    return;
+                };
+                lookup(target, &discv5_handle, &metrics).await;
+            }
 
             tokio::time::sleep(pulse_lookup_interval).await;
         }
 
         // initiate regular lookups to populate kbuckets
         loop {
-            let Some(discv5_handle) = discv5.upgrade() else {
-                return;
-            };
             // make sure node is connected to each subtree in the network by target
             // selection (ref kademlia)
             let target = get_lookup_target(kbucket_index, local_node_id);
@@ -621,7 +620,12 @@ pub fn spawn_populate_kbuckets_bg(
                 "starting periodic lookup query"
             );
 
-            lookup(target, &discv5_handle, &metrics).await;
+            {
+                let Some(discv5_handle) = discv5.upgrade() else {
+                    return;
+                };
+                lookup(target, &discv5_handle, &metrics).await;
+            }
 
             if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
                 // try to populate bucket one step closer
@@ -709,6 +713,11 @@ mod test {
     use ::enr::{CombinedKey, EnrKey};
     use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
+    use std::{
+        env,
+        net::UdpSocket,
+        time::{Duration, Instant},
+    };
     use tracing::trace;
 
     fn discv5_noop() -> Discv5 {
@@ -762,12 +771,34 @@ mod test {
         Discv5::start(secret_key, discv5_config).await
     }
 
+    fn unused_udp_port() -> u16 {
+        UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    async fn wait_for_udp_port_release(port: u16, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            match UdpSocket::bind(("127.0.0.1", port)) {
+                Ok(socket) => {
+                    drop(socket);
+                    return;
+                }
+                Err(err) if Instant::now() < deadline => {
+                    trace!(target: "net::discv5::test", %port, %err, "waiting for discv5 port release");
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(err) => panic!("discv5 did not release port {port} before timeout: {err}"),
+            }
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn discv5_releases_port_on_drop() {
         reth_tracing::init_test_tracing();
 
         let secret_key = SecretKey::new(&mut thread_rng());
-        let port = 30366;
+        let port = unused_udp_port();
 
         let (node, updates) = start_discovery_node_with_key(&secret_key, port)
             .await
@@ -775,7 +806,7 @@ mod test {
         drop(updates);
         drop(node);
 
-        tokio::task::yield_now().await;
+        wait_for_udp_port_release(port, Duration::from_secs(1)).await;
 
         let restarted = start_discovery_node_with_key(&secret_key, port).await;
         assert!(restarted.is_ok(), "discv5 failed to rebind dropped port: {restarted:?}");
