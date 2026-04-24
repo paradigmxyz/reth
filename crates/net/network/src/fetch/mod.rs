@@ -197,7 +197,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     }
 
     /// Returns whether any connected peer can serve BAL requests.
-    fn has_bal_capable_peer(&self) -> bool {
+    fn has_eth71_peer(&self) -> bool {
         self.peers.values().any(|peer| {
             !matches!(peer.state, PeerState::Closing) &&
                 peer.capabilities.supports_eth_at_least(&EthVersion::Eth71)
@@ -244,7 +244,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                                 requirement: BalRequirement::Optional,
                                 ..
                             }
-                        ) && !self.has_bal_capable_peer()
+                        ) && !self.has_eth71_peer()
                         {
                             request.send_err_response(RequestError::UnsupportedCapability);
                             continue
