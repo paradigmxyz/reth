@@ -237,14 +237,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 // poll incoming requests
                 match self.download_requests_rx.poll_next_unpin(cx) {
                     Poll::Ready(Some(request)) => {
-                        if matches!(
-                            request,
-                            DownloadRequest::GetBlockAccessLists {
-                                requirement: BalRequirement::Optional,
-                                ..
-                            }
-                        ) && !self.has_eth71_peer()
-                        {
+                        if request.is_optional_bal() && !self.has_eth71_peer() {
                             request.send_err_response(RequestError::UnsupportedCapability);
                             continue
                         }
@@ -666,6 +659,11 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns `true` if this request is normal priority.
     const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
+    }
+
+    /// Returns `true` if this is an optional BAL request.
+    const fn is_optional_bal(&self) -> bool {
+        matches!(self, Self::GetBlockAccessLists { requirement: BalRequirement::Optional, .. })
     }
 
     /// Sends an error response to the waiting caller.
