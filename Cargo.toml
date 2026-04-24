@@ -700,3 +700,12 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
+revm-bytecode = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
+revm-database = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
+revm-database-interface = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
+revm-interpreter = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
+revm-primitives = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
+revm-state = { git = "https://github.com/pepyakin/revm", rev = "f61002b4" }
