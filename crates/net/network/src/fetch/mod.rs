@@ -212,9 +212,15 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
         let request = self.queued_requests.pop_front().expect("not empty");
         let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
-            // no peer matches this request's requirements; requeue at the back so other
-            // queued requests get a chance on the next poll instead of head-of-line blocking.
-            self.queued_requests.push_back(request);
+            // Optional BAL requests can lose their eth/71 peer while queued; complete them
+            // instead of waiting for future peer churn.
+            if request.is_optional_bal() && !self.has_eth71_peer() {
+                request.send_err_response(RequestError::UnsupportedCapability);
+            } else {
+                // no peer matches this request's requirements; requeue at the back so other
+                // queued requests get a chance on the next poll instead of head-of-line blocking.
+                self.queued_requests.push_back(request);
+            }
             return PollAction::NoPeersAvailable
         };
 
@@ -1700,5 +1706,61 @@ mod tests {
 
         assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
         assert_eq!(fetcher.queued_requests.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_queued_optional_bal_request_rejected_after_eth71_disconnect() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_old = B512::random();
+        let caps_old = Arc::new(Capabilities::new(vec![]));
+        fetcher.new_active_peer(
+            peer_old,
+            B256::random(),
+            100,
+            caps_old,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        let peer_71 = B512::random();
+        let caps_71 = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+        fetcher.new_active_peer(
+            peer_71,
+            B256::random(),
+            100,
+            caps_71,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+        fetcher.peers.get_mut(&peer_71).expect("peer exists").state = PeerState::GetBlockHeaders;
+
+        let (tx, rx) = oneshot::channel();
+        fetcher
+            .download_requests_tx
+            .send(DownloadRequest::GetBlockAccessLists {
+                request: vec![],
+                response: tx,
+                priority: Priority::Normal,
+                requirement: BalRequirement::Optional,
+            })
+            .unwrap();
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert_eq!(fetcher.queued_requests.len(), 1);
+
+        fetcher.on_session_closed(&peer_71);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert!(fetcher.queued_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
     }
 }
