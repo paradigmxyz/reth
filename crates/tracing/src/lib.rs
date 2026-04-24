@@ -53,6 +53,7 @@ pub use tracing_subscriber;
 #[cfg(feature = "tracy")]
 tracy_client::register_demangler!();
 
+// Re-export our types
 #[cfg(feature = "std")]
 pub use formatter::LogFormat;
 #[cfg(feature = "std")]
@@ -89,11 +90,11 @@ use tracing_appender::non_blocking::WorkerGuard;
 #[cfg(feature = "std")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[cfg(feature = "std")]
 ///  Tracer for application logging.
 ///
 ///  Manages the configuration and initialization of logging layers,
 /// including standard output, optional journald, and optional file logging.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct RethTracer {
     stdout: LayerInfo,
@@ -180,11 +181,11 @@ impl Default for RethTracer {
     }
 }
 
-#[cfg(feature = "std")]
 ///  Configuration for a logging layer.
 ///
 ///  This struct holds configuration parameters for a tracing layer, including
 ///  the format, filtering directives, optional coloring, and directive.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct LayerInfo {
     format: LogFormat,
@@ -231,13 +232,13 @@ impl Default for LayerInfo {
     }
 }
 
-#[cfg(feature = "std")]
 /// Trait defining a general interface for logging configuration.
 ///
 /// The `Tracer` trait provides a standardized way to initialize logging configurations
 /// in an application. Implementations of this trait can specify different logging setups,
 /// such as standard output logging, file logging, journald logging, or custom logging
 /// configurations tailored for specific environments (like testing).
+#[cfg(feature = "std")]
 pub trait Tracer: Sized {
     /// Initialize the logging configuration.
     ///
@@ -309,10 +310,10 @@ impl Tracer for RethTracer {
     }
 }
 
-#[cfg(feature = "std")]
 ///  Initializes a tracing subscriber for tests.
 ///
 ///  The filter is configurable via `RUST_LOG`.
+#[cfg(feature = "std")]
 ///
 ///  # Note
 ///
