@@ -313,11 +313,11 @@ impl Tracer for RethTracer {
 ///  Initializes a tracing subscriber for tests.
 ///
 ///  The filter is configurable via `RUST_LOG`.
-#[cfg(feature = "std")]
 ///
 ///  # Note
 ///
 ///  The subscriber will silently fail if it could not be installed.
+#[cfg(feature = "std")]
 pub fn init_test_tracing() {
     let _ = TestTracer::default().init();
 }
