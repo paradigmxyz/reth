@@ -21,7 +21,7 @@
 //! declared-reads set; no revm inspector needed.
 
 use super::{RejectReason, BAL_ITEM_COST};
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::AccountChanges;
 use alloy_primitives::{Address, StorageKey, B256};
 use revm::context::result::ResultAndState;
 use std::collections::BTreeSet;
@@ -45,7 +45,7 @@ pub struct FeasibilityTracker {
 
 impl FeasibilityTracker {
     /// Derives `R_declared` and the declared-reads set from the received BAL.
-    pub fn new(bal: &BlockAccessList, gas_limit: u64) -> Self {
+    pub fn new(bal: &[AccountChanges], gas_limit: u64) -> Self {
         let declared_reads: BTreeSet<(Address, StorageKey)> = bal
             .iter()
             .flat_map(|acc| {
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn empty_bal_always_passes() {
-        let bal: BlockAccessList = Vec::new();
+        let bal: Vec<AccountChanges> = Vec::new();
         let mut t = FeasibilityTracker::new(&bal, 30_000_000);
         assert_eq!(t.record_and_check(&fake_tx_result(21_000, &[])), Ok(()));
         assert_eq!(t.r_declared(), 0);
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn gas_used_saturates_not_panics_on_overflow() {
-        let bal: BlockAccessList = Vec::new();
+        let bal: Vec<AccountChanges> = Vec::new();
         let mut t = FeasibilityTracker::new(&bal, u64::MAX);
         // Would overflow u64 if not saturating.
         t.record_and_check(&fake_tx_result(u64::MAX, &[])).unwrap();

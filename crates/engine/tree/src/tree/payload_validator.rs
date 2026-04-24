@@ -529,14 +529,7 @@ where
 
         // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
         // `provider_builder` (consumed by `spawn_payload_processor` below).
-        // TODO: rework `bal_path_eligible` / `execute_block_bal` / `BalPayloadExecutor` /
-        // `spawn_stream_bal_to_sparse_trie` to operate on `DecodedBal` directly and avoid this
-        // cloning.
-        let block_access_list: Option<Arc<BlockAccessList>> = env
-            .decoded_bal
-            .as_ref()
-            .map(|dbal| Arc::new(dbal.as_bal().clone().into()));
-        let bal_eligible = self.bal_path_eligible(block_access_list.as_deref());
+        let bal_eligible = self.bal_path_eligible(env.decoded_bal.as_deref());
         let bal_provider_builder = bal_eligible.then(|| provider_builder.clone());
 
         // Spawn the appropriate processor based on strategy
@@ -581,8 +574,8 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
-            let bal = block_access_list.expect("eligibility implies BAL is present");
-            let built_bal = Some((*bal).clone());
+            let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
+            let built_bal = Some(decoded_bal.as_bal().clone().into());
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
             match self.execute_block_bal(
@@ -590,7 +583,7 @@ where
                 env,
                 &block,
                 &mut handle,
-                bal,
+                decoded_bal,
                 provider_builder,
             ) {
                 Ok((output, senders, receipt_root_rx)) => {
@@ -1068,7 +1061,7 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, the snapshot-build overhead exceeds the gain. Tune empirically once workers are
     //     parallel; meaningless while the commit loop is sequential.
-    const fn bal_path_eligible(&self, bal: Option<&BlockAccessList>) -> bool {
+    const fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> bool {
         bal.is_some() && self.config.bal_execute_path_enabled()
     }
 
@@ -1090,7 +1083,7 @@ where
         env: ExecutionEnv<Evm>,
         block: &SealedBlock<N::Block>,
         handle: &mut PayloadHandle<Tx, Err, N::Receipt>,
-        bal: Arc<BlockAccessList>,
+        decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
         (
@@ -1126,7 +1119,7 @@ where
         })?;
         let cache_metrics = handle.cache_metrics().unwrap_or_default();
         let saved_cache = SavedCache::new(env.parent_hash, cache);
-        let reads = RequiredReads::from_bal(bal.iter());
+        let reads = RequiredReads::from_bal(decoded_bal.as_bal().iter());
         let snapshot = Arc::new(
             debug_span!(target: "engine::tree", "build_pre_state")
                 .in_scope(|| {
@@ -1148,7 +1141,7 @@ where
             let _stream_done = spawn_stream_bal_to_sparse_trie(
                 self.payload_processor.executor().bal_streaming_pool(),
                 snapshot.clone(),
-                bal.clone(),
+                Arc::clone(&decoded_bal),
                 to_sparse_trie_task,
             );
         }
@@ -1181,7 +1174,7 @@ where
         let bal_output = executor.execute_block(
             StateProviderDatabase::new(state_provider),
             snapshot,
-            (*bal).clone(),
+            decoded_bal,
             block,
             txs,
             header_bal_hash,
