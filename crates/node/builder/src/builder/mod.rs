@@ -34,7 +34,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
-    ChainSpecProvider, FullProvider,
+    BalProvider, ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
@@ -915,7 +915,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
-            .request_handler(self.provider().clone())
+            .request_handler_with_bal_store(
+                self.provider().clone(),
+                self.provider().bal_store().clone(),
+            )
             .split_with_handle();
 
         self.executor.spawn_critical_blocking_task("p2p txpool", txpool);

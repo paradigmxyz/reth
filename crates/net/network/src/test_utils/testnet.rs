@@ -243,8 +243,7 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: BalProvider
-        + BlockReader<
+    C: BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
@@ -316,8 +315,7 @@ impl<C, Pool> fmt::Debug for Testnet<C, Pool> {
 
 impl<C, Pool> Future for Testnet<C, Pool>
 where
-    C: BalProvider
-        + BlockReader<
+    C: BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
@@ -472,7 +470,12 @@ where
         let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
-        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
+        let request_handler = EthRequestHandler::with_bal_store(
+            self.client.clone(),
+            peers,
+            rx,
+            self.client.bal_store().clone(),
+        );
         self.request_handler = Some(request_handler);
     }
 
@@ -574,8 +577,7 @@ where
 
 impl<C, Pool> Future for Peer<C, Pool>
 where
-    C: BalProvider
-        + BlockReader<
+    C: BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
