@@ -282,16 +282,17 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         // Historical providers expose state at the start of `self.block_number`, so the overlay
         // builder needs the previous canonical block hash to preserve those semantics.
         let target_block = self.block_number.saturating_sub(1);
-        let block_hash = self
+        let anchor_hash = self
             .provider
             .block_hash(target_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
         let TrieInputSorted { nodes, state, prefix_sets } = input;
-        let overlay_builder =
-            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(self.changeset_cache.clone())
-                .with_block_hash(Some(block_hash))
-                .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
+        let overlay_builder = OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+            anchor_hash,
+            self.changeset_cache.clone(),
+        )
+        .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let Overlay { trie_updates, hashed_post_state } =
             overlay_builder.build_overlay(self.provider)?;
 

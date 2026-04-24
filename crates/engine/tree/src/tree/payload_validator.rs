@@ -527,8 +527,7 @@ where
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
         let provider_factory = self.provider.clone();
-        let overlay_builder = OverlayBuilder::<N>::new(self.changeset_cache.clone())
-            .with_block_hash(Some(anchor_hash))
+        let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_lazy_overlay(lazy_overlay);
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
@@ -2030,8 +2029,7 @@ where
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            OverlayBuilder::<N>::new(self.changeset_cache.clone())
-                .with_block_hash(Some(anchor_hash))
+            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
                 .with_lazy_overlay(lazy_overlay),
         );
 

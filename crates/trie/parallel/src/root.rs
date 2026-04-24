@@ -282,11 +282,13 @@ mod tests {
 
     #[tokio::test]
     async fn random_parallel_root() {
-        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let chain_spec = Arc::new(ChainSpec::default());
+        let anchor_hash = chain_spec.genesis_hash();
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let overlay_builder = reth_provider::providers::OverlayBuilder::<
             reth_ethereum_primitives::EthPrimitives,
-        >::new(changeset_cache);
+        >::new(anchor_hash, changeset_cache);
         let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
             factory.clone(),
             overlay_builder.clone(),
