@@ -1110,7 +1110,13 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     const fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
-            Self::SnapMessage(msg) => msg.is_response(),
+            Self::SnapMessage(msg) => matches!(
+                msg,
+                SnapProtocolMessage::AccountRange(_) |
+                    SnapProtocolMessage::StorageRanges(_) |
+                    SnapProtocolMessage::ByteCodes(_) |
+                    SnapProtocolMessage::TrieNodes(_)
+            ),
             _ => false,
         }
     }

@@ -72,13 +72,6 @@ pub enum SnapMessageId {
     BlockAccessLists = 0x09,
 }
 
-impl SnapMessageId {
-    /// Returns the total number of snap messages.
-    pub const fn message_count() -> u8 {
-        Self::TrieNodes as u8 + 1
-    }
-}
-
 /// Request for a range of accounts from the state trie.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getaccountrange-0x00
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
@@ -308,17 +301,6 @@ impl SnapProtocolMessage {
             Self::GetBlockAccessLists(_) => SnapMessageId::GetBlockAccessLists,
             Self::BlockAccessLists(_) => SnapMessageId::BlockAccessLists,
         }
-    }
-
-    /// Returns true if the message variant is a response.
-    pub const fn is_response(&self) -> bool {
-        matches!(
-            self,
-            Self::AccountRange(_) |
-                Self::StorageRanges(_) |
-                Self::ByteCodes(_) |
-                Self::TrieNodes(_)
-        )
     }
 
     /// Encode the message to bytes

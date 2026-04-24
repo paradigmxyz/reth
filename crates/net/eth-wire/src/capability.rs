@@ -99,12 +99,6 @@ impl SharedCapability {
         matches!(self, Self::Eth { .. })
     }
 
-    /// Returns true if the capability is snap/1.
-    #[inline]
-    pub fn is_snap(&self) -> bool {
-        self.name() == "snap" && self.version() == 1
-    }
-
     /// Returns the version of the capability.
     pub const fn version(&self) -> u8 {
         match self {
@@ -180,12 +174,6 @@ impl SharedCapabilities {
         self.iter_caps()
             .find_map(SharedCapability::eth_version)
             .ok_or(P2PStreamError::CapabilityNotShared)
-    }
-
-    /// Returns true if snap/1 is shared.
-    #[inline]
-    pub fn supports_snap(&self) -> bool {
-        self.iter_caps().any(SharedCapability::is_snap)
     }
 
     /// Returns true if the shared capabilities contain the given capability.
