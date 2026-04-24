@@ -143,6 +143,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
         eth_max_message_size: usize,
+        reject_block_announcements: bool,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -179,14 +180,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             handshake,
             eth_max_message_size,
             local_range_info,
-            reject_block_announcements: false,
+            reject_block_announcements,
         }
-    }
-
-    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
-    /// RLP decoding on all future sessions.
-    pub const fn set_reject_block_announcements(&mut self, reject: bool) {
-        self.reject_block_announcements = reject;
     }
 
     /// Returns the currently tracked [`ForkId`].

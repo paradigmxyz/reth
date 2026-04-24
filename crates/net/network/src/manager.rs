@@ -318,6 +318,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             extra_protocols,
             handshake,
             eth_max_message_size,
+            network_mode.is_stake(),
         );
 
         let state = NetworkState::new(
@@ -327,11 +328,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             Arc::clone(&num_active_peers),
         );
 
-        let mut swarm = Swarm::new(incoming, sessions, state);
-
-        if network_mode.is_stake() {
-            swarm.sessions_mut().set_reject_block_announcements(true);
-        }
+        let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
