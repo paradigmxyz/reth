@@ -1,28 +1,11 @@
-//! BAL-path block execution — workers produce per-tx results, a canonical executor commits
-//! them in order while building the composed BAL.
+//! BAL-path block execution — workers produce per-tx results in parallel and the canonical
+//! executor commits them in order while building the composed BAL.
 //!
-//! This is the main-thread commit loop from `BAL.md` §Main thread — canonical executor.
-//!
-//! ### The `Self::Result` type-punning
-//!
-//! Workers and the canonical executor are both built from the same `evm_config.create_executor`,
-//! but worker's Evm is over [`SnapshotDatabase`] while canonical's is over the caller's `DB`.
-//! `BlockExecutor::Result` depends on `Self::Evm`, so at the type level the two sides produce
-//! *distinct* `Self::Result` types — even though for `EthEvmFactory` they concretely resolve
-//! to the identical `EthTxResult<HaltReason, TxType>` (because [`EvmFactory::HaltReason`] is
-//! factory-level, not DB-parameterized; see `alloy-evm-0.33.1/src/evm.rs:279`).
-//!
-//! Rust's type system can't express that parametricity as a `where`-clause, so threading the
-//! worker output into `canonical.commit_transaction(worker_result)` requires a deliberate
-//! type-pun. [`reinterpret_result`] is the single `unsafe` site where this happens. It is
-//! sound **only** when the `EvmFactory`'s `HaltReason` and the receipt builder's transaction
-//! type are DB-independent — which holds for `EthEvmFactory` (mainnet Ethereum) and is the
-//! assumption under which this function operates.
-//!
-//! Future work (blocks removing the unsafe):
-//! - Expose `BlockExecutorFactory::Result` as an associated type in alloy-evm so it's named on the
-//!   factory rather than the executor, and parameterize it only by factory-level associated types.
-//!   Then Rust can prove the two sides produce the same `Result`.
+//! A single BAL-derived [`SnapshotDatabase`] backs both worker and canonical execution.
+//! `revm::State` carries all in-block writes in memory, so the underlying database only needs
+//! to answer pre-block reads. Using the same snapshot base on both sides keeps the EVM
+//! `Self::Result` type identical, so worker outputs flow directly into
+//! `commit_transaction` without any result reinterpretation.
 //!
 //! ### Checks performed
 //!
@@ -34,12 +17,6 @@
 //!
 //! Check E (per-tx fragment compare) is skipped — check F is authoritative, and a
 //! lightweight fragment compare isn't yet designed.
-//!
-//! ### Sequential; parallelism is future work
-//!
-//! One worker per tx on the calling thread. Workers' isolation from the canonical side is
-//! preserved (separate states, separate `bal_builder`), so a future `WorkerPool` wrap around
-//! the worker path would slot in without changing the commit-loop shape.
 
 use super::{
     feasibility::FeasibilityTracker,
@@ -48,25 +25,44 @@ use super::{
     validation::{check_bal_hash, check_item_count},
     RejectReason,
 };
+use alloy_consensus::{Header, TransactionEnvelope};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, TxResult},
-    Evm,
+    eth::{spec::EthExecutorSpec, EthBlockExecutor, EthTxResult},
+    Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::B256;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm};
+use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_ethereum_primitives::{Block, TransactionSigned};
+use reth_evm::{
+    execute::ExecutableTxFor, noop::NoopEvmConfig, precompiles::PrecompilesMap, ConfigureEvm,
+    EvmFor, HaltReasonFor, TransactionEnvMut,
+};
+use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_tasks::{pool::WorkerPool, Runtime};
 use revm::{
+    context::BlockEnv,
     database::{states::bundle_state::BundleRetention, BundleState, State},
+    primitives::hardfork::SpecId,
     Database,
 };
 use revm_state::bal::Bal;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 /// Alias for the canonical receipt type produced by a given `ConfigureEvm`. Factory-level
 /// associated type — DB-independent.
 pub type ReceiptFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Receipt;
+
+type EthBalResult<C, EvmF> = EthTxResult<
+    HaltReasonFor<EthEvmConfig<C, EvmF>>,
+    <TransactionSigned as TransactionEnvelope>::TxType,
+>;
 
 /// Output of a successful BAL-path block execution.
 #[expect(missing_debug_implementations)]
@@ -124,51 +120,101 @@ impl core::error::Error for BalExecutionError {}
 #[expect(missing_debug_implementations)]
 pub struct BalPayloadExecutor<Evm: ConfigureEvm> {
     evm_config: Evm,
+    runtime: Runtime,
 }
 
 impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
-    /// Wraps an `evm_config`. Caller typically clones the engine's config.
-    pub const fn new(evm_config: Evm) -> Self {
-        Self { evm_config }
+    /// Wraps an `evm_config` together with the runtime that owns the persistent BAL worker pool.
+    pub fn new(runtime: Runtime, evm_config: Evm) -> Self {
+        Self { evm_config, runtime }
     }
+}
 
+/// EVM configs that can drive BAL execution from the engine validator.
+pub trait BalExecuteEvm: ConfigureEvm {
     /// Executes one block on the BAL path.
-    ///
-    /// # Safety
-    ///
-    /// Contains one `unsafe` site (see module-level docs and [`reinterpret_result`]) that
-    /// type-puns worker output into the canonical executor's `commit_transaction` input. The
-    /// pun is sound only when the `EvmFactory`'s `HaltReason` is DB-independent, which holds
-    /// for `EthEvmFactory`. Custom factories whose `HaltReason` varies by DB would produce
-    /// unsound reads.
-    #[expect(clippy::too_many_arguments)]
-    pub fn execute_block<DB, Tx>(
+    fn execute_bal_block<Tx>(
         &self,
-        canonical_db: DB,
+        runtime: Runtime,
         snapshot: Arc<BlockPreState>,
         received_bal: Arc<DecodedBal>,
-        block: &SealedBlock<<Evm::Primitives as NodePrimitives>::Block>,
+        block: &SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
         txs: Vec<Tx>,
         header_bal_hash: B256,
         block_gas_limit: u64,
-    ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
+    ) -> Result<BalExecutionOutput<Self>, BalExecutionError>
     where
-        DB: Database + core::fmt::Debug,
-        Tx: ExecutableTxFor<Evm>,
+        Tx: ExecutableTxFor<Self> + Send;
+}
+
+impl<C, EvmF> BalPayloadExecutor<EthEvmConfig<C, EvmF>>
+where
+    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnvMut
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            BlockEnv = BlockEnv,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + core::fmt::Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+{
+    /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
+    #[expect(clippy::too_many_arguments)]
+    pub fn execute_block<Tx>(
+        &self,
+        snapshot: Arc<BlockPreState>,
+        received_bal: Arc<DecodedBal>,
+        block: &SealedBlock<Block>,
+        txs: Vec<Tx>,
+        header_bal_hash: B256,
+        block_gas_limit: u64,
+    ) -> Result<BalExecutionOutput<EthEvmConfig<C, EvmF>>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<EthEvmConfig<C, EvmF>> + Send,
+    {
+        self.execute_block_in_pool(
+            self.runtime.bal_streaming_pool(),
+            snapshot,
+            received_bal,
+            block,
+            txs,
+            header_bal_hash,
+            block_gas_limit,
+        )
+    }
+
+    /// Executes one block on the BAL path using the provided worker pool.
+    #[expect(clippy::too_many_arguments)]
+    pub fn execute_block_in_pool<Tx>(
+        &self,
+        worker_pool: &WorkerPool,
+        snapshot: Arc<BlockPreState>,
+        received_bal: Arc<DecodedBal>,
+        block: &SealedBlock<Block>,
+        txs: Vec<Tx>,
+        header_bal_hash: B256,
+        block_gas_limit: u64,
+    ) -> Result<BalExecutionOutput<EthEvmConfig<C, EvmF>>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<EthEvmConfig<C, EvmF>> + Send,
     {
         check_bal_hash(&received_bal, header_bal_hash)?;
         let bal = received_bal.as_bal();
         check_item_count(bal, block_gas_limit)?;
 
-        // Single clone from alloy `Bal` into revm `Bal` — needed because the revm state
-        // machine owns its `Bal` by value for BAL-aware commits.
         let received_bal_revm: Arc<Bal> = Arc::new(
             Bal::try_from(Vec::<_>::from(bal.clone()))
                 .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
         );
 
         let mut canonical_state = State::builder()
-            .with_database(canonical_db)
+            .with_database(SnapshotDatabase::new(Arc::clone(&snapshot)))
             .with_bundle_update()
             .with_bal_builder()
             .build();
@@ -177,67 +223,93 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         // (called by `commit_transaction`) panics at revm-database's
         // `cache.rs:195` ("All accounts should be present inside cache") when it tries to
         // apply a diff for an address not previously loaded. In the normal serial flow the
-        // EVM loads the account itself during execution, but in option (a) the worker runs
-        // the EVM on its own state and we only feed the diff to canonical — canonical never
-        // read those accounts, so they aren't in its cache.
+        // EVM loads the account itself during execution, but here workers execute the tx EVM
+        // and the canonical loop only commits their outputs, so canonical may never have read
+        // those accounts itself.
         for account_changes in bal {
             canonical_state
                 .load_cache_account(account_changes.address)
                 .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
         }
 
-        // Declare `worker_state` at the outer scope so its lifetime matches canonical_state's
-        // — both are method-local, and their borrows unify at the same `'a` when
-        // `executor_for_block` is called. Each iteration re-initializes with a fresh `State`.
-        //
-        // The initial binding is immediately overwritten in the loop but gives us a valid
-        // declaration site outside the loop body so the type is fixed once.
-        let mut worker_state = State::builder()
-            .with_database(SnapshotDatabase::new(snapshot.clone()))
-            .with_bal(received_bal_revm.clone())
-            .with_bundle_update()
-            .build();
-        let _ = &mut worker_state; // silence unused-assignment warning — we overwrite per iter
-
         let block_result = {
-            let mut canonical_executor = self
-                .evm_config
-                .executor_for_block(&mut canonical_state, block)
-                .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+            let worker_evm_config = self.evm_config.clone();
+            let mut canonical_executor =
+                eth_executor_for_block(&self.evm_config, &mut canonical_state, block)?;
 
             canonical_executor.apply_pre_execution_changes()?;
 
             let mut feasibility = FeasibilityTracker::new(bal, block_gas_limit);
+            let abort = Arc::new(AtomicBool::new(false));
+            let tx_count = txs.len() as u64;
 
-            for (i, tx) in txs.into_iter().enumerate() {
-                let tx_index = i as u64 + 1;
+            worker_pool.in_place_scope(|scope| -> Result<(), BalExecutionError> {
+                let (error_tx, error_rx) = crossbeam_channel::bounded(1);
+                let mut result_rxs = Vec::with_capacity(tx_count as usize);
 
-                // Reset worker state for the new tx (fresh snapshot view, zero bundle).
-                worker_state = State::builder()
-                    .with_database(SnapshotDatabase::new(snapshot.clone()))
-                    .with_bal(received_bal_revm.clone())
-                    .with_bundle_update()
-                    .build();
-                worker_state.set_bal_index(tx_index);
+                for (i, tx) in txs.into_iter().enumerate() {
+                    let tx_index = i as u64 + 1;
+                    let error_tx = error_tx.clone();
+                    let (result_tx, result_rx) = crossbeam_channel::bounded(1);
+                    let abort = Arc::clone(&abort);
+                    let snapshot = Arc::clone(&snapshot);
+                    let received_bal_revm = Arc::clone(&received_bal_revm);
+                    let evm_config = worker_evm_config.clone();
+                    result_rxs.push(result_rx);
 
-                let worker_result = {
-                    let mut worker_executor = self
-                        .evm_config
-                        .executor_for_block(&mut worker_state, block)
-                        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+                    scope.spawn(move |_| {
+                        if abort.load(Ordering::Relaxed) {
+                            return;
+                        }
 
-                    worker_executor.execute_transaction_without_commit(tx)?
-                };
+                        let worker_result = (|| {
+                            let mut worker_state = State::builder()
+                                .with_database(SnapshotDatabase::new(snapshot))
+                                .with_bal(received_bal_revm)
+                                .with_bundle_update()
+                                .build();
+                            worker_state.set_bal_index(tx_index);
 
-                feasibility.record_and_check(worker_result.result())?;
+                            execute_eth_worker_tx(&evm_config, &mut worker_state, block, tx)
+                        })();
 
-                canonical_executor.evm_mut().db_mut().bump_bal_index();
-                // SAFETY: `worker_result` and `canonical_executor`'s `Self::Result` are
-                // `EthTxResult<HaltReason, TxType>` for the same factory — bit-identical
-                // even though the Evm types differ by DB. See module-level safety note.
-                let canonical_result = unsafe { reinterpret_result(worker_result) };
-                let _gas = canonical_executor.commit_transaction(canonical_result)?;
-            }
+                        match worker_result {
+                            Ok(result) => {
+                                let _ = result_tx.send(result);
+                            }
+                            Err(err) => {
+                                abort.store(true, Ordering::Relaxed);
+                                let _ = error_tx.send(err);
+                            }
+                        }
+                    });
+                }
+                for result_rx in result_rxs {
+                    crossbeam_channel::select! {
+                        recv(error_rx) -> err => {
+                            abort.store(true, Ordering::Relaxed);
+                            return match err {
+                                Ok(err) => Err(err),
+                                Err(_) => Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                                    "BAL worker error channel closed unexpectedly",
+                                ))),
+                            }
+                        }
+                        recv(result_rx) -> worker_result => {
+                            let worker_result = worker_result.map_err(|_| {
+                                BalExecutionError::Evm(BlockExecutionError::msg(
+                                    "BAL worker result channel closed before all results arrived",
+                                ))
+                            })?;
+                            feasibility.record_and_check(worker_result.result())?;
+                            canonical_executor.evm_mut().db_mut().bump_bal_index();
+                            commit_worker_result(&mut canonical_executor, worker_result)?;
+                        }
+                    }
+                }
+
+                Ok(())
+            })?;
 
             canonical_executor.evm_mut().db_mut().bump_bal_index();
             canonical_executor.apply_post_execution_changes()?
@@ -263,47 +335,152 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
     }
 }
 
-/// Reinterprets a worker's `Self::Result` as the canonical executor's `Self::Result`.
-///
-/// # Safety
-///
-/// Safe iff:
-/// 1. The source and destination types are bit-identical.
-/// 2. The source value is dropped via the destination type's `Drop` (uses `transmute_copy` +
-///    `forget` to transfer ownership).
-///
-/// For `ConfigureEvm` implementations built atop `EthEvmFactory`, both `Self::Result` types
-/// resolve to `EthTxResult<HaltReason, TxType>` regardless of DB, so (1) holds. (2) is
-/// enforced by the function body. Non-Ethereum factories whose `HaltReason` depends on DB
-/// would violate (1) — this function must not be called against them.
-///
-/// The runtime assertion is a defensive check; a size mismatch indicates that the calling
-/// context does NOT satisfy (1) and the program would otherwise experience UB.
-#[inline]
-unsafe fn reinterpret_result<From, To>(src: From) -> To {
-    assert_eq!(
-        core::mem::size_of::<From>(),
-        core::mem::size_of::<To>(),
-        "BAL worker/canonical Self::Result types differ in size — \
-         the factory's HaltReason is not DB-independent, which violates the safety invariant \
-         of `execute_block_bal`. This probably means you're running against a custom \
-         EvmFactory whose HaltReason varies with the database type.",
-    );
-    assert_eq!(
-        core::mem::align_of::<From>(),
-        core::mem::align_of::<To>(),
-        "BAL worker/canonical Self::Result alignments differ — see size-mismatch message.",
-    );
-    // SAFETY: preconditions documented on the outer `unsafe fn`; size + align asserted above.
-    let dst = unsafe { core::mem::transmute_copy(&src) };
-    core::mem::forget(src);
-    dst
+impl<C, EvmF> BalExecuteEvm for EthEvmConfig<C, EvmF>
+where
+    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnvMut
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            BlockEnv = BlockEnv,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + core::fmt::Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+{
+    fn execute_bal_block<Tx>(
+        &self,
+        runtime: Runtime,
+        snapshot: Arc<BlockPreState>,
+        received_bal: Arc<DecodedBal>,
+        block: &SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+        txs: Vec<Tx>,
+        header_bal_hash: B256,
+        block_gas_limit: u64,
+    ) -> Result<BalExecutionOutput<Self>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<Self> + Send,
+    {
+        BalPayloadExecutor::new(runtime, self.clone()).execute_block(
+            snapshot,
+            received_bal,
+            block,
+            txs,
+            header_bal_hash,
+            block_gas_limit,
+        )
+    }
+}
+
+impl<Inner> BalExecuteEvm for NoopEvmConfig<Inner>
+where
+    Inner: ConfigureEvm,
+{
+    fn execute_bal_block<Tx>(
+        &self,
+        _runtime: Runtime,
+        _snapshot: Arc<BlockPreState>,
+        _received_bal: Arc<DecodedBal>,
+        _block: &SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _txs: Vec<Tx>,
+        _header_bal_hash: B256,
+        _block_gas_limit: u64,
+    ) -> Result<BalExecutionOutput<Self>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<Self> + Send,
+    {
+        unimplemented!("BAL execute path should never be used with NoopEvmConfig")
+    }
+}
+
+fn eth_executor_for_block<'a, C, EvmF, DB>(
+    evm_config: &'a EthEvmConfig<C, EvmF>,
+    db: &'a mut State<DB>,
+    block: &'a SealedBlock<Block>,
+) -> Result<
+    EthBlockExecutor<
+        'a,
+        EvmFor<EthEvmConfig<C, EvmF>, &'a mut State<DB>>,
+        &'a Arc<C>,
+        &'a RethReceiptBuilder,
+    >,
+    BalExecutionError,
+>
+where
+    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnvMut
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            BlockEnv = BlockEnv,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + core::fmt::Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+    DB: Database + core::fmt::Debug,
+{
+    let evm = evm_config
+        .evm_for_block(db, block.header())
+        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+    let ctx = evm_config
+        .context_for_block(block)
+        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+    let factory = &evm_config.executor_factory;
+    Ok(EthBlockExecutor::new(evm, ctx, factory.spec(), factory.receipt_builder()))
+}
+
+fn execute_eth_worker_tx<C, EvmF, DB, Tx>(
+    evm_config: &EthEvmConfig<C, EvmF>,
+    db: &mut State<DB>,
+    block: &SealedBlock<Block>,
+    tx: Tx,
+) -> Result<EthBalResult<C, EvmF>, BalExecutionError>
+where
+    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnvMut
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            BlockEnv = BlockEnv,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + core::fmt::Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+    DB: Database + core::fmt::Debug,
+    Tx: ExecutableTxFor<EthEvmConfig<C, EvmF>>,
+{
+    eth_executor_for_block(evm_config, db, block)?
+        .execute_transaction_without_commit(tx)
+        .map_err(BalExecutionError::Evm)
+}
+
+fn commit_worker_result<E>(
+    executor: &mut E,
+    worker_result: E::Result,
+) -> Result<(), BlockExecutionError>
+where
+    E: BlockExecutor,
+{
+    executor.commit_transaction(worker_result).map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use crate::tree::payload_processor::bal::RequiredReads;
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -314,14 +491,14 @@ mod tests {
     use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
+    use reth_tasks::Runtime;
     use revm::{
         database::{CacheDB, EmptyDB},
         state::{AccountInfo, Bytecode},
+        Database,
     };
 
-    /// Wraps a `BlockAccessList` (Vec of account changes) into an `Arc<DecodedBal>` by
-    /// RLP-encoding the data. `execute_block` now takes the decoded form; tests still build the
-    /// underlying `Vec` the natural way.
+    /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
     fn to_arc_decoded(bal: BlockAccessList) -> Arc<DecodedBal> {
         let alloy_bal: AlloyBal = bal.into();
         let raw = alloy_rlp::encode(&alloy_bal).into();
@@ -394,14 +571,13 @@ mod tests {
     #[test]
     fn rejects_bad_bal_hash_up_front() {
         // Check A: the received BAL's hash must match the header's commitment.
-        let executor = BalPayloadExecutor::new(EthEvmConfig::mainnet());
+        let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
         let snapshot = Arc::new(BlockPreState::default());
         let received_bal: BlockAccessList = Vec::new();
         let wrong_hash = B256::repeat_byte(0xff);
         let block = empty_amsterdam_block(wrong_hash);
 
-        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
-            system_contracts_db(),
+        let result = executor.execute_block::<Recovered<TransactionSigned>>(
             snapshot,
             to_arc_decoded(received_bal),
             &block,
@@ -422,7 +598,7 @@ mod tests {
         // Check B: (addrs + unique_slots) * 2000 must be <= gas_limit.
         use alloy_eip7928::AccountChanges;
 
-        let executor = BalPayloadExecutor::new(EthEvmConfig::mainnet());
+        let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
         let snapshot = Arc::new(BlockPreState::default());
 
         // 10 accounts × 2000 gas = 20,000. We set the limit to 10,000 → reject.
@@ -437,8 +613,7 @@ mod tests {
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
         let block = empty_amsterdam_block(bal_hash);
 
-        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
-            system_contracts_db(),
+        let result = executor.execute_block::<Recovered<TransactionSigned>>(
             snapshot,
             to_arc_decoded(received_bal),
             &block,
@@ -493,12 +668,11 @@ mod tests {
         // Sanity: reference BAL is non-empty (system calls populated it).
         assert!(!received_bal.is_empty(), "empty BAL means system calls didn't record state");
 
-        let executor = BalPayloadExecutor::new(evm_config);
-        let snapshot = Arc::new(BlockPreState::default());
+        let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let block = empty_amsterdam_block(bal_hash);
+        let snapshot = snapshot_for_bal(system_contracts_db(), &received_bal, block.number);
 
-        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
-            system_contracts_db(),
+        let result = executor.execute_block::<Recovered<TransactionSigned>>(
             snapshot,
             to_arc_decoded(received_bal),
             &block,
@@ -523,18 +697,53 @@ mod tests {
         );
     }
 
-    /// Inserts `(address → Some(Account { balance, nonce, bytecode_hash: None }))` into the
-    /// snapshot's account map so BalDatabase-fallback reads resolve.
-    fn seed_snapshot_account(
-        pre: &mut BlockPreState,
-        addr: alloy_primitives::Address,
-        balance: U256,
-        nonce: u64,
-    ) {
-        pre.accounts.insert(
-            addr,
-            Some(reth_primitives_traits::Account { balance, nonce, bytecode_hash: None }),
-        );
+    /// Builds the BAL snapshot from the declared access list and a fresh pre-block DB.
+    fn snapshot_for_bal(
+        mut db: CacheDB<EmptyDB>,
+        bal: &BlockAccessList,
+        block_number: u64,
+    ) -> Arc<BlockPreState> {
+        let reads = RequiredReads::from_bal(bal);
+        let mut pre = BlockPreState::default();
+
+        // Empty-code lookups are legitimate and should resolve deterministically.
+        pre.code.insert(KECCAK_EMPTY, None);
+
+        for address in reads.addresses {
+            let account = db.basic(address).expect("snapshot account read succeeds");
+            pre.accounts.insert(
+                address,
+                account.as_ref().map(|info| reth_primitives_traits::Account {
+                    balance: info.balance,
+                    nonce: info.nonce,
+                    bytecode_hash: (info.code_hash != KECCAK_EMPTY).then_some(info.code_hash),
+                }),
+            );
+
+            if let Some(info) = account {
+                if info.code_hash != KECCAK_EMPTY {
+                    let code = info
+                        .code
+                        .unwrap_or_else(|| db.code_by_hash(info.code_hash).expect("snapshot code"));
+                    pre.code.insert(info.code_hash, Some(reth_primitives_traits::Bytecode(code)));
+                }
+            }
+        }
+
+        for (address, slot) in reads.storage {
+            let value = db
+                .storage(address, U256::from_be_bytes(slot.0))
+                .expect("snapshot storage read succeeds");
+            pre.storage.insert((address, slot), value);
+        }
+
+        let start = block_number.saturating_sub(256);
+        for number in start..block_number {
+            let hash = db.block_hash(number).expect("snapshot block hash read succeeds");
+            pre.block_hashes.insert(number, hash);
+        }
+
+        Arc::new(pre)
     }
 
     /// Runs the canonical path on a block with real txs (no hash check) and returns the
@@ -590,7 +799,6 @@ mod tests {
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
 
         let evm_config = EthEvmConfig::mainnet();
-        let coinbase = alloy_primitives::Address::ZERO;
         let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
@@ -600,18 +808,10 @@ mod tests {
         let bob_kp = generate_key(&mut rng());
         let bob = public_key_to_address(bob_kp.public_key());
 
-        // Canonical DB: system contracts + funded senders.
-        let mut canonical_db = system_contracts_db();
-        insert_funded(&mut canonical_db, alice, sender_balance);
-        insert_funded(&mut canonical_db, bob, sender_balance);
-
-        // Snapshot: same accounts — workers read through BalDatabase → SnapshotDatabase.
-        let mut snapshot_pre = BlockPreState::default();
-        seed_snapshot_account(&mut snapshot_pre, alice, sender_balance, 0);
-        seed_snapshot_account(&mut snapshot_pre, bob, sender_balance, 0);
-        seed_snapshot_account(&mut snapshot_pre, carol, U256::ZERO, 0);
-        seed_snapshot_account(&mut snapshot_pre, coinbase, U256::ZERO, 0);
-        let snapshot = Arc::new(snapshot_pre);
+        // Pre-block DB: system contracts + funded senders.
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
 
         // Sign txs.
         let chain_id = MAINNET.chain.id();
@@ -679,10 +879,10 @@ mod tests {
 
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash);
+        let snapshot = snapshot_for_bal(pre_block_db.clone(), &reference_bal, block.number);
 
-        let executor = BalPayloadExecutor::new(evm_config);
+        let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let result = executor.execute_block(
-            canonical_db,
             snapshot,
             to_arc_decoded(reference_bal),
             &block,
@@ -766,7 +966,6 @@ mod tests {
     fn assert_shadow_equal(
         evm_config: EthEvmConfig,
         canonical_db_template: CacheDB<EmptyDB>,
-        snapshot: Arc<BlockPreState>,
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
         gas_limit: u64,
@@ -778,11 +977,12 @@ mod tests {
         // BAL path: stamp the hash of the reference BAL onto the header.
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash); // same shape, updated hash
+        let snapshot =
+            snapshot_for_bal(canonical_db_template.clone(), &reference_bal, block.number);
 
-        let executor = BalPayloadExecutor::new(evm_config);
+        let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let bal_out = executor
             .execute_block(
-                canonical_db_template,
                 snapshot,
                 to_arc_decoded(reference_bal),
                 &block,
@@ -819,7 +1019,6 @@ mod tests {
         assert_shadow_equal(
             EthEvmConfig::mainnet(),
             system_contracts_db(),
-            Arc::new(BlockPreState::default()),
             empty_amsterdam_block(B256::ZERO),
             Vec::new(),
             30_000_000,
@@ -838,7 +1037,6 @@ mod tests {
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
 
         let evm_config = EthEvmConfig::mainnet();
-        let coinbase = alloy_primitives::Address::ZERO;
         let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
@@ -850,12 +1048,6 @@ mod tests {
         let mut db = system_contracts_db();
         insert_funded(&mut db, alice, sender_balance);
         insert_funded(&mut db, bob, sender_balance);
-
-        let mut snap = BlockPreState::default();
-        seed_snapshot_account(&mut snap, alice, sender_balance, 0);
-        seed_snapshot_account(&mut snap, bob, sender_balance, 0);
-        seed_snapshot_account(&mut snap, carol, U256::ZERO, 0);
-        seed_snapshot_account(&mut snap, coinbase, U256::ZERO, 0);
 
         let chain_id = MAINNET.chain.id();
         let make_tx = |kp, to, value, nonce: u64| {
@@ -878,7 +1070,6 @@ mod tests {
         assert_shadow_equal(
             evm_config,
             db,
-            Arc::new(snap),
             empty_amsterdam_block(B256::ZERO),
             vec![tx1, tx2],
             30_000_000,
@@ -901,7 +1092,6 @@ mod tests {
         use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
-        let coinbase = alloy_primitives::Address::ZERO;
         let revert_contract: alloy_primitives::Address =
             alloy_primitives::Address::from([0xDE; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -925,20 +1115,6 @@ mod tests {
             },
         );
 
-        // Snapshot: alice + revert_contract (with its code) + coinbase.
-        let mut snap = BlockPreState::default();
-        seed_snapshot_account(&mut snap, alice, sender_balance, 0);
-        snap.accounts.insert(
-            revert_contract,
-            Some(reth_primitives_traits::Account {
-                balance: U256::ZERO,
-                nonce: 1,
-                bytecode_hash: Some(code_hash),
-            }),
-        );
-        snap.code.insert(code_hash, Some(reth_primitives_traits::Bytecode::new_raw(revert_code)));
-        seed_snapshot_account(&mut snap, coinbase, U256::ZERO, 0);
-
         let tx = Recovered::new_unchecked(
             sign_tx_with_key_pair(
                 alice_kp,
@@ -958,7 +1134,6 @@ mod tests {
         assert_shadow_equal(
             evm_config,
             db,
-            Arc::new(snap),
             empty_amsterdam_block(B256::ZERO),
             vec![tx],
             30_000_000,
@@ -983,7 +1158,6 @@ mod tests {
         use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
-        let coinbase = alloy_primitives::Address::ZERO;
         let sstore_contract: alloy_primitives::Address =
             alloy_primitives::Address::from([0x55; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -1007,24 +1181,6 @@ mod tests {
             },
         );
 
-        // Snapshot: alice + sstore_contract + coinbase. Workers read these via
-        // BalDatabase → SnapshotDatabase fallback when their EVM loads accounts.
-        let mut snap = BlockPreState::default();
-        seed_snapshot_account(&mut snap, alice, sender_balance, 0);
-        snap.accounts.insert(
-            sstore_contract,
-            Some(reth_primitives_traits::Account {
-                balance: U256::ZERO,
-                nonce: 1,
-                bytecode_hash: Some(code_hash),
-            }),
-        );
-        snap.code.insert(code_hash, Some(reth_primitives_traits::Bytecode::new_raw(sstore_code)));
-        seed_snapshot_account(&mut snap, coinbase, U256::ZERO, 0);
-        // Storage slot 0 of sstore_contract is read (SSTORE reads pre-value for the
-        // gas-cost calculation under EIP-2200), so the snapshot must contain it.
-        snap.storage.insert((sstore_contract, B256::ZERO), U256::ZERO);
-
         let tx = Recovered::new_unchecked(
             sign_tx_with_key_pair(
                 alice_kp,
@@ -1044,7 +1200,6 @@ mod tests {
         assert_shadow_equal(
             evm_config,
             db,
-            Arc::new(snap),
             empty_amsterdam_block(B256::ZERO),
             vec![tx],
             30_000_000,
@@ -1052,23 +1207,17 @@ mod tests {
     }
 
     #[test]
-    fn final_hash_check_catches_missing_system_call_entries() {
-        // End-to-end: empty received BAL, but canonical pre-exec runs system calls (EIP-4788
-        // beacon-root, EIP-2935 blockhash, EIP-7002 withdrawal-request) that mutate state at
-        // bal_index = 0 and get recorded in the canonical `bal_builder`. The composed BAL
-        // therefore isn't empty — its hash differs from keccak(rlp([])), so check F fires.
-        //
-        // This proves the full canonical path runs (pre-exec, tx loop over zero txs,
-        // post-exec) and that `take_built_alloy_bal` + `compute_block_access_list_hash` +
-        // the comparison against the header are correctly wired.
-        let executor = BalPayloadExecutor::new(EthEvmConfig::mainnet());
+    fn empty_bal_now_fails_before_final_hash_without_snapshot_entries() {
+        // With the BAL-derived snapshot backing canonical execution too, an empty BAL produces
+        // an empty snapshot. Pre-execution system calls then fail on their first undeclared
+        // access instead of reaching the final rebuilt-BAL hash comparison.
+        let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
         let snapshot = Arc::new(BlockPreState::default());
         let received_bal: BlockAccessList = Vec::new();
         let empty_bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
         let block = empty_amsterdam_block(empty_bal_hash);
 
-        let result = executor.execute_block::<_, Recovered<TransactionSigned>>(
-            system_contracts_db(),
+        let result = executor.execute_block::<Recovered<TransactionSigned>>(
             snapshot,
             to_arc_decoded(received_bal),
             &block,
@@ -1078,15 +1227,9 @@ mod tests {
         );
 
         match result {
-            Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
-                rebuilt,
-                expected,
-            })) => {
-                assert_eq!(expected, empty_bal_hash);
-                assert_ne!(rebuilt, empty_bal_hash, "rebuilt BAL must be non-empty");
-            }
-            Err(e) => panic!("expected FinalHashMismatch, got error {e:?}"),
-            Ok(_) => panic!("expected FinalHashMismatch, got Ok"),
+            Err(BalExecutionError::Evm(_)) => {}
+            Err(e) => panic!("expected snapshot-backed execution failure, got error {e:?}"),
+            Ok(_) => panic!("expected snapshot-backed execution failure, got Ok"),
         }
     }
 }

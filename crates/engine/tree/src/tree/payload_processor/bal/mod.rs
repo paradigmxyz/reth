@@ -13,8 +13,8 @@
 //!
 //! See `BAL.md` at the repo root for the full design.
 //!
-//! This module is being built leaf-first. Currently only the data types and error variants are in
-//! place; orchestration follows in subsequent PRs.
+//! The core BAL executor and its snapshot/state-root helpers live here. Engine-thread
+//! integration remains gated elsewhere.
 
 pub mod error;
 pub mod execute;
