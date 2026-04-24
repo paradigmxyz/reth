@@ -332,25 +332,18 @@ where
     ///
     /// When an execution error occurs, this function checks if there are any header validation
     /// errors that should be reported instead, as header validation errors have higher priority.
-    fn handle_execution_error<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    fn handle_execution_error_with_block(
         &self,
-        input: BlockOrPayload<T>,
+        block: SealedBlock<N::Block>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> InsertPayloadResult<N>
-    where
-        V: PayloadValidator<T, Block = N::Block>,
-    {
+    ) -> InsertPayloadResult<N> {
         debug!(
             target: "engine::tree::payload_validator",
             ?execution_err,
-            block = ?input.num_hash(),
+            block = ?block.num_hash(),
             "Block execution failed, checking for header validation errors"
         );
-
-        // If execution failed, we should first check if there are any header validation
-        // errors that take precedence over the execution error
-        let block = self.convert_to_block(input)?;
 
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block, None) {
@@ -532,6 +525,18 @@ where
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
+        // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
+        // `provider_builder` (consumed by `spawn_payload_processor` below).
+        // TODO: rework `bal_path_eligible` / `execute_block_bal` / `BalPayloadExecutor` /
+        // `spawn_stream_bal_to_sparse_trie` to operate on `DecodedBal` directly and avoid this
+        // cloning.
+        let block_access_list: Option<Arc<BlockAccessList>> = env
+            .decoded_bal
+            .as_ref()
+            .map(|dbal| Arc::new(dbal.as_bal().clone().into()));
+        let bal_eligible = self.bal_path_eligible(block_access_list.as_deref());
+        let bal_provider_builder = bal_eligible.then(|| provider_builder.clone());
+
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
@@ -564,15 +569,40 @@ where
             None
         };
 
+        // Convert input to block before dispatch. Both paths use `&block` directly. On the BAL
+        // path the block is needed by `BalPayloadExecutor`; on the serial path the block fills
+        // the same role as the late conversion that previously happened after execution.
+        let block = convert_to_block(input)?;
+
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx) =
-            match self.execute_block(state_provider, env, &input, &mut handle) {
+        let (output, senders, receipt_root_rx) = if bal_eligible {
+            let bal = block_access_list.expect("eligibility implies BAL is present");
+            let provider_builder =
+                bal_provider_builder.expect("eligibility implies builder was cloned");
+            match self.execute_block_bal(
+                state_provider,
+                env,
+                &block,
+                &mut handle,
+                bal,
+                provider_builder,
+            ) {
                 Ok(output) => output,
-                Err(err) => return self.handle_execution_error(input, err, &parent_block),
-            };
+                Err(err) => {
+                    return self.handle_execution_error_with_block(block, err, &parent_block)
+                }
+            }
+        } else {
+            match self.execute_block(state_provider, env, &block, &mut handle) {
+                Ok(output) => output,
+                Err(err) => {
+                    return self.handle_execution_error_with_block(block, err, &parent_block)
+                }
+            }
+        };
         let execution_duration = execute_block_start.elapsed();
 
         // After executing the block we can stop prewarming transactions
@@ -602,7 +632,6 @@ where
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
             });
 
-        let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
             let body = block.body().clone();
             let parent_span = Span::current();
@@ -895,11 +924,11 @@ where
     /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block<S, Err, T>(
+    fn execute_block<S, Err>(
         &mut self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
-        input: &BlockOrPayload<T>,
+        block: &SealedBlock<N::Block>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
         (
@@ -912,9 +941,6 @@ where
     where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        V: PayloadValidator<T, Block = N::Block>,
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
@@ -930,7 +956,8 @@ where
             let spec_id = *env.evm_env.spec_id();
             let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
-                .execution_ctx_for(input)
+                .evm_config
+                .context_for_block(block)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
             let executor = self.evm_config.create_executor(evm, ctx);
             (spec_id, executor)
@@ -957,7 +984,7 @@ where
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
         // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
-        let receipts_len = input.transaction_count();
+        let receipts_len = env.transaction_count;
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
@@ -965,7 +992,7 @@ where
             .executor()
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
-        let transaction_count = input.transaction_count();
+        let transaction_count = env.transaction_count;
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let executor = executor.with_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
@@ -1000,6 +1027,162 @@ where
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
+
+        Ok((output, senders, result_rx))
+    }
+
+    /// Returns true when the BAL execute path should be used for this block.
+    // TODO: extend with stronger gating before enabling on mainnet:
+    //   - Fork check: `Amsterdam.active_at_timestamp(env.evm_env.timestamp)`. Today a BAL only
+    //     exists post-Amsterdam, so the BAL-presence check is a sufficient proxy. It is a proxy,
+    //     not a guarantee.
+    //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
+    //     point, the snapshot-build overhead exceeds the gain. Tune empirically once workers are
+    //     parallel; meaningless while the commit loop is sequential.
+    const fn bal_path_eligible(&self, bal: Option<&BlockAccessList>) -> bool {
+        bal.is_some() && self.config.bal_execute_path_enabled()
+    }
+
+    /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]
+    /// so the dispatch site stays uniform.
+    ///
+    /// Inside, this:
+    /// 1. Builds the pre-block snapshot from the BAL using the per-thread provider builder.
+    /// 2. Spawns the sparse-trie streaming task fed from the snapshot.
+    /// 3. Spawns the receipt-root task.
+    /// 4. Calls [`crate::tree::payload_processor::bal::BalPayloadExecutor::execute_block`].
+    /// 5. Adapts the BAL output to a [`BlockExecutionOutput`] and forwards receipts to the
+    ///    receipt-root channel.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[expect(clippy::type_complexity)]
+    fn execute_block_bal<S, Tx, InnerTx, Err, BalP>(
+        &self,
+        state_provider: S,
+        env: ExecutionEnv<Evm>,
+        block: &SealedBlock<N::Block>,
+        handle: &mut PayloadHandle<Tx, Err, N::Receipt>,
+        bal: Arc<BlockAccessList>,
+        provider_builder: StateProviderBuilder<N, BalP>,
+    ) -> Result<
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
+        ),
+        InsertBlockErrorKind,
+    >
+    where
+        S: StateProvider + Send,
+        Tx: ExecutableTxFor<Evm> + alloy_evm::RecoveredTx<InnerTx>,
+        InnerTx: TxHashRef,
+        Err: core::error::Error + Send + Sync + 'static,
+        BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    {
+        use crate::tree::payload_processor::bal::{
+            build_pre_state, spawn_stream_bal_to_sparse_trie, BalPayloadExecutor, RequiredReads,
+        };
+
+        debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
+
+        // Header must carry the BAL hash on the BAL execute path.
+        let header_bal_hash = block.header().block_access_list_hash().ok_or_else(|| {
+            InsertBlockErrorKind::Other(
+                "BAL execute path: header missing block_access_list_hash".into(),
+            )
+        })?;
+
+        // Build the snapshot. Per-thread providers via the builder; writes through to the cache.
+        let cache = handle.caches().ok_or_else(|| {
+            InsertBlockErrorKind::Other("BAL execute path: no execution cache available".into())
+        })?;
+        let cache_metrics = handle.cache_metrics().unwrap_or_default();
+        let saved_cache = SavedCache::new(env.parent_hash, cache);
+        let reads = RequiredReads::from_bal(bal.iter());
+        let snapshot = Arc::new(
+            debug_span!(target: "engine::tree", "build_pre_state")
+                .in_scope(|| {
+                    build_pre_state(
+                        provider_builder,
+                        saved_cache,
+                        cache_metrics,
+                        &reads,
+                        block.header().number(),
+                    )
+                })
+                .map_err(InsertBlockErrorKind::Provider)?,
+        );
+
+        // Spawn sparse-trie streaming. Reads from the snapshot, sends one update per BAL
+        // account to the sparse-trie task. The receiver is dropped — completion is signalled
+        // downstream via `FinishedStateUpdates`.
+        if let Some(to_sparse_trie_task) = handle.sparse_trie_updates_tx() {
+            let _stream_done = spawn_stream_bal_to_sparse_trie(
+                self.payload_processor.executor().bal_streaming_pool(),
+                snapshot.clone(),
+                bal.clone(),
+                to_sparse_trie_task,
+            );
+        }
+
+        // Spawn the receipt-root task.
+        let receipts_len = env.transaction_count;
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+
+        // Collect txs from the handle's iterator. The BAL executor needs a `Vec<Tx>` because it
+        // owns each tx for the (currently sequential) commit loop.
+        //
+        // TODO: this can be optimized so that transactions are streamed directly to the BAL
+        // executor.
+        let txs: Vec<Tx> = handle
+            .iter_transactions()
+            .collect::<Result<Vec<Tx>, Err>>()
+            .map_err(BlockExecutionError::other)?;
+        let senders: Vec<Address> =
+            txs.iter().map(|tx| *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(tx)).collect();
+
+        let block_gas_limit = block.header().gas_limit();
+        let executor = BalPayloadExecutor::new(self.evm_config.clone());
+
+        let execution_start = Instant::now();
+        let bal_output = executor.execute_block(
+            StateProviderDatabase::new(state_provider),
+            snapshot,
+            (*bal).clone(),
+            block,
+            txs,
+            header_bal_hash,
+            block_gas_limit,
+        )?;
+        let execution_duration = execution_start.elapsed();
+
+        // Forward all receipts to the receipt-root task, in order. Drop the sender so the task
+        // knows the stream is closed.
+        for (i, receipt) in bal_output.receipts.iter().enumerate() {
+            let _ = receipt_tx.send(IndexedReceipt::new(i, receipt.clone()));
+        }
+        drop(receipt_tx);
+
+        // Adapt BalExecutionOutput → BlockExecutionOutput.
+        let result = alloy_evm::block::BlockExecutionResult {
+            receipts: bal_output.receipts,
+            requests: bal_output.requests,
+            gas_used: bal_output.gas_used,
+            blob_gas_used: bal_output.blob_gas_used,
+        };
+        let output = BlockExecutionOutput { result, state: bal_output.bundle_state };
+
+        self.metrics.record_block_execution(&output, execution_duration);
+        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
+        debug!(
+            target: "engine::tree::payload_validator",
+            elapsed = ?execution_duration,
+            "Executed block via BAL path",
+        );
 
         Ok((output, senders, result_rx))
     }

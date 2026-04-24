@@ -811,6 +811,13 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
             .flatten()
     }
 
+    /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL
+    /// execute path uses this to spawn its own sparse-trie streaming task fed from the
+    /// snapshot.
+    pub fn sparse_trie_updates_tx(&self) -> Option<CrossbeamSender<StateRootMessage>> {
+        self.state_root_handle.as_ref().map(|handle| handle.updates_tx().clone())
+    }
+
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
