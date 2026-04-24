@@ -185,7 +185,9 @@ impl Command {
         let mut writer =
             sf_provider.get_writer(first_block, StaticFileSegment::StorageChangeSets)?;
 
-        // Pad with empty changesets for pruned blocks (same as account changesets above).
+        // The writer starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint). Pad with
+        // empty changesets for pruned blocks so the writer is aligned.
         let writer_start = writer.next_block_number();
         for block in writer_start..first_block {
             writer.append_storage_changeset(vec![], block)?;
@@ -252,11 +254,11 @@ impl Command {
             .map_or(0, |b| b + 1);
         let first_block = prune_start.max(existing.map_or(0, |b| b + 1));
 
-        // Pad with empty blocks from the static file range boundary up to first_block
-        // so the writer is properly aligned (same as changeset migration).
+        // The writer starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint). Pad with
+        // empty blocks for pruned receipts so the writer is aligned.
         {
-            let mut writer =
-                sf_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
+            let mut writer = sf_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
             let writer_start = writer.next_block_number();
             for block in writer_start..first_block {
                 writer.increment_block(block)?;
