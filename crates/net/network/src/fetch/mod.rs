@@ -206,9 +206,13 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Returns the next action to return
     fn poll_action(&mut self) -> PollAction {
-        // We only pop once we know the queue is non-empty.
+        // we only check and not pop here since we don't know yet whether a peer is available.
         if self.queued_requests.is_empty() {
             return PollAction::NoRequests
+        }
+
+        if self.peers.is_empty() {
+            return PollAction::NoPeersAvailable
         }
 
         let request = self.queued_requests.pop_front().expect("not empty");
@@ -252,7 +256,8 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
                         match request.get_priority() {
                             Priority::High => {
-                                // Queue before the first normal request.
+                                // find first normal request and queue before it; add this request
+                                // to the back of the high-priority queue
                                 let pos = self
                                     .queued_requests
                                     .iter()
