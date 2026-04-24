@@ -27,7 +27,8 @@ use reth_network_api::{
 };
 use reth_network_peers::PeerId;
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+    noop::NoopProvider, BalProvider, BlockReader, BlockReaderIdExt, HeaderProvider,
+    StateProviderFactory,
 };
 use reth_tasks::Runtime;
 use reth_tokio_util::EventStream;
@@ -242,7 +243,8 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: BlockReader<
+    C: BalProvider
+        + BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
@@ -314,7 +316,8 @@ impl<C, Pool> fmt::Debug for Testnet<C, Pool> {
 
 impl<C, Pool> Future for Testnet<C, Pool>
 where
-    C: BlockReader<
+    C: BalProvider
+        + BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
@@ -462,7 +465,10 @@ where
     }
 
     /// Set a new request handler that's connected to the peer's network
-    pub fn install_request_handler(&mut self) {
+    pub fn install_request_handler(&mut self)
+    where
+        C: BalProvider,
+    {
         let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
@@ -568,7 +574,8 @@ where
 
 impl<C, Pool> Future for Peer<C, Pool>
 where
-    C: BlockReader<
+    C: BalProvider
+        + BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,

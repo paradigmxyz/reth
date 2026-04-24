@@ -20,7 +20,9 @@ use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{
+    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
+};
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -157,7 +159,8 @@ where
 impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
         + Unpin
