@@ -18,9 +18,10 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
-use alloy_consensus::Header;
+use alloy_consensus::{Header, TransactionEnvelope};
 use alloy_evm::{
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
+    block::{BlockExecutor, BlockExecutorFor},
+    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory, EthTxResult},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use core::{convert::Infallible, fmt::Debug};
@@ -28,10 +29,10 @@ use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    NextBlockEnvAttributes, TransactionEnvMut,
+    HaltReasonFor, NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
-use revm::{context::BlockEnv, primitives::hardfork::SpecId};
+use revm::{context::BlockEnv, database::State, primitives::hardfork::SpecId};
 
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
@@ -141,6 +142,8 @@ where
         + 'static,
 {
     type Primitives = EthPrimitives;
+    type TxExecutionResult =
+        EthTxResult<HaltReasonFor<Self>, <TransactionSigned as TransactionEnvelope>::TxType>;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmF>;
@@ -213,6 +216,25 @@ where
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
+    }
+
+    fn sendable_executor_for_block<'a, DB: reth_evm::Database>(
+        &'a self,
+        db: &'a mut State<DB>,
+        block: &'a SealedBlock<Block>,
+    ) -> Result<
+        impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>
+            + BlockExecutor<Result = Self::TxExecutionResult>,
+        Self::Error,
+    > {
+        let evm = self.evm_for_block(db, block.header())?;
+        let ctx = self.context_for_block(block)?;
+        Ok(EthBlockExecutor::new(
+            evm,
+            ctx,
+            self.executor_factory.spec(),
+            self.executor_factory.receipt_builder(),
+        ))
     }
 }
 

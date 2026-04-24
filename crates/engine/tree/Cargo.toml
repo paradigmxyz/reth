@@ -21,7 +21,6 @@ reth-execution-cache.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
-reth-evm-ethereum.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
@@ -131,7 +130,6 @@ test-utils = [
     "reth-trie-parallel/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",
-    "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
     "reth-execution-cache/test-utils",
 ]

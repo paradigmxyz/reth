@@ -386,8 +386,7 @@ where
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>
-            + crate::tree::payload_processor::bal::BalExecuteEvm<Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
@@ -1071,7 +1070,7 @@ where
         InnerTx: TxHashRef,
         Err: core::error::Error + Send + Sync + 'static,
         BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
-        Evm: crate::tree::payload_processor::bal::BalExecuteEvm<Primitives = N>,
+        Evm: ConfigureEvm<Primitives = N>,
     {
         use crate::tree::payload_processor::bal::{
             build_pre_state, spawn_stream_bal_to_sparse_trie, RequiredReads,
@@ -1142,8 +1141,11 @@ where
 
         let block_gas_limit = block.header().gas_limit();
         let execution_start = Instant::now();
-        let bal_output = self.evm_config.execute_bal_block(
+        let bal_output = crate::tree::payload_processor::bal::BalPayloadExecutor::new(
             self.runtime.clone(),
+            self.evm_config.clone(),
+        )
+        .execute_block(
             snapshot,
             decoded_bal,
             block,
@@ -2150,9 +2152,7 @@ where
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N>
-        + crate::tree::payload_processor::bal::BalExecuteEvm<Primitives = N>
-        + 'static,
+    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
