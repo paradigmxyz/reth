@@ -18,7 +18,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BalProvider, BlockReader, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -83,7 +83,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader,
+    C: BalProvider + BlockReader,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
@@ -292,13 +292,13 @@ where
         request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
-        // TODO: BAL serving is not fully implemented yet. Per EIP-8159, unavailable BALs are
-        // returned as empty BAL entries while preserving request order, so we currently return
-        // one RLP-encoded empty BAL (`0xc0`) per requested hash.
-        let access_lists = request
-            .0
+        let access_lists = self
+            .client
+            .bal_store()
+            .get_by_hashes(&request.0)
+            .unwrap_or_else(|_| request.0.iter().map(|_| None).collect())
             .into_iter()
-            .map(|_| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]))
+            .map(|bal| bal.unwrap_or_else(|| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])))
             .collect();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
@@ -338,7 +338,8 @@ where
 impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {

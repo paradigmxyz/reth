@@ -2,8 +2,9 @@
 //! Tests for eth related requests
 
 use alloy_consensus::Header;
+use alloy_primitives::Bytes;
 use rand::Rng;
-use reth_eth_wire::{EthVersion, HeadersDirection};
+use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::Block;
 use reth_network::{
     test_utils::{NetworkEventStream, PeerConfig, Testnet},
@@ -14,7 +15,7 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore};
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -525,4 +526,58 @@ async fn test_eth69_get_receipts() {
         assert_eq!(receipts_response.0[0][0].cumulative_gas_used, 21000);
         assert_eq!(receipts_response.0[0][1].cumulative_gas_used, 42000);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_get_block_access_lists() {
+    reth_tracing::init_test_tracing();
+    let mut rng = rand::rng();
+    let mut mock_provider = MockEthProvider::default();
+    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+    mock_provider.bal_store = bal_store.clone();
+    let mock_provider = Arc::new(mock_provider);
+
+    let mut net: Testnet<Arc<MockEthProvider>, TestPool> = Testnet::default();
+
+    let p0 = PeerConfig::with_protocols(mock_provider.clone(), Some(EthVersion::Eth71.into()));
+    net.add_peer_with_config(p0).await.unwrap();
+
+    let p1 = PeerConfig::with_protocols(mock_provider.clone(), Some(EthVersion::Eth71.into()));
+    net.add_peer_with_config(p1).await.unwrap();
+
+    net.for_each_mut(|peer| peer.install_request_handler());
+
+    let handle0 = net.peers()[0].handle();
+    let mut events0 = NetworkEventStream::new(handle0.event_listener());
+    let handle1 = net.peers()[1].handle();
+
+    let _handle = net.spawn();
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let connected = events0.next_session_established().await.unwrap();
+    assert_eq!(connected, *handle1.peer_id());
+
+    let hash0 = rng.random();
+    let hash1 = rng.random();
+    let hash2 = rng.random();
+    let bal0 = Bytes::from_static(&[0xc1, 0x01]);
+    let bal2 = Bytes::from_static(&[0xc1, 0x02]);
+
+    bal_store.insert(hash0, 1, bal0.clone()).unwrap();
+    bal_store.insert(hash2, 3, bal2.clone()).unwrap();
+
+    let (tx, rx) = oneshot::channel();
+    handle0.send_request(
+        *handle1.peer_id(),
+        reth_network::PeerRequest::GetBlockAccessLists {
+            request: GetBlockAccessLists(vec![hash0, hash1, hash2]),
+            response: tx,
+        },
+    );
+
+    let response = rx.await.unwrap().unwrap();
+    assert_eq!(
+        response,
+        BlockAccessLists(vec![bal0, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]), bal2,])
+    );
 }
