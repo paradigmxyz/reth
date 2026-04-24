@@ -7,14 +7,7 @@ use reth_eth_wire::{
     GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
     Receipts70, UnifiedStatus,
 };
-use reth_eth_wire_types::{
-    message::RequestPair,
-    snap::{
-        AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
-        GetStorageRangesMessage, GetTrieNodesMessage, SnapProtocolMessage, StorageRangesMessage,
-        TrieNodesMessage,
-    },
-};
+use reth_eth_wire_types::message::RequestPair;
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::{NodeRecord, PeerId};
@@ -270,42 +263,6 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
-    /// Requests an account range from the peer (snap protocol).
-    ///
-    /// The response should be sent through the channel.
-    SnapGetAccountRange {
-        /// The request for an account range.
-        request: GetAccountRangeMessage,
-        /// The channel to send the response for the account range.
-        response: oneshot::Sender<RequestResult<AccountRangeMessage>>,
-    },
-    /// Requests storage ranges from the peer (snap protocol).
-    ///
-    /// The response should be sent through the channel.
-    SnapGetStorageRanges {
-        /// The request for storage ranges.
-        request: GetStorageRangesMessage,
-        /// The channel to send the response for storage ranges.
-        response: oneshot::Sender<RequestResult<StorageRangesMessage>>,
-    },
-    /// Requests bytecodes from the peer (snap protocol).
-    ///
-    /// The response should be sent through the channel.
-    SnapGetByteCodes {
-        /// The request for bytecodes.
-        request: GetByteCodesMessage,
-        /// The channel to send the response for bytecodes.
-        response: oneshot::Sender<RequestResult<ByteCodesMessage>>,
-    },
-    /// Requests trie nodes from the peer (snap protocol).
-    ///
-    /// The response should be sent through the channel.
-    SnapGetTrieNodes {
-        /// The request for trie nodes.
-        request: GetTrieNodesMessage,
-        /// The channel to send the response for trie nodes.
-        response: oneshot::Sender<RequestResult<TrieNodesMessage>>,
-    },
 }
 
 // === impl PeerRequest ===
@@ -327,10 +284,6 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
-            Self::SnapGetAccountRange { response, .. } => response.send(Err(err)).ok(),
-            Self::SnapGetStorageRanges { response, .. } => response.send(Err(err)).ok(),
-            Self::SnapGetByteCodes { response, .. } => response.send(Err(err)).ok(),
-            Self::SnapGetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -387,26 +340,6 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
                     request_id,
                     message: request.clone(),
                 }))
-            }
-            Self::SnapGetAccountRange { request, .. } => {
-                let mut request = request.clone();
-                request.request_id = request_id;
-                EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(request))
-            }
-            Self::SnapGetStorageRanges { request, .. } => {
-                let mut request = request.clone();
-                request.request_id = request_id;
-                EthSnapMessage::Snap(SnapProtocolMessage::GetStorageRanges(request))
-            }
-            Self::SnapGetByteCodes { request, .. } => {
-                let mut request = request.clone();
-                request.request_id = request_id;
-                EthSnapMessage::Snap(SnapProtocolMessage::GetByteCodes(request))
-            }
-            Self::SnapGetTrieNodes { request, .. } => {
-                let mut request = request.clone();
-                request.request_id = request_id;
-                EthSnapMessage::Snap(SnapProtocolMessage::GetTrieNodes(request))
             }
         }
     }

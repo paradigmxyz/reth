@@ -435,13 +435,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetAccountRange {
-                            response,
-                            ..
-                        }) => {
-                            let _ = response.send(Ok(resp));
-                            self.update_request_timeout(req.timestamp, Instant::now());
-                        }
                         RequestState::Waiting(other) => {
                             other.send_bad_response();
                         }
@@ -458,13 +451,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetStorageRanges {
-                            response,
-                            ..
-                        }) => {
-                            let _ = response.send(Ok(resp));
-                            self.update_request_timeout(req.timestamp, Instant::now());
-                        }
                         RequestState::Waiting(other) => {
                             other.send_bad_response();
                         }
@@ -481,12 +467,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetByteCodes {
-                            response, ..
-                        }) => {
-                            let _ = response.send(Ok(resp));
-                            self.update_request_timeout(req.timestamp, Instant::now());
-                        }
                         RequestState::Waiting(other) => {
                             other.send_bad_response();
                         }
@@ -503,12 +483,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetTrieNodes {
-                            response, ..
-                        }) => {
-                            let _ = response.send(Ok(resp));
-                            self.update_request_timeout(req.timestamp, Instant::now());
-                        }
                         RequestState::Waiting(other) => {
                             other.send_bad_response();
                         }

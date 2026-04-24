@@ -565,10 +565,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 })
             }
-            PeerRequest::SnapGetAccountRange { .. } |
-            PeerRequest::SnapGetStorageRanges { .. } |
-            PeerRequest::SnapGetByteCodes { .. } |
-            PeerRequest::SnapGetTrieNodes { .. } => {}
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,
