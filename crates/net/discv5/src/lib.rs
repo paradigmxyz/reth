@@ -714,7 +714,6 @@ mod test {
     use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
     use std::{
-        env,
         net::UdpSocket,
         time::{Duration, Instant},
     };
