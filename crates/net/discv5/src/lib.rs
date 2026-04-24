@@ -799,9 +799,8 @@ mod test {
         let secret_key = SecretKey::new(&mut thread_rng());
         let port = unused_udp_port();
 
-        let (node, updates) = start_discovery_node_with_key(&secret_key, port)
-            .await
-            .expect("should start discv5");
+        let (node, updates) =
+            start_discovery_node_with_key(&secret_key, port).await.expect("should start discv5");
         drop(updates);
         drop(node);
 
