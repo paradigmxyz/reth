@@ -132,15 +132,11 @@ impl Command {
             .and_then(|cp| cp.block_number)
             .map_or(0, |b| b + 1);
 
-        let mut writer =
-            sf_provider.get_writer(first_block, StaticFileSegment::AccountChangeSets)?;
-
-        // The writer starts at the fixed range boundary (e.g. 2500000) which may be
-        // earlier than first_block (e.g. 2603897 from prune checkpoint). Pad with
-        // empty changesets for pruned blocks so the writer is aligned.
-        let writer_start = writer.next_block_number();
-        for block in writer_start..first_block {
-            writer.append_account_changeset(vec![], block)?;
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+        if first_block > 0 {
+            writer.ensure_at_block(first_block - 1)?;
         }
 
         let mut count = 0u64;
@@ -182,15 +178,11 @@ impl Command {
             .and_then(|cp| cp.block_number)
             .map_or(0, |b| b + 1);
 
-        let mut writer =
-            sf_provider.get_writer(first_block, StaticFileSegment::StorageChangeSets)?;
-
-        // The writer starts at the fixed range boundary (e.g. 2500000) which may be
-        // earlier than first_block (e.g. 2603897 from prune checkpoint). Pad with
-        // empty changesets for pruned blocks so the writer is aligned.
-        let writer_start = writer.next_block_number();
-        for block in writer_start..first_block {
-            writer.append_storage_changeset(vec![], block)?;
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
+        if first_block > 0 {
+            writer.ensure_at_block(first_block - 1)?;
         }
 
         let mut count = 0u64;
@@ -254,15 +246,11 @@ impl Command {
             .map_or(0, |b| b + 1);
         let first_block = prune_start.max(existing.map_or(0, |b| b + 1));
 
-        // The writer starts at the fixed range boundary (e.g. 2500000) which may be
-        // earlier than first_block (e.g. 2603897 from prune checkpoint). Pad with
-        // empty blocks for pruned receipts so the writer is aligned.
-        {
-            let mut writer = sf_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
-            let writer_start = writer.next_block_number();
-            for block in writer_start..first_block {
-                writer.increment_block(block)?;
-            }
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        if first_block > 0 {
+            let mut writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;
+            writer.ensure_at_block(first_block - 1)?;
             writer.commit()?;
         }
 
