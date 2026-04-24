@@ -109,7 +109,7 @@ pub struct EthStreamInner<N> {
     /// Maximum allowed ETH message size.
     max_message_size: usize,
     /// When true, `NewBlock` (0x07) and `NewBlockHashes` (0x01) messages are rejected before RLP
-    /// decoding to avoid memory amplification from deserializing blocks that will be discarded.
+    /// decoding to avoid any memory impact for non-PoW networks.
     reject_block_announcements: bool,
     _pd: std::marker::PhantomData<N>,
 }
