@@ -386,7 +386,8 @@ where
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>
+            + crate::tree::payload_processor::bal::BalExecuteEvm<Primitives = N>,
     {
         // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
@@ -1050,7 +1051,7 @@ where
     #[expect(clippy::type_complexity)]
     fn execute_block_bal<S, Tx, InnerTx, Err, BalP>(
         &self,
-        state_provider: S,
+        _state_provider: S,
         env: ExecutionEnv<Evm>,
         block: &SealedBlock<N::Block>,
         handle: &mut PayloadHandle<Tx, Err, N::Receipt>,
@@ -1066,13 +1067,14 @@ where
     >
     where
         S: StateProvider + Send,
-        Tx: ExecutableTxFor<Evm> + alloy_evm::RecoveredTx<InnerTx>,
+        Tx: ExecutableTxFor<Evm> + alloy_evm::RecoveredTx<InnerTx> + Send,
         InnerTx: TxHashRef,
         Err: core::error::Error + Send + Sync + 'static,
         BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+        Evm: crate::tree::payload_processor::bal::BalExecuteEvm<Primitives = N>,
     {
         use crate::tree::payload_processor::bal::{
-            build_pre_state, spawn_stream_bal_to_sparse_trie, BalPayloadExecutor, RequiredReads,
+            build_pre_state, spawn_stream_bal_to_sparse_trie, RequiredReads,
         };
 
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
@@ -1139,11 +1141,9 @@ where
             txs.iter().map(|tx| *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(tx)).collect();
 
         let block_gas_limit = block.header().gas_limit();
-        let executor = BalPayloadExecutor::new(self.evm_config.clone());
-
         let execution_start = Instant::now();
-        let bal_output = executor.execute_block(
-            StateProviderDatabase::new(state_provider),
+        let bal_output = self.evm_config.execute_bal_block(
+            self.runtime.clone(),
             snapshot,
             decoded_bal,
             block,
@@ -2150,7 +2150,9 @@ where
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
+    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N>
+        + crate::tree::payload_processor::bal::BalExecuteEvm<Primitives = N>
+        + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
