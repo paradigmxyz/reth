@@ -77,6 +77,8 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
     pub receipts: Vec<ReceiptFor<Evm>>,
     /// Total gas used by all transactions.
     pub gas_used: u64,
+    /// Blob gas used by the block.
+    pub blob_gas_used: u64,
     /// EIP-7685 withdrawal / deposit / consolidation requests.
     pub requests: alloy_eips::eip7685::Requests,
 }
@@ -252,6 +254,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             bundle_state: canonical_state.take_bundle(),
             receipts: block_result.receipts,
             gas_used: block_result.gas_used,
+            blob_gas_used: block_result.blob_gas_used,
             requests: block_result.requests,
         })
     }
