@@ -311,12 +311,6 @@ jobs:
           # llvm
           sudo .github/scripts/install_llvm_ubuntu.sh
 
-          # mc (MinIO client)
-          if ! command -v mc &>/dev/null; then
-            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
-            chmod +x "$HOME/.local/bin/mc"
-          fi
-
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
@@ -344,7 +338,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq; do
+          for cmd in schelk cpupower taskset stdbuf python3 curl make uv jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -370,19 +364,9 @@ jobs:
           echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
 
-      - name: Check if snapshot needs update
+      - name: Validate local snapshot
         id: snapshot-check
-        run: |
-          set +e
-          .github/scripts/bench-reth-snapshot.sh --check
-          rc=$?
-          set -e
-          case "$rc" in
-            0)  echo "needed=false" >> "$GITHUB_OUTPUT" ;;
-            10) echo "needed=true"  >> "$GITHUB_OUTPUT" ;;
-            *)  echo "::error::Snapshot check failed (exit $rc)"
-                exit "$rc" ;;
-          esac
+        run: .github/scripts/bench-reth-snapshot.sh
 
       - name: Prepare source dirs
         run: |
@@ -421,15 +405,6 @@ jobs:
             echo "::error::One or more build tasks failed"
             exit 1
           fi
-
-      - name: Download snapshot
-        id: snapshot-download
-        if: steps.snapshot-check.outputs.needed == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BENCH_REPO: ${{ github.repository }}
-          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/reth
-        run: .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -929,8 +904,8 @@ jobs:
             if (!token || !channel) return;
 
             const steps_status = [
+              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
@@ -978,6 +953,11 @@ jobs:
                 unfurl_links: false,
               }),
             });
+
+      - name: Clean build outputs
+        if: always()
+        run: |
+          sudo rm -rf ../reth-baseline/target ../reth-feature/target "$BENCH_WORK_DIR" 2>/dev/null || true
 
       - name: Restore system settings
         if: always()

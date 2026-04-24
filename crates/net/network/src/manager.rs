@@ -318,6 +318,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             extra_protocols,
             handshake,
             eth_max_message_size,
+            network_mode.is_stake(),
         );
 
         let state = NetworkState::new(

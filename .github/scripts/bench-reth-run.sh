@@ -88,10 +88,16 @@ trap cleanup EXIT
 # Stop any leftover reth process in the scope, then recover schelk state.
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
 sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
-sudo schelk recover -y --kill || true
+sudo schelk recover -y --kill || sudo schelk full-recover -y || true
 
 # Mount
-sudo schelk mount -y
+sudo schelk mount -y || true
+if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
+  echo "::error::Failed to mount benchmark datadir at ${DATADIR}"
+  ls -la "$SCHELK_MOUNT" || true
+  ls -la "$DATADIR" || true
+  exit 1
+fi
 sync
 sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 echo "=== Cache state after drop ==="

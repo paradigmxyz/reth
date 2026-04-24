@@ -479,7 +479,6 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
-            tx_env_converter: _,
             ..
         } = self;
         RpcConverter {

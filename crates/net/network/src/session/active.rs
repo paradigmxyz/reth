@@ -79,6 +79,9 @@ const TIMEOUT_SCALING: u32 = 3;
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
+/// Minimum capacity to retain for buffered incoming requests from the remote peer.
+const MIN_RECEIVED_REQUESTS_CAPACITY: usize = 1;
+
 /// Soft limit for the total number of buffered outgoing broadcast items (e.g. transaction hashes).
 ///
 /// Many small broadcast messages carrying a single tx hash each are equivalent in cost to one
@@ -204,8 +207,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Shrinks the capacity of the internal buffers.
     pub fn shrink_to_fit(&mut self) {
-        self.received_requests_from_remote.shrink_to_fit();
-        self.queued_outgoing.shrink_to_fit();
+        self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
+        self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
     }
 
     /// Returns how many responses we've currently queued up.
@@ -1090,8 +1093,8 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         self.count.increment(1);
     }
 
-    pub(crate) fn shrink_to_fit(&mut self) {
-        self.messages.shrink_to_fit();
+    pub(crate) fn shrink_to(&mut self, min_capacity: usize) {
+        self.messages.shrink_to(min_capacity);
     }
 }
 

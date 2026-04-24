@@ -1,6 +1,6 @@
 //! All capability related types
 
-use crate::{EthMessageID, EthVersion};
+use crate::{EthMessageID, EthVersion, SnapVersion};
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use alloy_primitives::bytes::Bytes;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -85,6 +85,11 @@ impl Capability {
         Self::new_static("eth", version as usize)
     }
 
+    /// Returns the corresponding snap capability for the given version.
+    pub const fn snap(version: SnapVersion) -> Self {
+        Self::new_static("snap", version as usize)
+    }
+
     /// Returns the [`EthVersion::Eth66`] capability.
     pub const fn eth_66() -> Self {
         Self::eth(EthVersion::Eth66)
@@ -113,6 +118,16 @@ impl Capability {
     /// Returns the [`EthVersion::Eth71`] capability.
     pub const fn eth_71() -> Self {
         Self::eth(EthVersion::Eth71)
+    }
+
+    /// Returns the `snap/1` capability.
+    pub const fn snap_1() -> Self {
+        Self::snap(SnapVersion::V1)
+    }
+
+    /// Returns the `snap/2` capability.
+    pub const fn snap_2() -> Self {
+        Self::snap(SnapVersion::V2)
     }
 
     /// Whether this is eth v66 protocol.

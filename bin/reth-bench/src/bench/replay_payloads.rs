@@ -450,12 +450,11 @@ impl Command {
                 let name_str = name.to_string_lossy();
                 let index = if let Some(rest) = name_str.strip_prefix("payload_block_") {
                     rest.strip_suffix(".json")?.parse::<u64>().ok()?
-                } else if let Some(rest) = name_str.strip_prefix("big_block_") {
+                } else {
+                    let rest = name_str.strip_prefix("big_block_")?;
                     // "big_block_FROM_to_TO.json" — use FROM as the index
                     let rest = rest.strip_suffix(".json")?;
                     rest.split("_to_").next()?.parse::<u64>().ok()?
-                } else {
-                    return None;
                 };
                 Some((index, e.path()))
             })

@@ -1020,41 +1020,46 @@ mod tests {
                 done: true
             } if processed == total && total == block.gas_used);
 
-            let provider = factory.provider().unwrap();
+            {
+                let provider = factory.provider().unwrap();
 
-            // check post state
-            let account1 = address!("0x1000000000000000000000000000000000000000");
-            let account1_info =
-                Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
-            let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
-            let account2_info = Account {
-                balance: U256::from(0x1bc16d674ece94bau128),
-                nonce: 0x00,
-                bytecode_hash: None,
-            };
-            let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-            let account3_info = Account {
-                balance: U256::from(0x3635c9adc5de996b46u128),
-                nonce: 0x01,
-                bytecode_hash: None,
-            };
+                // check post state
+                let account1 = address!("0x1000000000000000000000000000000000000000");
+                let account1_info =
+                    Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
+                let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+                let account2_info = Account {
+                    balance: U256::from(0x1bc16d674ece94bau128),
+                    nonce: 0x00,
+                    bytecode_hash: None,
+                };
+                let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+                let account3_info = Account {
+                    balance: U256::from(0x3635c9adc5de996b46u128),
+                    nonce: 0x01,
+                    bytecode_hash: None,
+                };
 
-            // assert accounts
-            assert!(
-                matches!(provider.basic_account(&account1), Ok(Some(acc)) if acc == account1_info)
-            );
-            assert!(
-                matches!(provider.basic_account(&account2), Ok(Some(acc)) if acc == account2_info)
-            );
-            assert!(
-                matches!(provider.basic_account(&account3), Ok(Some(acc)) if acc == account3_info)
-            );
-            // assert storage
-            // Get on dupsort would return only first value. This is good enough for this test.
-            assert!(matches!(
-                provider.tx_ref().get::<tables::PlainStorageState>(account1),
-                Ok(Some(entry)) if entry.key == B256::with_last_byte(1) && entry.value == U256::from(2)
-            ));
+                // assert accounts
+                assert!(matches!(
+                    provider.basic_account(&account1),
+                    Ok(Some(acc)) if acc == account1_info
+                ));
+                assert!(matches!(
+                    provider.basic_account(&account2),
+                    Ok(Some(acc)) if acc == account2_info
+                ));
+                assert!(matches!(
+                    provider.basic_account(&account3),
+                    Ok(Some(acc)) if acc == account3_info
+                ));
+                // assert storage
+                // Get on dupsort would return only first value. This is good enough for this test.
+                assert!(matches!(
+                    provider.tx_ref().get::<tables::PlainStorageState>(account1),
+                    Ok(Some(entry)) if entry.key == B256::with_last_byte(1) && entry.value == U256::from(2)
+                ));
+            }
 
             let mut provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();

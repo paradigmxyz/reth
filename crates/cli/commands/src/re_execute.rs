@@ -20,6 +20,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::stages::calculate_gas_used_from_headers;
+use reth_storage_api::DBProvider;
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -72,13 +73,18 @@ impl<C: ChainSpecParser> Command<C> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `re-execute` command
     pub async fn execute<N>(
-        self,
+        mut self,
         components: impl CliComponentsBuilder<N>,
         runtime: reth_tasks::Runtime,
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
+        // Default to 4GB RocksDB block cache for re-execute unless explicitly set.
+        if self.env.db.rocksdb_block_cache_size.is_none() {
+            self.env.db.rocksdb_block_cache_size = Some(4 << 30);
+        }
+
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
 
         let components = components(provider_factory.chain_spec());
@@ -112,15 +118,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             min_block..=max_block,
         )?;
 
-        let db_at = {
-            let provider_factory = provider_factory.clone();
-            move |block_number: u64| {
-                StateProviderDatabase(
-                    provider_factory.history_by_block_number(block_number).unwrap(),
-                )
-            }
-        };
-
         let skip_invalid_blocks = self.skip_invalid_blocks;
         let blocks_per_chunk = self.blocks_per_chunk;
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
@@ -136,13 +133,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let provider_factory = provider_factory.clone();
             let evm_config = components.evm_config().clone();
             let consensus = components.consensus().clone();
-            let db_at = db_at.clone();
             let stats_tx = stats_tx.clone();
             let info_tx = info_tx.clone();
             let cancellation = cancellation.clone();
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
-                let executor_lifetime = Duration::from_secs(120);
+                let executor_lifetime = Duration::from_secs(600);
+                let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
+
+                let db_at = {
+                    |block_number: u64| {
+                        StateProviderDatabase(
+                            provider
+                                .history_by_block_number(block_number)
+                                .unwrap(),
+                        )
+                    }
+                };
 
                 loop {
                     if cancellation.is_cancelled() {
@@ -249,7 +256,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let _ = stats_tx.send(block.gas_used());
 
                         // Reset DB once in a while to avoid OOM or read tx timeouts
-                        if executor.size_hint() > 1_000_000 ||
+                        if executor.size_hint() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             executor =
