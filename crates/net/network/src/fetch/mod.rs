@@ -160,15 +160,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// full history available
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
         // filter out peers that aren't idle or don't meet the requirement
-        let mut idle = self.peers.iter().filter(|(_, peer)| {
-            peer.state.is_idle() &&
-                match &requirement {
-                    BestPeerRequirements::EthVersion(ver) => {
-                        peer.capabilities.supports_eth_at_least(ver)
-                    }
-                    _ => true,
-                }
-        });
+        let mut idle = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.state.is_idle() && peer.satisfies(&requirement));
 
         let mut best_peer = idle.next()?;
 
@@ -497,6 +492,16 @@ impl Peer {
 
     fn range(&self) -> Option<RangeInclusive<u64>> {
         self.range_info.as_ref().map(|info| info.range())
+    }
+
+    /// Returns whether this peer can serve requests with the given hard requirements.
+    fn satisfies(&self, requirement: &BestPeerRequirements) -> bool {
+        match requirement {
+            BestPeerRequirements::EthVersion(ver) => self.capabilities.supports_eth_at_least(ver),
+            BestPeerRequirements::None |
+            BestPeerRequirements::FullBlock |
+            BestPeerRequirements::FullBlockRange(_) => true,
+        }
     }
 
     /// Returns true if this peer has a better range than the other peer for serving the requested
