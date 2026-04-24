@@ -28,7 +28,7 @@ ARG MANIFEST_PATH=bin/reth
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
-# Extra Cargo flags (can be overridden, otherwise set per-platform below)
+# Extra Cargo flags (appended after platform-specific flags)
 ARG RUSTFLAGS=""
 
 # Extra Cargo features
@@ -53,10 +53,10 @@ RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
     export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
     sccache --start-server && \
-    if [ -n "$RUSTFLAGS" ]; then \
+    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq $RUSTFLAGS"; \
+    else \
         export RUSTFLAGS="$RUSTFLAGS"; \
-    elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
-        export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"; \
     fi && \
     cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml && \
     sccache --show-stats
