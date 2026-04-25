@@ -18,7 +18,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BalStoreHandle, BlockReader, HeaderProvider};
+use reth_storage_api::{BalProvider, BlockReader, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -63,8 +63,6 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
-    /// Store for block access lists.
-    bal_store: BalStoreHandle,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
@@ -73,21 +71,10 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     /// Create a new instance
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
-        Self::with_bal_store(client, peers, incoming, BalStoreHandle::default())
-    }
-
-    /// Create a new instance with the given BAL store.
-    pub fn with_bal_store(
-        client: C,
-        peers: PeersHandle,
-        incoming: Receiver<IncomingEthRequest<N>>,
-        bal_store: BalStoreHandle,
-    ) -> Self {
         Self {
             client,
             peers,
             incoming_requests: ReceiverStream::new(incoming),
-            bal_store,
             metrics: Default::default(),
         }
     }
@@ -295,26 +282,6 @@ where
         let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
     }
 
-    /// Handles [`GetBlockAccessLists`] queries.
-    ///
-    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
-    /// <https://eips.ethereum.org/EIPS/eip-8159>
-    fn on_block_access_lists_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetBlockAccessLists,
-        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
-    ) {
-        let access_lists = self
-            .bal_store
-            .get_by_hashes(&request.0)
-            .unwrap_or_else(|_| request.0.iter().map(|_| None).collect())
-            .into_iter()
-            .map(|bal| bal.unwrap_or_else(|| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])))
-            .collect();
-        let _ = response.send(Ok(BlockAccessLists(access_lists)));
-    }
-
     #[inline]
     fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
     where
@@ -344,13 +311,41 @@ where
     }
 }
 
+impl<C, N> EthRequestHandler<C, N>
+where
+    N: NetworkPrimitives,
+    C: BalProvider,
+{
+    /// Handles [`GetBlockAccessLists`] queries.
+    ///
+    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
+    /// <https://eips.ethereum.org/EIPS/eip-8159>
+    fn on_block_access_lists_request(
+        &self,
+        _peer_id: PeerId,
+        request: GetBlockAccessLists,
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    ) {
+        let access_lists = self
+            .client
+            .bal_store()
+            .get_by_hashes(&request.0)
+            .unwrap_or_else(|_| request.0.iter().map(|_| None).collect())
+            .into_iter()
+            .map(|bal| bal.unwrap_or_else(|| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])))
+            .collect();
+        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+    }
+}
+
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {
