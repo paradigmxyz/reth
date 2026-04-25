@@ -2,8 +2,6 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
 
-const EMPTY_BLOCK_ACCESS_LIST_CODE: u8 = 0xc0;
-
 /// Store for Block Access Lists (BALs).
 ///
 /// This abstraction intentionally does not prescribe where BALs live. Implementations may keep
@@ -91,7 +89,7 @@ impl GetBlockAccessListLimit {
 /// Returns the RLP-encoded empty BAL entry.
 #[inline]
 pub fn empty_block_access_list() -> Bytes {
-    Bytes::from_static(&[EMPTY_BLOCK_ACCESS_LIST_CODE])
+    Bytes::from_static(&[0xc0])
 }
 
 /// Clone-friendly façade around a BAL store implementation.

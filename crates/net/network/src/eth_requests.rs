@@ -338,6 +338,7 @@ where
     }
 }
 
+/// Builds the error fallback response while still enforcing the BAL response soft limit.
 fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLimit) -> Vec<Bytes> {
     let mut out = Vec::with_capacity(count);
     let mut size = 0;
