@@ -255,6 +255,10 @@ impl Command {
             writer.commit()?;
         }
 
+        let before = sf_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map_or(0, |tx| tx + 1);
+
         let block_range = first_block..=tip;
 
         let segment = reth_static_file::segments::Receipts;
@@ -262,7 +266,11 @@ impl Command {
 
         sf_provider.commit()?;
 
-        info!(target: "reth::cli", "Receipts migrated");
+        let after = sf_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map_or(0, |tx| tx + 1);
+        let count = after - before;
+        info!(target: "reth::cli", count, "Receipts migrated");
         Ok(())
     }
 
