@@ -5,6 +5,7 @@
 //! state), compacts MDBX, then runs the pipeline to rebuild them.
 
 use crate::common::CliNodeTypes;
+use alloy_primitives::Address;
 use clap::Parser;
 use reth_db::{
     mdbx::{self, ffi},
@@ -186,7 +187,7 @@ impl Command {
         }
 
         let mut count = 0u64;
-        let mut walker = cursor.walk(Some(Default::default()))?.peekable();
+        let mut walker = cursor.walk(Some((first_block, Address::ZERO).into()))?.peekable();
 
         for block in first_block..=tip {
             let mut entries = Vec::new();
