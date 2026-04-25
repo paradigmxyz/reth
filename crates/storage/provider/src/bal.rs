@@ -1,6 +1,6 @@
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
-use reth_storage_api::{empty_block_access_list, BalStore, GetBlockAccessListLimit};
+use reth_storage_api::{BalStore, GetBlockAccessListLimit};
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::HashMap, sync::Arc};
 
@@ -42,7 +42,7 @@ impl BalStore for InMemoryBalStore {
         let mut size = 0;
 
         for hash in block_hashes {
-            let bal = entries.get(hash).cloned().unwrap_or_else(empty_block_access_list);
+            let bal = entries.get(hash).cloned().unwrap_or_else(|| Bytes::from_static(&[0xc0]));
             size += bal.len();
             out.push(bal);
 

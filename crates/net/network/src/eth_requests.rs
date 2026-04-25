@@ -18,9 +18,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{
-    empty_block_access_list, BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider,
-};
+use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -343,7 +341,7 @@ fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLi
     let mut out = Vec::with_capacity(count);
     let mut size = 0;
     for _ in 0..count {
-        let bal = empty_block_access_list();
+        let bal = Bytes::from_static(&[0xc0]);
         size += bal.len();
         out.push(bal);
 

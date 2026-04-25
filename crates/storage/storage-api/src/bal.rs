@@ -49,7 +49,7 @@ pub trait BalStore: Send + Sync + 'static {
     ) -> ProviderResult<()> {
         let mut size = 0;
         for bal in self.get_by_hashes(block_hashes)? {
-            let bal = bal.unwrap_or_else(empty_block_access_list);
+            let bal = bal.unwrap_or_else(|| Bytes::from_static(&[0xc0]));
             size += bal.len();
             out.push(bal);
 
@@ -84,12 +84,6 @@ impl GetBlockAccessListLimit {
             Self::ResponseSizeSoftLimit(limit) => size > *limit,
         }
     }
-}
-
-/// Returns the RLP-encoded empty BAL entry.
-#[inline]
-pub fn empty_block_access_list() -> Bytes {
-    Bytes::from_static(&[0xc0])
 }
 
 /// Clone-friendly façade around a BAL store implementation.
@@ -200,7 +194,7 @@ impl BalStore for NoopBalStore {
     ) -> ProviderResult<()> {
         let mut size = 0;
         for _ in block_hashes {
-            let bal = empty_block_access_list();
+            let bal = Bytes::from_static(&[0xc0]);
             size += bal.len();
             out.push(bal);
 
@@ -242,7 +236,7 @@ mod tests {
             .get_by_hashes_with_limit(&hashes, GetBlockAccessListLimit::ResponseSizeSoftLimit(1))
             .unwrap();
 
-        assert_eq!(limited, vec![empty_block_access_list(), empty_block_access_list()]);
+        assert_eq!(limited, vec![Bytes::from_static(&[0xc0]), Bytes::from_static(&[0xc0])]);
     }
 
     #[test]
