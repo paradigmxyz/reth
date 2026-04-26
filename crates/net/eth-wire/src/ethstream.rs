@@ -7,7 +7,7 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE},
+    message::{EthBroadcastMessage, EthMessageID, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -108,6 +108,9 @@ pub struct EthStreamInner<N> {
     version: EthVersion,
     /// Maximum allowed ETH message size.
     max_message_size: usize,
+    /// When true, `NewBlock` (0x07) and `NewBlockHashes` (0x01) messages are rejected before RLP
+    /// decoding to avoid any memory impact for non-PoW networks.
+    reject_block_announcements: bool,
     _pd: std::marker::PhantomData<N>,
 }
 
@@ -122,7 +125,12 @@ where
 
     /// Creates a new [`EthStreamInner`] with the given eth version and message size limit.
     pub const fn with_max_message_size(version: EthVersion, max_message_size: usize) -> Self {
-        Self { version, max_message_size, _pd: std::marker::PhantomData }
+        Self {
+            version,
+            max_message_size,
+            reject_block_announcements: false,
+            _pd: std::marker::PhantomData,
+        }
     }
 
     /// Returns the eth version
@@ -131,10 +139,23 @@ where
         self.version
     }
 
+    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
+    /// RLP decoding.
+    pub const fn set_reject_block_announcements(&mut self, reject: bool) {
+        self.reject_block_announcements = reject;
+    }
+
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
+        }
+
+        if self.reject_block_announcements &&
+            let Some(&id) = bytes.first() &&
+            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
+        {
+            return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
 
         let msg = match ProtocolMessage::decode_message(self.version, &mut bytes.as_ref()) {
@@ -206,6 +227,12 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
     #[inline]
     pub const fn version(&self) -> EthVersion {
         self.eth.version()
+    }
+
+    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
+    /// RLP decoding.
+    pub const fn set_reject_block_announcements(&mut self, reject: bool) {
+        self.eth.set_reject_block_announcements(reject);
     }
 
     /// Returns the underlying stream.

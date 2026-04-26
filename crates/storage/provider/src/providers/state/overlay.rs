@@ -51,9 +51,9 @@ pub(crate) struct OverlayStateProviderMetrics {
 
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
 #[derive(Debug, Clone)]
-struct Overlay {
-    trie_updates: Arc<TrieUpdatesSorted>,
-    hashed_post_state: Arc<HashedPostStateSorted>,
+pub(super) struct Overlay {
+    pub(super) trie_updates: Arc<TrieUpdatesSorted>,
+    pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -85,14 +85,12 @@ impl OverlaySource {
     }
 }
 
-/// Factory for creating overlay state providers with optional reverts and overlays.
+/// Builder for calculating trie and hashed-state overlays.
 ///
-/// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
-/// particular block, and/or with additional overlay information added on top.
+/// This stores the overlay configuration and the logic for resolving immediate/lazy overlays and
+/// collecting reverts. It is intentionally independent from any provider factory or overlay cache.
 #[derive(Debug, Clone)]
-pub struct OverlayStateProviderFactory<F> {
-    /// The underlying database provider factory
-    factory: F,
+pub struct OverlayBuilder {
     /// Optional block hash for collecting reverts
     block_hash: Option<B256>,
     /// Optional overlay source (lazy or immediate).
@@ -101,21 +99,16 @@ pub struct OverlayStateProviderFactory<F> {
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
-    /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
-    /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockNumber, Overlay>>,
 }
 
-impl<F> OverlayStateProviderFactory<F> {
-    /// Create a new overlay state provider factory
-    pub fn new(factory: F, changeset_cache: ChangesetCache) -> Self {
+impl OverlayBuilder {
+    /// Create a new overlay builder.
+    pub fn new(changeset_cache: ChangesetCache) -> Self {
         Self {
-            factory,
             block_hash: None,
             overlay_source: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
-            overlay_cache: Default::default(),
         }
     }
 
@@ -131,8 +124,6 @@ impl<F> OverlayStateProviderFactory<F> {
     /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
         self.overlay_source = source;
-        // Clear the overlay cache since we've updated the source.
-        self.overlay_cache = Default::default();
         self
     }
 
@@ -141,8 +132,6 @@ impl<F> OverlayStateProviderFactory<F> {
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
     pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay>) -> Self {
         self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
-        // Clear the overlay cache since we've updated the source.
-        self.overlay_cache = Default::default();
         self
     }
 
@@ -158,8 +147,6 @@ impl<F> OverlayStateProviderFactory<F> {
                 trie: Arc::new(TrieUpdatesSorted::default()),
                 state,
             });
-            // Clear the overlay cache since we've updated the source.
-            self.overlay_cache = Default::default();
         }
         self
     }
@@ -186,23 +173,9 @@ impl<F> OverlayStateProviderFactory<F> {
                 });
             }
         }
-        // Clear the overlay cache since we've updated the source.
-        self.overlay_cache = Default::default();
         self
     }
-}
 
-impl<F> OverlayStateProviderFactory<F>
-where
-    F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader
-        + PruneCheckpointReader
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + DBProvider
-        + BlockNumReader
-        + StorageSettingsCache,
-{
     /// Resolves the effective overlay (trie updates, hashed state).
     ///
     /// If an overlay source is set, it is resolved (blocking if lazy).
@@ -217,10 +190,13 @@ where
     }
 
     /// Returns the block number for [`Self`]'s `block_hash` field, if any.
-    fn get_requested_block_number(
+    fn get_requested_block_number<Provider>(
         &self,
-        provider: &F::Provider,
-    ) -> ProviderResult<Option<BlockNumber>> {
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        Provider: BlockNumReader,
+    {
         if let Some(block_hash) = self.block_hash {
             Ok(Some(
                 provider
@@ -234,7 +210,10 @@ where
 
     /// Returns the block which is at the tip of the DB, i.e. the block which the state tables of
     /// the DB are currently synced to.
-    fn get_db_tip_block_number(&self, provider: &F::Provider) -> ProviderResult<BlockNumber> {
+    fn get_db_tip_block_number<Provider>(&self, provider: &Provider) -> ProviderResult<BlockNumber>
+    where
+        Provider: StageCheckpointReader,
+    {
         provider
             .get_stage_checkpoint(StageId::Finish)?
             .as_ref()
@@ -247,12 +226,15 @@ where
     ///
     /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
     /// available data range.
-    fn reverts_required(
+    fn reverts_required<Provider>(
         &self,
-        provider: &F::Provider,
+        provider: &Provider,
         db_tip_block: BlockNumber,
         requested_block: BlockNumber,
-    ) -> ProviderResult<bool> {
+    ) -> ProviderResult<bool>
+    where
+        Provider: PruneCheckpointReader,
+    {
         // If the requested block is the DB tip then there won't be any reverts necessary, and we
         // can simply return Ok.
         if db_tip_block == requested_block {
@@ -288,11 +270,20 @@ where
         skip_all,
         fields(%db_tip_block)
     )]
-    fn calculate_overlay(
+    fn calculate_overlay<Provider>(
         &self,
-        provider: &F::Provider,
+        provider: &Provider,
         db_tip_block: BlockNumber,
-    ) -> ProviderResult<Overlay> {
+    ) -> ProviderResult<Overlay>
+    where
+        Provider: ChangeSetReader
+            + StorageChangeSetReader
+            + DBProvider
+            + BlockNumReader
+            + StageCheckpointReader
+            + PruneCheckpointReader
+            + StorageSettingsCache,
+    {
         //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
@@ -404,40 +395,78 @@ where
         Ok(Overlay { trie_updates, hashed_post_state })
     }
 
-    /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
-    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    /// Builds the effective overlay for the given provider.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay(&self, provider: &F::Provider) -> ProviderResult<Overlay> {
-        // If we have no anchor block configured then we will never need to get trie reverts, just
-        // return the in-memory overlay (resolving lazy overlay if set).
+    pub(super) fn build_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    where
+        Provider: StageCheckpointReader
+            + PruneCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + DBProvider
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
         if self.block_hash.is_none() {
             let (trie_updates, hashed_post_state) = self.resolve_overlays();
             return Ok(Overlay { trie_updates, hashed_post_state })
         }
 
         let db_tip_block = self.get_db_tip_block_number(provider)?;
+        self.calculate_overlay(provider, db_tip_block)
+    }
+}
 
-        // If the overlay is present in the cache then return it directly.
-        if let Some(entry) = self.overlay_cache.get(&db_tip_block) {
-            return Ok(entry.value().clone());
+/// Factory for creating overlay state providers with optional reverts and overlays.
+///
+/// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
+/// particular block, and/or with additional overlay information added on top.
+#[derive(Debug, Clone)]
+pub struct OverlayStateProviderFactory<F> {
+    /// The underlying database provider factory
+    factory: F,
+    /// Overlay builder containing the configuration and overlay calculation logic.
+    overlay_builder: OverlayBuilder,
+    /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
+    /// then a new entry will get added to this, but in most cases only one entry is present.
+    overlay_cache: Arc<DashMap<BlockNumber, Overlay>>,
+}
+
+impl<F> OverlayStateProviderFactory<F> {
+    /// Create a new overlay state provider factory
+    pub fn new(factory: F, overlay_builder: OverlayBuilder) -> Self {
+        Self { factory, overlay_builder, overlay_cache: Default::default() }
+    }
+
+    /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
+    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
+    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    where
+        Provider: StageCheckpointReader
+            + PruneCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + DBProvider
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        // No anchor block — just resolve the in-memory overlay directly.
+        if self.overlay_builder.block_hash.is_none() {
+            return self.overlay_builder.build_overlay(provider)
         }
 
-        // If the overlay is not present then we need to calculate a new one.
-        // DashMap's entry API handles the race condition internally.
-        let mut cache_miss = false;
+        let db_tip_block = self.overlay_builder.get_db_tip_block_number(provider)?;
+
         let overlay = match self.overlay_cache.entry(db_tip_block) {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
-                cache_miss = true;
-                let overlay = self.calculate_overlay(provider, db_tip_block)?;
+                self.overlay_builder.metrics.overlay_cache_misses.increment(1);
+                let overlay = self.overlay_builder.build_overlay(provider)?;
                 entry.insert(overlay.clone());
                 overlay
             }
         };
-
-        if cache_miss {
-            self.metrics.overlay_cache_misses.increment(1);
-        }
 
         Ok(overlay)
     }
@@ -464,14 +493,14 @@ where
         let provider = {
             let start = Instant::now();
             let res = self.factory.database_provider_ro()?;
-            self.metrics.create_provider_duration.record(start.elapsed());
+            self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
             res
         };
 
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
-        self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
+        self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }
 }

@@ -10,7 +10,7 @@ use alloy_eips::{
     eip1559::BaseFeeParams,
     eip7840::BlobParams,
     eip7928::{AccountChanges, BlockAccessList, SlotChanges},
-    BlockNumberOrTag, Typed2718,
+    Typed2718,
 };
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -31,6 +31,8 @@ use reth_primitives_traits::proofs;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future};
 use tracing::{info, warn};
+
+use crate::bench::helpers::fetch_block_access_list;
 
 /// A single transaction with its gas used and raw encoded bytes.
 #[derive(Debug, Clone)]
@@ -667,20 +669,6 @@ impl Command {
 
         Ok(())
     }
-}
-
-async fn fetch_block_access_list(
-    provider: &RootProvider<AnyNetwork>,
-    block_number: u64,
-) -> eyre::Result<BlockAccessList> {
-    provider
-        .client()
-        .request("eth_getBlockAccessListByBlockNumber", (BlockNumberOrTag::Number(block_number),))
-        .await
-        .map_err(Into::into)
-        .and_then(|block_access_list: Option<BlockAccessList>| {
-            block_access_list.ok_or_else(|| eyre::eyre!("BAL not found for block {block_number}"))
-        })
 }
 
 fn merge_block_access_list(

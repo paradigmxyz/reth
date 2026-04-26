@@ -269,7 +269,7 @@ where
         >::from_execution_payload(&payload);
         self.inner
             .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+            .validate_version_specific_fields(EngineApiMessageVersion::V5, payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
@@ -386,7 +386,7 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
     }
 
@@ -1438,9 +1438,10 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, B256};
+    use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
-        ClientCode, ClientVersionV1, PayloadAttributes, PayloadStatusEnum,
+        ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
     };
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
@@ -1530,6 +1531,63 @@ mod tests {
             api.new_payload_v1(execution_data).await.unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
+    }
+
+    #[tokio::test]
+    async fn new_payload_v5_accepts_amsterdam_payloads() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+
+        tokio::spawn(async move {
+            let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
+            let payload = ExecutionPayloadV4 {
+                payload_inner: ExecutionPayloadV3 {
+                    payload_inner: ExecutionPayloadV2 {
+                        payload_inner: payload_v1,
+                        withdrawals: Vec::new(),
+                    },
+                    blob_gas_used: 0,
+                    excess_blob_gas: 0,
+                },
+                block_access_list: Bytes::from_static(b"bal"),
+                slot_number: 1,
+            };
+            let execution_data = ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        versioned_hashes: Vec::new(),
+                        parent_beacon_block_root: B256::ZERO,
+                    },
+                    PraguePayloadFields { requests: RequestsOrHash::Requests(Requests::default()) },
+                ),
+            };
+
+            api.new_payload_v5(execution_data).await.unwrap();
+        });
+
+        assert_matches!(engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
 
     #[derive(Clone)]

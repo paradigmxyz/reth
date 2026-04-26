@@ -25,7 +25,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use revm::{
     context::Block,
-    context_interface::{result::ExecutionResult, Transaction},
+    context_interface::{result::ExecutionResult, Cfg, Transaction},
     primitives::KECCAK_EMPTY,
 };
 use tracing::trace;
@@ -74,10 +74,15 @@ pub trait EstimateCall: Call {
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
         // the gas limit of the corresponding block
-        let max_gas_limit = evm_env.cfg_env.tx_gas_limit_cap.map_or_else(
-            || evm_env.block_env.gas_limit(),
-            |cap| cap.min(evm_env.block_env.gas_limit()),
-        );
+        let max_gas_limit = evm_env
+            .cfg_env
+            .tx_gas_limit_cap
+            // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
+            .filter(|_| !evm_env.cfg_env.is_amsterdam_eip8037_enabled())
+            .map_or_else(
+                || evm_env.block_env.gas_limit(),
+                |cap| cap.min(evm_env.block_env.gas_limit()),
+            );
 
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
