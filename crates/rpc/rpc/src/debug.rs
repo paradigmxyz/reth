@@ -226,7 +226,7 @@ where
         let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
+            .spawn_with_state_at_block_and_bal(state_at, block_hash, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
@@ -348,9 +348,10 @@ where
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
+        let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
+            .spawn_with_state_at_block_and_bal(state_at, block_hash, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 

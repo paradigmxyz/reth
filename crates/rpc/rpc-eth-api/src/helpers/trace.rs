@@ -107,8 +107,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
-    /// Before the transaction is traced, all previous transaction in the block are applied to the
-    /// state by executing them first.
+    /// Before the transaction is traced, the database is positioned at the state before the target
+    /// transaction.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
     /// and the database that points to the beginning of the transaction.
     ///
@@ -137,8 +137,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
-    /// Before the transaction is traced, all previous transaction in the block are applied to the
-    /// state by executing them first.
+    /// Before the transaction is traced, the database is positioned at the state before the target
+    /// transaction.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
     /// and the database that points to the beginning of the transaction.
     ///
@@ -175,8 +175,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
+            let block_hash = block.hash();
 
-            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, block_hash, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
