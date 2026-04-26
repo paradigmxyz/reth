@@ -647,7 +647,7 @@ async fn spawn_eth71_bal_testnet() -> (BalTestnetHandle, BalStoreHandle) {
     spawn_bal_testnet([EthVersion::Eth71, EthVersion::Eth71]).await
 }
 
-// Spawns a two-peer BAL testnet with the requested eth protocol versions.
+// Spawns a BAL testnet with one peer per requested eth protocol version.
 async fn spawn_bal_testnet(
     versions: impl IntoIterator<Item = EthVersion>,
 ) -> (BalTestnetHandle, BalStoreHandle) {
