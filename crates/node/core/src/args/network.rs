@@ -44,7 +44,7 @@ use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use std::str::FromStr;
-use tracing::error;
+use tracing::{error, warn};
 
 /// Global static network defaults
 static NETWORK_DEFAULTS: OnceLock<DefaultNetworkArgs> = OnceLock::new();
@@ -439,9 +439,21 @@ impl NetworkArgs {
     }
 
     /// Returns the resolved bootnodes if any are provided.
+    ///
+    /// Nodes that fail to resolve are skipped with a warning log so misconfigured
+    /// `--bootnodes` entries are visible instead of silently falling back to chain defaults.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.bootnodes.clone().map(|bootnodes| {
-            bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+            bootnodes
+                .into_iter()
+                .filter_map(|node| match node.resolve_blocking() {
+                    Ok(record) => Some(record),
+                    Err(err) => {
+                        warn!(target: "reth::cli", %node, %err, "Failed to resolve bootnode");
+                        None
+                    }
+                })
+                .collect()
         })
     }
 
