@@ -647,6 +647,7 @@ async fn spawn_eth71_bal_testnet() -> (BalTestnetHandle, BalStoreHandle) {
     spawn_bal_testnet([EthVersion::Eth71, EthVersion::Eth71]).await
 }
 
+// Spawns a two-peer BAL testnet with the requested eth protocol versions.
 async fn spawn_bal_testnet(
     versions: impl IntoIterator<Item = EthVersion>,
 ) -> (BalTestnetHandle, BalStoreHandle) {
@@ -670,6 +671,7 @@ async fn spawn_bal_testnet(
     (net, bal_store)
 }
 
+// Sends a GetBlockAccessLists request from peer 0 to peer 1.
 async fn request_block_access_lists(net: &BalTestnetHandle, hashes: Vec<B256>) -> BlockAccessLists {
     let requester = &net.peers()[0];
     let responder = &net.peers()[1];
@@ -686,6 +688,7 @@ async fn request_block_access_lists(net: &BalTestnetHandle, hashes: Vec<B256>) -
     rx.await.unwrap().unwrap()
 }
 
+// Builds a complete raw RLP list item with the requested encoded byte length.
 fn raw_bal_with_len(len: usize) -> Bytes {
     assert!(len > 0);
 
