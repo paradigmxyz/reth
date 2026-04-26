@@ -554,6 +554,7 @@ async fn test_eth71_get_block_access_lists() {
     );
 }
 
+// Ensures BAL responses stop at the soft response limit while keeping the item that crosses it.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth71_get_block_access_lists_respects_response_soft_limit() {
     reth_tracing::init_test_tracing();
@@ -576,6 +577,7 @@ async fn test_eth71_get_block_access_lists_respects_response_soft_limit() {
     assert_eq!(response, BlockAccessLists(vec![bal0, bal1]));
 }
 
+// Ensures a single BAL larger than the soft limit is still returned.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth71_get_block_access_lists_returns_single_oversized_bal() {
     reth_tracing::init_test_tracing();
@@ -594,6 +596,7 @@ async fn test_eth71_get_block_access_lists_returns_single_oversized_bal() {
     assert_eq!(response, BlockAccessLists(vec![bal0]));
 }
 
+// Ensures an empty BAL request roundtrips to an empty response.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth71_get_block_access_lists_empty_request() {
     reth_tracing::init_test_tracing();
@@ -604,6 +607,7 @@ async fn test_eth71_get_block_access_lists_empty_request() {
     assert_eq!(response, BlockAccessLists(Vec::new()));
 }
 
+// Ensures the fetch client can request BALs through an eth/71 peer.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth71_fetch_client_get_block_access_lists() {
     reth_tracing::init_test_tracing();
@@ -624,6 +628,7 @@ async fn test_eth71_fetch_client_get_block_access_lists() {
     );
 }
 
+// Ensures fetch client BAL requests are rejected when no eth/71 peer is available.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth70_fetch_client_rejects_optional_block_access_lists_request() {
     reth_tracing::init_test_tracing();
