@@ -2,12 +2,13 @@
 //! Tests for eth related requests
 
 use alloy_consensus::Header;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, B256};
 use rand::Rng;
 use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::Block;
 use reth_network::{
-    test_utils::{NetworkEventStream, PeerConfig, Testnet},
+    eth_requests::SOFT_RESPONSE_LIMIT,
+    test_utils::{NetworkEventStream, PeerConfig, Testnet, TestnetHandle},
     BlockDownloaderProvider, NetworkEventListenerProvider,
 };
 use reth_network_api::{NetworkInfo, Peers};
@@ -19,6 +20,8 @@ use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStor
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
 use std::sync::Arc;
 use tokio::sync::oneshot;
+
+type Eth71BalTestnetHandle = TestnetHandle<Arc<MockEthProvider>, TestPool>;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
@@ -531,7 +534,47 @@ async fn test_eth69_get_receipts() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth71_get_block_access_lists() {
     reth_tracing::init_test_tracing();
-    let mut rng = rand::rng();
+    let (net, bal_store) = spawn_eth71_bal_testnet().await;
+
+    let hash0 = B256::random();
+    let hash1 = B256::random();
+    let hash2 = B256::random();
+    let bal0 = Bytes::from_static(&[0xc1, 0x01]);
+    let bal2 = Bytes::from_static(&[0xc1, 0x02]);
+
+    bal_store.insert(hash0, 1, bal0.clone()).unwrap();
+    bal_store.insert(hash2, 3, bal2.clone()).unwrap();
+
+    let response = request_block_access_lists(&net, vec![hash0, hash1, hash2]).await;
+    assert_eq!(
+        response,
+        BlockAccessLists(vec![bal0, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]), bal2,])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_get_block_access_lists_respects_response_soft_limit() {
+    reth_tracing::init_test_tracing();
+    let (net, bal_store) = spawn_eth71_bal_testnet().await;
+
+    let hash0 = B256::random();
+    let hash1 = B256::random();
+    let hash2 = B256::random();
+    let bal0 = raw_bal_with_len(2);
+    let bal1 = raw_bal_with_len(SOFT_RESPONSE_LIMIT);
+    let bal2 = raw_bal_with_len(2);
+    assert!(bal0.len() + bal1.len() > SOFT_RESPONSE_LIMIT);
+
+    bal_store.insert(hash0, 1, bal0.clone()).unwrap();
+    bal_store.insert(hash1, 2, bal1.clone()).unwrap();
+    bal_store.insert(hash2, 3, bal2).unwrap();
+
+    let response = request_block_access_lists(&net, vec![hash0, hash1, hash2]).await;
+
+    assert_eq!(response, BlockAccessLists(vec![bal0, bal1]));
+}
+
+async fn spawn_eth71_bal_testnet() -> (Eth71BalTestnetHandle, BalStoreHandle) {
     let mut mock_provider = MockEthProvider::default();
     let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
     mock_provider.bal_store = bal_store.clone();
@@ -542,42 +585,51 @@ async fn test_eth71_get_block_access_lists() {
     let p0 = PeerConfig::with_protocols(mock_provider.clone(), Some(EthVersion::Eth71.into()));
     net.add_peer_with_config(p0).await.unwrap();
 
-    let p1 = PeerConfig::with_protocols(mock_provider.clone(), Some(EthVersion::Eth71.into()));
+    let p1 = PeerConfig::with_protocols(mock_provider, Some(EthVersion::Eth71.into()));
     net.add_peer_with_config(p1).await.unwrap();
 
     net.for_each_mut(|peer| peer.install_request_handler());
 
-    let handle0 = net.peers()[0].handle();
-    let mut events0 = NetworkEventStream::new(handle0.event_listener());
-    let handle1 = net.peers()[1].handle();
+    let net = net.spawn();
+    net.connect_peers().await;
 
-    let _handle = net.spawn();
+    (net, bal_store)
+}
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-    let connected = events0.next_session_established().await.unwrap();
-    assert_eq!(connected, *handle1.peer_id());
-
-    let hash0 = rng.random();
-    let hash1 = rng.random();
-    let hash2 = rng.random();
-    let bal0 = Bytes::from_static(&[0xc1, 0x01]);
-    let bal2 = Bytes::from_static(&[0xc1, 0x02]);
-
-    bal_store.insert(hash0, 1, bal0.clone()).unwrap();
-    bal_store.insert(hash2, 3, bal2.clone()).unwrap();
-
+async fn request_block_access_lists(
+    net: &Eth71BalTestnetHandle,
+    hashes: Vec<B256>,
+) -> BlockAccessLists {
+    let requester = &net.peers()[0];
+    let responder = &net.peers()[1];
     let (tx, rx) = oneshot::channel();
-    handle0.send_request(
-        *handle1.peer_id(),
+
+    requester.network().send_request(
+        *responder.peer_id(),
         reth_network::PeerRequest::GetBlockAccessLists {
-            request: GetBlockAccessLists(vec![hash0, hash1, hash2]),
+            request: GetBlockAccessLists(hashes),
             response: tx,
         },
     );
 
-    let response = rx.await.unwrap().unwrap();
-    assert_eq!(
-        response,
-        BlockAccessLists(vec![bal0, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]), bal2,])
-    );
+    rx.await.unwrap().unwrap()
+}
+
+fn raw_bal_with_len(len: usize) -> Bytes {
+    assert!(len > 0);
+
+    let mut payload_length = len - 1;
+    loop {
+        let header_length = alloy_rlp::Header { list: true, payload_length }.length();
+        let next_payload_length = len.checked_sub(header_length).unwrap();
+        if next_payload_length == payload_length {
+            break
+        }
+        payload_length = next_payload_length;
+    }
+
+    let mut out = Vec::with_capacity(len);
+    alloy_rlp::Header { list: true, payload_length }.encode(&mut out);
+    out.resize(len, alloy_rlp::EMPTY_LIST_CODE);
+    Bytes::from(out)
 }
