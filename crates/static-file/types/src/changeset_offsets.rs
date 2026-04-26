@@ -7,9 +7,37 @@ use crate::ChangesetOffset;
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
-    os::unix::fs::FileExt,
     path::Path,
 };
+
+#[cfg(unix)]
+fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    use std::os::unix::fs::FileExt;
+    file.read_exact_at(buf, offset)
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                ));
+            }
+            Ok(n) => {
+                let tmp = buf;
+                buf = &mut tmp[n..];
+                offset += n as u64;
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
 
 /// Writer for appending changeset offsets to a sidecar file.
 #[derive(Debug)]
@@ -185,7 +213,7 @@ impl ChangesetOffsetReader {
 
         let byte_pos = block_index * Self::RECORD_SIZE as u64;
         let mut buf = [0u8; Self::RECORD_SIZE];
-        self.file.read_exact_at(&mut buf, byte_pos)?;
+        read_exact_at(&self.file, &mut buf, byte_pos)?;
 
         let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
         let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
@@ -208,7 +236,7 @@ impl ChangesetOffsetReader {
 
         for i in 0..count {
             let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
+            read_exact_at(&self.file, &mut buf, pos)?;
             let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
             let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
             result.push(ChangesetOffset::new(offset, num_changes));
