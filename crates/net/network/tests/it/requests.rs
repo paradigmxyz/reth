@@ -14,14 +14,16 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::{
     bodies::client::BodiesClient,
+    error::RequestError,
     headers::client::{HeadersClient, HeadersRequest},
+    BalRequirement, BlockAccessListsClient,
 };
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore};
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-type Eth71BalTestnetHandle = TestnetHandle<Arc<MockEthProvider>, TestPool>;
+type BalTestnetHandle = TestnetHandle<Arc<MockEthProvider>, TestPool>;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
@@ -574,7 +576,75 @@ async fn test_eth71_get_block_access_lists_respects_response_soft_limit() {
     assert_eq!(response, BlockAccessLists(vec![bal0, bal1]));
 }
 
-async fn spawn_eth71_bal_testnet() -> (Eth71BalTestnetHandle, BalStoreHandle) {
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_get_block_access_lists_returns_single_oversized_bal() {
+    reth_tracing::init_test_tracing();
+    let (net, bal_store) = spawn_eth71_bal_testnet().await;
+
+    let hash0 = B256::random();
+    let hash1 = B256::random();
+    let bal0 = raw_bal_with_len(SOFT_RESPONSE_LIMIT + 1);
+    let bal1 = raw_bal_with_len(2);
+
+    bal_store.insert(hash0, 1, bal0.clone()).unwrap();
+    bal_store.insert(hash1, 2, bal1).unwrap();
+
+    let response = request_block_access_lists(&net, vec![hash0, hash1]).await;
+
+    assert_eq!(response, BlockAccessLists(vec![bal0]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_get_block_access_lists_empty_request() {
+    reth_tracing::init_test_tracing();
+    let (net, _) = spawn_eth71_bal_testnet().await;
+
+    let response = request_block_access_lists(&net, Vec::new()).await;
+
+    assert_eq!(response, BlockAccessLists(Vec::new()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_fetch_client_get_block_access_lists() {
+    reth_tracing::init_test_tracing();
+    let (net, bal_store) = spawn_eth71_bal_testnet().await;
+
+    let hash0 = B256::random();
+    let hash1 = B256::random();
+    let bal0 = Bytes::from_static(&[0xc1, 0x01]);
+
+    bal_store.insert(hash0, 1, bal0.clone()).unwrap();
+
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+    let response = fetch.get_block_access_lists(vec![hash0, hash1]).await.unwrap().into_data();
+
+    assert_eq!(
+        response,
+        BlockAccessLists(vec![bal0, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth70_fetch_client_rejects_optional_block_access_lists_request() {
+    reth_tracing::init_test_tracing();
+    let (net, _) = spawn_bal_testnet([EthVersion::Eth70, EthVersion::Eth70]).await;
+
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+    let err = fetch
+        .get_block_access_lists_with_requirement(vec![B256::random()], BalRequirement::Optional)
+        .await
+        .unwrap_err();
+
+    assert_eq!(err, RequestError::UnsupportedCapability);
+}
+
+async fn spawn_eth71_bal_testnet() -> (BalTestnetHandle, BalStoreHandle) {
+    spawn_bal_testnet([EthVersion::Eth71, EthVersion::Eth71]).await
+}
+
+async fn spawn_bal_testnet(
+    versions: impl IntoIterator<Item = EthVersion>,
+) -> (BalTestnetHandle, BalStoreHandle) {
     let mut mock_provider = MockEthProvider::default();
     let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
     mock_provider.bal_store = bal_store.clone();
@@ -582,11 +652,10 @@ async fn spawn_eth71_bal_testnet() -> (Eth71BalTestnetHandle, BalStoreHandle) {
 
     let mut net: Testnet<Arc<MockEthProvider>, TestPool> = Testnet::default();
 
-    let p0 = PeerConfig::with_protocols(mock_provider.clone(), Some(EthVersion::Eth71.into()));
-    net.add_peer_with_config(p0).await.unwrap();
-
-    let p1 = PeerConfig::with_protocols(mock_provider, Some(EthVersion::Eth71.into()));
-    net.add_peer_with_config(p1).await.unwrap();
+    for version in versions {
+        let peer = PeerConfig::with_protocols(mock_provider.clone(), Some(version.into()));
+        net.add_peer_with_config(peer).await.unwrap();
+    }
 
     net.for_each_mut(|peer| peer.install_request_handler());
 
@@ -596,10 +665,7 @@ async fn spawn_eth71_bal_testnet() -> (Eth71BalTestnetHandle, BalStoreHandle) {
     (net, bal_store)
 }
 
-async fn request_block_access_lists(
-    net: &Eth71BalTestnetHandle,
-    hashes: Vec<B256>,
-) -> BlockAccessLists {
+async fn request_block_access_lists(net: &BalTestnetHandle, hashes: Vec<B256>) -> BlockAccessLists {
     let requester = &net.peers()[0];
     let responder = &net.peers()[1];
     let (tx, rx) = oneshot::channel();
