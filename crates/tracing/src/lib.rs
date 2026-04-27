@@ -50,7 +50,7 @@ pub use tracing_appender;
 #[cfg(feature = "std")]
 pub use tracing_subscriber;
 
-#[cfg(feature = "tracy")]
+#[cfg(all(feature = "tracy", feature = "std"))]
 tracy_client::register_demangler!();
 
 // Re-export our types
