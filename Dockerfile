@@ -34,6 +34,8 @@ RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-pat
 
 # Build application
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
+#
+# TARGETPLATFORM is set by BuildKit: https://docs.docker.com/reference/dockerfile#automatic-platform-args-in-the-global-scope
 ARG TARGETPLATFORM
 COPY --exclude=dist . .
 RUN if [ -n "$RUSTFLAGS" ]; then \
