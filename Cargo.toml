@@ -700,3 +700,7 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+
+[patch.crates-io]
+discv5 = { git = "https://github.com/klkvr/discv5", rev = "4335fd7" }
