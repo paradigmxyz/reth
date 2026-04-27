@@ -198,14 +198,23 @@ struct SingleVerifier<I> {
     account: Option<B256>, // None for accounts trie
     trie_iter: I,
     curr: Option<(Nibbles, BranchNodeCompact)>,
+    subtrie_prefix: Option<Nibbles>,
     canonical_branch_nodes: Vec<(Nibbles, BranchNodeCompact)>,
 }
 
 impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
-    fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
+    fn new(
+        account: Option<B256>,
+        trie_cursor: C,
+        subtrie_prefix: Option<Nibbles>,
+    ) -> Result<Self, DatabaseError> {
         let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
         let curr = trie_iter.next().transpose()?;
-        Ok(Self { account, trie_iter, curr, canonical_branch_nodes: Vec::new() })
+        Ok(Self { account, trie_iter, curr, subtrie_prefix, canonical_branch_nodes: Vec::new() })
+    }
+
+    fn should_output_extra(&self, path: &Nibbles) -> bool {
+        self.subtrie_prefix.as_ref().is_none_or(|prefix| path.starts_with(prefix))
     }
 
     const fn output_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
@@ -293,7 +302,9 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // If the given path comes after the current path in depth-first order,
                     // it means the cursor's path was not found by the caller (otherwise it would
                     // have hit the equal case) and so is extraneous.
-                    outputs.push(self.output_extra(*curr_path, curr_node.clone()));
+                    if self.should_output_extra(curr_path) {
+                        outputs.push(self.output_extra(*curr_path, curr_node.clone()));
+                    }
                     self.curr = self.trie_iter.next().transpose()?;
                     // back to the top of the loop to check the latest `self.curr` value against the
                     // given path/node.
@@ -310,7 +321,9 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     ) -> Result<Vec<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
-                outputs.push(self.output_extra(curr_path, curr_node));
+                if self.should_output_extra(&curr_path) {
+                    outputs.push(self.output_extra(curr_path, curr_node));
+                }
                 self.curr = self.trie_iter.next().transpose()?;
             } else {
                 return Ok(core::mem::take(&mut self.canonical_branch_nodes))
@@ -326,6 +339,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 pub struct Verifier<'a, T: TrieCursorFactory, H> {
     trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
+    subtrie_prefix: Nibbles,
     branch_node_iter: StateRootBranchNodesIter<NoopTrieCursorFactory, H>,
     outputs: Vec<Output>,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
@@ -338,16 +352,22 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
     pub fn new(
         trie_cursor_factory: &'a T,
         hashed_cursor_factory: H,
+        subtrie_prefix: Nibbles,
     ) -> Result<Self, DatabaseError> {
         Ok(Self {
             trie_cursor_factory,
             hashed_cursor_factory: hashed_cursor_factory.clone(),
+            subtrie_prefix,
             branch_node_iter: StateRootBranchNodesIter::new(
                 NoopTrieCursorFactory,
                 hashed_cursor_factory,
             ),
             outputs: Default::default(),
-            account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
+            account: SingleVerifier::new(
+                None,
+                trie_cursor_factory.account_trie_cursor()?,
+                Some(subtrie_prefix),
+            )?,
             storage: None,
             complete: false,
         })
@@ -355,6 +375,14 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
 }
 
 impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H> {
+    fn matches_subtrie_prefix(&self, path: &Nibbles) -> bool {
+        path.starts_with(&self.subtrie_prefix)
+    }
+
+    fn account_in_subtrie(&self, account: B256) -> bool {
+        Nibbles::unpack(account).starts_with(&self.subtrie_prefix)
+    }
+
     fn new_storage(
         &mut self,
         account: B256,
@@ -362,7 +390,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError> {
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(account)?;
-        let mut storage = SingleVerifier::new(Some(account), trie_cursor)?;
+        let mut storage = SingleVerifier::new(Some(account), trie_cursor, None)?;
         storage.next(&mut self.outputs, path, node)?;
         self.storage = Some((account, storage));
         Ok(())
@@ -398,6 +426,10 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
             };
 
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
+                if !self.account_in_subtrie(curr_account) {
+                    continue
+                }
+
                 trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
 
                 let mut storage_cursor =
@@ -432,10 +464,17 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
                     let max_account = B256::from([0xFFu8; 32]);
 
                     self.verify_empty_storages(prev_account, max_account, false, true)?;
+                } else if !self.subtrie_prefix.is_empty() {
+                    let max_account = B256::from([0xFFu8; 32]);
+                    self.verify_empty_storages(B256::ZERO, max_account, true, true)?;
                 }
                 self.complete = true;
             }
             Some(BranchNode::Account(path, node)) => {
+                if !self.matches_subtrie_prefix(&path) {
+                    return Ok(())
+                }
+
                 trace!(target: "trie::verify", ?path, "Account node from state root");
                 self.account.next(&mut self.outputs, path, node)?;
                 // Push progress indicator
@@ -444,6 +483,10 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
                 }
             }
             Some(BranchNode::Storage(account, path, node)) => {
+                if !self.account_in_subtrie(account) {
+                    return Ok(())
+                }
+
                 trace!(target: "trie::verify", ?account, ?path, "Storage node from state root");
                 match self.storage.as_mut() {
                     None => {
@@ -695,7 +738,7 @@ mod tests {
         )]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let verifier = SingleVerifier::new(None, cursor).unwrap();
+        let verifier = SingleVerifier::new(None, cursor, None).unwrap();
 
         // Should have seeked to the beginning and found the first node
         assert!(verifier.curr.is_some());
@@ -713,7 +756,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with the exact node that exists
@@ -732,7 +775,7 @@ mod tests {
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), node_in_trie.clone())]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with different node value
@@ -756,7 +799,7 @@ mod tests {
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x3]), node1)]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with a node that comes before any in the trie
@@ -788,7 +831,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
@@ -833,7 +876,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
@@ -872,7 +915,7 @@ mod tests {
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), node)]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(Some(account), cursor).unwrap();
+        let mut verifier = SingleVerifier::new(Some(account), cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // Call next with missing node
@@ -893,7 +936,7 @@ mod tests {
         // Test with empty trie cursor
         let trie_nodes = BTreeMap::new();
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // Any node should be marked as missing
@@ -930,7 +973,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces nodes in post-order (children before parents)
@@ -971,7 +1014,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // Process in WRONG order (skip root, provide child before processing all nodes correctly)
@@ -1011,7 +1054,7 @@ mod tests {
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
-        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
         let mut outputs = Vec::new();
 
         // The depth-first iterator produces nodes in post-order (children before parents)
@@ -1037,5 +1080,54 @@ mod tests {
             }
         }
         assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn test_verifier_subtrie_prefix_filters_account_outputs() {
+        let subtrie_prefix = Nibbles::from_nibbles([0x1]);
+        let in_prefix_path = Nibbles::from_nibbles([0x1]);
+        let out_of_prefix_path = Nibbles::from_nibbles([0x2]);
+
+        let root = test_branch_node(0b0110, 0, 0b0110, vec![]);
+        let expected_in_prefix = test_branch_node(0b0001, 0, 0b0001, vec![B256::from([1u8; 32])]);
+        let expected_out_of_prefix =
+            test_branch_node(0b0010, 0, 0b0010, vec![B256::from([2u8; 32])]);
+        let wrong_in_prefix = test_branch_node(0b0100, 0, 0b0100, vec![B256::from([3u8; 32])]);
+        let wrong_out_of_prefix = test_branch_node(0b1000, 0, 0b1000, vec![B256::from([4u8; 32])]);
+
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::from([
+                (Nibbles::new(), root),
+                (in_prefix_path, wrong_in_prefix.clone()),
+                (out_of_prefix_path, wrong_out_of_prefix),
+            ]),
+            B256Map::default(),
+        );
+        let hashed_cursor_factory =
+            MockHashedCursorFactory::new(BTreeMap::new(), B256Map::default());
+
+        let mut verifier =
+            Verifier::new(&trie_cursor_factory, hashed_cursor_factory, subtrie_prefix).unwrap();
+        verifier.branch_node_iter.account_nodes = vec![
+            (out_of_prefix_path, expected_out_of_prefix),
+            (in_prefix_path, expected_in_prefix),
+        ];
+        verifier.branch_node_iter.complete = true;
+
+        let outputs = verifier.collect::<Result<Vec<_>, _>>().unwrap();
+
+        assert!(outputs.iter().any(|output| {
+            matches!(output, Output::AccountWrong { path, found, .. } if *path == in_prefix_path && *found == wrong_in_prefix)
+        }));
+        assert!(outputs.iter().all(|output| match output {
+            Output::AccountExtra(path, _) |
+            Output::AccountMissing(path, _) |
+            Output::Progress(path) => path.starts_with(&subtrie_prefix),
+            Output::AccountWrong { path, .. } => path.starts_with(&subtrie_prefix),
+            Output::StorageExtra(account, ..) |
+            Output::StorageMissing(account, ..) |
+            Output::StorageWrong { account, .. } =>
+                Nibbles::unpack(*account).starts_with(&subtrie_prefix),
+        }));
     }
 }

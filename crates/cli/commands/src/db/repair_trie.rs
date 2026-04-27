@@ -124,7 +124,7 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
     // Create the verifier
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory, Nibbles::new())?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -247,7 +247,7 @@ where
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
 
     // Create the verifier
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory, Nibbles::new())?;
 
     let metrics = RepairTrieMetrics::new();
 
