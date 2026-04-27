@@ -46,6 +46,11 @@ pub const MAX_HEADERS_SERVE: usize = 1024;
 /// `SOFT_RESPONSE_LIMIT`.
 pub const MAX_BODIES_SERVE: usize = 1024;
 
+/// Maximum number of block access lists to serve.
+///
+/// Used to limit lookups.
+pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
+
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
@@ -326,12 +331,19 @@ where
         request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
+        // Cap the number of hashes we look up per EIP-8159 implementation-defined limits.
+        let hashes = if request.0.len() > MAX_BLOCK_ACCESS_LISTS_SERVE {
+            &request.0[..MAX_BLOCK_ACCESS_LISTS_SERVE]
+        } else {
+            &request.0[..]
+        };
+
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists = self
             .client
             .bal_store()
-            .get_by_hashes_with_limit(&request.0, limit)
-            .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
+            .get_by_hashes_with_limit(hashes, limit)
+            .unwrap_or_else(|_| empty_block_access_lists_with_limit(hashes.len(), limit));
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
