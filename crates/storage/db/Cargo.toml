@@ -45,6 +45,9 @@ parking_lot = { workspace = true, optional = true }
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives-traits = { workspace = true, features = ["reth-codec"] }

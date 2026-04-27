@@ -270,6 +270,7 @@ pub(crate) fn describe_prune_config(config: &Config) -> Vec<String> {
     .collect()
 }
 
+/// Formats one prune mode for the generated config summary.
 fn format_mode(mode: &PruneMode) -> String {
     match mode {
         PruneMode::Full => "\"full\"".to_string(),

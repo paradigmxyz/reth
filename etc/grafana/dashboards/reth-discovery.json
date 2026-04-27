@@ -1154,7 +1154,9 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": [],
+  "tags": [
+    "reth"
+  ],
   "templating": {
     "list": [
       {

@@ -248,7 +248,7 @@ impl Discv5 {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
             discv5::Event::Discovered(_) => None,
-            discv5::Event::NodeInserted { replaced: _, .. } => {
+            discv5::Event::NodeInserted { .. } => {
 
                 // node has been inserted into kbuckets
 
@@ -698,8 +698,6 @@ mod test {
     use ::enr::{CombinedKey, EnrKey};
     use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
-    use reth_tracing::init_test_tracing;
-    use std::env;
     use tracing::trace;
 
     fn discv5_noop() -> Discv5 {
@@ -937,11 +935,6 @@ mod test {
 
     #[test]
     fn get_fork_id_with_different_network_stack_ids() {
-        unsafe {
-            env::set_var("RUST_LOG", "net::discv5=trace");
-        }
-        init_test_tracing();
-
         let fork_id = MAINNET.latest_fork_id();
         let sk = SecretKey::new(&mut thread_rng());
 

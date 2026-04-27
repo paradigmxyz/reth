@@ -8,13 +8,9 @@ use crate::{
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
+use imbl::OrdMap;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap},
-    ops::Bound::Unbounded,
-    sync::Arc,
-};
+use std::{cmp::Ordering, collections::hash_map::Entry, ops::Bound::Unbounded, sync::Arc};
 use tokio::sync::broadcast;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
@@ -36,7 +32,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
+    by_id: OrdMap<TransactionId, PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
     highest_nonces: FxHashMap<SenderId, PendingTransaction<T>>,
@@ -80,7 +76,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Returns
     ///
     /// Returns all transactions by id.
-    fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
+    fn clear_transactions(&mut self) -> OrdMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
         self.highest_nonces.clear();
         self.size_of.reset();
@@ -525,7 +521,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// All transactions grouped by id
-    pub const fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
+    pub const fn by_id(&self) -> &OrdMap<TransactionId, PendingTransaction<T>> {
         &self.by_id
     }
 

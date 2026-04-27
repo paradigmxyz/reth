@@ -205,10 +205,12 @@ impl EngineNodeLauncher {
                 ctx.blockchain_db().clone(),
                 ctx.components().evm_config().clone(),
                 || async {
-                    // Create a separate cache for reorg validator (not shared with main engine)
-                    let reorg_cache = ChangesetCache::new();
                     validator_builder
-                        .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), reorg_cache)
+                        .build_tree_validator(
+                            &add_ons_ctx,
+                            engine_tree_config.clone(),
+                            changeset_cache.clone(),
+                        )
                         .await
                 },
                 node_config.debug.reorg_frequency,

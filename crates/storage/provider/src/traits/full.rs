@@ -1,7 +1,7 @@
 //! Helper provider traits to encapsulate all provider traits for simplicity.
 
 use crate::{
-    AccountReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
+    AccountReader, BalProvider, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, PruneCheckpointReader,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderFactory, StateReader,
     StaticFileProviderFactory,
@@ -32,6 +32,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
     > + AccountReader
+    + BalProvider
     + StateProviderFactory
     + StateReader
     + HashedPostStateProvider
@@ -67,6 +68,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
         > + AccountReader
+        + BalProvider
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider

@@ -16,8 +16,6 @@ use crate::{
 };
 use futures_util::{future::select, Future, FutureExt, TryFutureExt};
 #[cfg(feature = "rayon")]
-use std::sync::OnceLock;
-#[cfg(feature = "rayon")]
 use std::{num::NonZeroUsize, thread::available_parallelism};
 use std::{
     pin::pin,
@@ -237,34 +235,6 @@ pub enum RuntimeBuildError {
     RayonBuild(#[from] rayon::ThreadPoolBuildError),
 }
 
-#[cfg(feature = "rayon")]
-#[derive(Debug)]
-struct LazyWorkerPool {
-    pool: OnceLock<WorkerPool>,
-    num_threads: usize,
-    thread_name_prefix: &'static str,
-}
-
-#[cfg(feature = "rayon")]
-impl LazyWorkerPool {
-    const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), num_threads, thread_name_prefix }
-    }
-
-    fn get(&self) -> &WorkerPool {
-        let num_threads = self.num_threads;
-        let thread_name_prefix = self.thread_name_prefix;
-        self.pool.get_or_init(|| {
-            WorkerPool::from_builder(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(num_threads)
-                    .thread_name(move |i| format!("{thread_name_prefix}-{i:02}")),
-            )
-            .unwrap_or_else(|err| panic!("failed to build {thread_name_prefix} worker pool: {err}"))
-        })
-    }
-}
-
 // ── RuntimeInner ──────────────────────────────────────────────────────
 
 struct RuntimeInner {
@@ -303,7 +273,7 @@ struct RuntimeInner {
     prewarming_pool: WorkerPool,
     /// BAL streaming pool (BAL hashed state streaming).
     #[cfg(feature = "rayon")]
-    bal_streaming_pool: LazyWorkerPool,
+    bal_streaming_pool: WorkerPool,
     /// Named single-thread worker map. Each unique name gets a dedicated OS thread
     /// that is reused across all tasks submitted under that name.
     worker_map: WorkerMap,
@@ -392,7 +362,7 @@ impl Runtime {
     /// Get the BAL streaming pool.
     #[cfg(feature = "rayon")]
     pub fn bal_streaming_pool(&self) -> &WorkerPool {
-        self.0.bal_streaming_pool.get()
+        &self.0.bal_streaming_pool
     }
 }
 
@@ -837,30 +807,20 @@ impl RuntimeBuilder {
 
             let proof_storage_worker_threads =
                 config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
-            let proof_storage_worker_pool = WorkerPool::from_builder(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(proof_storage_worker_threads)
-                    .thread_name(|i| format!("proof-strg-{i:02}")),
-            )?;
+            let proof_storage_worker_pool =
+                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
 
             let proof_account_worker_threads =
                 config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
-            let proof_account_worker_pool = WorkerPool::from_builder(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(proof_account_worker_threads)
-                    .thread_name(|i| format!("proof-acct-{i:02}")),
-            )?;
+            let proof_account_worker_pool =
+                WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
-            let prewarming_pool = WorkerPool::from_builder(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(prewarming_threads)
-                    .thread_name(|i| format!("prewarm-{i:02}")),
-            )?;
+            let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
 
             let bal_streaming_threads =
                 config.rayon.bal_streaming_threads.unwrap_or(default_threads);
-            let bal_streaming_pool = LazyWorkerPool::new(bal_streaming_threads, "bal-stream");
+            let bal_streaming_pool = WorkerPool::new(bal_streaming_threads, "bal-stream");
 
             debug!(
                 default_threads,
@@ -871,7 +831,7 @@ impl RuntimeBuilder {
                 prewarming_threads,
                 bal_streaming_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
-                "Initialized rayon thread pools and configured lazy BAL streaming pool"
+                "Configured lazy rayon worker pools"
             );
 
             (
@@ -962,12 +922,19 @@ mod tests {
 
     #[cfg(feature = "rayon")]
     #[test]
-    fn test_bal_streaming_pool_is_lazy() {
+    fn test_worker_pools_are_lazy() {
         let runtime = Runtime::test();
 
-        assert!(runtime.0.bal_streaming_pool.pool.get().is_none());
+        // Worker pools are lazy — not initialized until first access.
+        assert!(!runtime.0.bal_streaming_pool.is_initialized());
+        assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
 
+        // Accessing them triggers initialization and returns the configured thread count.
         assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
-        assert!(runtime.0.bal_streaming_pool.pool.get().is_some());
+        assert!(runtime.0.bal_streaming_pool.is_initialized());
+
+        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
+        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
+        assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
     }
 }

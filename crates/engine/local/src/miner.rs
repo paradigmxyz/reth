@@ -141,6 +141,11 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     last_header: SealedHeaderFor<<T::BuiltPayload as BuiltPayload>::Primitives>,
     /// Stores latest mined blocks.
     last_block_hashes: VecDeque<B256>,
+    /// Optional sleep duration between initiating payload building and resolving.
+    ///
+    /// When set, the miner sleeps after `fork_choice_updated` before calling
+    /// `resolve_kind`, giving the payload job time for multiple rebuild attempts.
+    payload_wait_time: Option<Duration>,
 }
 
 impl<T, B, Pool> LocalMiner<T, B, Pool>
@@ -170,7 +175,14 @@ where
             payload_builder,
             last_block_hashes: VecDeque::from([last_header.hash()]),
             last_header,
+            payload_wait_time: None,
         }
+    }
+
+    /// Sets the payload wait time, if any.
+    pub const fn with_payload_wait_time_opt(mut self, wait_time: Option<Duration>) -> Self {
+        self.payload_wait_time = wait_time;
+        self
     }
 
     /// Runs the [`LocalMiner`] in a loop, polling the miner and building payloads.
@@ -237,6 +249,10 @@ where
         }
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
+
+        if let Some(wait_time) = self.payload_wait_time {
+            tokio::time::sleep(wait_time).await;
+        }
 
         let Some(Ok(payload)) =
             self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await

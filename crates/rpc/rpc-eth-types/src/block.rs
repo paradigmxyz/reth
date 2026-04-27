@@ -53,6 +53,7 @@ impl<B: Block, R> CachedTransaction<B, R> {
             index: self.tx_index as u64,
             block_hash: self.block.hash(),
             block_number: self.block.number(),
+            block_timestamp: self.block.timestamp(),
             base_fee: self.block.base_fee_per_gas(),
         })
     }
