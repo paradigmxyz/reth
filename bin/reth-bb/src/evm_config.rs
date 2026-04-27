@@ -195,7 +195,7 @@ where
         )
     }
 
-    fn sendable_executor_for_block<'a, DB: Database>(
+    fn executor_for_block<'a, DB: Database>(
         &'a self,
         db: &'a mut revm::database::State<DB>,
         block: &'a SealedBlock<reth_ethereum_primitives::Block>,

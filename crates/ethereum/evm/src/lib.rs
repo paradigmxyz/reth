@@ -218,7 +218,7 @@ where
         })
     }
 
-    fn sendable_executor_for_block<'a, DB: reth_evm::Database>(
+    fn executor_for_block<'a, DB: reth_evm::Database>(
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<Block>,

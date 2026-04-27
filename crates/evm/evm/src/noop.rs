@@ -73,7 +73,7 @@ where
         self.inner().context_for_next_block(parent, attributes)
     }
 
-    fn sendable_executor_for_block<'a, DB: crate::Database>(
+    fn executor_for_block<'a, DB: crate::Database>(
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
@@ -82,7 +82,7 @@ where
             + BlockExecutor<Result = Self::TxExecutionResult>,
         Self::Error,
     > {
-        self.inner().sendable_executor_for_block(db, block)
+        self.inner().executor_for_block(db, block)
     }
 }
 
