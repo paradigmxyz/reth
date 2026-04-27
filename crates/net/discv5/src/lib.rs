@@ -1054,6 +1054,28 @@ mod test {
         ));
     }
 
+    /// Regression test: [`ConfigBuilder::with_nat_external_ipv4_for_unspecified_bind`] must set
+    /// the ENR IPv4 when RLPx listens on `0.0.0.0` and an external IPv4 is provided.
+    #[test]
+    fn with_nat_external_ipv4_for_unspecified_bind_sets_enr_ip4() {
+        let nat_external_ip = Ipv4Addr::new(1, 2, 3, 4);
+        let tcp_port: u16 = 30303;
+        let udp_port: u16 = 9200;
+
+        let rlpx_tcp_socket: SocketAddr = (Ipv4Addr::UNSPECIFIED, tcp_port).into();
+        let discv5_listen_config = ListenConfig::Ipv4 { ip: Ipv4Addr::UNSPECIFIED, port: udp_port };
+
+        let config = Config::builder(rlpx_tcp_socket)
+            .with_nat_external_ipv4_for_unspecified_bind(Some(nat_external_ip))
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        let sk = SecretKey::new(&mut thread_rng());
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.ip4(), Some(nat_external_ip));
+    }
+
     /// Regression test: when `RLPx` binds to 0.0.0.0 (all interfaces) and the user configures
     /// `--nat extip:<IP>`, the discv5 ENR must contain the NAT-resolved external IPv4 address.
     ///
