@@ -235,7 +235,7 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                bal::position_state_before_transaction(
+                bal::prepare_state_before_transaction(
                     &eth_api,
                     &mut db,
                     evm_env.clone(),
@@ -357,7 +357,7 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // 2. position the state before the requested transaction index
-                bal::position_state_before_transaction(
+                bal::prepare_state_before_transaction(
                     &eth_api,
                     &mut db,
                     evm_env.clone(),

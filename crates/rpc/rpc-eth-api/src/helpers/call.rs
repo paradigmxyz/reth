@@ -789,7 +789,7 @@ pub trait Call:
                     executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 }
 
-                bal::position_state_before_transaction(
+                bal::prepare_state_before_transaction(
                     &this,
                     &mut db,
                     evm_env.clone(),

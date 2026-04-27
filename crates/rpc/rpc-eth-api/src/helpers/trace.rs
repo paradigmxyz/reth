@@ -183,7 +183,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                bal::position_state_before_transaction(
+                bal::prepare_state_before_transaction(
                     &this,
                     &mut db,
                     evm_env.clone(),
