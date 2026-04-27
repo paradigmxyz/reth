@@ -98,6 +98,8 @@ where
     cursor_entry: Option<(B256, V::NonZero)>,
     /// Forward-only in-memory cursor over underlying V.
     post_state_cursor: ForwardInMemoryCursor<'a, B256, V>,
+    /// Whether the current storage overlay contains any non-zero slots.
+    post_state_has_non_zero: bool,
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
@@ -120,6 +122,7 @@ where
             cursor_wiped: false,
             cursor_entry: None,
             post_state_cursor,
+            post_state_has_non_zero: false,
             last_key: None,
             seeked: false,
             post_state,
@@ -138,13 +141,14 @@ where
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
     ) -> Self {
-        let (post_state_cursor, cursor_wiped) =
+        let (post_state_cursor, cursor_wiped, post_state_has_non_zero) =
             Self::get_storage_overlay(post_state, hashed_address);
         Self {
             cursor,
             cursor_wiped,
             cursor_entry: None,
             post_state_cursor,
+            post_state_has_non_zero,
             last_key: None,
             seeked: false,
             post_state,
@@ -155,12 +159,13 @@ where
     fn get_storage_overlay(
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
-    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
+    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool, bool) {
         let post_state_storage = post_state.storages.get(&hashed_address);
         let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
         let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
+        let post_state_has_non_zero = storage_slots.iter().any(|(_, value)| !value.is_zero());
 
-        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
+        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped, post_state_has_non_zero)
     }
 }
 
@@ -324,6 +329,7 @@ where
             cursor_wiped,
             cursor_entry,
             post_state_cursor,
+            post_state_has_non_zero,
             last_key,
             seeked,
             post_state: _,
@@ -334,6 +340,7 @@ where
 
         *cursor_wiped = false;
         *cursor_entry = None;
+        *post_state_has_non_zero = false;
         *last_key = None;
         *seeked = false;
     }
@@ -350,8 +357,8 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| !value.is_zero()) {
+        // Storage is not empty if the overlay contains any non-zero slots.
+        if self.post_state_has_non_zero {
             return Ok(false);
         }
 
@@ -363,7 +370,7 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        (self.post_state_cursor, self.cursor_wiped) =
+        (self.post_state_cursor, self.cursor_wiped, self.post_state_has_non_zero) =
             HashedPostStateCursor::<C, U256>::get_storage_overlay(self.post_state, hashed_address);
     }
 }
@@ -372,6 +379,7 @@ where
 mod tests {
     use super::*;
     use crate::hashed_cursor::mock::MockHashedCursor;
+    use alloy_primitives::map::B256Map;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -577,5 +585,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn storage_empty_ignores_zero_only_overlay() {
+        let hashed_address = B256::ZERO;
+        let db_nodes = Arc::new(BTreeMap::new());
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes, visited_keys);
+
+        let mut storages = B256Map::default();
+        storages.insert(
+            hashed_address,
+            reth_trie_common::HashedStorageSorted {
+                storage_slots: vec![(B256::repeat_byte(1), U256::ZERO)],
+                wiped: false,
+            },
+        );
+        let post_state = HashedPostStateSorted::new(Vec::new(), storages);
+
+        let mut cursor =
+            HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);
+        assert!(cursor.is_storage_empty().unwrap());
+    }
+
+    #[test]
+    fn storage_empty_short_circuits_for_live_overlay_slots() {
+        let hashed_address = B256::ZERO;
+        let db_nodes = Arc::new(BTreeMap::new());
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes, visited_keys);
+
+        let mut storages = B256Map::default();
+        storages.insert(
+            hashed_address,
+            reth_trie_common::HashedStorageSorted {
+                storage_slots: vec![(B256::repeat_byte(1), U256::from(1))],
+                wiped: false,
+            },
+        );
+        let post_state = HashedPostStateSorted::new(Vec::new(), storages);
+
+        let mut cursor =
+            HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);
+        assert!(!cursor.is_storage_empty().unwrap());
     }
 }
