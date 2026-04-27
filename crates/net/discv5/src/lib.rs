@@ -815,6 +815,48 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn advertised_ip_in_enr_while_bound_to_local_address() {
+        reth_tracing::init_test_tracing();
+
+        // Pick a real, locally-bindable port for discv5 to listen on.
+        let bind_udp_port = unused_udp_port();
+        let bind_listen: SocketAddr = format!("127.0.0.1:{bind_udp_port}").parse().unwrap();
+        let rlpx_bind: SocketAddr = "127.0.0.1:30303".parse().unwrap();
+        // Pretend the public/advertised address is something the host doesn't own.
+        let advertised: SocketAddr = "203.0.113.7:30303".parse().unwrap();
+        let advertised_ip = Ipv4Addr::new(203, 0, 113, 7);
+
+        // Build the inner discv5 config with `disable_enr_update()` so observations cannot
+        // overwrite the explicit advertised IP — same condition the CLI applies when an
+        // explicit advertised address is supplied.
+        let mut inner = discv5::ConfigBuilder::new(ListenConfig::from(bind_listen));
+        inner.disable_enr_update();
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let config = Config::builder(rlpx_bind)
+            .advertised_socket(advertised)
+            .discv5_config(inner.build())
+            .build();
+
+        let (node, _events) =
+            Discv5::start(&secret_key, config).await.expect("should start discv5");
+
+        // (a) ENR contains the advertised IP, the RLPx tcp port, and the discv5 udp bind port.
+        let enr = node.with_discv5(|d| d.local_enr());
+        assert_eq!(enr.ip4(), Some(advertised_ip));
+        assert_eq!(enr.tcp4(), Some(30303));
+        assert_eq!(enr.udp4(), Some(bind_udp_port));
+
+        // (b) discv5 is genuinely bound to the local bind address: trying to bind another
+        // UdpSocket to the same address fails with `AddrInUse`.
+        let rebind = UdpSocket::bind(("127.0.0.1", bind_udp_port));
+        assert!(rebind.is_err(), "expected discv5 to hold the bind port, but rebinding succeeded");
+
+        drop(node);
+        wait_for_udp_port_release(bind_udp_port, Duration::from_secs(1)).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn discv5_releases_port_on_drop() {
         reth_tracing::init_test_tracing();
 
