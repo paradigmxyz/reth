@@ -416,31 +416,31 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } = if let Some(mut handle) = trie_handle
-    {
-        // Drop the state hook, which drops the StateHookSender and triggers
-        // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
-        builder.executor_mut().set_state_hook(None);
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
+        if let Some(mut handle) = trie_handle {
+            // Drop the state hook, which drops the StateHookSender and triggers
+            // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
+            builder.executor_mut().set_state_hook(None);
 
-        // The sparse trie has been computing incrementally alongside tx execution.
-        // This recv() waits for the final root hash — most work is already done.
-        // Fall back to sync state root if the trie pipeline fails.
-        match handle.state_root() {
-            Ok(outcome) => {
-                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
-                builder.finish(
-                    state_provider.as_ref(),
-                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
-                )?
+            // The sparse trie has been computing incrementally alongside tx execution.
+            // This recv() waits for the final root hash — most work is already done.
+            // Fall back to sync state root if the trie pipeline fails.
+            match handle.state_root() {
+                Ok(outcome) => {
+                    debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                    builder.finish(
+                        state_provider.as_ref(),
+                        Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+                    )?
+                }
+                Err(err) => {
+                    warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
+                    builder.finish(state_provider.as_ref(), None)?
+                }
             }
-            Err(err) => {
-                warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
-                builder.finish(state_provider.as_ref(), None)?
-            }
-        }
-    } else {
-        builder.finish(state_provider.as_ref(), None)?
-    };
+        } else {
+            builder.finish(state_provider.as_ref(), None)?
+        };
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
@@ -456,9 +456,14 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    // EIP-7928 (Amsterdam): the BAL extracted by the block builder is RLP-encoded into
+    // the V6 envelope by `EthBuiltPayload::try_into_v6`. Encode it here to match the
+    // `Option<Bytes>` field on the built payload.
+    let block_access_list_bytes = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
+    let payload =
+        EthBuiltPayload::new(sealed_block, total_fees, requests, block_access_list_bytes)
+            // add blob sidecars from the executed txs
+            .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
