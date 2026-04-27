@@ -3599,8 +3599,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // that is why it is deleted afterwards.
         self.remove_blocks_above(block)?;
 
-        // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
+        // Keep the finish checkpoint's trie frontier aligned with the highest trie data that is
+        // still durably materialized after truncation.
+        self.update_finish_checkpoint_after_remove(block)?;
 
         Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
@@ -3615,8 +3616,35 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // that is why it is deleted afterwards.
         self.remove_blocks_above(block)?;
 
-        // Update pipeline progress
+        // Keep the finish checkpoint's trie frontier aligned with the highest trie data that is
+        // still durably materialized after truncation.
+        self.update_finish_checkpoint_after_remove(block)?;
+
+        Ok(())
+    }
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    fn trie_persisted_tip_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
+            checkpoint
+                .finish_stage_checkpoint()
+                .and_then(|finish| finish.partial_state_trie)
+                .unwrap_or(checkpoint.block_number)
+        }))
+    }
+
+    fn update_finish_checkpoint_after_remove(&self, block: BlockNumber) -> ProviderResult<()> {
+        let partial_state_trie = self
+            .trie_persisted_tip_block_number()?
+            .map(|trie_persisted_tip| trie_persisted_tip.min(block));
+
         self.update_pipeline_stages(block, true)?;
+        self.save_stage_checkpoint(
+            StageId::Finish,
+            StageCheckpoint::new(block)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie }),
+        )?;
 
         Ok(())
     }

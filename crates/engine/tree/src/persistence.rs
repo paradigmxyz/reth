@@ -154,15 +154,11 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult {
-                        non_trie_persisted_tip: last_block,
-                        trie_persisted_tip: None,
-                        commit_duration: None,
-                    });
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(plan, sender) => {
                     let result = self.on_save_blocks(plan)?;
@@ -193,18 +189,30 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
+    ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        let trie_persisted_tip =
+            provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
+                checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie)
+                    .unwrap_or(checkpoint.block_number)
+            });
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
+        Ok(PersistenceResult {
+            non_trie_persisted_tip: new_tip_hash
+                .map(|hash| BlockNumHash { hash, number: new_tip_num }),
+            trie_persisted_tip,
+            commit_duration: None,
+        })
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = plan.blocks.len()))]
@@ -502,6 +510,13 @@ mod tests {
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
 
+        persistence_handle(provider)
+    }
+
+    fn persistence_handle<N>(provider: ProviderFactory<N>) -> PersistenceHandle<EthPrimitives>
+    where
+        N: ProviderNodeTypes<Primitives = EthPrimitives>,
+    {
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
@@ -662,6 +677,37 @@ mod tests {
             assert_eq!(last_hash, last_block.hash);
             assert_eq!(result.trie_persisted_tip, Some(last_block.number));
         }
+    }
+
+    #[test]
+    fn test_remove_blocks_above_preserves_partial_state_trie() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory();
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let blocks = test_block_builder.get_executed_blocks(0..4).collect::<Vec<_>>();
+
+        let provider_rw = provider.database_provider_rw().unwrap();
+        provider_rw.save_blocks(&blocks, 0, 2, 2, SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let handle = persistence_handle(provider.clone());
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        handle.remove_blocks_above(2, tx).unwrap();
+
+        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+        let last_block = result.non_trie_persisted_tip.unwrap();
+        assert_eq!(last_block.number, 2);
+        assert_eq!(result.trie_persisted_tip, Some(1));
+
+        let finish_checkpoint =
+            provider.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 2);
+        assert_eq!(
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            Some(1)
+        );
     }
 
     /// Verifies that committing `save_blocks` history before running the pruner
