@@ -256,7 +256,7 @@ impl Discv4 {
     /// Creates a new `Discv4` instance using a pre-bound shared socket. No receive loop is
     /// spawned; instead returns an [`IngressHandler`] that should be used to forward raw packets
     /// received by the socket owner (e.g. discv5 unrecognized frames).
-    pub async fn bind_shared(
+    pub fn bind_shared(
         socket: Arc<UdpSocket>,
         local_node_record: NodeRecord,
         secret_key: SecretKey,

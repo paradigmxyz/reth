@@ -118,7 +118,7 @@ impl Discovery {
                     let socket = bind_socket(discovery_v4_addr).await?;
 
                     let (discv4, mut discv4_service, ingress) =
-                        Discv4::bind_shared(socket.clone(), local_enr, sk, config).await.map_err(
+                        Discv4::bind_shared(socket.clone(), local_enr, sk, config).map_err(
                             |err| {
                                 NetworkError::from_io_error(
                                     err,
