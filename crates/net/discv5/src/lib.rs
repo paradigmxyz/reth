@@ -1055,7 +1055,7 @@ mod test {
     }
 
     /// Regression test: [`ConfigBuilder::with_nat_external_ipv4_for_unspecified_bind`] must set
-    /// the ENR IPv4 when RLPx listens on `0.0.0.0` and an external IPv4 is provided.
+    /// the ENR IPv4 when `RLPx` listens on `0.0.0.0` and an external IPv4 is provided.
     #[test]
     fn with_nat_external_ipv4_for_unspecified_bind_sets_enr_ip4() {
         let nat_external_ip = Ipv4Addr::new(1, 2, 3, 4);

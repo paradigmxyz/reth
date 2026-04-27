@@ -177,13 +177,13 @@ impl ConfigBuilder {
         self
     }
 
-    /// When the RLPx listener address is [`IpAddr::is_unspecified`] and `nat_external_ipv4` is
+    /// When the `RLPx` listener address is [`IpAddr::is_unspecified`] and `nat_external_ipv4` is
     /// set, use that address for the TCP IP advertised in the local ENR (port is unchanged).
     ///
     /// The caller is expected to pass an IP resolved from their NAT configuration (for example
     /// `--nat extip:<ipv4>`) so the ENR lists a concrete address when the node binds to all
     /// interfaces.
-    pub fn with_nat_external_ipv4_for_unspecified_bind(
+    pub const fn with_nat_external_ipv4_for_unspecified_bind(
         mut self,
         nat_external_ipv4: Option<Ipv4Addr>,
     ) -> Self {

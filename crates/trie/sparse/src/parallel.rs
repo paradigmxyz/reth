@@ -956,7 +956,7 @@ impl ParallelSparseTrie {
         #[cfg(not(feature = "std"))]
         {
             let _ = num_nodes;
-            return false;
+            false
         }
 
         #[cfg(feature = "std")]
@@ -971,7 +971,7 @@ impl ParallelSparseTrie {
         #[cfg(not(feature = "std"))]
         {
             let _ = num_changed_keys;
-            return false;
+            false
         }
 
         #[cfg(feature = "std")]
