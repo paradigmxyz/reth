@@ -155,14 +155,8 @@ impl Command {
                     .as_ref()
                     .map(|t| t.persistence_wait)
                     .unwrap_or_default(),
-                execution_cache_wait: server_timings
-                    .as_ref()
-                    .map(|t| t.execution_cache_wait)
-                    .unwrap_or_default(),
-                sparse_trie_wait: server_timings
-                    .as_ref()
-                    .map(|t| t.sparse_trie_wait)
-                    .unwrap_or_default(),
+                execution_cache_wait: server_timings.as_ref().and_then(|t| t.execution_cache_wait),
+                sparse_trie_wait: server_timings.as_ref().and_then(|t| t.sparse_trie_wait),
             };
             blocks_processed += 1;
             let progress = match total_blocks {

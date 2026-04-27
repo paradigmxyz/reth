@@ -28,9 +28,9 @@ pub(crate) struct NewPayloadResult {
     /// Time spent waiting on persistence (backpressure + explicit wait).
     pub(crate) persistence_wait: Duration,
     /// Time spent waiting for execution cache lock.
-    pub(crate) execution_cache_wait: Duration,
+    pub(crate) execution_cache_wait: Option<Duration>,
     /// Time spent waiting for sparse trie lock.
-    pub(crate) sparse_trie_wait: Duration,
+    pub(crate) sparse_trie_wait: Option<Duration>,
 }
 
 impl NewPayloadResult {
@@ -65,8 +65,14 @@ impl Serialize for NewPayloadResult {
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
         state.serialize_field("persistence_wait", &self.persistence_wait.as_micros())?;
-        state.serialize_field("execution_cache_wait", &self.execution_cache_wait.as_micros())?;
-        state.serialize_field("sparse_trie_wait", &self.sparse_trie_wait.as_micros())?;
+        state.serialize_field(
+            "execution_cache_wait",
+            &self.execution_cache_wait.map(|wait| wait.as_micros()),
+        )?;
+        state.serialize_field(
+            "sparse_trie_wait",
+            &self.sparse_trie_wait.map(|wait| wait.as_micros()),
+        )?;
         state.end()
     }
 }
@@ -110,11 +116,15 @@ impl std::fmt::Display for CombinedResult {
             self.fcu_latency,
             np.latency,
         )?;
-        if !np.execution_cache_wait.is_zero() {
-            write!(f, ", execution cache wait: {:?}", np.execution_cache_wait)?;
+        if let Some(wait) = np.execution_cache_wait &&
+            !wait.is_zero()
+        {
+            write!(f, ", execution cache wait: {:?}", wait)?;
         }
-        if !np.sparse_trie_wait.is_zero() {
-            write!(f, ", trie cache wait: {:?}", np.sparse_trie_wait)?;
+        if let Some(wait) = np.sparse_trie_wait &&
+            !wait.is_zero()
+        {
+            write!(f, ", trie cache wait: {:?}", wait)?;
         }
         if !np.persistence_wait.is_zero() {
             write!(f, ", persistence wait: {:?}", np.persistence_wait)?;
@@ -150,11 +160,11 @@ impl Serialize for CombinedResult {
         )?;
         state.serialize_field(
             "execution_cache_wait",
-            &self.new_payload_result.execution_cache_wait.as_micros(),
+            &self.new_payload_result.execution_cache_wait.map(|wait| wait.as_micros()),
         )?;
         state.serialize_field(
             "sparse_trie_wait",
-            &self.new_payload_result.sparse_trie_wait.as_micros(),
+            &self.new_payload_result.sparse_trie_wait.map(|wait| wait.as_micros()),
         )?;
         state.end()
     }
