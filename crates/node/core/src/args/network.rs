@@ -886,7 +886,10 @@ impl DiscoveryArgs {
             // advertised address was supplied (we don't want it overwritten from observations).
             discv5_config_builder.disable_enr_update();
         }
-        reth_discv5::Config::builder(rlpx_advertised_socket)
+        // `tcp_socket` is the bind socket. The advertised IP is supplied separately via
+        // `.advertised_socket(...)`; this keeps `Config::rlpx_socket()` (and the
+        // `rlpx_ip_mode` derived from the same field) consistent with how the OS binds.
+        reth_discv5::Config::builder(rlpx_tcp_socket)
             .advertised_socket(rlpx_advertised_socket)
             .discv5_config(discv5_config_builder.build())
             .add_unsigned_boot_nodes(boot_nodes)
