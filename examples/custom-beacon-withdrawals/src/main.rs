@@ -165,7 +165,7 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.context_for_next_block(parent, attributes)
     }
 
-    fn sendable_executor_for_block<'a, DB: reth_ethereum::evm::primitives::Database>(
+    fn executor_for_block<'a, DB: reth_ethereum::evm::primitives::Database>(
         &'a self,
         db: &'a mut reth_ethereum::evm::revm::State<DB>,
         block: &'a SealedBlock<Block>,

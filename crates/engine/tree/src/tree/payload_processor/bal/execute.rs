@@ -183,7 +183,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             let worker_evm_config = self.evm_config.clone();
             let mut canonical_executor = self
                 .evm_config
-                .sendable_executor_for_block(&mut canonical_state, block)
+                .executor_for_block(&mut canonical_state, block)
                 .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
 
             canonical_executor.apply_pre_execution_changes()?;
@@ -212,7 +212,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                         worker_state.set_bal_index(tx_index);
 
                         evm_config
-                            .sendable_executor_for_block(&mut worker_state, block)
+                            .executor_for_block(&mut worker_state, block)
                             .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
                             .execute_transaction_without_commit(tx)
                             .map_err(BalExecutionError::Evm)
