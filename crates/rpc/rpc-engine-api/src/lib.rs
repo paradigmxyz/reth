@@ -15,6 +15,10 @@ mod engine_api;
 /// Reth-specific engine API extensions.
 mod reth_engine_api;
 
+/// Block Access List (BAL) cache for EIP-7928.
+mod bal_cache;
+pub use bal_cache::BalCache;
+
 /// Engine API capabilities.
 pub mod capabilities;
 pub use capabilities::EngineCapabilities;
