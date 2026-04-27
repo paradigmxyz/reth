@@ -54,7 +54,7 @@ pub mod snap;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use block_access_lists::client::BlockAccessListsClient;
+pub use block_access_lists::client::{BalRequirement, BlockAccessListsClient};
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
 pub use receipts::client::ReceiptsClient;

@@ -300,8 +300,16 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         &'a self,
         block_hash: BlockHash,
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        let mut block_number =
+        let block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        self.history_by_block_number(block_number)
+    }
+
+    /// Storage provider for state at that given block number
+    pub fn history_by_block_number<'a>(
+        &'a self,
+        mut block_number: BlockNumber,
+    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
