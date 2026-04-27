@@ -574,9 +574,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// - `blocks[trie_catchup_block_count..full_persist_end]` are `full_persist_blocks`: this call
     ///   persists both their non-trie outputs and trie data.
     /// - `blocks[full_persist_end..in_memory_block_start]` are `deferred_trie_blocks`: this call
-    ///   persists only their non-trie outputs.
+    ///   persists only their non-trie outputs, and they mask trie writes for older blocks in the
+    ///   same durable checkpoint.
     /// - `blocks[in_memory_block_start..]` are `in_memory_blocks`: they remain fully in memory and
-    ///   are only used to mask trie writes for older blocks.
+    ///   do not affect durable trie masking until a later call persists their non-trie outputs.
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
@@ -617,7 +618,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let full_persist_blocks = &blocks[trie_catchup_block_count..full_persist_end];
         let deferred_trie_blocks = &blocks[full_persist_end..in_memory_block_start];
         let non_trie_blocks = &blocks[trie_catchup_block_count..in_memory_block_start];
-        let in_memory_blocks = &blocks[in_memory_block_start..];
 
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
@@ -806,11 +806,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .chain(full_persist_blocks.iter())
                     .map(|block| block.trie_data())
                     .collect();
-                let trie_masking_data: Vec<_> = deferred_trie_blocks
-                    .iter()
-                    .chain(in_memory_blocks.iter())
-                    .map(|block| block.trie_data())
-                    .collect();
+                // Only blocks whose non-trie outputs are durably written in this call can mask
+                // trie writes. A fully in-memory suffix must not suppress the durable trie
+                // frontier because its changesets are not on disk yet.
+                let trie_masking_data: Vec<_> =
+                    deferred_trie_blocks.iter().map(|block| block.trie_data()).collect();
 
                 let start = Instant::now();
                 if !trie_persist_data.is_empty() {
@@ -4587,7 +4587,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_blocks_disjoints_in_memory_trie_data() {
+    fn test_save_blocks_only_masks_trie_with_deferred_blocks() {
         use reth_trie::{
             updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
             BranchNodeCompact, HashedPostStateSorted, HashedStorageSorted,
@@ -4632,31 +4632,36 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let kept_account = B256::with_last_byte(0x11);
-        let overlapping_account = B256::with_last_byte(0x12);
+        let deferred_masked_account = B256::with_last_byte(0x12);
+        let in_memory_overlap_account = B256::with_last_byte(0x13);
+        let in_memory_only_account = B256::with_last_byte(0x14);
         let kept_storage = B256::with_last_byte(0x21);
-        let overlapping_storage = B256::with_last_byte(0x22);
+        let deferred_masked_storage = B256::with_last_byte(0x22);
+        let in_memory_overlap_storage = B256::with_last_byte(0x23);
+        let in_memory_only_storage = B256::with_last_byte(0x24);
         let kept_slot = B256::with_last_byte(0x31);
-        let overlapping_slot = B256::with_last_byte(0x32);
-        let in_memory_hashed_account = B256::with_last_byte(0x43);
-        let in_memory_hashed_storage = B256::with_last_byte(0x44);
-        let in_memory_hashed_slot = B256::with_last_byte(0x45);
+        let deferred_masked_slot = B256::with_last_byte(0x32);
+        let in_memory_overlap_slot = B256::with_last_byte(0x33);
+        let in_memory_only_slot = B256::with_last_byte(0x34);
         let kept_account_node = Nibbles::from_nibbles([0x1, 0x2]);
-        let overlapping_account_node = Nibbles::from_nibbles([0x1, 0x3]);
+        let deferred_masked_account_node = Nibbles::from_nibbles([0x1, 0x3]);
+        let in_memory_overlap_account_node = Nibbles::from_nibbles([0x1, 0x4]);
+        let in_memory_only_account_node = Nibbles::from_nibbles([0x1, 0x5]);
         let kept_storage_node = Nibbles::from_nibbles([0x2, 0x1]);
-        let overlapping_storage_node = Nibbles::from_nibbles([0x2, 0x2]);
-        let in_memory_account_node = Nibbles::from_nibbles([0x2, 0x3]);
-        let in_memory_storage_node = Nibbles::from_nibbles([0x2, 0x4]);
-        let plain_storage_address = Address::new([0xAA; 20]);
-        let plain_storage_slot = U256::from_limbs([1, 0, 0, 0]);
+        let deferred_masked_storage_node = Nibbles::from_nibbles([0x2, 0x2]);
+        let in_memory_overlap_storage_node = Nibbles::from_nibbles([0x2, 0x3]);
+        let in_memory_only_storage_node = Nibbles::from_nibbles([0x2, 0x4]);
         let blocks: Vec<_> =
-            TestBlockBuilder::eth().with_state().get_executed_blocks(1..3).collect();
-        let partial_persist_base = &blocks[0];
-        let in_memory_only_base = &blocks[1];
+            TestBlockBuilder::eth().with_state().get_executed_blocks(1..4).collect();
+        let full_persist_base = &blocks[0];
+        let deferred_trie_base = &blocks[1];
+        let in_memory_only_base = &blocks[2];
 
-        let partial_persist_hashed_state = HashedPostStateSorted::new(
+        let full_persist_hashed_state = HashedPostStateSorted::new(
             vec![
                 (kept_account, Some(Account::default())),
-                (overlapping_account, Some(Account { nonce: 1, ..Default::default() })),
+                (deferred_masked_account, Some(Account { nonce: 1, ..Default::default() })),
+                (in_memory_overlap_account, Some(Account { nonce: 2, ..Default::default() })),
             ],
             B256Map::from_iter([
                 (
@@ -4667,18 +4672,26 @@ mod tests {
                     },
                 ),
                 (
-                    overlapping_storage,
+                    deferred_masked_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(overlapping_slot, U256::from(2))],
+                        storage_slots: vec![(deferred_masked_slot, U256::from(2))],
+                    },
+                ),
+                (
+                    in_memory_overlap_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(in_memory_overlap_slot, U256::from(3))],
                     },
                 ),
             ]),
         );
-        let partial_persist_trie_updates = TrieUpdatesSorted::new(
+        let full_persist_trie_updates = TrieUpdatesSorted::new(
             vec![
                 (kept_account_node.clone(), Some(branch(0b0000_1111_0000_1111))),
-                (overlapping_account_node.clone(), Some(branch(0b1111_0000_1111_0000))),
+                (deferred_masked_account_node.clone(), Some(branch(0b1111_0000_1111_0000))),
+                (in_memory_overlap_account_node.clone(), Some(branch(0b1010_1010_1010_1010))),
             ],
             B256Map::from_iter([
                 (
@@ -4689,71 +4702,117 @@ mod tests {
                     },
                 ),
                 (
-                    overlapping_storage,
+                    deferred_masked_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
                         storage_nodes: vec![(
-                            overlapping_storage_node.clone(),
+                            deferred_masked_storage_node.clone(),
                             Some(branch(0b0101)),
+                        )],
+                    },
+                ),
+                (
+                    in_memory_overlap_storage,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(
+                            in_memory_overlap_storage_node.clone(),
+                            Some(branch(0b0110)),
                         )],
                     },
                 ),
             ]),
         );
 
-        let partial_persist_block = ExecutedBlock::new(
-            Arc::clone(&partial_persist_base.recovered_block),
-            Arc::clone(&partial_persist_base.execution_output),
+        let full_persist_block = ExecutedBlock::new(
+            Arc::clone(&full_persist_base.recovered_block),
+            Arc::clone(&full_persist_base.execution_output),
             ComputedTrieData {
-                hashed_state: Arc::new(partial_persist_hashed_state),
-                trie_updates: Arc::new(partial_persist_trie_updates),
+                hashed_state: Arc::new(full_persist_hashed_state),
+                trie_updates: Arc::new(full_persist_trie_updates),
+                ..Default::default()
+            },
+        );
+
+        let deferred_trie_hashed_state = HashedPostStateSorted::new(
+            vec![(deferred_masked_account, Some(Account { nonce: 3, ..Default::default() }))],
+            B256Map::from_iter([(
+                deferred_masked_storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(deferred_masked_slot, U256::from(4))],
+                },
+            )]),
+        );
+        let deferred_trie_updates = TrieUpdatesSorted::new(
+            vec![(deferred_masked_account_node.clone(), Some(branch(0b0011_0011)))],
+            B256Map::from_iter([(
+                deferred_masked_storage,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(
+                        deferred_masked_storage_node.clone(),
+                        Some(branch(0b1100)),
+                    )],
+                },
+            )]),
+        );
+        let deferred_trie_block = ExecutedBlock::new(
+            Arc::clone(&deferred_trie_base.recovered_block),
+            Arc::clone(&deferred_trie_base.execution_output),
+            ComputedTrieData {
+                hashed_state: Arc::new(deferred_trie_hashed_state),
+                trie_updates: Arc::new(deferred_trie_updates),
                 ..Default::default()
             },
         );
 
         let in_memory_only_hashed_state = HashedPostStateSorted::new(
             vec![
-                (overlapping_account, Some(Account { nonce: 2, ..Default::default() })),
-                (in_memory_hashed_account, Some(Account { nonce: 3, ..Default::default() })),
+                (in_memory_overlap_account, Some(Account { nonce: 4, ..Default::default() })),
+                (in_memory_only_account, Some(Account { nonce: 5, ..Default::default() })),
             ],
             B256Map::from_iter([
                 (
-                    overlapping_storage,
+                    in_memory_overlap_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(overlapping_slot, U256::from(3))],
+                        storage_slots: vec![(in_memory_overlap_slot, U256::from(5))],
                     },
                 ),
                 (
-                    in_memory_hashed_storage,
+                    in_memory_only_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(in_memory_hashed_slot, U256::from(4))],
+                        storage_slots: vec![(in_memory_only_slot, U256::from(6))],
                     },
                 ),
             ]),
         );
         let in_memory_only_trie_updates = TrieUpdatesSorted::new(
             vec![
-                (overlapping_account_node.clone(), Some(branch(0b0011_0011))),
-                (in_memory_account_node.clone(), Some(branch(0b0101_0101))),
+                (in_memory_overlap_account_node.clone(), Some(branch(0b0101_0101))),
+                (in_memory_only_account_node.clone(), Some(branch(0b1111_0000))),
             ],
             B256Map::from_iter([
                 (
-                    overlapping_storage,
+                    in_memory_overlap_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
                         storage_nodes: vec![(
-                            overlapping_storage_node.clone(),
-                            Some(branch(0b1100)),
+                            in_memory_overlap_storage_node.clone(),
+                            Some(branch(0b1001)),
                         )],
                     },
                 ),
                 (
-                    in_memory_hashed_storage,
+                    in_memory_only_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(in_memory_storage_node.clone(), Some(branch(0b1111)))],
+                        storage_nodes: vec![(
+                            in_memory_only_storage_node.clone(),
+                            Some(branch(0b1111)),
+                        )],
                     },
                 ),
             ]),
@@ -4769,8 +4828,8 @@ mod tests {
         );
 
         let provider_rw = factory.provider_rw().unwrap();
-        let blocks = vec![partial_persist_block, in_memory_only_block];
-        provider_rw.save_blocks(&blocks, 1, 0, 1, SaveBlocksMode::Full).unwrap();
+        let blocks = vec![full_persist_block, deferred_trie_block, in_memory_only_block];
+        provider_rw.save_blocks(&blocks, 0, 1, 1, SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -4781,31 +4840,30 @@ mod tests {
             finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
             Some(1)
         );
-
-        let mut plain_storages = tx.cursor_dup_read::<tables::PlainStorageState>().unwrap();
-        assert_eq!(
-            plain_storages
-                .seek_by_key_subkey(
-                    plain_storage_address,
-                    B256::from(plain_storage_slot.to_be_bytes()),
-                )
-                .unwrap(),
-            Some(StorageEntry {
-                key: B256::from(plain_storage_slot.to_be_bytes()),
-                value: U256::from(3),
-            })
-        );
         assert!(provider.block_hash(2).unwrap().is_some());
+        assert!(provider.block_hash(3).unwrap().is_none());
 
         let mut hashed_accounts = tx.cursor_read::<tables::HashedAccounts>().unwrap();
         assert!(hashed_accounts.seek_exact(kept_account).unwrap().is_some());
-        assert!(hashed_accounts.seek_exact(overlapping_account).unwrap().is_none());
-        assert!(hashed_accounts.seek_exact(in_memory_hashed_account).unwrap().is_none());
+        assert!(hashed_accounts.seek_exact(deferred_masked_account).unwrap().is_none());
+        assert!(hashed_accounts.seek_exact(in_memory_overlap_account).unwrap().is_some());
+        assert!(hashed_accounts.seek_exact(in_memory_only_account).unwrap().is_none());
 
         let mut hashed_storages = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
         assert!(hashed_storages.seek_by_key_subkey(kept_storage, kept_slot).unwrap().is_some());
         assert!(hashed_storages
-            .walk_dup(Some(overlapping_storage), None)
+            .walk_dup(Some(deferred_masked_storage), None)
+            .unwrap()
+            .next()
+            .transpose()
+            .unwrap()
+            .is_none());
+        assert!(hashed_storages
+            .seek_by_key_subkey(in_memory_overlap_storage, in_memory_overlap_slot)
+            .unwrap()
+            .is_some());
+        assert!(hashed_storages
+            .walk_dup(Some(in_memory_only_storage), None)
             .unwrap()
             .next()
             .transpose()
@@ -4818,10 +4876,17 @@ mod tests {
             .unwrap()
             .is_some());
         assert!(account_trie
-            .seek_exact(StoredNibbles(overlapping_account_node))
+            .seek_exact(StoredNibbles(deferred_masked_account_node))
             .unwrap()
             .is_none());
-        assert!(account_trie.seek_exact(StoredNibbles(in_memory_account_node)).unwrap().is_none());
+        assert!(account_trie
+            .seek_exact(StoredNibbles(in_memory_overlap_account_node))
+            .unwrap()
+            .is_some());
+        assert!(account_trie
+            .seek_exact(StoredNibbles(in_memory_only_account_node))
+            .unwrap()
+            .is_none());
 
         let mut storage_trie = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
         let kept_entries: Vec<_> = storage_trie
@@ -4832,15 +4897,23 @@ mod tests {
         assert_eq!(kept_entries.len(), 1);
         assert_eq!(kept_entries[0].1.nibbles.0, kept_storage_node);
 
-        let overlapping_entries: Vec<_> = storage_trie
-            .walk_dup(Some(overlapping_storage), None)
+        let deferred_masked_entries: Vec<_> = storage_trie
+            .walk_dup(Some(deferred_masked_storage), None)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert!(overlapping_entries.is_empty());
+        assert!(deferred_masked_entries.is_empty());
+
+        let in_memory_overlap_entries: Vec<_> = storage_trie
+            .walk_dup(Some(in_memory_overlap_storage), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(in_memory_overlap_entries.len(), 1);
+        assert_eq!(in_memory_overlap_entries[0].1.nibbles.0, in_memory_overlap_storage_node);
 
         let in_memory_entries: Vec<_> = storage_trie
-            .walk_dup(Some(in_memory_hashed_storage), None)
+            .walk_dup(Some(in_memory_only_storage), None)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
