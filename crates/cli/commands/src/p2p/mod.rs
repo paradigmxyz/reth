@@ -192,9 +192,8 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
 
         let default_secret_key_path = data_dir.p2p_secret();
         let p2p_secret_key = self.network.secret_key(default_secret_key_path)?;
-        let advertised_ip =
-            self.network.nat.clone().as_external_ip(self.network.port).unwrap_or(self.network.addr);
-        let advertised_socket: SocketAddr = (advertised_ip, self.network.port).into();
+        let bind_socket: SocketAddr = (self.network.addr, self.network.port).into();
+        let advertised_ip = self.network.nat.clone().as_external_ip(self.network.port);
         let boot_nodes = self
             .network
             .resolved_bootnodes()
@@ -210,8 +209,8 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
                 .apply(|builder| {
                     self.network.discovery.apply_to_builder(
                         builder,
-                        advertised_socket,
-                        self.network.addr,
+                        bind_socket,
+                        advertised_ip,
                         boot_nodes,
                     )
                 })
