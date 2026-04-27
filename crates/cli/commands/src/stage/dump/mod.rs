@@ -152,17 +152,21 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
     output_db: &PathBuf,
     db_tool: &DbTool<N>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
-    assert!(from < to, "FROM block should be lower than TO block.");
+    if from >= to {
+        return Err(eyre::eyre!("FROM block should be lower than TO block"));
+    }
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
     let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
+    let start = from.checked_sub(1);
+    let end = to.checked_add(1).ok_or_else(|| eyre::eyre!("TO block is too large"))?;
 
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(
             &db_tool.provider_factory.db_ref().tx()?,
-            Some(from - 1),
-            to + 1,
+            start,
+            end,
         )
     })??;
 
@@ -170,7 +174,7 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
         .provider_factory
         .db_ref()
         .view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??
-        .expect("some");
+        .ok_or_else(|| eyre::eyre!("missing block body indices in source database"))?;
 
     Ok((output_datadir, tip_block_number))
 }
