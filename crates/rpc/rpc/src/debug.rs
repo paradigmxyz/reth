@@ -238,7 +238,7 @@ where
                 bal::prepare_state_before_transaction(
                     &eth_api,
                     &mut db,
-                    evm_env.clone(),
+                    block.sealed_block(),
                     block_txs,
                     tx_index as usize,
                 )?;
@@ -360,7 +360,7 @@ where
                 bal::prepare_state_before_transaction(
                     &eth_api,
                     &mut db,
-                    evm_env.clone(),
+                    block.sealed_block(),
                     block.transactions_recovered(),
                     tx_index,
                 )?;

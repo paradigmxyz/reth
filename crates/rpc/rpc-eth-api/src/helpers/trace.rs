@@ -186,7 +186,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 bal::prepare_state_before_transaction(
                     &this,
                     &mut db,
-                    evm_env.clone(),
+                    block.sealed_block(),
                     block_txs,
                     tx_index,
                 )?;

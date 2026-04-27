@@ -5,8 +5,8 @@ use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm, EvmEnvFor};
-use reth_primitives_traits::Recovered;
+use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
+use reth_primitives_traits::{BlockTy, Recovered, SealedBlock};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
@@ -18,7 +18,7 @@ use tracing::debug;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
-    FromEvmError, RpcNodeCore,
+    RpcNodeCore,
 };
 
 /// Helper trait for `eth_blockAccessList` RPC method.
@@ -132,10 +132,12 @@ where
 ///
 /// If a BAL is attached, this only sets the BAL index. Otherwise it executes and commits the
 /// transactions preceding `target_tx_index`.
+///
+/// The caller must apply the block's pre-execution changes before invoking this helper.
 pub fn prepare_state_before_transaction<'a, Api, I>(
     api: &Api,
     db: &mut StateCacheDb,
-    evm_env: EvmEnvFor<Api::Evm>,
+    block: &SealedBlock<BlockTy<Api::Primitives>>,
     transactions: I,
     target_tx_index: usize,
 ) -> Result<(), Api::Error>
@@ -148,10 +150,13 @@ where
         return Ok(())
     }
 
-    let mut evm = api.evm_config().evm_with_env(db, evm_env);
+    let mut executor = api
+        .evm_config()
+        .executor_for_block(db, block)
+        .map_err(RethError::other)
+        .map_err(Api::Error::from_eth_err)?;
     for tx in transactions.into_iter().take(target_tx_index) {
-        let tx_env = api.evm_config().tx_env(tx);
-        evm.transact_commit(tx_env).map_err(Api::Error::from_evm_err)?;
+        executor.execute_transaction(tx).map_err(Api::Error::from_eth_err)?;
     }
     Ok(())
 }
