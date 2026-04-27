@@ -285,6 +285,7 @@ where
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
+            parallel_bal_execution,
         );
 
         PayloadHandle {
@@ -311,7 +312,8 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -465,29 +467,36 @@ where
     }
 
     /// Spawn prewarming optionally wired to the sparse trie task for target updates.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor",
-        skip_all,
-        fields(bal=%env.decoded_bal.is_some())
-    )]
+    ///
+    /// `parallel_bal_execution` is true when the BAL execute path will execute this block. In
+    /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
+    /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        parallel_bal_execution: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
-
+        let mode = if parallel_bal_execution {
+            PrewarmMode::BlockAccessList(
+                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+            )
+        } else if self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        {
+            PrewarmMode::Skipped
+        } else {
+            PrewarmMode::Transactions(transactions)
+        };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
-        let maybe_decoded_bal = env.decoded_bal.clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -512,17 +521,7 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_state_root = self.disable_bal_parallel_state_root;
             self.executor.spawn_blocking_named("prewarm", move || {
-                let mode = if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_state_root)
-                {
-                    PrewarmMode::BlockAccessList(decoded_bal)
-                } else if skip_prewarm {
-                    PrewarmMode::Skipped
-                } else {
-                    PrewarmMode::Transactions(transactions)
-                };
                 prewarm_task.run(mode, to_prewarm_task);
             });
         }
