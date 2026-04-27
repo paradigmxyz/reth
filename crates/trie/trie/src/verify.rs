@@ -35,7 +35,8 @@ enum BranchNode {
 ///   started. In other words, if the current storage account is not equal to the previous, the
 ///   previous has no more nodes.
 #[derive(Debug)]
-struct StateRootBranchNodesIter<H> {
+struct StateRootBranchNodesIter<T, H> {
+    trie_cursor_factory: T,
     hashed_cursor_factory: H,
     account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     storage_tries: Vec<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
@@ -44,9 +45,10 @@ struct StateRootBranchNodesIter<H> {
     complete: bool,
 }
 
-impl<H> StateRootBranchNodesIter<H> {
-    fn new(hashed_cursor_factory: H) -> Self {
+impl<T, H> StateRootBranchNodesIter<T, H> {
+    fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
         Self {
+            trie_cursor_factory,
             hashed_cursor_factory,
             account_nodes: Default::default(),
             storage_tries: Default::default(),
@@ -66,7 +68,9 @@ impl<H> StateRootBranchNodesIter<H> {
     }
 }
 
-impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
+impl<T: TrieCursorFactory + Clone, H: HashedCursorFactory + Clone> Iterator
+    for StateRootBranchNodesIter<T, H>
+{
     type Item = Result<BranchNode, StateRootError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -101,9 +105,11 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
                 return None
             }
 
-            let state_root =
-                StateRoot::new(NoopTrieCursorFactory, self.hashed_cursor_factory.clone())
-                    .with_intermediate_state(self.intermediate_state.take().map(|s| *s));
+            let state_root = StateRoot::new(
+                self.trie_cursor_factory.clone(),
+                self.hashed_cursor_factory.clone(),
+            )
+            .with_intermediate_state(self.intermediate_state.take().map(|s| *s));
 
             let updates = match state_root.root_with_progress() {
                 Err(err) => return Some(Err(err)),
@@ -192,13 +198,14 @@ struct SingleVerifier<I> {
     account: Option<B256>, // None for accounts trie
     trie_iter: I,
     curr: Option<(Nibbles, BranchNodeCompact)>,
+    canonical_branch_nodes: Vec<(Nibbles, BranchNodeCompact)>,
 }
 
 impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
         let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
         let curr = trie_iter.next().transpose()?;
-        Ok(Self { account, trie_iter, curr })
+        Ok(Self { account, trie_iter, curr, canonical_branch_nodes: Vec::new() })
     }
 
     const fn output_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
@@ -241,6 +248,18 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         path: Nibbles,
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError> {
+        match self.canonical_branch_nodes.first() {
+            Some((first_path, _)) if path.len() < first_path.len() => {
+                self.canonical_branch_nodes.clear();
+                self.canonical_branch_nodes.push((path, node.clone()));
+            }
+            Some((first_path, _)) if path.len() == first_path.len() => {
+                self.canonical_branch_nodes.push((path, node.clone()));
+            }
+            None => self.canonical_branch_nodes.push((path, node.clone())),
+            Some(_) => {}
+        }
+
         loop {
             // `curr` is None only if the end of the iterator has been reached. Any further nodes
             // found must be considered missing.
@@ -285,13 +304,16 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 
     /// Must be called once there are no more calls to `next` to made. All further nodes produced
     /// by the iterator will be considered extraneous.
-    fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), DatabaseError> {
+    fn finalize(
+        &mut self,
+        outputs: &mut Vec<Output>,
+    ) -> Result<Vec<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
                 outputs.push(self.output_extra(curr_path, curr_node));
                 self.curr = self.trie_iter.next().transpose()?;
             } else {
-                return Ok(())
+                return Ok(core::mem::take(&mut self.canonical_branch_nodes))
             }
         }
     }
@@ -304,7 +326,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 pub struct Verifier<'a, T: TrieCursorFactory, H> {
     trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
-    branch_node_iter: StateRootBranchNodesIter<H>,
+    branch_node_iter: StateRootBranchNodesIter<NoopTrieCursorFactory, H>,
     outputs: Vec<Output>,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
     storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor<'a>>>)>,
@@ -320,7 +342,10 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         Ok(Self {
             trie_cursor_factory,
             hashed_cursor_factory: hashed_cursor_factory.clone(),
-            branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
+            branch_node_iter: StateRootBranchNodesIter::new(
+                NoopTrieCursorFactory,
+                hashed_cursor_factory,
+            ),
             outputs: Default::default(),
             account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
             storage: None,
@@ -395,9 +420,9 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
     fn try_next(&mut self) -> Result<(), StateRootError> {
         match self.branch_node_iter.next().transpose()? {
             None => {
-                self.account.finalize(&mut self.outputs)?;
+                let _ = self.account.finalize(&mut self.outputs)?;
                 if let Some((prev_account, storage)) = self.storage.as_mut() {
-                    storage.finalize(&mut self.outputs)?;
+                    let _ = storage.finalize(&mut self.outputs)?;
 
                     // If there was a previous storage account, and it is the final one, then we
                     // need to validate that all accounts coming after it have empty storages.
@@ -430,7 +455,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
                         storage.next(&mut self.outputs, path, node)?;
                     }
                     Some((prev_account, storage)) => {
-                        storage.finalize(&mut self.outputs)?;
+                        let _ = storage.finalize(&mut self.outputs)?;
                         // Clear any storage entries between the previous account and the new one
                         let prev_account = *prev_account;
                         self.verify_empty_storages(prev_account, account, false, false)?;
@@ -516,7 +541,7 @@ mod tests {
     fn test_state_root_branch_nodes_iter_empty() {
         // Test with completely empty state
         let factory = MockHashedCursorFactory::new(BTreeMap::new(), B256Map::default());
-        let mut iter = StateRootBranchNodesIter::new(factory);
+        let mut iter = StateRootBranchNodesIter::new(NoopTrieCursorFactory, factory);
 
         // Collect all results - with empty state, should complete without producing nodes
         let mut count = 0;
@@ -554,7 +579,7 @@ mod tests {
         storage_tries.insert(addr1, storage1);
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
-        let mut iter = StateRootBranchNodesIter::new(factory);
+        let mut iter = StateRootBranchNodesIter::new(NoopTrieCursorFactory, factory);
 
         // Collect nodes and verify basic properties
         let mut account_paths = Vec::new();
@@ -627,7 +652,7 @@ mod tests {
         }
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
-        let mut iter = StateRootBranchNodesIter::new(factory);
+        let mut iter = StateRootBranchNodesIter::new(NoopTrieCursorFactory, factory);
 
         // Track what we see
         let mut seen_storage_accounts = Vec::new();
@@ -770,7 +795,7 @@ mod tests {
         // We only provide 0x1 and 0x3, skipping 0x2 and root
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x3]), node3).unwrap();
-        verifier.finalize(&mut outputs).unwrap();
+        let _ = verifier.finalize(&mut outputs).unwrap();
 
         // Should have two "extra" outputs for nodes in the trie that we skipped
         if outputs.len() != 2 {
@@ -813,12 +838,12 @@ mod tests {
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
         // Process first two nodes correctly
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1.clone()).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2.clone()).unwrap();
         assert!(outputs.is_empty());
 
         // Finalize - should mark remaining nodes (0x3 and root) as extra
-        verifier.finalize(&mut outputs).unwrap();
+        let canonical_branch_nodes = verifier.finalize(&mut outputs).unwrap();
 
         // Should have two extra nodes
         assert_eq!(outputs.len(), 2);
@@ -831,6 +856,10 @@ mod tests {
             &outputs[1],
             Output::AccountExtra(path, node)
                 if *path == Nibbles::new() && *node == node_root
+        );
+        assert_eq!(
+            canonical_branch_nodes,
+            vec![(Nibbles::from_nibbles([0x1]), node1), (Nibbles::from_nibbles([0x2]), node2),]
         );
     }
 
@@ -910,8 +939,8 @@ mod tests {
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
-        verifier.finalize(&mut outputs).unwrap();
+        verifier.next(&mut outputs, Nibbles::new(), node_root.clone()).unwrap();
+        let canonical_branch_nodes = verifier.finalize(&mut outputs).unwrap();
 
         // All should match, no outputs
         if !outputs.is_empty() {
@@ -924,6 +953,7 @@ mod tests {
             }
         }
         assert!(outputs.is_empty());
+        assert_eq!(canonical_branch_nodes, vec![(Nibbles::new(), node_root)]);
     }
 
     #[test]
@@ -994,7 +1024,7 @@ mod tests {
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x2, 0x1]), node21).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
         verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
-        verifier.finalize(&mut outputs).unwrap();
+        let _ = verifier.finalize(&mut outputs).unwrap();
 
         // All should match, no outputs
         if !outputs.is_empty() {
