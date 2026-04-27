@@ -123,6 +123,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// Shared local range information that gets propagated to active sessions.
     /// This represents the range of blocks that this node can serve to other peers.
     local_range_info: BlockRangeInfo,
+    /// When true, block announcement messages (`NewBlock`, `NewBlockHashes`) are rejected before
+    /// RLP decoding on new sessions to avoid memory amplification.
+    reject_block_announcements: bool,
 }
 
 // === impl SessionManager ===
@@ -140,6 +143,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
         eth_max_message_size: usize,
+        reject_block_announcements: bool,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -176,6 +180,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             handshake,
             eth_max_message_size,
             local_range_info,
+            reject_block_announcements,
         }
     }
 
@@ -496,7 +501,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 local_addr,
                 peer_id,
                 capabilities,
-                conn,
+                mut conn,
                 status,
                 direction,
                 client_id,
@@ -562,6 +567,10 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 let remote_range_info = status.block_range_update().map(|update| {
                     BlockRangeInfo::new(update.earliest, update.latest, update.latest_hash)
                 });
+
+                if self.reject_block_announcements {
+                    conn.set_reject_block_announcements(true);
+                }
 
                 let session = ActiveSession {
                     next_id: 0,
