@@ -986,6 +986,11 @@ Engine:
 
           This value must be greater than `--engine.persistence-threshold`.
 
+      --engine.deferred-trie-blocks <DEFERRED_TRIE_BLOCKS>
+          Configure how many canonical blocks may persist non-trie outputs while deferring durable trie updates
+
+          [default: 0]
+
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
 

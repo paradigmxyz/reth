@@ -2134,8 +2134,12 @@ where
         let trie_persisted_tip_number = self.persistence_state.trie_persisted_tip.number;
         let non_trie_persisted_tip_number = self.persistence_state.non_trie_persisted_tip.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
-        let threshold_non_trie_target =
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+        let non_trie_target_number = match target {
+            PersistTarget::Threshold => {
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+            }
+            PersistTarget::Head => canonical_head_number,
+        };
 
         debug!(
             target: "engine::tree",
@@ -2151,10 +2155,7 @@ where
                 break;
             }
 
-            if self.config.deferred_trie_blocks() > 0 ||
-                matches!(target, PersistTarget::Head) ||
-                block.recovered_block().number() <= threshold_non_trie_target
-            {
+            if block.recovered_block().number() <= non_trie_target_number {
                 blocks.push(block.clone());
             }
 
@@ -2167,21 +2168,10 @@ where
         let trie_catchup_block_count = non_trie_persisted_tip_number
             .saturating_sub(trie_persisted_tip_number)
             .min(blocks.len() as u64) as usize;
-        let available_deferred_trie_blocks = blocks.len().saturating_sub(trie_catchup_block_count);
-        let (full_persist_block_count, deferred_trie_block_count) =
-            if self.config.deferred_trie_blocks() == 0 {
-                (available_deferred_trie_blocks, 0)
-            } else {
-                (
-                    0,
-                    match target {
-                        PersistTarget::Head => available_deferred_trie_blocks,
-                        PersistTarget::Threshold => available_deferred_trie_blocks
-                            .saturating_sub(self.config.memory_block_buffer_target() as usize)
-                            .min(self.config.deferred_trie_blocks() as usize),
-                    },
-                )
-            };
+        let non_trie_block_count = blocks.len().saturating_sub(trie_catchup_block_count);
+        let deferred_trie_block_count =
+            non_trie_block_count.min(self.config.deferred_trie_blocks() as usize);
+        let full_persist_block_count = non_trie_block_count - deferred_trie_block_count;
 
         Ok(SaveBlocksPlan::new(
             blocks,

@@ -1089,12 +1089,42 @@ fn test_get_save_blocks_plan_with_deferred_trie_blocks() {
     assert_eq!(plan.trie_catchup_block_count, 2);
     assert_eq!(plan.full_persist_block_count, 0);
     assert_eq!(plan.deferred_trie_block_count, 2);
-    assert_eq!(plan.blocks.len(), 5);
+    assert_eq!(plan.blocks.len(), 4);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        vec![2, 3, 4, 5, 6]
+        vec![2, 3, 4, 5]
     );
     assert_eq!(plan.non_trie_persisted_tip(), Some(blocks[5].recovered_block().num_hash()));
+}
+
+#[test]
+fn test_get_save_blocks_plan_persists_full_region_before_deferred_tail() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..31).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.trie_persisted_tip =
+        blocks[12].recovered_block().num_hash();
+    test_harness.tree.persistence_state.non_trie_persisted_tip =
+        blocks[15].recovered_block().num_hash();
+    test_harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(3)
+        .with_memory_block_buffer_target(2)
+        .with_deferred_trie_blocks(2);
+
+    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+
+    assert_eq!(plan.trie_catchup_block_count, 3);
+    assert_eq!(plan.full_persist_block_count, 11);
+    assert_eq!(plan.deferred_trie_block_count, 2);
+    assert_eq!(plan.blocks.len(), 16);
+    assert_eq!(
+        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        (13..=28).collect::<Vec<_>>()
+    );
+    assert_eq!(plan.non_trie_persisted_tip(), Some(blocks[28].recovered_block().num_hash()));
 }
 
 #[test]

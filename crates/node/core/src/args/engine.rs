@@ -7,7 +7,7 @@ use clap::{
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    default_persistence_backpressure_threshold, TreeConfig,
+    default_persistence_backpressure_threshold, TreeConfig, DEFAULT_DEFERRED_TRIE_BLOCKS,
     DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
     DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS, DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
@@ -28,6 +28,7 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
     persistence_backpressure_threshold: Option<u64>,
+    deferred_trie_blocks: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
     legacy_state_root_task_enabled: bool,
@@ -90,6 +91,12 @@ impl DefaultEngineValues {
     /// Set the default persistence backpressure threshold
     pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
         self.persistence_backpressure_threshold = Some(v);
+        self
+    }
+
+    /// Set the default deferred trie block target
+    pub const fn with_deferred_trie_blocks(mut self, v: u64) -> Self {
+        self.deferred_trie_blocks = v;
         self
     }
 
@@ -276,6 +283,7 @@ impl Default for DefaultEngineValues {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             persistence_backpressure_threshold: None,
+            deferred_trie_blocks: DEFAULT_DEFERRED_TRIE_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             legacy_state_root_task_enabled: false,
@@ -330,6 +338,11 @@ pub struct EngineArgs {
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
+
+    /// Configure how many canonical blocks may persist non-trie outputs while deferring durable
+    /// trie updates.
+    #[arg(long = "engine.deferred-trie-blocks", default_value_t = DefaultEngineValues::get_global().deferred_trie_blocks)]
+    pub deferred_trie_blocks: u64,
 
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
@@ -563,6 +576,7 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold: defaults.persistence_threshold,
             persistence_backpressure_threshold: None,
+            deferred_trie_blocks: defaults.deferred_trie_blocks,
             memory_block_buffer_target: defaults.memory_block_buffer_target,
             invalid_header_hit_eviction_threshold: defaults.invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled: defaults.legacy_state_root_task_enabled,
@@ -642,6 +656,7 @@ impl EngineArgs {
         let config = TreeConfig::default()
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
+            .with_deferred_trie_blocks(self.deferred_trie_blocks)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -777,6 +792,7 @@ mod tests {
         let args = EngineArgs::default();
 
         assert_eq!(args.persistence_threshold, DEFAULT_PERSISTENCE_THRESHOLD);
+        assert_eq!(args.deferred_trie_blocks, DEFAULT_DEFERRED_TRIE_BLOCKS);
         assert_eq!(args.memory_block_buffer_target, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
         assert_eq!(args.persistence_backpressure_threshold, None);
         assert_eq!(
@@ -794,6 +810,7 @@ mod tests {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
+            deferred_trie_blocks: 25,
             memory_block_buffer_target: 50,
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -838,6 +855,8 @@ mod tests {
             "100",
             "--engine.persistence-backpressure-threshold",
             "101",
+            "--engine.deferred-trie-blocks",
+            "25",
             "--engine.memory-block-buffer-target",
             "50",
             "--engine.invalid-header-cache-hit-eviction-threshold",
@@ -879,6 +898,16 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_parse_deferred_trie_blocks() {
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.deferred-trie-blocks", "7"])
+                .args;
+
+        assert_eq!(args.deferred_trie_blocks, 7);
+        assert_eq!(args.tree_config().deferred_trie_blocks(), 7);
     }
 
     #[test]
