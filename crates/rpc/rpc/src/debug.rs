@@ -230,16 +230,16 @@ where
                 let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
-                let tx = transaction.into_recovered();
+                let (tx, tx_info) = transaction.split();
+                let tx_index = tx_info.index.unwrap_or_default();
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
+                eth_api.position_state_before_transaction(
                     &mut db,
                     evm_env.clone(),
                     block_txs,
-                    *tx.tx_hash(),
+                    tx_index as usize,
                 )?;
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
@@ -251,7 +251,7 @@ where
                     .get_result(
                         Some(TransactionContext {
                             block_hash: Some(block_hash),
-                            tx_index: Some(index),
+                            tx_index: Some(tx_index as usize),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
                         &tx_env,
@@ -355,12 +355,12 @@ where
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // 2. replay the required number of transactions
-                eth_api.replay_transactions_until(
+                // 2. position the state before the requested transaction index
+                eth_api.position_state_before_transaction(
                     &mut db,
                     evm_env.clone(),
                     block.transactions_recovered(),
-                    *block.body().transactions()[tx_index].tx_hash(),
+                    tx_index,
                 )?;
 
                 // 3. now execute the trace call on this state

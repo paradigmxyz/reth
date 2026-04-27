@@ -3,12 +3,14 @@
 
 use core::fmt;
 
-use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
+use super::{
+    BlockAccessListState, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking,
+    Trace,
+};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eip7928::bal::Bal as AlloyBal;
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
@@ -25,7 +27,6 @@ use reth_evm::{
     EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
-use reth_primitives_traits::Recovered;
 use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
@@ -38,16 +39,14 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BalProvider, BlockIdReader, ProviderTx, StateProviderBox};
+use reth_storage_api::{BlockIdReader, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
-    state::bal::Bal,
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
-use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -542,7 +541,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
 /// Executes code on state.
 pub trait Call:
-    LoadState<
+    BlockAccessListState
+    + LoadState<
         RpcConvert: RpcConvert<Evm = Self::Evm>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
@@ -676,77 +676,6 @@ pub trait Call:
         })
     }
 
-    /// Executes the closure with state for `at` and, when available, the BAL for `block_hash`.
-    fn spawn_with_state_at_block_and_bal<F, R>(
-        &self,
-        at: impl Into<BlockId>,
-        block_hash: B256,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
-        R: Send + 'static,
-    {
-        let at = at.into();
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
-            let mut db = State::builder()
-                .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
-                .build();
-            this.set_block_access_list_for_tracing(block_hash, &mut db);
-            f(this, db)
-        })
-    }
-
-    /// Loads the block BAL into `db` for trace/replay acceleration.
-    fn set_block_access_list_for_tracing(&self, block_hash: B256, db: &mut StateCacheDb) {
-        if let Some(bal) = self.block_access_list_for_tracing(block_hash) {
-            db.set_bal(Some(bal));
-        }
-    }
-
-    /// Fetches and decodes the block BAL used by revm state reads during tracing.
-    fn block_access_list_for_tracing(&self, block_hash: B256) -> Option<Arc<Bal>> {
-        let raw_bal = match self.provider().bal_store().get_by_hashes(&[block_hash]) {
-            Ok(bals) => bals.into_iter().next().flatten()?,
-            Err(err) => {
-                debug!(
-                    target: "reth::rpc",
-                    ?block_hash,
-                    %err,
-                    "Failed to fetch block access list for tracing"
-                );
-                return None
-            }
-        };
-
-        let alloy_bal = match alloy_rlp::decode_exact::<AlloyBal>(raw_bal.as_ref()) {
-            Ok(bal) => bal,
-            Err(err) => {
-                debug!(
-                    target: "reth::rpc",
-                    ?block_hash,
-                    %err,
-                    "Failed to decode block access list for tracing"
-                );
-                return None
-            }
-        };
-
-        match Bal::try_from(alloy_bal.into_inner()) {
-            Ok(bal) => Some(Arc::new(bal)),
-            Err(err) => {
-                debug!(
-                    target: "reth::rpc",
-                    ?block_hash,
-                    %err,
-                    "Failed to convert block access list for tracing"
-                );
-                None
-            }
-        }
-    }
-
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
@@ -823,6 +752,7 @@ pub trait Call:
                 Some(res) => res,
             };
             let (tx, tx_info) = transaction.split();
+            let tx_index = tx_info.index.unwrap_or_default() as usize;
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we need to get the state of the parent block because we're essentially replaying the
@@ -841,8 +771,12 @@ pub trait Call:
                     executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 }
 
-                // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
+                this.position_state_before_transaction(
+                    &mut db,
+                    evm_env.clone(),
+                    block_txs,
+                    tx_index,
+                )?;
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
 
@@ -852,54 +786,6 @@ pub trait Call:
             .await
             .map(Some)
         }
-    }
-
-    /// Replays all the transactions until the target transaction is found.
-    ///
-    /// If the database has a BAL attached, this positions the BAL index at the target transaction.
-    /// Otherwise, all transactions before the target transaction are executed and their changes are
-    /// written to the _runtime_ db ([`State`]).
-    ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator.
-    fn replay_transactions_until<'a, I>(
-        &self,
-        db: &mut StateCacheDb,
-        evm_env: EvmEnvFor<Self::Evm>,
-        transactions: I,
-        target_tx_hash: B256,
-    ) -> Result<usize, Self::Error>
-    where
-        I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
-    {
-        let transactions = transactions.into_iter();
-        if db.bal_state.bal.is_some() {
-            let mut index = 0;
-            for tx in transactions {
-                if *tx.tx_hash() == target_tx_hash {
-                    db.set_bal_index(index as u64 + 1);
-                    return Ok(index)
-                }
-                index += 1;
-            }
-
-            db.set_bal_index(index as u64 + 1);
-            return Ok(index)
-        }
-
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
-        let mut index = 0;
-        for tx in transactions {
-            if *tx.tx_hash() == target_tx_hash {
-                // reached the target transaction
-                break
-            }
-
-            let tx_env = self.evm_config().tx_env(tx);
-            evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
-            index += 1;
-        }
-        Ok(index)
     }
 
     ///

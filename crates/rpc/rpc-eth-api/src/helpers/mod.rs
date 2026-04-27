@@ -15,6 +15,7 @@
 //! all the `Eth` traits, e.g. `reth_rpc::EthApi`.
 
 pub mod bal;
+pub mod bal_state;
 pub mod block;
 pub mod blocking_task;
 pub mod call;
@@ -30,6 +31,7 @@ pub mod trace;
 pub mod transaction;
 
 pub use bal::GetBlockAccessList;
+pub use bal_state::BlockAccessListState;
 pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
 pub use call::{Call, EthCall};
