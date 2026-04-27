@@ -186,8 +186,8 @@ impl ConfigBuilder {
     /// When the `RLPx` listener address is [`IpAddr::is_unspecified`] and `nat_external_ipv4` is
     /// set, store that address for the local ENR only.
     ///
-    /// The `RLPx` [`SocketAddr`](std::net::SocketAddr) is left unchanged so
-    /// [`amend_listen_config_wrt_rlpx`](crate::amend_listen_config_wrt_rlpx) still reflects the
+    /// The `RLPx` [`SocketAddr`] is left unchanged so
+    /// [`amend_listen_config_wrt_rlpx`] still reflects the
     /// real bind address (for example `0.0.0.0`). Binding discv5 UDP to a NAT-only public IP
     /// would fail with `EADDRNOTAVAIL` on the host.
     ///
