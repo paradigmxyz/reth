@@ -33,7 +33,7 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 ///
 /// Decoded transactions expand relative to their RLP encoding due to struct overhead and heap
 /// allocations. With many peers in flight this can cause significant memory pressure, so we
-/// stop decoding once the cumulative [`InMemorySize`] of decoded transactions exceeds
+/// stop decoding once the cumulative in-memory size of decoded transactions exceeds
 /// `max_message_size * TX_MEMORY_BUDGET_MULTIPLIER`. Remaining transactions are silently dropped.
 pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = 2;
 
@@ -103,7 +103,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     /// transactions in `Transactions` and `PooledTransactions` messages. Once exceeded,
     /// remaining transactions are silently dropped.
     ///
-    /// Use [`TRANSACTIONS_DECODED_SIZE_BUDGET`] for a reasonable default.
+    /// Use [`TX_MEMORY_BUDGET_MULTIPLIER`] to derive a reasonable default.
     pub fn decode_message_with_tx_memory_budget(
         version: EthVersion,
         buf: &mut &[u8],
