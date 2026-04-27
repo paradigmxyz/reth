@@ -270,16 +270,16 @@ where
             halve_workers,
             config,
         );
-        // When the BAL execute path will dispatch this block, the BAL execute path will spawn
-        // its own sparse-trie streaming task fed from the snapshot. So we skip per-tx state
-        // hooks for that case. Otherwise (no BAL, or BAL present but kill switch on), state
-        // hooks fire from the canonical executor and feed the sparse trie directly.
-        let install_state_hook = !(config.bal_execute_path_enabled() && env.decoded_bal.is_some());
+        // BAL blocks stream sparse-trie updates either through the serial BAL prewarm path or the
+        // parallel BAL execute path. Non-BAL blocks use the normal execution state hook.
+        let bal_will_dispatch = config.bal_execute_path_enabled() && env.decoded_bal.is_some();
+        let install_state_hook = env.decoded_bal.is_none();
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
+            bal_will_dispatch,
         );
 
         PayloadHandle {
@@ -306,7 +306,8 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -460,24 +461,25 @@ where
     }
 
     /// Spawn prewarming optionally wired to the sparse trie task for target updates.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor",
-        skip_all,
-        fields(bal=%env.decoded_bal.is_some())
-    )]
+    ///
+    /// `bal_will_dispatch` is true when the BAL execute path will execute this block; in that
+    /// case prewarming would re-execute the same transactions in parallel for no benefit, so
+    /// the prewarm task spawns in `Skipped` mode and only the cache wiring stays alive.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        bal_will_dispatch: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
+        let skip_prewarm = self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD ||
+            bal_will_dispatch;
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -507,13 +509,10 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
-                } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
-                {
+                } else if let Some(decoded_bal) = maybe_decoded_bal {
                     PrewarmMode::BlockAccessList(decoded_bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
