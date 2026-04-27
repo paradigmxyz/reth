@@ -470,62 +470,52 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config {
-        discv5_config,
-        fork,
-        tcp_socket,
-        advertised_ipv4,
-        advertised_ipv6,
-        other_enr_kv_pairs,
-        ..
-    } = config;
+    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
 
-    // Prefer the explicit advertised IP (e.g. resolved from `--nat extip:<IP>`); else fall back
-    // to the bind IP if it is a real address; else leave the ENR field unset and let
-    // `discv5::Discv5` populate it from observed addresses.
-    let enr_ipv4 = |bind: Ipv4Addr| -> Option<Ipv4Addr> {
-        advertised_ipv4.or_else(|| (bind != Ipv4Addr::UNSPECIFIED).then_some(bind))
+    // The RLPx `tcp_socket` carries the advertised IP (and TCP port). UDP port comes from the
+    // bind `ListenConfig`. An UNSPECIFIED advertised IP means "omit from ENR" — peers will
+    // learn the address via observations.
+    let advertised_ip4 = match tcp_socket {
+        SocketAddr::V4(s) if *s.ip() != Ipv4Addr::UNSPECIFIED => Some(*s.ip()),
+        _ => None,
     };
-    let enr_ipv6 = |bind: Ipv6Addr| -> Option<Ipv6Addr> {
-        advertised_ipv6.or_else(|| (bind != Ipv6Addr::UNSPECIFIED).then_some(bind))
+    let advertised_ip6 = match tcp_socket {
+        SocketAddr::V6(s) if *s.ip() != Ipv6Addr::UNSPECIFIED => Some(*s.ip()),
+        _ => None,
     };
 
     let socket = match discv5_config.listen_config {
         ListenConfig::Ipv4 { ip, port } => {
-            let advertised = enr_ipv4(ip);
-            if let Some(advertised) = advertised {
-                builder.ip4(advertised);
+            if let Some(ip) = advertised_ip4 {
+                builder.ip4(ip);
             }
             builder.udp4(port);
             builder.tcp4(tcp_socket.port());
 
-            (advertised.unwrap_or(ip), port).into()
+            (advertised_ip4.unwrap_or(ip), port).into()
         }
         ListenConfig::Ipv6 { ip, port } => {
-            let advertised = enr_ipv6(ip);
-            if let Some(advertised) = advertised {
-                builder.ip6(advertised);
+            if let Some(ip) = advertised_ip6 {
+                builder.ip6(ip);
             }
             builder.udp6(port);
             builder.tcp6(tcp_socket.port());
 
-            (advertised.unwrap_or(ip), port).into()
+            (advertised_ip6.unwrap_or(ip), port).into()
         }
-        ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-            let advertised_v4 = enr_ipv4(ipv4);
-            if let Some(advertised) = advertised_v4 {
-                builder.ip4(advertised);
+        ListenConfig::DualStack { ipv4: _, ipv4_port, ipv6, ipv6_port } => {
+            if let Some(ip) = advertised_ip4 {
+                builder.ip4(ip);
             }
             builder.udp4(ipv4_port);
             builder.tcp4(tcp_socket.port());
 
-            let advertised_v6 = enr_ipv6(ipv6);
-            if let Some(advertised) = advertised_v6 {
-                builder.ip6(advertised);
+            if let Some(ip) = advertised_ip6 {
+                builder.ip6(ip);
             }
             builder.udp6(ipv6_port);
 
-            (advertised_v6.unwrap_or(ipv6), ipv6_port).into()
+            (advertised_ip6.unwrap_or(ipv6), ipv6_port).into()
         }
     };
 
@@ -821,8 +811,7 @@ mod test {
         // Pick a real, locally-bindable port for discv5 to listen on.
         let bind_udp_port = unused_udp_port();
         let bind_listen: SocketAddr = format!("127.0.0.1:{bind_udp_port}").parse().unwrap();
-        let rlpx_bind: SocketAddr = "127.0.0.1:30303".parse().unwrap();
-        // Pretend the public/advertised address is something the host doesn't own.
+        // Pretend the public/advertised RLPx socket is something the host doesn't own.
         let advertised: SocketAddr = "203.0.113.7:30303".parse().unwrap();
         let advertised_ip = Ipv4Addr::new(203, 0, 113, 7);
 
@@ -833,10 +822,9 @@ mod test {
         inner.disable_enr_update();
 
         let secret_key = SecretKey::new(&mut thread_rng());
-        let config = Config::builder(rlpx_bind)
-            .advertised_socket(advertised)
-            .discv5_config(inner.build())
-            .build();
+        // The single `Config::builder(...)` arg is the advertised RLPx socket; the inner
+        // discv5 `ListenConfig` controls bind.
+        let config = Config::builder(advertised).discv5_config(inner.build()).build();
 
         let (node, _events) =
             Discv5::start(&secret_key, config).await.expect("should start discv5");
@@ -1074,10 +1062,10 @@ mod test {
     #[test]
     fn build_local_enr_uses_advertised_ip_over_unspecified_bind() {
         const TCP_PORT: u16 = 30303;
-        let bind: SocketAddr = (Ipv4Addr::UNSPECIFIED, TCP_PORT).into();
+        // Inner discv5 ListenConfig keeps the bind IP unspecified (i.e. 0.0.0.0); the
+        // advertised RLPx socket has a real public IP — that's what should land in the ENR.
         let advertised: SocketAddr = "1.2.3.4:30303".parse().unwrap();
-
-        let config = Config::builder(bind).advertised_socket(advertised).build();
+        let config = Config::builder(advertised).build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = build_local_enr(&sk, &config);

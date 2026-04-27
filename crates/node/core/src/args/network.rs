@@ -550,14 +550,8 @@ impl NetworkArgs {
             })
             // apply discovery settings
             .apply(|builder| {
-                let rlpx_socket = (addr, self.port).into();
                 let advertised_socket = (advertised_ip, self.port).into();
-                self.discovery.apply_to_builder(
-                    builder,
-                    rlpx_socket,
-                    advertised_socket,
-                    chain_bootnodes,
-                )
+                self.discovery.apply_to_builder(builder, advertised_socket, addr, chain_bootnodes)
             })
             .listener_addr(SocketAddr::new(
                 addr, // set discovery port based on instance number
@@ -795,15 +789,14 @@ pub struct DiscoveryArgs {
 impl DiscoveryArgs {
     /// Apply the discovery settings to the given [`NetworkConfigBuilder`].
     ///
-    /// `rlpx_tcp_socket` is the bind socket; `rlpx_advertised_socket` is the socket put into the
-    /// local ENR. They typically coincide; they differ only when `--nat extip:<IP>` (or
-    /// `extaddr:<DOMAIN>`) supplies an externally-resolved address. See
+    /// `rlpx_advertised_socket` is what gets advertised in the local ENR; `bind_ip` is the
+    /// locally-bindable IP used as the discv5 [`ListenConfig`] default. See
     /// [`Self::discovery_v5_builder`] for details.
     pub fn apply_to_builder<N>(
         &self,
         mut network_config_builder: NetworkConfigBuilder<N>,
-        rlpx_tcp_socket: SocketAddr,
         rlpx_advertised_socket: SocketAddr,
+        bind_ip: IpAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
     ) -> NetworkConfigBuilder<N>
     where
@@ -824,7 +817,7 @@ impl DiscoveryArgs {
 
         if self.should_enable_discv5() {
             network_config_builder = network_config_builder.discovery_v5(
-                self.discovery_v5_builder(rlpx_tcp_socket, rlpx_advertised_socket, boot_nodes),
+                self.discovery_v5_builder(rlpx_advertised_socket, bind_ip, boot_nodes),
             );
         }
 
@@ -833,18 +826,15 @@ impl DiscoveryArgs {
 
     /// Creates a [`reth_discv5::ConfigBuilder`] filling it with the values from this struct.
     ///
-    /// `rlpx_tcp_socket` is the socket the OS binds `RLPx` to (`--addr` / `--port`). It is also
-    /// the default source of the discv5 [`ListenConfig`] IP when `--discovery.v5.addr` is not
-    /// set, so it must remain a locally-reachable address.
-    ///
-    /// `rlpx_advertised_socket` is the socket put into the local ENR. It typically equals
-    /// `rlpx_tcp_socket`, but when `--nat extip:<IP>` (or `extaddr:<DOMAIN>`) is set the IP comes
-    /// from there instead. Decoupling the two lets the node bind to a private address while
-    /// advertising the externally-resolved one.
+    /// `rlpx_advertised_socket` is the `RLPx` socket put into the local ENR. When the host is
+    /// behind NAT (e.g. `--nat extip:<IP>` / `extaddr:<DOMAIN>`) this is the externally-resolved
+    /// address; otherwise it is just the bind address. The OS bind for discv5 lives on the
+    /// inner [`discv5::ListenConfig`] and falls back to `bind_ip` when `--discovery.v5.addr` is
+    /// not set, so `bind_ip` must remain a locally-reachable address.
     pub fn discovery_v5_builder(
         &self,
-        rlpx_tcp_socket: SocketAddr,
         rlpx_advertised_socket: SocketAddr,
+        bind_ip: IpAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
     ) -> reth_discv5::ConfigBuilder {
         let Self {
@@ -859,20 +849,20 @@ impl DiscoveryArgs {
         } = self;
 
         let has_discv5_addr_args = discv5_addr.is_some() || discv5_addr_ipv6.is_some();
-        // True when the user supplied an external advertised IP that differs from the bind IP
-        // (e.g. via `--nat extip:<IP>`). In that case we must not let `discv5::Discv5`
+        // True when the operator supplied an external advertised IP that differs from the bind
+        // IP (e.g. via `--nat extip:<IP>`). In that case we must not let `discv5::Discv5`
         // overwrite the explicitly advertised IP from observed addresses.
-        let advertised_differs_from_bind = rlpx_advertised_socket.ip() != rlpx_tcp_socket.ip();
+        let advertised_differs_from_bind = rlpx_advertised_socket.ip() != bind_ip;
 
         // The discv5 `ListenConfig` is the *bind* config: it must be a locally-reachable
         // address. Default to the RLPx bind IP, never the advertised IP.
-        let discv5_addr_ipv4 = discv5_addr.or(match rlpx_tcp_socket {
-            SocketAddr::V4(addr) => Some(*addr.ip()),
-            SocketAddr::V6(_) => None,
+        let discv5_addr_ipv4 = discv5_addr.or(match bind_ip {
+            IpAddr::V4(ip) => Some(ip),
+            IpAddr::V6(_) => None,
         });
-        let discv5_addr_ipv6 = discv5_addr_ipv6.or(match rlpx_tcp_socket {
-            SocketAddr::V4(_) => None,
-            SocketAddr::V6(addr) => Some(*addr.ip()),
+        let discv5_addr_ipv6 = discv5_addr_ipv6.or(match bind_ip {
+            IpAddr::V4(_) => None,
+            IpAddr::V6(ip) => Some(ip),
         });
 
         let mut discv5_config_builder =
@@ -886,11 +876,7 @@ impl DiscoveryArgs {
             // advertised address was supplied (we don't want it overwritten from observations).
             discv5_config_builder.disable_enr_update();
         }
-        // `tcp_socket` is the bind socket. The advertised IP is supplied separately via
-        // `.advertised_socket(...)`; this keeps `Config::rlpx_socket()` (and the
-        // `rlpx_ip_mode` derived from the same field) consistent with how the OS binds.
-        reth_discv5::Config::builder(rlpx_tcp_socket)
-            .advertised_socket(rlpx_advertised_socket)
+        reth_discv5::Config::builder(rlpx_advertised_socket)
             .discv5_config(discv5_config_builder.build())
             .add_unsigned_boot_nodes(boot_nodes)
             .lookup_interval(*discv5_lookup_interval)
@@ -1015,7 +1001,6 @@ mod tests {
         ])
         .args;
 
-        let bind_socket: SocketAddr = (args.addr, args.port).into();
         let advertised_ip =
             args.nat.clone().as_external_ip(args.port).expect("extip resolves synchronously");
         let advertised_socket: SocketAddr = (advertised_ip, args.port).into();
@@ -1023,11 +1008,12 @@ mod tests {
 
         let cfg = args
             .discovery
-            .discovery_v5_builder(bind_socket, advertised_socket, std::iter::empty())
+            .discovery_v5_builder(advertised_socket, args.addr, std::iter::empty())
             .build();
 
-        // Advertised IPv4 carried through to the discv5 Config (and eventually the ENR).
-        assert_eq!(cfg.advertised_ipv4(), Some(Ipv4Addr::new(1, 2, 3, 4)));
+        // The RLPx socket on the discv5 Config now carries the advertised IP (becomes the ENR
+        // `ip4` / `tcp4`).
+        assert_eq!(*cfg.rlpx_socket(), advertised_socket);
         // Bind side untouched: the host needs to bind to a locally-reachable address. The
         // `--discovery.v5.addr` default falls back to the RLPx bind IP (0.0.0.0), not the
         // external IP. UDP port stays at the discv5 default.

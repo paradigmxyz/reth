@@ -66,17 +66,13 @@ pub struct ConfigBuilder {
     ///
     /// Defaults to L1 mainnet if not set.
     fork: Option<(&'static [u8], ForkId)>,
-    /// `RLPx` TCP socket the OS binds to. Its port is what gets advertised in the local ENR
-    /// (`tcp4`/`tcp6`); its IP is used as the fallback advertised IP only when no explicit
-    /// advertised socket is set via [`ConfigBuilder::advertised_socket`] *and* the bind IP is
-    /// not unspecified.
+    /// `RLPx` TCP socket as **advertised** in the local [`Enr`](discv5::enr::Enr) — IP and port
+    /// peers will dial to open `RLPx` sessions. Distinct from the OS bind address, which lives in
+    /// [`discv5::ListenConfig`]: when the host is behind NAT (e.g. `--nat extip:<IP>`) the
+    /// advertised IP is the externally-resolved one, while the bind IP is the local interface.
+    /// An UNSPECIFIED IP (`0.0.0.0` / `::`) here means "no explicit advertised IP — let
+    /// `discv5::Discv5` populate it from observed addresses."
     tcp_socket: SocketAddr,
-    /// Explicit advertised IPv4 for the local ENR. When `Some`, this overrides the IPv4 derived
-    /// from `tcp_socket` when populating the ENR's `ip4` field. The discv5 [`ListenConfig`] is
-    /// kept untouched, so the OS continues to bind to the user-configured address.
-    advertised_ipv4: Option<Ipv4Addr>,
-    /// Explicit advertised IPv6 for the local ENR. See [`Self::advertised_ipv4`].
-    advertised_ipv6: Option<Ipv6Addr>,
     /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
     /// (in addition to tcp port, udp port and fork).
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -100,8 +96,6 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
-            advertised_ipv4,
-            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -114,8 +108,6 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_socket,
-            advertised_ipv4,
-            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
@@ -178,28 +170,16 @@ impl ConfigBuilder {
         self
     }
 
-    /// Sets the `RLPx` TCP bind socket. Its port is what gets advertised in the local
-    /// [`Enr`](discv5::enr::Enr) (`tcp4`/`tcp6`); its IP is the fallback advertised IP only
-    /// when no explicit advertised socket is set via [`Self::advertised_socket`].
+    /// Sets the `RLPx` TCP socket to advertise in the local [`Enr`](discv5::enr::Enr).
+    ///
+    /// This is the IP and port peers will dial to open `RLPx` sessions — distinct from the OS bind
+    /// address (which lives in the inner [`discv5::ListenConfig`]). Behind NAT this should be
+    /// the externally-resolved address (e.g. from `--nat extip:<IP>`); the OS bind continues to
+    /// target the local interface configured on the [`ListenConfig`]. Pass an UNSPECIFIED IP
+    /// (`0.0.0.0` / `::`) to omit the IP from the ENR and let `discv5::Discv5` fill it in from
+    /// observed addresses.
     pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
         self.tcp_socket = socket;
-        self
-    }
-
-    /// Sets an explicit advertised socket whose IP overrides the IP derived from `tcp_socket`
-    /// when populating the local ENR's `ip4`/`ip6` field.
-    ///
-    /// Used to advertise an externally-resolved address (e.g. from `--nat extip:<IP>`) while
-    /// continuing to bind discv5 to the locally-reachable address. The discv5 [`ListenConfig`]
-    /// is unaffected, so the OS bind keeps targeting the configured local interface.
-    ///
-    /// Only the IP portion of `socket` is used; ports come from the [`ListenConfig`] (UDP) and
-    /// `tcp_socket` (TCP).
-    pub const fn advertised_socket(mut self, socket: SocketAddr) -> Self {
-        match socket {
-            SocketAddr::V4(s) => self.advertised_ipv4 = Some(*s.ip()),
-            SocketAddr::V6(s) => self.advertised_ipv6 = Some(*s.ip()),
-        }
         self
     }
 
@@ -247,8 +227,6 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
-            advertised_ipv4,
-            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -258,19 +236,6 @@ impl ConfigBuilder {
 
         let discv5_config = discv5_config.unwrap_or_else(|| {
             discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build()
-        });
-
-        // Default advertised IPs to the IP version of `tcp_socket` for callers that do not set
-        // an explicit advertised socket. UNSPECIFIED IPs (0.0.0.0 / ::) are not treated as a
-        // fallback so the ENR omits the corresponding field and `discv5::Discv5` populates it
-        // from observed addresses.
-        let advertised_ipv4 = advertised_ipv4.or_else(|| match tcp_socket {
-            SocketAddr::V4(s) if *s.ip() != Ipv4Addr::UNSPECIFIED => Some(*s.ip()),
-            _ => None,
-        });
-        let advertised_ipv6 = advertised_ipv6.or_else(|| match tcp_socket {
-            SocketAddr::V6(s) if *s.ip() != Ipv6Addr::UNSPECIFIED => Some(*s.ip()),
-            _ => None,
         });
 
         let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
@@ -289,8 +254,6 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
-            advertised_ipv4,
-            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -303,24 +266,20 @@ impl ConfigBuilder {
 /// Config used to bootstrap [`discv5::Discv5`].
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
-    /// socket. Drives where the OS binds; not used directly for ENR IP fields.
+    /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`] (the OS bind config —
+    /// distinct from what gets advertised in the ENR's `ip` field).
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
     pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
-    /// `RLPx` TCP socket the OS binds to. Its port is what gets advertised in the local ENR;
-    /// its IP is the fallback advertised IP only when [`Self::advertised_ipv4`] /
-    /// [`Self::advertised_ipv6`] are unset and the bind IP is not unspecified.
+    /// `RLPx` TCP socket as **advertised** in the local [`Enr`](discv5::enr::Enr). When the host
+    /// is behind NAT (e.g. `--nat extip:<IP>`) this is the externally-resolved address; the OS
+    /// bind continues to target the local interface configured on the [`ListenConfig`]. An
+    /// UNSPECIFIED IP (`0.0.0.0` / `::`) means "no explicit advertised IP — let
+    /// `discv5::Discv5` populate it from observed addresses."
     pub(super) tcp_socket: SocketAddr,
-    /// IPv4 address to advertise in the local ENR's `ip4` field. Decoupled from the bind
-    /// [`ListenConfig`] so an externally-resolved address (e.g. from `--nat extip:<IP>`) can be
-    /// advertised while discv5 binds to a locally-reachable address.
-    pub(super) advertised_ipv4: Option<Ipv4Addr>,
-    /// IPv6 address to advertise in the local ENR's `ip6` field. See [`Self::advertised_ipv4`].
-    pub(super) advertised_ipv6: Option<Ipv6Addr>,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -337,16 +296,15 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns a new [`ConfigBuilder`], with the `RLPx` TCP port and IP version configured w.r.t.
-    /// the given socket.
+    /// Returns a new [`ConfigBuilder`]. `rlpx_tcp_socket` is the **advertised** `RLPx` socket
+    /// (see [`ConfigBuilder::tcp_socket`]); the OS bind for discv5 lives on the inner
+    /// [`discv5::ListenConfig`].
     pub fn builder(rlpx_tcp_socket: SocketAddr) -> ConfigBuilder {
         ConfigBuilder {
             discv5_config: None,
             bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
-            advertised_ipv4: None,
-            advertised_ipv6: None,
             other_enr_kv_pairs: Vec::new(),
             lookup_interval: None,
             bootstrap_lookup_interval: None,
@@ -387,23 +345,11 @@ impl Config {
         }
     }
 
-    /// Returns the `RLPx` (TCP) bind socket. Its port is what gets advertised to peers in the
-    /// local [`Enr`](discv5::enr::Enr); its IP is only the fallback advertised IP when
-    /// [`Self::advertised_ipv4`] / [`Self::advertised_ipv6`] are unset.
+    /// Returns the `RLPx` (TCP) socket as **advertised** in the local [`Enr`](discv5::enr::Enr).
+    /// When the host is behind NAT this is the externally-resolved address; the OS bind for
+    /// discv5 lives on the inner [`discv5::ListenConfig`].
     pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
-    }
-
-    /// Returns the explicit IPv4 advertised in the local ENR, if any. Falls back to the IPv4
-    /// derived from [`Self::rlpx_socket`] when not set.
-    pub const fn advertised_ipv4(&self) -> Option<Ipv4Addr> {
-        self.advertised_ipv4
-    }
-
-    /// Returns the explicit IPv6 advertised in the local ENR, if any. Falls back to the IPv6
-    /// derived from [`Self::rlpx_socket`] when not set.
-    pub const fn advertised_ipv6(&self) -> Option<Ipv6Addr> {
-        self.advertised_ipv6
     }
 }
 
@@ -522,36 +468,23 @@ mod test {
     }
 
     #[test]
-    fn rlpx_ip_is_default_advertised_ipv4() {
+    fn rlpx_ip_is_advertised_ipv4_and_listen_config_untouched() {
         let rlpx_addr: Ipv4Addr = "192.168.0.1".parse().unwrap();
         let config = Config::builder((rlpx_addr, 30303).into()).build();
 
-        // ENR-advertised IPv4 falls back to the RLPx IP when no explicit advertised socket set.
-        assert_eq!(config.advertised_ipv4(), Some(rlpx_addr));
-        assert_eq!(config.advertised_ipv6(), None);
-        // The discv5 ListenConfig is not touched by `tcp_socket`.
+        // The RLPx IP is the advertised IP — it ends up in the ENR's `ip4` field.
+        assert_eq!(*config.rlpx_socket(), SocketAddr::from((rlpx_addr, 30303)));
+        // The discv5 `ListenConfig` is not touched by the RLPx socket (no more pre-fix
+        // overwrite); the OS bind keeps targeting the configured local interface.
         assert_default_listen_ipv4(&config.discv5_config.listen_config);
     }
 
     #[test]
-    fn rlpx_ip_is_default_advertised_ipv6() {
+    fn rlpx_ip_is_advertised_ipv6_and_listen_config_untouched() {
         let rlpx_addr: Ipv6Addr = "fe80::1".parse().unwrap();
         let config = Config::builder((rlpx_addr, 30303).into()).build();
 
-        assert_eq!(config.advertised_ipv6(), Some(rlpx_addr));
-        assert_eq!(config.advertised_ipv4(), None);
-        assert_default_listen_ipv4(&config.discv5_config.listen_config);
-    }
-
-    #[test]
-    fn advertised_socket_overrides_rlpx_for_enr_ipv4() {
-        let rlpx_addr: Ipv4Addr = "10.0.0.1".parse().unwrap();
-        let advertised: SocketAddr = "1.2.3.4:30303".parse().unwrap();
-        let config =
-            Config::builder((rlpx_addr, 30303).into()).advertised_socket(advertised).build();
-
-        assert_eq!(config.advertised_ipv4(), Some(Ipv4Addr::new(1, 2, 3, 4)));
-        // Bind ListenConfig left at its (default) value.
+        assert_eq!(*config.rlpx_socket(), SocketAddr::from((rlpx_addr, 30303)));
         assert_default_listen_ipv4(&config.discv5_config.listen_config);
     }
 }
