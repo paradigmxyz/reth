@@ -212,17 +212,15 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             let tx_count = txs.len() as u64;
 
             worker_pool.in_place_scope(|scope| -> Result<(), BalExecutionError> {
-                let (error_tx, error_rx) = crossbeam_channel::bounded(1);
                 let mut result_rxs = Vec::with_capacity(tx_count as usize);
 
                 for (i, tx) in txs.into_iter().enumerate() {
                     let tx_index = i as u64 + 1;
-                    let error_tx = error_tx.clone();
                     let abort = Arc::clone(&abort);
                     let snapshot = Arc::clone(&snapshot);
                     let received_bal_revm = Arc::clone(&received_bal_revm);
                     let evm_config = worker_evm_config.clone();
-                    let result_rx = spawn_worker(scope, abort, error_tx, move || {
+                    let result_rx = spawn_worker(scope, abort, move || {
                         let mut worker_state = State::builder()
                             .with_database(SnapshotDatabase::new(snapshot))
                             .with_bal(received_bal_revm)
@@ -239,29 +237,23 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                     result_rxs.push(result_rx);
                 }
                 for (i, result_rx) in result_rxs.into_iter().enumerate() {
-                    crossbeam_channel::select! {
-                        recv(error_rx) -> err => {
+                    let worker_result = result_rx.recv().map_err(|_| {
+                        BalExecutionError::Evm(BlockExecutionError::msg(
+                            "BAL worker result channel closed before result arrived",
+                        ))
+                    })?;
+                    let worker_result = match worker_result {
+                        Ok(worker_result) => worker_result,
+                        Err(err) => {
                             abort.store(true, Ordering::Relaxed);
-                            return match err {
-                                Ok(err) => Err(err),
-                                Err(_) => Err(BalExecutionError::Evm(BlockExecutionError::msg(
-                                    "BAL worker error channel closed unexpectedly",
-                                ))),
-                            }
+                            return Err(err);
                         }
-                        recv(result_rx) -> worker_result => {
-                            let worker_result = worker_result.map_err(|_| {
-                                BalExecutionError::Evm(BlockExecutionError::msg(
-                                    "BAL worker result channel closed before all results arrived",
-                                ))
-                            })?;
-                            gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
-                            feasibility.record_and_check(worker_result.result())?;
-                            gas_tracker.record_result(worker_result.result());
-                            canonical_executor.evm_mut().db_mut().bump_bal_index();
-                            commit_worker_result(&mut canonical_executor, worker_result)?;
-                        }
-                    }
+                    };
+                    gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
+                    feasibility.record_and_check(worker_result.result())?;
+                    gas_tracker.record_result(worker_result.result());
+                    canonical_executor.evm_mut().db_mut().bump_bal_index();
+                    commit_worker_result(&mut canonical_executor, worker_result)?;
                 }
 
                 Ok(())
@@ -336,9 +328,8 @@ impl BlockGasTracker {
 fn spawn_worker<'scope, R, F>(
     scope: &rayon::Scope<'scope>,
     abort: Arc<AtomicBool>,
-    error_tx: crossbeam_channel::Sender<BalExecutionError>,
     run: F,
-) -> crossbeam_channel::Receiver<R>
+) -> crossbeam_channel::Receiver<Result<R, BalExecutionError>>
 where
     R: Send + 'scope,
     F: FnOnce() -> Result<R, BalExecutionError> + Send + 'scope,
@@ -350,15 +341,7 @@ where
             return;
         }
 
-        match run() {
-            Ok(result) => {
-                let _ = result_tx.send(result);
-            }
-            Err(err) => {
-                abort.store(true, Ordering::Relaxed);
-                let _ = error_tx.send(err);
-            }
-        }
+        let _ = result_tx.send(run());
     });
 
     result_rx
