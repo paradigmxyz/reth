@@ -492,3 +492,93 @@ pub(crate) async fn call_forkchoice_updated_with_reth<
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Bytes, B256};
+    use alloy_rpc_types_engine::{
+        CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+        ExecutionPayloadV4, PraguePayloadFields,
+    };
+    use reth_ethereum_primitives::Block;
+
+    fn payload_v3() -> ExecutionPayloadV3 {
+        let payload_inner = ExecutionPayloadV2 {
+            payload_inner: ExecutionPayloadV1::from_block_slow(&Block::default()),
+            withdrawals: Vec::new(),
+        };
+        ExecutionPayloadV3 { payload_inner, blob_gas_used: 0, excess_blob_gas: 0 }
+    }
+
+    fn cancun_fields() -> CancunPayloadFields {
+        CancunPayloadFields {
+            versioned_hashes: vec![B256::with_last_byte(1)],
+            parent_beacon_block_root: B256::with_last_byte(2),
+        }
+    }
+
+    fn prague_fields() -> PraguePayloadFields {
+        PraguePayloadFields { requests: Default::default() }
+    }
+
+    #[test]
+    fn encodes_v3_payload_as_new_payload_v3_without_prague_sidecar() {
+        let (version, params, execution_data) = payload_to_new_payload(
+            ExecutionPayload::V3(payload_v3()),
+            ExecutionPayloadSidecar::v3(cancun_fields()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(version, EngineApiMessageVersion::V3);
+        assert_eq!(params.as_array().expect("params are encoded as an array").len(), 3);
+        assert!(matches!(execution_data.payload, ExecutionPayload::V3(_)));
+    }
+
+    #[test]
+    fn encodes_v3_payload_as_new_payload_v4_with_prague_sidecar() {
+        let (version, params, execution_data) = payload_to_new_payload(
+            ExecutionPayload::V3(payload_v3()),
+            ExecutionPayloadSidecar::v4(cancun_fields(), prague_fields()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(version, EngineApiMessageVersion::V4);
+        assert_eq!(params.as_array().expect("params are encoded as an array").len(), 4);
+        assert!(matches!(execution_data.payload, ExecutionPayload::V3(_)));
+    }
+
+    #[test]
+    fn encodes_v4_payload_as_new_payload_v6_by_default() {
+        let payload = ExecutionPayload::V4(ExecutionPayloadV4 {
+            payload_inner: payload_v3(),
+            block_access_list: Bytes::from_static(b"bal"),
+            slot_number: 1,
+        });
+
+        let (version, params, execution_data) = payload_to_new_payload(
+            payload,
+            ExecutionPayloadSidecar::v4(cancun_fields(), prague_fields()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(version, EngineApiMessageVersion::V6);
+        assert_eq!(params.as_array().expect("params are encoded as an array").len(), 4);
+        assert!(matches!(execution_data.payload, ExecutionPayload::V4(_)));
+    }
+
+    #[test]
+    fn rejects_v3_payload_without_cancun_sidecar() {
+        let err = payload_to_new_payload(
+            ExecutionPayload::V3(payload_v3()),
+            ExecutionPayloadSidecar::none(),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing cancun sidecar for V3 payload"));
+    }
+}

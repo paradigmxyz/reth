@@ -550,3 +550,29 @@ fn upgrade_to_v4(
         slot_number: 0,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
+    use reth_ethereum_primitives::Block;
+
+    fn payload_v3() -> ExecutionPayloadV3 {
+        let payload_inner = ExecutionPayloadV2 {
+            payload_inner: ExecutionPayloadV1::from_block_slow(&Block::default()),
+            withdrawals: Vec::new(),
+        };
+        ExecutionPayloadV3 { payload_inner, blob_gas_used: 0, excess_blob_gas: 0 }
+    }
+
+    #[test]
+    fn upgrade_to_v4_adds_block_access_list_to_v3_payload() {
+        let block_access_list = alloy_primitives::Bytes::from_static(b"bal");
+
+        let payload = upgrade_to_v4(ExecutionPayload::V3(payload_v3()), block_access_list.clone());
+
+        let ExecutionPayload::V4(payload) = payload else { panic!("expected V4 payload") };
+        assert_eq!(payload.block_access_list, block_access_list);
+        assert_eq!(payload.slot_number, 0);
+    }
+}
