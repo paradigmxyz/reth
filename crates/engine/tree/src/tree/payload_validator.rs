@@ -1111,10 +1111,10 @@ where
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
             }
-        }
-        // Bump BAL index after each transaction (EIP-7928)
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
+            // Bump BAL index after each transaction (EIP-7928)
+            if has_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
+            }
         }
         drop(exec_span);
 
