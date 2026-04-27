@@ -118,18 +118,18 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             // Change: https://github.com/ethereum/execution-apis/pull/761
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
-                    VersionSpecificValidationError::NoWithdrawalsPostShanghai |
-                    VersionSpecificValidationError::HasWithdrawalsPreShanghai |
-                    VersionSpecificValidationError::BlockAccessListNotSupported |
-                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
-                    VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
-                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
-                    VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
-                    VersionSpecificValidationError::SlotNumberNotSupported,
+                    VersionSpecificValidationError::WithdrawalsNotSupportedInV1
+                    | VersionSpecificValidationError::NoWithdrawalsPostShanghai
+                    | VersionSpecificValidationError::HasWithdrawalsPreShanghai
+                    | VersionSpecificValidationError::BlockAccessListNotSupported
+                    | VersionSpecificValidationError::HasBlockAccessListPreAmsterdam
+                    | VersionSpecificValidationError::NoBlockAccessListPostAmsterdam
+                    | VersionSpecificValidationError::HasSlotNumberPreAmsterdam
+                    | VersionSpecificValidationError::NoSlotNumberPostAmsterdam
+                    | VersionSpecificValidationError::SlotNumberNotSupported,
                 ),
-            ) |
-            EngineApiError::UnexpectedRequestsHash => {
+            )
+            | EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
                 jsonrpsee_types::error::ErrorObject::owned(
@@ -138,10 +138,10 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
-            EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::EngineObjectValidationError(
-                EngineObjectValidationError::Payload(_) |
-                EngineObjectValidationError::InvalidParams(_),
+            EngineApiError::InvalidBodiesRange { .. }
+            | EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::Payload(_)
+                | EngineObjectValidationError::InvalidParams(_),
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 INVALID_PARAMS_CODE,
                 INVALID_PARAMS_MSG,
@@ -152,8 +152,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 error.to_string(),
                 None::<()>,
             ),
-            EngineApiError::PayloadRequestTooLarge { .. } |
-            EngineApiError::BlobRequestTooLarge { .. } => {
+            EngineApiError::PayloadRequestTooLarge { .. }
+            | EngineApiError::BlobRequestTooLarge { .. } => {
                 jsonrpsee_types::error::ErrorObject::owned(
                     REQUEST_TOO_LARGE_CODE,
                     REQUEST_TOO_LARGE_MESSAGE,
@@ -162,8 +162,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             }
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
-                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3
+                    | VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
                 ),
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR,
@@ -187,8 +187,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                             None::<()>,
                         )
                     }
-                    ForkchoiceUpdateError::InvalidState |
-                    ForkchoiceUpdateError::UnknownFinalBlock => {
+                    ForkchoiceUpdateError::InvalidState
+                    | ForkchoiceUpdateError::UnknownFinalBlock => {
                         jsonrpsee_types::error::ErrorObject::owned(
                             INVALID_FORK_CHOICE_STATE_ERROR,
                             INVALID_FORK_CHOICE_STATE_ERROR_MSG,
@@ -196,8 +196,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         )
                     }
                 },
-                BeaconForkChoiceUpdateError::EngineUnavailable |
-                BeaconForkChoiceUpdateError::Internal(_) => {
+                BeaconForkChoiceUpdateError::EngineUnavailable
+                | BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(
                         INTERNAL_ERROR_CODE,
                         SERVER_ERROR_MSG,
@@ -206,10 +206,10 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 }
             },
             // Any other server error
-            EngineApiError::TerminalBlockHash { .. } |
-            EngineApiError::NewPayload(_) |
-            EngineApiError::Internal(_) |
-            EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
+            EngineApiError::TerminalBlockHash { .. }
+            | EngineApiError::NewPayload(_)
+            | EngineApiError::Internal(_)
+            | EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
                 INTERNAL_ERROR_CODE,
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),

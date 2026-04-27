@@ -162,11 +162,11 @@ impl FromStr for RpcBlockFetchRetries {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
-        if s.eq_ignore_ascii_case("forever") ||
-            s.eq_ignore_ascii_case("infinite") ||
-            s.eq_ignore_ascii_case("inf")
+        if s.eq_ignore_ascii_case("forever")
+            || s.eq_ignore_ascii_case("infinite")
+            || s.eq_ignore_ascii_case("inf")
         {
-            return Ok(Self::Forever)
+            return Ok(Self::Forever);
         }
 
         let retries = s
@@ -219,16 +219,16 @@ impl FromStr for WaitForPersistence {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
         if s.eq_ignore_ascii_case("always") {
-            return Ok(Self::Always)
+            return Ok(Self::Always);
         }
         if s.eq_ignore_ascii_case("never") {
-            return Ok(Self::Never)
+            return Ok(Self::Never);
         }
         let n = s.parse::<u64>().map_err(|_| {
             format!("invalid value {s:?}, expected 'always', 'never', or a block interval number")
         })?;
         if n == 0 {
-            return Err("block interval must be > 0, use 'never' to disable".to_string())
+            return Err("block interval must be > 0, use 'never' to disable".to_string());
         }
         Ok(Self::EveryN(n))
     }

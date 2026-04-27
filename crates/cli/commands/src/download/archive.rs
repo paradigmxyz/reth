@@ -265,8 +265,8 @@ impl ArchiveProcessor {
         let download_result = {
             let mut download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
             let result = fetcher.download(Some(&mut download_progress));
-            if let Ok(ref downloaded) = result &&
-                download_progress.has_tracked_bytes()
+            if let Ok(ref downloaded) = result
+                && download_progress.has_tracked_bytes()
             {
                 download_progress.complete(downloaded.size);
             }
@@ -347,7 +347,7 @@ impl ArchiveMode {
     fn new(ctx: &ArchiveProcessContext) -> Result<Self> {
         if ctx.cache_dir().is_some() {
             ctx.session().require_request_limiter()?;
-            return Ok(Self::Cached)
+            return Ok(Self::Cached);
         }
 
         Ok(Self::Streaming)

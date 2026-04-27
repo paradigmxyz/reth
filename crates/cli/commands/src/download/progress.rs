@@ -223,8 +223,8 @@ impl SharedProgress {
 
     /// Returns logical compressed download progress.
     pub(crate) fn logical_downloaded_bytes(&self) -> u64 {
-        (self.completed_download_bytes.load(Ordering::Relaxed) +
-            self.active_download_bytes.load(Ordering::Relaxed))
+        (self.completed_download_bytes.load(Ordering::Relaxed)
+            + self.active_download_bytes.load(Ordering::Relaxed))
         .min(self.total_download_bytes)
     }
 
@@ -235,15 +235,15 @@ impl SharedProgress {
 
     /// Returns plain-output bytes currently represented by extraction progress.
     pub(crate) fn extracting_output_bytes(&self) -> u64 {
-        (self.completed_output_bytes.load(Ordering::Relaxed) +
-            self.active_extracted_output_bytes.load(Ordering::Relaxed))
+        (self.completed_output_bytes.load(Ordering::Relaxed)
+            + self.active_extracted_output_bytes.load(Ordering::Relaxed))
         .min(self.total_output_bytes)
     }
 
     /// Returns plain-output bytes currently represented by verification progress.
     pub(crate) fn verifying_output_bytes(&self) -> u64 {
-        (self.completed_output_bytes.load(Ordering::Relaxed) +
-            self.active_verified_output_bytes.load(Ordering::Relaxed))
+        (self.completed_output_bytes.load(Ordering::Relaxed)
+            + self.active_verified_output_bytes.load(Ordering::Relaxed))
         .min(self.total_output_bytes)
     }
 
@@ -629,8 +629,8 @@ impl<R: Read> Read for ProgressReader<R> {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let bytes = self.reader.read(buf)?;
-        if bytes > 0 &&
-            let Err(error) = self.progress.update(bytes as u64)
+        if bytes > 0
+            && let Err(error) = self.progress.update(bytes as u64)
         {
             return Err(io::Error::other(error));
         }

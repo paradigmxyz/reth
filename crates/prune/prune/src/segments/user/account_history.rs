@@ -68,7 +68,7 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No account history to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
         let range_end = *range.end();
@@ -111,7 +111,7 @@ impl AccountHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         // Deleted account changeset keys (account addresses) with the highest block number deleted
@@ -185,7 +185,7 @@ impl AccountHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         // Deleted account changeset keys (account addresses) with the highest block number deleted
@@ -250,7 +250,7 @@ impl AccountHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         let mut highest_deleted_accounts = FxHashMap::default();
@@ -434,8 +434,8 @@ mod tests {
                     .iter()
                     .enumerate()
                     .skip_while(|(i, (block_number, _))| {
-                        *i < deleted_entries_limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE * run &&
-                            *block_number <= to_block as usize
+                        *i < deleted_entries_limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE * run
+                            && *block_number <= to_block as usize
                     })
                     .next()
                     .map(|(i, _)| i)

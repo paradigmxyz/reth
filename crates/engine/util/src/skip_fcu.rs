@@ -50,14 +50,14 @@ where
                         *this.skipped += 1;
                         tracing::warn!(target: "engine::stream::skip_fcu", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
                         let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
-                        continue
+                        continue;
                     }
                     *this.skipped = 0;
                     Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 next => next,
             };
-            return Poll::Ready(item)
+            return Poll::Ready(item);
         }
     }
 }

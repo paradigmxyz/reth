@@ -259,8 +259,8 @@ impl ArenaSparseNode {
     /// `hash_mask` bit.
     pub(super) fn hash_mask_bit(&self) -> bool {
         self.as_branch().is_some_and(|b| {
-            b.short_key.is_empty() &&
-                b.state.cached_rlp_node().expect("branch's RlpNode must be cached").is_hash()
+            b.short_key.is_empty()
+                && b.state.cached_rlp_node().expect("branch's RlpNode must be cached").is_hash()
         })
     }
 

@@ -118,7 +118,7 @@ where
         self.inner.safe_block.send_if_modified(|current_header| {
             if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
                 let _ = current_header.replace(header);
-                return true
+                return true;
             }
 
             false
@@ -130,7 +130,7 @@ where
         self.inner.finalized_block.send_if_modified(|current_header| {
             if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
                 let _ = current_header.replace(header);
-                return true
+                return true;
             }
 
             false
@@ -142,7 +142,7 @@ where
         self.inner.persisted_block.send_if_modified(|current| {
             if current.map(|b| b.hash) != Some(num_hash.hash) {
                 let _ = current.replace(num_hash);
-                return true
+                return true;
             }
 
             false

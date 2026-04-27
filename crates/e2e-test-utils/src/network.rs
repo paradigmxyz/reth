@@ -43,11 +43,11 @@ where
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.network_events.next().await {
             match ev {
-                NetworkEvent::ActivePeerSession { info, .. } |
-                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                NetworkEvent::ActivePeerSession { info, .. }
+                | NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     let peer_id = info.peer_id;
                     info!("Session established with peer: {:?}", peer_id);
-                    return Some(peer_id)
+                    return Some(peer_id);
                 }
                 _ => {}
             }

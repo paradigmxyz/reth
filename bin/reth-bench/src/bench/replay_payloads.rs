@@ -262,8 +262,8 @@ impl Command {
             );
 
             let (version, params) = if self.reth_new_payload {
-                let big_block_data_param = if payload.big_block_data.env_switches.is_empty() &&
-                    payload.big_block_data.prior_block_hashes.is_empty()
+                let big_block_data_param = if payload.big_block_data.env_switches.is_empty()
+                    && payload.big_block_data.prior_block_hashes.is_empty()
                 {
                     None
                 } else {
@@ -279,8 +279,8 @@ impl Command {
                 // can be carried inline. This changes the block hash, so we recompute
                 // it and patch parent_hash to maintain the chain.
                 let mut execution_data = execution_data.clone();
-                if self.bal &&
-                    let Some(bal) = &payload.block_access_list
+                if self.bal
+                    && let Some(bal) = &payload.block_access_list
                 {
                     let encoded_bal: alloy_primitives::Bytes =
                         alloy_rlp::encode(Bal::from(bal.clone())).into();
@@ -373,8 +373,8 @@ impl Command {
             let progress = format!("{}/{}", i + 1, payloads.len());
             info!(target: "reth-bench", progress, %combined_result);
 
-            if let Some(scraper) = metrics_scraper.as_mut() &&
-                let Err(err) = scraper.scrape_after_block(block_number).await
+            if let Some(scraper) = metrics_scraper.as_mut()
+                && let Err(err) = scraper.scrape_after_block(block_number).await
             {
                 tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
@@ -435,9 +435,9 @@ impl Command {
             .filter(|e| {
                 let name = e.file_name();
                 let name_str = name.to_string_lossy();
-                e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    (name_str.starts_with("payload_block_") ||
-                        name_str.starts_with("big_block_"))
+                e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                    && (name_str.starts_with("payload_block_")
+                        || name_str.starts_with("big_block_"))
             })
             .collect();
 

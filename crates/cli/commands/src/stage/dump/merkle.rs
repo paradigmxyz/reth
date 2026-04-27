@@ -178,7 +178,7 @@ where
             checkpoint: Some(StageCheckpoint::new(from)),
         };
         if stage.execute(&provider, input)?.done {
-            break
+            break;
         }
     }
 

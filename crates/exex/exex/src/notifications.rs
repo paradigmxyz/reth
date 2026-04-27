@@ -345,12 +345,12 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        if self.provider.is_known(self.initial_exex_head.block.hash)? &&
-            self.initial_exex_head.block.number <= self.initial_local_head.number
+        if self.provider.is_known(self.initial_exex_head.block.hash)?
+            && self.initial_exex_head.block.number <= self.initial_local_head.number
         {
             // we have the targeted block and that block is below the current head
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
-            return Ok(None)
+            return Ok(None);
         }
 
         // If the head block is not found in the database, it means we're not on the canonical
@@ -370,7 +370,7 @@ where
             return Err(eyre::eyre!(
                 "Could not find notification for block hash {:?} in the WAL",
                 self.initial_exex_head.block.hash
-            ))
+            ));
         };
 
         // Update the head block hash to the parent hash of the first committed block.
@@ -437,7 +437,7 @@ where
         // 1. Check once whether we need to retrieve a notification gap from the WAL.
         if this.pending_check_canonical {
             if let Some(canonical_notification) = this.check_canonical()? {
-                return Poll::Ready(Some(Ok(canonical_notification)))
+                return Poll::Ready(Some(Ok(canonical_notification)));
             }
 
             // ExEx head is on the canonical chain, we no longer need to check it
@@ -471,8 +471,8 @@ where
                     this.pending_notifications.push_back(notification);
                     continue;
                 }
-                if let Some(committed) = notification.committed_chain() &&
-                    committed.tip().number() <= this.initial_local_head.number
+                if let Some(committed) = notification.committed_chain()
+                    && committed.tip().number() <= this.initial_local_head.number
                 {
                     // Covered by backfill range, safe to discard
                     continue;
@@ -485,7 +485,7 @@ where
                 debug!(target: "exex::notifications", range = ?chain.range(), "Backfill job returned a chain");
                 return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
                     new: Arc::new(chain),
-                })))
+                })));
             }
 
             // Backfill job is done, remove it
@@ -494,24 +494,24 @@ where
 
         // 4. Deliver any notifications that were buffered during backfill
         if let Some(notification) = this.pending_notifications.pop_front() {
-            return Poll::Ready(Some(Ok(notification)))
+            return Poll::Ready(Some(Ok(notification)));
         }
 
         // 5. Otherwise advance the regular event stream
         loop {
             let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             };
 
             // 6. In case the exex is ahead of the new tip, we must skip it
             if let Some(committed) = notification.committed_chain() {
                 // inclusive check because we should start with `exex.head + 1`
                 if this.initial_exex_head.block.number >= committed.tip().number() {
-                    continue
+                    continue;
                 }
             }
 
-            return Poll::Ready(Some(Ok(notification)))
+            return Poll::Ready(Some(Ok(notification)));
         }
     }
 }

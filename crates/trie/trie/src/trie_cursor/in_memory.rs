@@ -192,7 +192,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
                 {
                     // If overlay returns a node prior to the DB's node, or the DB is exhausted,
                     // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
+                    return Ok(Some((mem_key, node)));
                 }
                 // All other cases:
                 // - mem_key > db_key
@@ -250,14 +250,14 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         // If either cursor is currently pointing to the last entry which was returned then consume
         // that entry so that `choose_next_entry` is looking at the subsequent one.
-        if let Some((key, _)) = self.in_memory_cursor.current() &&
-            key == &last_key
+        if let Some((key, _)) = self.in_memory_cursor.current()
+            && key == &last_key
         {
             self.in_memory_cursor.first_after(&last_key);
         }
 
-        if let Some((key, _)) = &self.cursor_entry &&
-            key == &last_key
+        if let Some((key, _)) = &self.cursor_entry
+            && key == &last_key
         {
             self.cursor_next()?;
         }
@@ -330,8 +330,8 @@ mod tests {
 
         let mut results = Vec::new();
 
-        if let Some(first_expected) = test_case.expected_results.first() &&
-            let Ok(Some(entry)) = cursor.seek(first_expected.0)
+        if let Some(first_expected) = test_case.expected_results.first()
+            && let Ok(Some(entry)) = cursor.seek(first_expected.0)
         {
             results.push(entry);
         }

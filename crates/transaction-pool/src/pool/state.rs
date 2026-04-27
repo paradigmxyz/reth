@@ -230,10 +230,10 @@ mod tests {
         let state = TxState::default();
         assert_eq!(SubPool::Queued, state.into());
 
-        let state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_FEE_CAP_BLOCK;
+        let state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_FEE_CAP_BLOCK;
         assert_eq!(SubPool::Queued, state.into());
     }
 
@@ -330,12 +330,12 @@ mod tests {
     #[test]
     fn test_blob_reason_insufficient_base_fee() {
         // Blob tx with all structural bits set and blob fee sufficient, but base fee insufficient
-        let state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::ENOUGH_BALANCE |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
-            TxState::BLOB_TRANSACTION;
+        let state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::ENOUGH_BALANCE
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_BLOB_FEE_CAP_BLOCK
+            | TxState::BLOB_TRANSACTION;
         // ENOUGH_FEE_CAP_BLOCK intentionally not set
         let subpool: SubPool = state.into();
         assert_eq!(subpool, SubPool::Blob);
@@ -346,12 +346,12 @@ mod tests {
     #[test]
     fn test_blob_reason_insufficient_blob_fee() {
         // Blob tx with all structural bits set and base fee sufficient, but blob fee insufficient
-        let state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::ENOUGH_BALANCE |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_FEE_CAP_BLOCK |
-            TxState::BLOB_TRANSACTION;
+        let state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::ENOUGH_BALANCE
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_FEE_CAP_BLOCK
+            | TxState::BLOB_TRANSACTION;
         // ENOUGH_BLOB_FEE_CAP_BLOCK intentionally not set
         let subpool: SubPool = state.into();
         assert_eq!(subpool, SubPool::Blob);
@@ -362,12 +362,12 @@ mod tests {
     #[test]
     fn test_blob_reason_nonce_gap() {
         // Blob tx with nonce gap should report NonceGap regardless of fee bits
-        let mut state = TxState::NO_PARKED_ANCESTORS |
-            TxState::ENOUGH_BALANCE |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_FEE_CAP_BLOCK |
-            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
-            TxState::BLOB_TRANSACTION;
+        let mut state = TxState::NO_PARKED_ANCESTORS
+            | TxState::ENOUGH_BALANCE
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_FEE_CAP_BLOCK
+            | TxState::ENOUGH_BLOB_FEE_CAP_BLOCK
+            | TxState::BLOB_TRANSACTION;
         state.remove(TxState::NO_NONCE_GAPS);
         let subpool: SubPool = state.into();
         assert_eq!(subpool, SubPool::Blob);
@@ -378,12 +378,12 @@ mod tests {
     #[test]
     fn test_blob_reason_insufficient_balance() {
         // Blob tx with insufficient balance
-        let state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_FEE_CAP_BLOCK |
-            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
-            TxState::BLOB_TRANSACTION;
+        let state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_FEE_CAP_BLOCK
+            | TxState::ENOUGH_BLOB_FEE_CAP_BLOCK
+            | TxState::BLOB_TRANSACTION;
         // ENOUGH_BALANCE intentionally not set
         let subpool: SubPool = state.into();
         assert_eq!(subpool, SubPool::Blob);
@@ -394,12 +394,12 @@ mod tests {
     #[test]
     fn test_blob_reason_too_much_gas() {
         // Blob tx exceeding gas limit
-        let mut state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::ENOUGH_BALANCE |
-            TxState::ENOUGH_FEE_CAP_BLOCK |
-            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
-            TxState::BLOB_TRANSACTION;
+        let mut state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::ENOUGH_BALANCE
+            | TxState::ENOUGH_FEE_CAP_BLOCK
+            | TxState::ENOUGH_BLOB_FEE_CAP_BLOCK
+            | TxState::BLOB_TRANSACTION;
         state.remove(TxState::NOT_TOO_MUCH_GAS);
         let subpool: SubPool = state.into();
         assert_eq!(subpool, SubPool::Blob);

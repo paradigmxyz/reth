@@ -205,8 +205,8 @@ where
                 None => return Ok(()),
             };
 
-            if plan.next_segment >= plan.segments.len() ||
-                plan.tx_counter != plan.segments[plan.next_segment].start_tx
+            if plan.next_segment >= plan.segments.len()
+                || plan.tx_counter != plan.segments[plan.next_segment].start_tx
             {
                 return Ok(());
             }
@@ -399,8 +399,8 @@ where
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
+        if offset > 0
+            && let Some(receipt) = self.inner_mut().receipts.last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }

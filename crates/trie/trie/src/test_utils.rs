@@ -289,8 +289,8 @@ impl TrieTestHarness {
             .retain(|path, node| self.storage_trie_updates.storage_nodes.get(path) != Some(node));
 
         updates.removed_nodes.retain(|path| {
-            self.storage_trie_updates.storage_nodes.contains_key(path) &&
-                !paths_with_updates.contains(path)
+            self.storage_trie_updates.storage_nodes.contains_key(path)
+                && !paths_with_updates.contains(path)
         });
     }
 }

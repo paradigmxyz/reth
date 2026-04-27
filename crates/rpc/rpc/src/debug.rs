@@ -35,9 +35,7 @@ use reth_storage_api::{
     ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
-use reth_trie_common::{
-    updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, TrieInput,
-};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, TrieInput};
 use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
@@ -560,16 +558,9 @@ where
                 // that were accessed during execution, producing an
                 // incomplete witness for the stateless validator.
                 let prefix_sets = hashed_state.construct_prefix_sets();
-                let input = TrieInput::new(
-                    Default::default(),
-                    Default::default(),
-                    prefix_sets,
-                );
-                let mut state = db
-                    .database
-                    .0
-                    .witness(input, hashed_state, mode)
-                    .map_err(EthApiError::from)?;
+                let input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
+                let mut state =
+                    db.database.0.witness(input, hashed_state, mode).map_err(EthApiError::from)?;
 
                 // The witness multiproof may omit the state trie root node for
                 // historical blocks where the root is not directly traversed during

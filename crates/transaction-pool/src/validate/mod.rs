@@ -460,7 +460,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
         // Check if the max fee per gas is underpriced.
         if maybe_replacement.max_fee_per_gas() < required_bumped_fee(self.max_fee_per_gas()) {
-            return true
+            return true;
         }
 
         let existing_max_priority_fee_per_gas =
@@ -469,12 +469,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
             maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or_default();
 
         // Check max priority fee per gas (relevant for EIP-1559 transactions only)
-        if existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas <
-                required_bumped_fee(existing_max_priority_fee_per_gas)
+        if existing_max_priority_fee_per_gas != 0
+            && replacement_max_priority_fee_per_gas != 0
+            && replacement_max_priority_fee_per_gas
+                < required_bumped_fee(existing_max_priority_fee_per_gas)
         {
-            return true
+            return true;
         }
 
         // Check max blob fee per gas
@@ -484,7 +484,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
             if replacement_max_blob_fee_per_gas < required_bumped_fee(existing_max_blob_fee_per_gas)
             {
-                return true
+                return true;
             }
         }
 

@@ -292,8 +292,8 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let bal = if rlp.is_none() &&
-                (block.header.block_access_list_hash.is_some() || self.enable_bal)
+            let bal = if rlp.is_none()
+                && (block.header.block_access_list_hash.is_some() || self.enable_bal)
             {
                 Some(fetch_block_access_list(&block_provider, block.header.number).await?)
             } else {
@@ -440,8 +440,8 @@ impl Command {
             };
             info!(target: "reth-bench", progress, %combined_result);
 
-            if let Some(scraper) = metrics_scraper.as_mut() &&
-                let Err(err) = scraper.scrape_after_block(block_number).await
+            if let Some(scraper) = metrics_scraper.as_mut()
+                && let Err(err) = scraper.scrape_after_block(block_number).await
             {
                 warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
@@ -553,7 +553,7 @@ async fn queue_fork_block(
     no_wait_for_caches: bool,
 ) -> eyre::Result<Option<QueuedForkBlock>> {
     if !benchmark_mode.contains(block_number) {
-        return Ok(None)
+        return Ok(None);
     }
 
     let future_block = block_provider
@@ -578,8 +578,8 @@ async fn queue_fork_block(
 
 fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool {
     let message = err.to_string();
-    message.contains("block not found: hash") ||
-        message.contains("block hash not found for block number")
+    message.contains("block not found: hash")
+        || message.contains("block hash not found for block number")
 }
 
 fn build_block_request(
@@ -595,7 +595,7 @@ fn build_block_request(
             let tx: TxEnvelope =
                 tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type in RPC block"))?;
             if tx.is_eip4844() {
-                return Ok(None)
+                return Ok(None);
             }
             Ok(Some(tx.encoded_2718().into()))
         })
@@ -633,7 +633,7 @@ fn parse_reorg_depth(value: &str) -> Result<usize, String> {
         .map_err(|_| format!("invalid reorg depth {value:?}, expected a positive integer"))?;
 
     if depth == 0 {
-        return Err("reorg depth must be greater than 0".to_string())
+        return Err("reorg depth must be greater than 0".to_string());
     }
 
     Ok(depth)

@@ -47,7 +47,7 @@ impl Decodable for BlockAccessLists {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
         if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
 
         let (mut payload, rest) = buf.split_at(header.payload_length);
@@ -58,7 +58,7 @@ impl Decodable for BlockAccessLists {
             let item_start = payload;
             let item_header = Header::decode(&mut payload)?;
             if !item_header.list {
-                return Err(alloy_rlp::Error::UnexpectedString)
+                return Err(alloy_rlp::Error::UnexpectedString);
             }
 
             let item_length = item_header.length_with_payload();
