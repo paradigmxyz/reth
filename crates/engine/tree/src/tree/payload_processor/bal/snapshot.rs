@@ -26,7 +26,10 @@
 
 use super::pre_state::{BlockPreState, RequiredReads};
 use crate::tree::{CachedStateMetrics, CachedStateProvider, SavedCache, StateProviderBuilder};
-use alloy_primitives::{map::B256HashMap, Address, BlockNumber, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{B256HashMap, B256HashSet},
+    Address, BlockNumber, StorageKey, StorageValue, B256,
+};
 use rayon::prelude::*;
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
@@ -173,12 +176,8 @@ where
 {
     // Dedupe code hashes across accounts so we fetch each bytecode once even if multiple
     // accounts share the same code (common for proxy / clone patterns).
-    let hashes: Vec<B256> = accounts
-        .values()
-        .filter_map(|opt| opt.as_ref().and_then(|a| a.bytecode_hash))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
+    let mut hashes = B256HashSet::with_capacity_and_hasher(accounts.len(), Default::default());
+    hashes.extend(accounts.values().filter_map(|opt| opt.as_ref().and_then(|a| a.bytecode_hash)));
 
     let pairs: Vec<(B256, Option<Bytecode>)> = hashes
         .into_par_iter()
