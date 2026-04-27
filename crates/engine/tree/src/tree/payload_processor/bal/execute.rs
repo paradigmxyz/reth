@@ -25,16 +25,23 @@ use super::{
     validation::{check_bal_hash, check_item_count},
     RejectReason,
 };
+use alloy_consensus::Transaction;
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, TxResult},
+    block::{
+        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError, TxResult,
+    },
     Evm,
 };
 use alloy_primitives::B256;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm};
 use reth_primitives_traits::{BlockTy, SealedBlock};
 use reth_tasks::{pool::WorkerPool, Runtime};
-use revm::database::{states::bundle_state::BundleRetention, BundleState, State};
+use revm::{
+    context::result::ResultAndState,
+    database::{states::bundle_state::BundleRetention, BundleState, State},
+    primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
+};
 use revm_state::bal::Bal;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -165,6 +172,17 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             .with_bundle_update()
             .with_bal_builder()
             .build();
+        // NOTE: technically Amsterdam implies BAL (the current path) we are on.
+        // TODO: should we do this
+        let is_amsterdam = self
+            .evm_config
+            .evm_env(block.header())
+            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
+            .cfg_env
+            .spec
+            .into()
+            .is_enabled_in(SpecId::AMSTERDAM);
+        let tx_gas_limits: Vec<_> = txs.iter().map(|tx| tx.tx().gas_limit()).collect();
 
         // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
         // (called by `commit_transaction`) panics at revm-database's
@@ -189,6 +207,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             canonical_executor.apply_pre_execution_changes()?;
 
             let mut feasibility = FeasibilityTracker::new(bal, block_gas_limit);
+            let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
             let abort = Arc::new(AtomicBool::new(false));
             let tx_count = txs.len() as u64;
 
@@ -219,7 +238,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                     });
                     result_rxs.push(result_rx);
                 }
-                for result_rx in result_rxs {
+                for (i, result_rx) in result_rxs.into_iter().enumerate() {
                     crossbeam_channel::select! {
                         recv(error_rx) -> err => {
                             abort.store(true, Ordering::Relaxed);
@@ -236,7 +255,9 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                                     "BAL worker result channel closed before all results arrived",
                                 ))
                             })?;
+                            gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
                             feasibility.record_and_check(worker_result.result())?;
+                            gas_tracker.record_result(worker_result.result());
                             canonical_executor.evm_mut().db_mut().bump_bal_index();
                             commit_worker_result(&mut canonical_executor, worker_result)?;
                         }
@@ -267,6 +288,48 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             blob_gas_used: block_result.blob_gas_used,
             requests: block_result.requests,
         })
+    }
+}
+
+/// Mirrors `EthBlockExecutor`'s cumulative gas admission check in the ordered BAL commit loop.
+#[derive(Debug)]
+struct BlockGasTracker {
+    block_gas_limit: u64,
+    is_amsterdam: bool,
+    cumulative_tx_gas_used: u64,
+    block_regular_gas_used: u64,
+}
+
+impl BlockGasTracker {
+    const fn new(block_gas_limit: u64, is_amsterdam: bool) -> Self {
+        Self { block_gas_limit, is_amsterdam, cumulative_tx_gas_used: 0, block_regular_gas_used: 0 }
+    }
+
+    fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
+        let block_gas_used = if self.is_amsterdam {
+            self.block_regular_gas_used
+        } else {
+            self.cumulative_tx_gas_used
+        };
+        let block_available_gas = self.block_gas_limit.saturating_sub(block_gas_used);
+        let tx_min_gas_limit = tx_gas_limit.min(TX_GAS_LIMIT_CAP);
+
+        if tx_min_gas_limit > block_available_gas {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: tx_gas_limit,
+                block_available_gas,
+            }
+            .into());
+        }
+
+        Ok(())
+    }
+
+    fn record_result<H>(&mut self, result: &ResultAndState<H>) {
+        let gas = result.result.gas();
+        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
+        self.block_regular_gas_used =
+            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
     }
 }
 
@@ -380,10 +443,17 @@ mod tests {
 
     /// Builds a minimal sealed block (empty body, Amsterdam-ready header) for tests.
     fn empty_amsterdam_block(header_bal_hash: B256) -> SealedBlock<Block> {
+        empty_amsterdam_block_with_gas_limit(header_bal_hash, 30_000_000)
+    }
+
+    fn empty_amsterdam_block_with_gas_limit(
+        header_bal_hash: B256,
+        gas_limit: u64,
+    ) -> SealedBlock<Block> {
         let header = Header {
             timestamp: 1,
             number: 1,
-            gas_limit: 30_000_000,
+            gas_limit,
             parent_beacon_block_root: Some(B256::ZERO),
             withdrawals_root: Some(alloy_consensus::EMPTY_ROOT_HASH),
             requests_hash: Some(alloy_eips::eip7685::EMPTY_REQUESTS_HASH),
@@ -909,6 +979,86 @@ mod tests {
             vec![tx1, tx2],
             30_000_000,
         );
+    }
+
+    #[test]
+    fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
+        // Each worker sees an empty block, so both transactions fit individually. The ordered
+        // commit loop must still reject tx2 because tx1's committed gas leaves too little
+        // block gas for tx2's gas limit.
+        use alloy_consensus::TxLegacy;
+        use alloy_evm::block::BlockValidationError;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+        let block_gas_limit = 1_000_000;
+        let tx_gas_limit = 990_000;
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: tx_gas_limit,
+                    to: TxKind::Call(carol),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+
+        // Build the reference BAL under a generous gas limit so both workers can execute.
+        // Replaying the same BAL under `block_gas_limit` below should reject in the ordered
+        // commit loop before tx2 is committed.
+        let reference_block = empty_amsterdam_block(B256::ZERO);
+        let reference_bal = reference_bal_for_block(
+            &evm_config,
+            pre_block_db.clone(),
+            &reference_block,
+            vec![tx1.clone(), tx2.clone()],
+        );
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, block_gas_limit);
+        let snapshot = snapshot_for_bal(pre_block_db, &reference_bal, low_gas_block.number);
+
+        let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
+        let result = executor.execute_block(
+            snapshot,
+            to_arc_decoded(reference_bal),
+            &low_gas_block,
+            vec![tx1, tx2],
+            Some(bal_hash),
+            block_gas_limit,
+        );
+
+        match result {
+            Err(BalExecutionError::Evm(err)) => assert!(matches!(
+                err.as_validation(),
+                Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
+            )),
+            Err(err) => panic!("expected block gas validation error, got {err:?}"),
+            Ok(_) => panic!("expected block gas validation error, got Ok"),
+        }
     }
 
     #[test]
