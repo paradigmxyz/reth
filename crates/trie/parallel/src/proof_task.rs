@@ -1164,7 +1164,7 @@ mod tests {
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(
             provider_factory,
-            changeset_cache,
+            reth_provider::providers::OverlayBuilder::new(changeset_cache),
         );
         let ctx = test_ctx(factory);
 

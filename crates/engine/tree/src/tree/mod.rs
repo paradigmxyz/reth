@@ -3029,7 +3029,15 @@ where
             InsertBlockValidationError::Consensus(err) => self.consensus.is_transient_error(err),
             _ => false,
         };
-        if !is_transient {
+        if is_transient {
+            warn!(
+                target: "engine::tree",
+                invalid_hash=%block.hash(),
+                invalid_number=block.number(),
+                %validation_err,
+                "Skipping invalid header cache insert for transient validation error",
+            );
+        } else {
             self.state.invalid_headers.insert(block.block_with_parent());
         }
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(

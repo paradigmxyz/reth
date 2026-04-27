@@ -802,21 +802,26 @@ jobs:
 
       - name: Prepare source dirs
         run: |
+          prepare_source_dir() {
+            local dir="$1"
+            local ref="$2"
+
+            if [ -d "$dir" ]; then
+              git -C "$dir" reset --hard HEAD
+              git -C "$dir" clean -fdx
+              git -C "$dir" fetch origin "$ref"
+            else
+              git clone . "$dir"
+            fi
+
+            git -C "$dir" checkout --force "$ref"
+          }
+
           BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
-          if [ -d ../reth-baseline ]; then
-            git -C ../reth-baseline fetch origin "$BASELINE_REF"
-          else
-            git clone . ../reth-baseline
-          fi
-          git -C ../reth-baseline checkout "$BASELINE_REF"
+          prepare_source_dir ../reth-baseline "$BASELINE_REF"
 
           FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
-          if [ -d ../reth-feature ]; then
-            git -C ../reth-feature fetch origin "$FEATURE_REF"
-          else
-            git clone . ../reth-feature
-          fi
-          git -C ../reth-feature checkout "$FEATURE_REF"
+          prepare_source_dir ../reth-feature "$FEATURE_REF"
 
       - name: Build binaries
         id: build
