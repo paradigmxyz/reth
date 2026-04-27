@@ -189,13 +189,11 @@ impl Discovery {
         // requiring the main `Discovery::poll` loop to be driven for packets to be routed.
         let (discv5_updates, _discv5_forwarder) = match (discv4_ingress, discv5_updates) {
             (Some(mut ingress), Some(mut updates)) => {
-                // Sized to comfortably absorb event bursts while `Discovery::poll` catches up,
-                // so routing of `UnrecognizedFrame`s into discv4 stays independent of polling.
-                let (tx, rx) = mpsc::channel(1024);
+                let (tx, rx) = mpsc::channel(updates.max_capacity());
                 let handle = tokio::spawn(async move {
                     while let Some(event) = updates.recv().await {
                         if let discv5::Event::UnrecognizedFrame(frame) = &event {
-                            ingress.handle_packet(&frame.packet, frame.src_address);
+                            ingress.handle_packet(&frame.packet, frame.src_address).await;
                             continue;
                         }
                         if tx.send(event).await.is_err() {

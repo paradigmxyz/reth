@@ -2018,9 +2018,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                 handler.send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
-                if let Some(event) = handler.classify(&buf[..read], remote_addr) {
-                    handler.send(event).await;
-                }
+                handler.handle_packet(&buf[..read], remote_addr).await;
             }
         }
     }
@@ -2059,26 +2057,9 @@ impl IngressHandler {
         });
     }
 
-    fn try_send(&self, event: IngressEvent) {
-        let _ = self.tx.try_send(event).map_err(|err| {
-            debug!(target: "discv4", %err, "failed send incoming packet");
-        });
-    }
-
     /// Handles an incoming raw packet: decodes, rate-limits, deduplicates, and forwards to the
     /// discv4 service. Used in shared-port mode to process unrecognized frames from discv5.
-    ///
-    /// Uses `try_send` so a backed-up discv4 ingress channel doesn't block the caller. Lost
-    /// packets are acceptable: discv4 peers retry on timeout.
-    pub fn handle_packet(&mut self, data: &[u8], src: SocketAddr) {
-        if let Some(event) = self.classify(data, src) {
-            self.try_send(event);
-        }
-    }
-
-    /// Decodes/rate-limits/deduplicates a packet and returns the resulting [`IngressEvent`] if
-    /// any.
-    fn classify(&mut self, data: &[u8], src: SocketAddr) -> Option<IngressEvent> {
+    pub async fn handle_packet(&mut self, data: &[u8], src: SocketAddr) {
         if self.last_tick.elapsed() >= self.tick_interval {
             self.cache.tick_ips(self.tick);
             self.last_tick = Instant::now();
@@ -2087,28 +2068,30 @@ impl IngressHandler {
         // rate limit incoming packets by IP
         if self.cache.inc_ip(src.ip()) > MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP {
             trace!(target: "discv4", ?src, "Too many incoming packets from IP.");
-            return None
+            return
         }
 
-        match Message::decode(data) {
+        let event = match Message::decode(data) {
             Ok(packet) => {
                 if packet.node_id == self.local_id {
                     debug!(target: "discv4", ?src, "Received own packet.");
-                    return None
+                    return
                 }
 
                 if self.cache.contains_packet(packet.hash) {
                     debug!(target: "discv4", ?src, "Received duplicate packet.");
-                    return None
+                    return
                 }
 
-                Some(IngressEvent::Packet(src, packet))
+                IngressEvent::Packet(src, packet)
             }
             Err(err) => {
                 trace!(target: "discv4", %err, "Failed to decode packet");
-                Some(IngressEvent::BadPacket(src, err, data.to_vec()))
+                IngressEvent::BadPacket(src, err, data.to_vec())
             }
-        }
+        };
+
+        self.send(event).await;
     }
 }
 
