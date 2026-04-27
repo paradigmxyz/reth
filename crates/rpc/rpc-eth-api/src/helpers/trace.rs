@@ -1,6 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use super::{Call, LoadBlock, LoadState, LoadTransaction};
+use super::{bal, Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
@@ -183,7 +183,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                this.position_state_before_transaction(
+                bal::position_state_before_transaction(
+                    &this,
                     &mut db,
                     evm_env.clone(),
                     block_txs,

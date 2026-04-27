@@ -3,10 +3,7 @@
 
 use core::fmt;
 
-use super::{
-    BlockAccessListState, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking,
-    Trace,
-};
+use super::{bal, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
@@ -541,8 +538,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
 /// Executes code on state.
 pub trait Call:
-    BlockAccessListState
-    + LoadState<
+    LoadState<
         RpcConvert: RpcConvert<Evm = Self::Evm>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
@@ -676,6 +672,28 @@ pub trait Call:
         })
     }
 
+    /// Executes the closure with state for `at` and, when available, the BAL for `block_hash`.
+    fn spawn_with_state_at_block_and_bal<F, R>(
+        &self,
+        at: impl Into<BlockId>,
+        block_hash: B256,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        let at = at.into();
+        self.spawn_blocking_io_fut(async move |this| {
+            let state = this.state_at_block_id(at).await?;
+            let mut db = State::builder()
+                .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                .build();
+            bal::attach_block_bal(this.provider(), block_hash, &mut db);
+            f(this, db)
+        })
+    }
+
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
@@ -771,7 +789,8 @@ pub trait Call:
                     executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 }
 
-                this.position_state_before_transaction(
+                bal::position_state_before_transaction(
+                    &this,
                     &mut db,
                     evm_env.clone(),
                     block_txs,

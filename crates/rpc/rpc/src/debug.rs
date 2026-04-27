@@ -25,7 +25,7 @@ use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{bal, EthTransactions, TraceExt},
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
@@ -235,7 +235,8 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                eth_api.position_state_before_transaction(
+                bal::position_state_before_transaction(
+                    &eth_api,
                     &mut db,
                     evm_env.clone(),
                     block_txs,
@@ -356,7 +357,8 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // 2. position the state before the requested transaction index
-                eth_api.position_state_before_transaction(
+                bal::position_state_before_transaction(
+                    &eth_api,
                     &mut db,
                     evm_env.clone(),
                     block.transactions_recovered(),
