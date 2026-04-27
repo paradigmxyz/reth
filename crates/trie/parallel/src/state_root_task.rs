@@ -180,22 +180,95 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             let info = if destroyed { None } else { Some(account.info.into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            } else {
+                let storage_len = account.storage.len();
+                let mut changed_storage = None;
+
+                for (slot, value) in account.storage {
+                    if !value.is_changed() {
+                        continue;
+                    }
+
+                    let storage = changed_storage.get_or_insert_with(|| {
+                        let mut storage = HashedStorage::new(false);
+                        storage.storage.reserve(storage_len);
+                        storage
+                    });
+                    storage.storage.insert(keccak256(B256::from(slot)), value.present_value);
+                }
+
+                if let Some(changed_storage) = changed_storage {
+                    hashed_state.storages.insert(hashed_address, changed_storage);
+                }
             }
         }
     }
 
     hashed_state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+    use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+    #[test]
+    fn preserves_changed_slots_and_destroyed_accounts() {
+        let live_address = Address::with_last_byte(1);
+        let destroyed_address = Address::with_last_byte(2);
+
+        let mut update = EvmState::default();
+        update.insert(
+            live_address,
+            Account {
+                info: AccountInfo::default(),
+                original_info: Box::new(AccountInfo::default()),
+                storage: [
+                    (U256::from(1), EvmStorageSlot::new_changed(U256::ZERO, U256::from(5), 0)),
+                    (U256::from(2), EvmStorageSlot::default()),
+                    (U256::from(3), EvmStorageSlot::new_changed(U256::from(7), U256::ZERO, 0)),
+                ]
+                .into_iter()
+                .collect(),
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+        update.insert(
+            destroyed_address,
+            Account {
+                info: AccountInfo::default(),
+                original_info: Box::new(AccountInfo::default()),
+                storage: [(
+                    U256::from(4),
+                    EvmStorageSlot::new_changed(U256::ZERO, U256::from(9), 0),
+                )]
+                .into_iter()
+                .collect(),
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                transaction_id: 0,
+            },
+        );
+
+        let hashed = evm_state_to_hashed_post_state(update);
+
+        let live_storage = hashed.storages.get(&keccak256(live_address)).unwrap();
+        assert!(!live_storage.wiped);
+        assert_eq!(live_storage.storage.len(), 2);
+        assert_eq!(
+            live_storage.storage.get(&keccak256(B256::from(U256::from(1)))).copied(),
+            Some(U256::from(5))
+        );
+        assert_eq!(
+            live_storage.storage.get(&keccak256(B256::from(U256::from(3)))).copied(),
+            Some(U256::ZERO)
+        );
+
+        let destroyed_storage = hashed.storages.get(&keccak256(destroyed_address)).unwrap();
+        assert!(destroyed_storage.wiped);
+        assert!(destroyed_storage.storage.is_empty());
+    }
 }
