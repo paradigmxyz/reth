@@ -1803,7 +1803,7 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
         loop {
             let event = self.st.try_recv()?;
             if event.subpool == self.subpool {
-                return Ok(event)
+                return Ok(event);
             }
         }
     }
@@ -1817,7 +1817,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             match ready!(self.st.poll_recv(cx)) {
                 Some(event) => {
                     if event.subpool == self.subpool {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
                 }
                 None => return Poll::Ready(None),

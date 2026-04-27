@@ -10,14 +10,14 @@ pub use nybbles::Nibbles;
 /// - Siblings are ordered lexicographically
 pub fn depth_first_cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
     if a.len() == b.len() {
-        return a.cmp(b)
+        return a.cmp(b);
     }
 
     let common_prefix_len = a.common_prefix_length(b);
     if a.len() == common_prefix_len {
-        return Ordering::Greater
+        return Ordering::Greater;
     } else if b.len() == common_prefix_len {
-        return Ordering::Less
+        return Ordering::Less;
     }
 
     a.get_unchecked(common_prefix_len).cmp(&b.get_unchecked(common_prefix_len))

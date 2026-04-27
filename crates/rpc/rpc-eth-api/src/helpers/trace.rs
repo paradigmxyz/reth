@@ -273,7 +273,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
             if block.body().transactions().is_empty() {
                 // nothing to trace
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             // replay all transactions of the block

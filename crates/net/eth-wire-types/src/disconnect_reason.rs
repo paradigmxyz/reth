@@ -95,9 +95,9 @@ impl Decodable for DisconnectReason {
     /// reason encoded a single byte or a RLP list containing the disconnect reason.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(alloy_rlp::Error::InputTooShort)
+            return Err(alloy_rlp::Error::InputTooShort);
         } else if buf.len() > 2 {
-            return Err(alloy_rlp::Error::Overflow)
+            return Err(alloy_rlp::Error::Overflow);
         }
 
         if buf.len() > 1 {
@@ -106,14 +106,14 @@ impl Decodable for DisconnectReason {
             let header = Header::decode(buf)?;
 
             if !header.list {
-                return Err(alloy_rlp::Error::UnexpectedString)
+                return Err(alloy_rlp::Error::UnexpectedString);
             }
 
             if header.payload_length != 1 {
                 return Err(alloy_rlp::Error::ListLengthMismatch {
                     expected: 1,
                     got: header.payload_length,
-                })
+                });
             }
         }
 

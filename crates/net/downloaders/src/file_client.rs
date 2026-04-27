@@ -161,7 +161,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Returns true if all blocks are canonical (no gaps)
     pub fn has_canonical_blocks(&self) -> bool {
         if self.headers.is_empty() {
-            return true
+            return true;
         }
         let (min, max) = self.headers.keys().minmax().into_option().expect("not empty");
         // Contiguous range from min to max means no gaps
@@ -265,7 +265,7 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                             "partial block returned from decoding chunk"
                         );
                         remaining_bytes = bytes;
-                        break
+                        break;
                     }
                     Err(err) => return Err(err),
                 };
@@ -335,7 +335,7 @@ impl<B: FullBlock> HeadersClient for FileClient<B> {
                 Some(num) => *num,
                 None => {
                     warn!(%hash, "Could not find starting block number for requested header hash");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                    return Box::pin(async move { Err(RequestError::BadResponse) });
                 }
             },
             BlockHashOrNumber::Number(num) => num,
@@ -359,7 +359,7 @@ impl<B: FullBlock> HeadersClient for FileClient<B> {
                 Some(header) => headers.push(header),
                 None => {
                     warn!(number=%block_number, "Could not find header");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                    return Box::pin(async move { Err(RequestError::BadResponse) });
                 }
             }
         }
@@ -455,7 +455,7 @@ impl FileReader {
 
         if *remaining_bytes == 0 && chunk.is_empty() {
             // eof
-            return Ok(None)
+            return Ok(None);
         }
 
         let chunk_target_len = chunk_byte_len.min(*remaining_bytes + chunk.len() as u64);
@@ -498,7 +498,7 @@ impl FileReader {
         let mut buffer = vec![0u8; 64 * 1024];
         loop {
             if chunk.len() >= chunk_byte_len as usize {
-                return Ok(true)
+                return Ok(true);
             }
 
             match self.read(&mut buffer).await {
@@ -605,7 +605,7 @@ impl ChunkedFileReader {
             })
         })?
         else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // make new file client from chunk

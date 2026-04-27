@@ -138,8 +138,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         Ok(res) => res,
                         Err(e) => match e.kind {
                             // skip pool capacity/replacement errors (not relevant)
-                            PoolErrorKind::SpammerExceededCapacity(_) |
-                            PoolErrorKind::ReplacementUnderpriced => return,
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
                             _ => panic!("unexpected error: {e:?}"),
                         },
                     };
@@ -181,8 +181,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         Ok(res) => res,
                         Err(e) => match e.kind {
                             // skip pool capacity/replacement errors (not relevant)
-                            PoolErrorKind::SpammerExceededCapacity(_) |
-                            PoolErrorKind::ReplacementUnderpriced => return,
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
                             _ => panic!("unexpected error: {e:?}"),
                         },
                     };
@@ -229,8 +229,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         Ok(res) => res,
                         Err(e) => match e.kind {
                             // skip pool capacity/replacement errors (not relevant)
-                            PoolErrorKind::SpammerExceededCapacity(_) |
-                            PoolErrorKind::ReplacementUnderpriced => return,
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
                             _ => panic!("unexpected error: {e:?}"),
                         },
                     };
@@ -283,8 +283,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         Ok(res) => res,
                         Err(e) => match e.kind {
                             // skip pool capacity/replacement errors (not relevant)
-                            PoolErrorKind::SpammerExceededCapacity(_) |
-                            PoolErrorKind::ReplacementUnderpriced => return,
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
                             _ => panic!("unexpected error: {e:?}"),
                         },
                     };

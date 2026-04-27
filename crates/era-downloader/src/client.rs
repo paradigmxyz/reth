@@ -123,9 +123,9 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if let Some(name) = entry.file_name().to_str() &&
-                    let Some(number) = self.file_name_to_number(name) &&
-                    (max.is_none() || matches!(max, Some(max) if number > max))
+                if let Some(name) = entry.file_name().to_str()
+                    && let Some(number) = self.file_name_to_number(name)
+                    && (max.is_none() || matches!(max, Some(max) if number > max))
                 {
                     max.replace(number + 1);
                 }
@@ -141,9 +141,9 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if let Some(name) = entry.file_name().to_str() &&
-                    let Some(number) = self.file_name_to_number(name) &&
-                    (number < index || number >= last)
+                if let Some(name) = entry.file_name().to_str()
+                    && let Some(number) = self.file_name_to_number(name)
+                    && (number < index || number >= last)
                 {
                     reth_fs_util::remove_file_if_exists(entry.path())?;
                 }
@@ -215,8 +215,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let ext_len = ext.len();
 
         while let Some(line) = lines.next_line().await? {
-            if let Some(j) = line.find(ext) &&
-                let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
+            if let Some(j) = line.find(ext)
+                && let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
             {
                 let era = &line[i + 1..j + ext_len];
                 writer.write_all(era.as_bytes()).await?;

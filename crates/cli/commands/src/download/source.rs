@@ -181,8 +181,8 @@ pub(crate) fn resolve_manifest_base_url(
     manifest: &SnapshotManifest,
     source: &str,
 ) -> Result<String> {
-    if let Some(base_url) = manifest.base_url.as_deref() &&
-        !base_url.is_empty()
+    if let Some(base_url) = manifest.base_url.as_deref()
+        && !base_url.is_empty()
     {
         return Ok(base_url.trim_end_matches('/').to_string());
     }

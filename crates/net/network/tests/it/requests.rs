@@ -697,7 +697,7 @@ fn raw_bal_with_len(len: usize) -> Bytes {
         let header_length = alloy_rlp::Header { list: true, payload_length }.length();
         let next_payload_length = len.checked_sub(header_length).unwrap();
         if next_payload_length == payload_length {
-            break
+            break;
         }
         payload_length = next_payload_length;
     }

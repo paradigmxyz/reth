@@ -568,17 +568,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             });
         }
 
-        let has_explicit_flags = self.with_txs ||
-            self.with_txs_since.is_some() ||
-            self.with_txs_distance.is_some() ||
-            self.with_receipts ||
-            self.with_receipts_since.is_some() ||
-            self.with_receipts_distance.is_some() ||
-            self.with_state_history ||
-            self.with_state_history_since.is_some() ||
-            self.with_state_history_distance.is_some() ||
-            self.with_senders ||
-            self.with_rocksdb;
+        let has_explicit_flags = self.with_txs
+            || self.with_txs_since.is_some()
+            || self.with_txs_distance.is_some()
+            || self.with_receipts
+            || self.with_receipts_since.is_some()
+            || self.with_receipts_distance.is_some()
+            || self.with_state_history
+            || self.with_state_history_since.is_some()
+            || self.with_state_history_distance.is_some()
+            || self.with_senders
+            || self.with_rocksdb;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
@@ -608,13 +608,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
-            if let Some(selection) = tx_selection &&
-                available(SnapshotComponentType::Transactions)
+            if let Some(selection) = tx_selection
+                && available(SnapshotComponentType::Transactions)
             {
                 selections.insert(SnapshotComponentType::Transactions, selection);
             }
-            if let Some(selection) = receipt_selection &&
-                available(SnapshotComponentType::Receipts)
+            if let Some(selection) = receipt_selection
+                && available(SnapshotComponentType::Receipts)
             {
                 selections.insert(SnapshotComponentType::Receipts, selection);
             }
@@ -813,10 +813,10 @@ fn inject_archive_only_components(
     let is_all =
         |ty: SnapshotComponentType| selections.get(&ty).copied() == Some(ComponentSelection::All);
 
-    let is_archive = is_all(SnapshotComponentType::Transactions) &&
-        is_all(SnapshotComponentType::Receipts) &&
-        is_all(SnapshotComponentType::AccountChangesets) &&
-        is_all(SnapshotComponentType::StorageChangesets);
+    let is_archive = is_all(SnapshotComponentType::Transactions)
+        && is_all(SnapshotComponentType::Receipts)
+        && is_all(SnapshotComponentType::AccountChangesets)
+        && is_all(SnapshotComponentType::StorageChangesets);
 
     if !is_archive {
         return;
@@ -885,8 +885,8 @@ where
     let default_chain = C::default_value().and_then(|chain_name| C::parse(chain_name).ok());
 
     if default_chain.as_ref().is_some_and(|default_chain| {
-        default_chain.chain() == current_chain &&
-            default_chain.genesis_hash() == current_genesis_hash
+        default_chain.chain() == current_chain
+            && default_chain.genesis_hash() == current_genesis_hash
     }) {
         return None;
     }
@@ -895,8 +895,8 @@ where
         .iter()
         .find_map(|chain_name| {
             let parsed_chain = C::parse(chain_name).ok()?;
-            (parsed_chain.chain() == current_chain &&
-                parsed_chain.genesis_hash() == current_genesis_hash)
+            (parsed_chain.chain() == current_chain
+                && parsed_chain.genesis_hash() == current_genesis_hash)
                 .then(|| (*chain_name).to_string())
         })
         .or_else(|| Some("<chain-or-chainspec>".to_string()))

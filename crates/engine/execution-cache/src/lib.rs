@@ -90,7 +90,7 @@ impl PayloadExecutionCache {
                     // and picking up polluted data if the fork block fails.
                     c.clear_with_hash(parent_hash);
                 }
-                return Some(c.clone())
+                return Some(c.clone());
             } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }

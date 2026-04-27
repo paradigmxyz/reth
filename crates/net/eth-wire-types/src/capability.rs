@@ -169,12 +169,12 @@ impl Capability {
     /// Whether this is any eth version.
     #[inline]
     pub fn is_eth(&self) -> bool {
-        self.is_eth_v66() ||
-            self.is_eth_v67() ||
-            self.is_eth_v68() ||
-            self.is_eth_v69() ||
-            self.is_eth_v70() ||
-            self.is_eth_v71()
+        self.is_eth_v66()
+            || self.is_eth_v67()
+            || self.is_eth_v68()
+            || self.is_eth_v69()
+            || self.is_eth_v70()
+            || self.is_eth_v71()
     }
 }
 
@@ -239,12 +239,12 @@ impl Capabilities {
     pub const fn supports_eth_at_least(&self, version: &EthVersion) -> bool {
         match version {
             EthVersion::Eth66 => {
-                self.eth_66 ||
-                    self.eth_67 ||
-                    self.eth_68 ||
-                    self.eth_69 ||
-                    self.eth_70 ||
-                    self.eth_71
+                self.eth_66
+                    || self.eth_67
+                    || self.eth_68
+                    || self.eth_69
+                    || self.eth_70
+                    || self.eth_71
             }
             EthVersion::Eth67 => {
                 self.eth_67 || self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71

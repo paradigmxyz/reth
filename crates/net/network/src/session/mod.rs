@@ -391,8 +391,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// by a shared atomic counter. If the bounded command channel is full but the broadcast limit
     /// hasn't been reached, the message overflows to a dedicated unbounded channel.
     pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
-        if let Some(session) = self.active_sessions.get(peer_id) &&
-            !session.commands.send_message(msg)
+        if let Some(session) = self.active_sessions.get(peer_id)
+            && !session.commands.send_message(msg)
         {
             self.metrics.total_outgoing_peer_messages_dropped.increment(1);
         }
@@ -422,7 +422,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     ) {
         if !self.disconnections_counter.has_capacity() {
             // drop the connection if we don't have capacity for gracefully disconnecting
-            return
+            return;
         }
 
         let guard = self.disconnections_counter.clone();
@@ -530,7 +530,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                         peer_id,
                         remote_addr,
                         direction,
-                    })
+                    });
                 }
 
                 let (commands_tx, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -968,7 +968,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
                     error,
                 })
                 .await;
-            return
+            return;
         }
     };
     authenticate(
@@ -1018,7 +1018,7 @@ async fn authenticate<N: NetworkPrimitives>(
                     direction,
                 })
                 .await;
-            return
+            return;
         }
     };
 

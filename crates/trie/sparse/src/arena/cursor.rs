@@ -135,8 +135,8 @@ impl ArenaCursor {
                 ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Subtrie(s) => {
                     let root = &s.arena[s.root];
-                    matches!(root, ArenaSparseNode::EmptyRoot) ||
-                        matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
+                    matches!(root, ArenaSparseNode::EmptyRoot)
+                        || matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
                 }
                 _ => false,
             });
@@ -299,8 +299,8 @@ impl ArenaCursor {
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena), ret)]
     pub(super) fn seek(&mut self, arena: &mut NodeArena, full_path: &Nibbles) -> SeekResult {
         // Pop stack until head is ancestor of full_path.
-        while self.stack.len() > 1 &&
-            !full_path.starts_with(&self.stack.last().expect("cursor has root").path)
+        while self.stack.len() > 1
+            && !full_path.starts_with(&self.stack.last().expect("cursor has root").path)
         {
             self.pop(arena);
         }
@@ -333,8 +333,8 @@ impl ArenaCursor {
 
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
+            if full_path.len() <= head_branch_logical_path.len()
+                || !full_path.starts_with(&head_branch_logical_path)
             {
                 return SeekResult::Diverged;
             }

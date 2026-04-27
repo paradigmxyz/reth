@@ -151,9 +151,9 @@ where
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
 
-        if self.reject_block_announcements &&
-            let Some(&id) = bytes.first() &&
-            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
+        if self.reject_block_announcements
+            && let Some(&id) = bytes.first()
+            && (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
         {
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
@@ -324,7 +324,7 @@ where
             // but we can start the disconnect process. The actual disconnect will be handled
             // asynchronously by the caller or the stream's poll methods.
             let _disconnect_future = this.inner.disconnect(DisconnectReason::ProtocolBreach);
-            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
         self.project()

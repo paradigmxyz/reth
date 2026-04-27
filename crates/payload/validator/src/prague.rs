@@ -27,7 +27,7 @@ pub const fn ensure_well_formed_sidecar_fields(
 ) -> Result<(), PayloadError> {
     if !is_prague_active && prague_fields.is_some() {
         // prague _not_ active but prague fields present
-        return Err(PayloadError::PrePragueBlockRequests)
+        return Err(PayloadError::PrePragueBlockRequests);
     }
 
     Ok(())
@@ -41,7 +41,7 @@ pub fn ensure_well_formed_transactions_field<T: Typed2718, H>(
     is_prague_active: bool,
 ) -> Result<(), PayloadError> {
     if !is_prague_active && block_body.has_eip7702_transactions() {
-        return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
+        return Err(PayloadError::PrePragueBlockWithEip7702Transactions);
     }
 
     Ok(())

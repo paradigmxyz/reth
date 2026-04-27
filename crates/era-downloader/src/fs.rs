@@ -19,8 +19,8 @@ pub fn read_dir(
             (|| {
                 let path = entry?.path();
 
-                if path.extension() == Some("era1".as_ref()) &&
-                    let Some(last) = path.components().next_back()
+                if path.extension() == Some("era1".as_ref())
+                    && let Some(last) = path.components().next_back()
                 {
                     let str = last.as_os_str().to_string_lossy().to_string();
                     let parts = str.split('-').collect::<Vec<_>>();

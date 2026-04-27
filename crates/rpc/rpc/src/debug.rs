@@ -35,7 +35,7 @@ use reth_storage_api::{
     ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
-use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, TrieInput};
 use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
@@ -71,8 +71,8 @@ where
         // Spawn a task caching bad blocks
         executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
-                if let ConsensusEngineEvent::InvalidBlock(block) = event &&
-                    let Ok(recovered) = RecoveredBlock::try_recover_sealed(*block)
+                if let ConsensusEngineEvent::InvalidBlock(block) = event
+                    && let Ok(recovered) = RecoveredBlock::try_recover_sealed(*block)
                 {
                     bad_block_store.insert(recovered);
                 }
@@ -341,7 +341,7 @@ where
                 tx_index,
                 block.transaction_count()
             ))
-            .into())
+            .into());
         }
 
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
@@ -389,7 +389,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -546,9 +546,52 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(witness_record
-                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
-                    .map_err(EthApiError::from)?)
+                let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+                    witness_record;
+
+                use reth_storage_api::{HeaderProvider, StateProofProvider};
+
+                // Build prefix sets from the hashed state so that the
+                // proof calculator knows which trie subtrees have been
+                // modified and must not use cached branch hashes.
+                // Without this, the multiproof may skip account paths
+                // that were accessed during execution, producing an
+                // incomplete witness for the stateless validator.
+                let prefix_sets = hashed_state.construct_prefix_sets();
+                let input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
+                let mut state =
+                    db.database.0.witness(input, hashed_state, mode).map_err(EthApiError::from)?;
+
+                // The witness multiproof may omit the state trie root node for
+                // historical blocks where the root is not directly traversed during
+                // execution. Stateless validators need the root to start their
+                // BFS walk, so we ensure it is always present by fetching the
+                // account proof for the zero address. The first element of an
+                // account proof is always the root trie node.
+                if let Ok(proof) = db.database.0.proof(Default::default(), Address::ZERO, &[]) {
+                    if let Some(root_node) = proof.proof.first() {
+                        if !state.contains(root_node) {
+                            state.push(root_node.clone());
+                        }
+                    }
+                }
+
+                // Fetch ancestor headers referenced by BLOCKHASH opcodes.
+                let smallest =
+                    lowest_block_number.unwrap_or_else(|| block_number.saturating_sub(1));
+                let headers: Vec<alloy_primitives::Bytes> = eth_api
+                    .provider()
+                    .headers_range(smallest..block_number)
+                    .map_err(|e| EthApiError::Internal(e.into()))?
+                    .into_iter()
+                    .map(|header| {
+                        let mut buf = Vec::new();
+                        alloy_rlp::Encodable::encode(&header, &mut buf);
+                        buf.into()
+                    })
+                    .collect();
+
+                Ok(ExecutionWitness { state, codes, keys, headers })
             })
             .await
     }

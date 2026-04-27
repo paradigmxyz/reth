@@ -68,9 +68,9 @@ pub(crate) fn dispatch_with_chunking<T, I>(
 ) where
     I: IntoIterator<Item = T>,
 {
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        has_multiple_idle_account_workers ||
-        has_multiple_idle_storage_workers;
+    let should_chunk = chunking_len > max_targets_for_chunking
+        || has_multiple_idle_account_workers
+        || has_multiple_idle_storage_workers;
 
     if should_chunk && chunking_len > chunk_size {
         for chunk in chunker(items, chunk_size) {

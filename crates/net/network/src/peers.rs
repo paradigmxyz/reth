@@ -146,7 +146,7 @@ impl PeersManager {
             // confirmed fork ID. These were likely accumulated from a different network during
             // a prior run without the flag.
             if enforce_enr_fork_id && fork_id.is_none() {
-                continue
+                continue;
             }
             let NodeRecord { address, tcp_port, udp_port, id } = record;
             peers.entry(id).or_insert_with(|| {
@@ -310,11 +310,11 @@ impl PeersManager {
         // Check if the IP is in the allowed ranges (netrestrict)
         if !self.ip_filter.is_allowed(&addr) {
             trace!(target: "net", ?addr, "Rejecting connection from IP not in allowed ranges");
-            return Err(InboundConnectionError::IpBanned)
+            return Err(InboundConnectionError::IpBanned);
         }
 
         if self.ban_list.is_banned_ip(&addr) {
-            return Err(InboundConnectionError::IpBanned)
+            return Err(InboundConnectionError::IpBanned);
         }
 
         // check if we even have slots for a new incoming connection
@@ -322,7 +322,7 @@ impl PeersManager {
             if self.trusted_peer_ids.is_empty() {
                 // if we don't have any incoming slots and no trusted peers, we don't accept any new
                 // connections
-                return Err(InboundConnectionError::ExceedsCapacity)
+                return Err(InboundConnectionError::ExceedsCapacity);
             }
 
             // there's an edge case here where no incoming connections besides from trusted peers
@@ -335,17 +335,17 @@ impl PeersManager {
                     self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
                 if self.connection_info.num_pending_in < max_inbound {
                     self.connection_info.inc_pending_in();
-                    return Ok(())
+                    return Ok(());
                 }
             }
 
             // all trusted peers are either connected or connecting
-            return Err(InboundConnectionError::ExceedsCapacity)
+            return Err(InboundConnectionError::ExceedsCapacity);
         }
 
         // also cap the incoming connections we can process at once
         if !self.connection_info.has_in_pending_capacity() {
-            return Err(InboundConnectionError::ExceedsCapacity)
+            return Err(InboundConnectionError::ExceedsCapacity);
         }
 
         // apply the rate limit
@@ -397,14 +397,14 @@ impl PeersManager {
         // on_incoming_pending_session. We also check if the peer is in the backoff list here.
         if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
-            return
+            return;
         }
 
         // check if the peer is trustable or not
         let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
         if self.trusted_nodes_only && !is_trusted {
             self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
-            return
+            return;
         }
 
         // start a new tick, so the peer is not immediately rewarded for the time since last tick
@@ -415,7 +415,7 @@ impl PeersManager {
                 let peer = entry.get_mut();
                 if peer.is_banned() {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
-                    return
+                    return;
                 }
                 // it might be the case that we're also trying to connect to this peer at the same
                 // time, so we need to adjust the state here
@@ -452,8 +452,8 @@ impl PeersManager {
 
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
-        let ban_duration = if let Some(peer) = self.peers.get(&peer_id) &&
-            (peer.is_trusted() || peer.is_static())
+        let ban_duration = if let Some(peer) = self.peers.get(&peer_id)
+            && (peer.is_trusted() || peer.is_static())
         {
             // For misbehaving trusted or static peers, we provide a bit more leeway when
             // penalizing them.
@@ -539,12 +539,12 @@ impl PeersManager {
                     // exempt trusted and static peers from reputation slashing for
                     if matches!(
                         rep,
-                        ReputationChangeKind::Dropped |
-                            ReputationChangeKind::BadAnnouncement |
-                            ReputationChangeKind::Timeout |
-                            ReputationChangeKind::AlreadySeenTransaction
+                        ReputationChangeKind::Dropped
+                            | ReputationChangeKind::BadAnnouncement
+                            | ReputationChangeKind::Timeout
+                            | ReputationChangeKind::AlreadySeenTransaction
                     ) {
-                        return
+                        return;
                     }
 
                     // also be less strict with the reputation slashing for trusted peers
@@ -556,7 +556,7 @@ impl PeersManager {
                 peer.apply_reputation(reputation_change, rep)
             }
         } else {
-            return
+            return;
         };
 
         match outcome {
@@ -668,7 +668,7 @@ impl PeersManager {
         if let Some(peer) = self.peers.get(peer_id) {
             if peer.state.is_incoming() {
                 // we already have an active connection to the peer, so we can ignore this error
-                return
+                return;
             }
 
             if peer.is_trusted() && is_connection_failed_reputation(peer.reputation) {
@@ -754,9 +754,9 @@ impl PeersManager {
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
 
-                if peer.severe_backoff_counter > self.max_backoff_count &&
-                    !peer.is_trusted() &&
-                    !peer.is_static()
+                if peer.severe_backoff_counter > self.max_backoff_count
+                    && !peer.is_trusted()
+                    && !peer.is_static()
                 {
                     // mark peer for removal if it has been backoff too many times and is _not_
                     // trusted or static
@@ -835,11 +835,11 @@ impl PeersManager {
         // Check if the IP is in the allowed ranges (netrestrict)
         if !self.ip_filter.is_allowed(&ip_addr) {
             trace!(target: "net", ?peer_id, ?ip_addr, "Skipping peer from IP not in allowed ranges");
-            return
+            return;
         }
 
         if self.ban_list.is_banned(&peer_id, &ip_addr) {
-            return
+            return;
         }
 
         match self.peers.entry(peer_id) {
@@ -878,7 +878,7 @@ impl PeersManager {
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
         let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
         if entry.get().is_trusted() {
-            return
+            return;
         }
         let mut peer = entry.remove();
 
@@ -928,11 +928,11 @@ impl PeersManager {
         // Check if the IP is in the allowed ranges (netrestrict)
         if !self.ip_filter.is_allowed(&ip_addr) {
             trace!(target: "net", ?peer_id, ?ip_addr, "Skipping outbound connection to IP not in allowed ranges");
-            return
+            return;
         }
 
         if self.ban_list.is_banned(&peer_id, &ip_addr) {
-            return
+            return;
         }
 
         match self.peers.entry(peer_id) {
@@ -971,7 +971,7 @@ impl PeersManager {
     pub(crate) fn remove_peer_from_trusted_set(&mut self, peer_id: PeerId) {
         let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
         if !entry.get().is_trusted() {
-            return
+            return;
         }
 
         let peer = entry.get_mut();
@@ -994,23 +994,23 @@ impl PeersManager {
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
-            !peer.is_backed_off() &&
-                !peer.is_banned() &&
-                peer.state.is_unconnected() &&
-                (!self.trusted_nodes_only || peer.is_trusted())
+            !peer.is_backed_off()
+                && !peer.is_banned()
+                && peer.state.is_unconnected()
+                && (!self.trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
 
         if best_peer.1.is_trusted() || best_peer.1.is_static() {
-            return Some((*best_peer.0, best_peer.1))
+            return Some((*best_peer.0, best_peer.1));
         }
 
         for maybe_better in unconnected {
             // if the peer is trusted or static, return it immediately
             if maybe_better.1.is_trusted() || maybe_better.1.is_static() {
-                return Some((*maybe_better.0, maybe_better.1))
+                return Some((*maybe_better.0, maybe_better.1));
             }
 
             // prefer higher reputation, break ties by fork_id presence
@@ -1037,7 +1037,7 @@ impl PeersManager {
 
         if !self.net_connection_state.is_active() {
             // nothing to fill
-            return
+            return;
         }
 
         // as long as there are slots available fill them with the best peers
@@ -1098,7 +1098,7 @@ impl PeersManager {
         loop {
             // drain buffered actions
             if let Some(action) = self.queued_actions.pop_front() {
-                return Poll::Ready(action)
+                return Poll::Ready(action);
             }
 
             while let Poll::Ready(Some(cmd)) = self.handle_rx.poll_next_unpin(cx) {
@@ -1137,7 +1137,7 @@ impl PeersManager {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
                         }
-                        return false
+                        return false;
                     }
                     true
                 })
@@ -1152,7 +1152,7 @@ impl PeersManager {
             }
 
             if self.queued_actions.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -1189,8 +1189,8 @@ impl ConnectionInfo {
 
     ///  Returns `true` if there's still capacity to perform an outgoing connection.
     const fn has_out_capacity(&self) -> bool {
-        self.num_pending_out < self.config.max_concurrent_outbound_dials &&
-            self.num_outbound < self.config.max_outbound
+        self.num_pending_out < self.config.max_concurrent_outbound_dials
+            && self.num_outbound < self.config.max_outbound
     }
 
     ///  Returns `true` if there's still capacity to accept a new incoming connection.
@@ -2190,7 +2190,7 @@ mod tests {
 
             let p = peers.peers.get(&peer).unwrap();
             if p.is_banned() {
-                break
+                break;
             }
         }
 

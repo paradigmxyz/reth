@@ -136,7 +136,7 @@ fn extract_entry_with_progress<R: Read>(
         entry.unpack_in(target_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
-        return Ok(())
+        return Ok(());
     }
 
     if size < STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE {
@@ -146,21 +146,21 @@ fn extract_entry_with_progress<R: Read>(
         if let Some(progress) = progress {
             progress.record_extracted(size);
         }
-        return Ok(())
+        return Ok(());
     }
 
     let Some(progress_handle) = progress.as_ref().and_then(|progress| progress.handle()) else {
         entry.unpack_in(target_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
-        return Ok(())
+        return Ok(());
     };
 
     let Some(entry_path) = entry_destination_path(entry, target_dir)? else {
         entry.unpack_in(target_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
-        return Ok(())
+        return Ok(());
     };
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -193,7 +193,7 @@ fn entry_destination_path<R: Read>(
     }
 
     if file_dst == target_dir {
-        return Ok(None)
+        return Ok(None);
     }
 
     Ok(Some(file_dst))
@@ -400,8 +400,8 @@ fn blocking_download_and_extract(
 ) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
-    if let Ok(parsed_url) = Url::parse(url) &&
-        parsed_url.scheme() == "file"
+    if let Ok(parsed_url) = Url::parse(url)
+        && parsed_url.scheme() == "file"
     {
         let session = DownloadSession::new(shared, request_limiter, cancel_token);
         let file_path = parsed_url

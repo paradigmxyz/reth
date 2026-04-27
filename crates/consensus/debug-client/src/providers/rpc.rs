@@ -88,7 +88,7 @@ where
                     return;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                continue
+                continue;
             };
 
             while let Some(res) = stream.next().await {

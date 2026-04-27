@@ -311,7 +311,7 @@ where
     /// transaction events.
     pub fn add_transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
         if !self.get_pool_data().contains(&tx_hash) {
-            return None
+            return None;
         }
         let mut listener = self.event_listener.write();
         let events = listener.subscribe(tx_hash);
@@ -350,7 +350,7 @@ where
         F: FnOnce(&mut PoolEventBroadcast<T::Transaction>),
     {
         if !self.has_event_listeners() {
-            return
+            return;
         }
         let mut listener = self.event_listener.write();
         if !listener.is_empty() {
@@ -420,7 +420,7 @@ where
             out.push(pooled.into_inner());
 
             if limit.exceeds(size) {
-                break
+                break;
             }
         }
     }
@@ -679,8 +679,8 @@ where
                     let (result, meta) = self.add_transaction(&mut pool, origin, tx);
 
                     // Only collect metadata for successful insertions
-                    if result.is_ok() &&
-                        let Some(meta) = meta
+                    if result.is_ok()
+                        && let Some(meta) = meta
                     {
                         added_metas.push(meta);
                     }
@@ -714,8 +714,8 @@ where
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut results {
-                if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
-                    discarded_hashes.contains(hash)
+                if let Ok(AddedTransactionOutcome { hash, .. }) = res
+                    && discarded_hashes.contains(hash)
                 {
                     *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
@@ -807,7 +807,7 @@ where
                         needs_cleanup = true;
                     }
                     // Skip non-propagate transactions for propagate-only listeners
-                    continue
+                    continue;
                 }
 
                 if !listener.send(event.clone()) {
@@ -826,7 +826,7 @@ where
     fn on_new_blob_sidecar(&self, tx_hash: &TxHash, sidecar: &BlobTransactionSidecarVariant) {
         let mut sidecar_listeners = self.blob_transaction_sidecar_listener.lock();
         if sidecar_listeners.is_empty() {
-            return
+            return;
         }
         let sidecar = Arc::new(sidecar.clone());
         sidecar_listeners.retain_mut(|listener| {
@@ -1056,7 +1056,7 @@ where
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if hashes.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         let removed = self.pool.write().remove_transactions(hashes);
 
@@ -1072,7 +1072,7 @@ where
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if hashes.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         let removed = self.pool.write().remove_transactions_and_descendants(hashes);
 
@@ -1107,7 +1107,7 @@ where
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if hashes.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
 
         self.pool.write().prune_transactions(hashes)
@@ -1119,7 +1119,7 @@ where
         A: HandleMempoolData,
     {
         if announcement.is_empty() {
-            return
+            return;
         }
         let pool = self.get_pool_data();
         announcement.retain_by_hash(|tx| !pool.contains(tx))
@@ -1230,7 +1230,7 @@ where
     /// If no transaction exists, it is skipped.
     pub fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if txs.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         self.get_pool_data().get_all(txs).collect()
     }
@@ -1243,7 +1243,7 @@ where
         txs: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if txs.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         let pool = self.get_pool_data();
         txs.iter().filter_map(|tx| pool.get(tx).filter(|tx| tx.propagate)).collect()
@@ -1252,7 +1252,7 @@ where
     /// Notify about propagated transactions.
     pub fn on_propagated(&self, txs: PropagatedTransactions) {
         if txs.is_empty() {
-            return
+            return;
         }
         self.with_event_listener(|listener| {
             txs.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
@@ -1384,9 +1384,9 @@ where
         loop {
             let next = self.iter.next()?;
             if self.kind.is_propagate_only() && !next.propagate {
-                continue
+                continue;
             }
-            return Some(*next.hash())
+            return Some(*next.hash());
         }
     }
 }
@@ -1408,12 +1408,12 @@ where
         loop {
             let next = self.iter.next()?;
             if self.kind.is_propagate_only() && !next.propagate {
-                continue
+                continue;
             }
             return Some(NewTransactionEvent {
                 subpool: SubPool::Pending,
                 transaction: next.clone(),
-            })
+            });
         }
     }
 }

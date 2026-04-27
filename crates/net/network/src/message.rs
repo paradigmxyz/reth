@@ -85,10 +85,10 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
     pub const fn is_broadcast(&self) -> bool {
         matches!(
             self,
-            Self::NewBlockHashes(_) |
-                Self::NewBlock(_) |
-                Self::SendTransactions(_) |
-                Self::PooledTransactions(_)
+            Self::NewBlockHashes(_)
+                | Self::NewBlock(_)
+                | Self::SendTransactions(_)
+                | Self::PooledTransactions(_)
         )
     }
 
@@ -99,10 +99,10 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::ReceivedTransaction(msg) => msg.len(),
             Self::SendTransactions(msg) => msg.len(),
             Self::PooledTransactions(msg) => msg.len(),
-            Self::NewBlock(_) |
-            Self::EthRequest(_) |
-            Self::BlockRangeUpdated(_) |
-            Self::Other(_) => 1,
+            Self::NewBlock(_)
+            | Self::EthRequest(_)
+            | Self::BlockRangeUpdated(_)
+            | Self::Other(_) => 1,
         }
     }
 }

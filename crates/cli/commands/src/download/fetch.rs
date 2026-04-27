@@ -126,7 +126,7 @@ impl ArchiveFetcher {
         download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
     ) -> Result<DownloadedArchive> {
         let Some(request_limiter) = self.session.request_limiter() else {
-            return self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
+            return self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress);
         };
 
         let client = BlockingClient::builder().connect_timeout(Duration::from_secs(30)).build()?;
@@ -198,10 +198,10 @@ impl ArchiveFetcher {
             let existing_size =
                 fs::metadata(self.paths.part_path()).map(|meta| meta.len()).unwrap_or(0);
 
-            if let Some(total) = total_size &&
-                existing_size >= total
+            if let Some(total) = total_size
+                && existing_size >= total
             {
-                return self.finalize_download(total)
+                return self.finalize_download(total);
             }
 
             if attempt > 1 {
@@ -323,7 +323,7 @@ impl ArchiveFetcher {
                 continue;
             }
 
-            return self.finalize_download(current_total)
+            return self.finalize_download(current_total);
         }
 
         Err(last_error.unwrap_or_else(|| {
@@ -436,11 +436,11 @@ enum FetchStrategy {
 /// Chooses the fetch strategy from the remote probe and available worker budget.
 fn choose_fetch_strategy(probe: RemoteArchiveProbe, max_workers: usize) -> FetchStrategy {
     if !probe.supports_ranges {
-        return FetchStrategy::Sequential(SequentialDownloadFallback::NoRangeSupport)
+        return FetchStrategy::Sequential(SequentialDownloadFallback::NoRangeSupport);
     }
 
     if probe.total_size == 0 {
-        return FetchStrategy::Sequential(SequentialDownloadFallback::EmptyFile)
+        return FetchStrategy::Sequential(SequentialDownloadFallback::EmptyFile);
     }
 
     plan_segmented_download(probe.total_size, max_workers)
@@ -604,7 +604,7 @@ impl SegmentedDownload {
                 shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
             }
             paths.cleanup_partial();
-            return Err(error.wrap_err("Parallel download failed"))
+            return Err(error.wrap_err("Parallel download failed"));
         }
 
         if let Some(shared) = shared {
@@ -669,7 +669,7 @@ impl SegmentedDownload {
     ) -> Result<()> {
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
             if cancel_token.is_cancelled() {
-                return Err(eyre::eyre!("Download cancelled"))
+                return Err(eyre::eyre!("Download cancelled"));
             }
 
             let _request_permit = request_limiter.acquire(shared, cancel_token)?;
@@ -776,7 +776,7 @@ impl SegmentedDownload {
                 progress.add_active_download_bytes(expected_len);
             }
             piece_progress_bytes.fetch_add(expected_len, Ordering::Relaxed);
-            return Ok(())
+            return Ok(());
         }
 
         Err(PieceAttemptFailure::Retryable {
@@ -903,12 +903,12 @@ fn piece_retry_backoff(attempt: u32, throttled: bool) -> Duration {
 fn is_retryable_piece_status(status: StatusCode) -> bool {
     matches!(
         status,
-        StatusCode::REQUEST_TIMEOUT |
-            StatusCode::TOO_MANY_REQUESTS |
-            StatusCode::INTERNAL_SERVER_ERROR |
-            StatusCode::BAD_GATEWAY |
-            StatusCode::SERVICE_UNAVAILABLE |
-            StatusCode::GATEWAY_TIMEOUT
+        StatusCode::REQUEST_TIMEOUT
+            | StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::INTERNAL_SERVER_ERROR
+            | StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
     )
 }
 
@@ -921,10 +921,10 @@ fn should_retry_piece_status(status: StatusCode) -> bool {
 fn is_throttle_piece_status(status: StatusCode) -> bool {
     matches!(
         status,
-        StatusCode::REQUEST_TIMEOUT |
-            StatusCode::TOO_MANY_REQUESTS |
-            StatusCode::SERVICE_UNAVAILABLE |
-            StatusCode::GATEWAY_TIMEOUT
+        StatusCode::REQUEST_TIMEOUT
+            | StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
     )
 }
 

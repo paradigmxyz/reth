@@ -47,7 +47,7 @@ impl BalStore for InMemoryBalStore {
             out.push(bal);
 
             if limit.exceeds(size) {
-                break
+                break;
             }
         }
 
