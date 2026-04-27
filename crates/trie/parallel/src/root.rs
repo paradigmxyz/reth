@@ -274,9 +274,13 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
-    use reth_chainspec::ChainSpec;
-    use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory_with_chain_spec, HashingWriter};
+    use reth_chainspec::{ChainSpec, EthChainSpec};
+    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, StorageEntry};
+    use reth_provider::{
+        test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, ExecutionOutcome,
+        HashingWriter,
+    };
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
     use std::sync::Arc;
 
@@ -284,7 +288,7 @@ mod tests {
     async fn random_parallel_root() {
         let chain_spec = Arc::new(ChainSpec::default());
         let anchor_hash = chain_spec.genesis_hash();
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let overlay_builder = reth_provider::providers::OverlayBuilder::<
             reth_ethereum_primitives::EthPrimitives,
@@ -316,6 +320,20 @@ mod tests {
 
         {
             let provider_rw = factory.provider_rw().unwrap();
+            let genesis_block = RecoveredBlock::new_sealed(
+                SealedBlock::<Block>::seal_parts(
+                    chain_spec.genesis_header().clone(),
+                    BlockBody::default(),
+                ),
+                vec![],
+            );
+            provider_rw
+                .append_blocks_with_state(
+                    vec![genesis_block],
+                    &ExecutionOutcome::default(),
+                    Default::default(),
+                )
+                .unwrap();
             provider_rw
                 .insert_account_for_hashing(
                     state.iter().map(|(address, (account, _))| (*address, Some(*account))),
