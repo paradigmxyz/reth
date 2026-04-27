@@ -72,6 +72,10 @@ pub struct ConfigBuilder {
     /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     tcp_socket: SocketAddr,
+    /// When the `RLPx` listener is [`IpAddr::is_unspecified`], optional IPv4 to put in the local
+    /// ENR (from NAT), without changing the address used to bind discv5 UDP / amend listen
+    /// config.
+    enr_nat_ipv4: Option<Ipv4Addr>,
     /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
     /// (in addition to tcp port, udp port and fork).
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -95,6 +99,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
+            enr_nat_ipv4,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -107,6 +112,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_socket,
+            enr_nat_ipv4,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
@@ -178,7 +184,12 @@ impl ConfigBuilder {
     }
 
     /// When the `RLPx` listener address is [`IpAddr::is_unspecified`] and `nat_external_ipv4` is
-    /// set, use that address for the TCP IP advertised in the local ENR (port is unchanged).
+    /// set, store that address for the local ENR only.
+    ///
+    /// The `RLPx` [`SocketAddr`](std::net::SocketAddr) is left unchanged so
+    /// [`amend_listen_config_wrt_rlpx`](crate::amend_listen_config_wrt_rlpx) still reflects the
+    /// real bind address (for example `0.0.0.0`). Binding discv5 UDP to a NAT-only public IP
+    /// would fail with `EADDRNOTAVAIL` on the host.
     ///
     /// The caller is expected to pass an IP resolved from their NAT configuration (for example
     /// `--nat extip:<ipv4>`) so the ENR lists a concrete address when the node binds to all
@@ -191,7 +202,7 @@ impl ConfigBuilder {
             !ip.is_unspecified() &&
             self.tcp_socket.ip().is_unspecified()
         {
-            self.tcp_socket = SocketAddr::new(IpAddr::V4(ip), self.tcp_socket.port());
+            self.enr_nat_ipv4 = Some(ip);
         }
         self
     }
@@ -240,6 +251,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
+            enr_nat_ipv4,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -270,6 +282,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
+            enr_nat_ipv4,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -295,6 +308,10 @@ pub struct Config {
     /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     pub(super) tcp_socket: SocketAddr,
+    /// IPv4 for the local ENR when the `RLPx` listener is unspecified and NAT supplies a public
+    /// IP; does not affect discv5 UDP bind address. See
+    /// [`ConfigBuilder::with_nat_external_ipv4_for_unspecified_bind`].
+    pub(super) enr_nat_ipv4: Option<Ipv4Addr>,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -319,6 +336,7 @@ impl Config {
             bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
+            enr_nat_ipv4: None,
             other_enr_kv_pairs: Vec::new(),
             lookup_interval: None,
             bootstrap_lookup_interval: None,

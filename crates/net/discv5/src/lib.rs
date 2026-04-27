@@ -471,7 +471,7 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
+    let Config { discv5_config, fork, tcp_socket, enr_nat_ipv4, other_enr_kv_pairs, .. } = config;
 
     let socket = {
         let v4 = crate::config::ipv4(&discv5_config.listen_config);
@@ -480,17 +480,24 @@ pub fn build_local_enr(
         if let Some(addr) = v4 {
             if *addr.ip() != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(*addr.ip());
-            } else if let IpAddr::V4(ip4) = tcp_socket.ip() && !ip4.is_unspecified() {
-                // Fallback to the resolved NAT IP from the RLPx socket
-                builder.ip4(ip4);
+            } else if let Some(ip) = *enr_nat_ipv4 {
+                // NAT `--nat extip:` (or similar) while RLPx/discv5 listen on 0.0.0.0
+                builder.ip4(ip);
+            } else if let IpAddr::V4(ip4) = tcp_socket.ip() {
+                if !ip4.is_unspecified() {
+                    // Fallback to the resolved IP on the RLPx socket
+                    builder.ip4(ip4);
+                }
             }
             builder.udp4(addr.port());
         }
         if let Some(addr) = v6 {
             if *addr.ip() != Ipv6Addr::UNSPECIFIED {
                 builder.ip6(*addr.ip());
-            } else if let IpAddr::V6(ip6) = tcp_socket.ip() && !ip6.is_unspecified() {
-                builder.ip6(ip6);
+            } else if let IpAddr::V6(ip6) = tcp_socket.ip() {
+                if !ip6.is_unspecified() {
+                    builder.ip6(ip6);
+                }
             }
             builder.udp6(addr.port());
         }
