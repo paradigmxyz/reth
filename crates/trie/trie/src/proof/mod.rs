@@ -23,9 +23,6 @@ use reth_trie_common::{
     MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof,
 };
 
-mod trie_node;
-pub use trie_node::*;
-
 /// A struct for generating merkle proofs.
 ///
 /// Proof generator adds the target address and slots to the prefix set, enables the proof retainer

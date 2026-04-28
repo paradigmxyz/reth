@@ -338,7 +338,7 @@ pub trait LoadPendingBlock:
                 }
 
                 let gas_used = match builder.execute_transaction(tx) {
-                    Ok(gas_used) => gas_used,
+                    Ok(gas_used) => gas_used.tx_gas_used(),
                     Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                         error,
                         ..
@@ -377,7 +377,7 @@ pub trait LoadPendingBlock:
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates, .. } =
             builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =

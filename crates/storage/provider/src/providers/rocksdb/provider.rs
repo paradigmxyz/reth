@@ -39,6 +39,13 @@ use std::{
 };
 use tracing::instrument;
 
+/// Returns [`WriteOptions`] with WAL sync enabled for crash durability.
+fn synced_write_options() -> WriteOptions {
+    let mut opts = WriteOptions::default();
+    opts.set_sync(true);
+    opts
+}
+
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
@@ -766,7 +773,7 @@ impl RocksDBProvider {
     /// # Panics
     /// Panics if the provider is in read-only mode.
     pub fn tx(&self) -> RocksTx<'_> {
-        let write_options = WriteOptions::default();
+        let write_options = synced_write_options();
         let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
@@ -1269,7 +1276,7 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
+        self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -1834,14 +1841,12 @@ impl<'a> RocksDBBatch<'a> {
                 "Auto-committing RocksDB batch"
             );
             let old_batch = std::mem::take(&mut self.inner);
-            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
-                |e| {
-                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                },
-            )?;
+            self.provider.0.db_rw().write_opt(old_batch, &synced_write_options()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
         }
         Ok(())
     }
@@ -1854,7 +1859,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+        self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,

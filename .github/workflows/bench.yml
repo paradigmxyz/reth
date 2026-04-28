@@ -650,12 +650,6 @@ jobs:
             linux-tools-"$(uname -r)" || \
             sudo apt-get install -y --no-install-recommends linux-tools-generic
 
-          # mc (MinIO client)
-          if ! command -v mc &>/dev/null; then
-            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
-            chmod +x "$HOME/.local/bin/mc"
-          fi
-
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
@@ -690,7 +684,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq; do
+          for cmd in schelk cpupower taskset stdbuf python3 curl make uv jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -766,79 +760,68 @@ jobs:
             core.setOutput('feature-ref', featureRef);
             core.setOutput('feature-name', featureName);
 
-      - name: Check big-blocks freshness
+      - name: Validate local big blocks
         if: env.BENCH_BIG_BLOCKS == 'true'
         id: big-blocks-check
         run: |
           set -euo pipefail
-          MC="mc --config-dir /home/ubuntu/.mc"
-          MANIFEST="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.json"
-          HASH_FILE="$HOME/.reth-bench-big-blocks-hash"
-          echo "Fetching big-blocks manifest from $MANIFEST..."
-          BB_MANIFEST=$($MC cat "$MANIFEST" 2>/dev/null) || {
-            echo "::error::Failed to fetch big-blocks manifest from $MANIFEST"
+          BIG_BLOCKS_DIR="$HOME/.reth-bench-big-blocks"
+          PAYLOAD_DIR="$BIG_BLOCKS_DIR/payloads"
+          MANIFEST="$BIG_BLOCKS_DIR/manifest.json"
+          echo "BENCH_BIG_BLOCKS_DIR=${BIG_BLOCKS_DIR}" >> "$GITHUB_ENV"
+
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Missing local big-blocks manifest at $MANIFEST"
             exit 1
-          }
-          BASE_SNAPSHOT=$(echo "$BB_MANIFEST" | jq -r '.base_snapshot // empty')
+          fi
+
+          BASE_SNAPSHOT=$(jq -r '.base_snapshot // empty' "$MANIFEST")
           if [ -z "$BASE_SNAPSHOT" ]; then
             echo "::error::Big-blocks manifest missing base_snapshot field"
             exit 1
           fi
-          echo "Big-blocks base snapshot: $BASE_SNAPSHOT"
-          echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
 
-          REMOTE_HASH=$(echo "$BB_MANIFEST" | sha256sum | awk '{print $1}')
-          LOCAL_HASH=""
-          [ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
-          if [ "$REMOTE_HASH" = "$LOCAL_HASH" ]; then
-            echo "Big blocks up-to-date (hash: ${REMOTE_HASH:0:16}…)"
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Big blocks need update (local: ${LOCAL_HASH:+${LOCAL_HASH:0:16}…}${LOCAL_HASH:-<none>}, remote: ${REMOTE_HASH:0:16}…)"
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-            echo "remote-hash=${REMOTE_HASH}" >> "$GITHUB_OUTPUT"
+          if [ ! -d "$PAYLOAD_DIR" ]; then
+            echo "::error::Missing local big-block payload directory at $PAYLOAD_DIR"
+            exit 1
           fi
 
-      - name: Check if snapshot needs update
-        id: snapshot-check
-        run: |
-          set +e
-          .github/scripts/bench-reth-snapshot.sh --check
-          rc=$?
-          set -e
-          case "$rc" in
-            0)  echo "needed=false" >> "$GITHUB_OUTPUT" ;;
-            10) echo "needed=true"  >> "$GITHUB_OUTPUT" ;;
-            *)  echo "::error::Snapshot check failed (exit $rc)"
-                exit "$rc" ;;
-          esac
+          PAYLOAD_COUNT=$(find "$PAYLOAD_DIR" -name '*.json' | wc -l)
+          if [ "$PAYLOAD_COUNT" -eq 0 ]; then
+            echo "::error::No payload files found in $PAYLOAD_DIR"
+            exit 1
+          fi
 
-      - name: Update status (snapshot needed)
-        if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ secrets.DEREK_PAT }}
-          script: |
-            const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Building binaries (snapshot update pending)...'});
+          echo "Big-blocks base snapshot: $BASE_SNAPSHOT"
+          echo "Payload files: $PAYLOAD_COUNT"
+          echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
+
+      - name: Validate local snapshot
+        id: snapshot-check
+        run: .github/scripts/bench-reth-snapshot.sh
 
       - name: Prepare source dirs
         run: |
+          prepare_source_dir() {
+            local dir="$1"
+            local ref="$2"
+
+            if [ -d "$dir" ]; then
+              git -C "$dir" reset --hard HEAD
+              git -C "$dir" clean -fdx
+              git -C "$dir" fetch origin "$ref"
+            else
+              git clone . "$dir"
+            fi
+
+            git -C "$dir" checkout --force "$ref"
+          }
+
           BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
-          if [ -d ../reth-baseline ]; then
-            git -C ../reth-baseline fetch origin "$BASELINE_REF"
-          else
-            git clone . ../reth-baseline
-          fi
-          git -C ../reth-baseline checkout "$BASELINE_REF"
+          prepare_source_dir ../reth-baseline "$BASELINE_REF"
 
           FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
-          if [ -d ../reth-feature ]; then
-            git -C ../reth-feature fetch origin "$FEATURE_REF"
-          else
-            git clone . ../reth-feature
-          fi
-          git -C ../reth-feature checkout "$FEATURE_REF"
+          prepare_source_dir ../reth-feature "$FEATURE_REF"
 
       - name: Build binaries
         id: build
@@ -861,15 +844,6 @@ jobs:
             echo "::error::One or more build tasks failed"
             exit 1
           fi
-
-      - name: Download snapshot
-        id: snapshot-download
-        if: steps.snapshot-check.outputs.needed == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BENCH_REPO: ${{ github.repository }}
-          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/${{ needs.reth-bench-ack.outputs.big-blocks == 'true' && 'reth-bb' || 'reth' }}
-        run: .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -940,45 +914,6 @@ jobs:
           sudo schelk recover -y --kill || sudo schelk full-recover -y || true
           rm -rf "$BENCH_WORK_DIR"
           mkdir -p "$BENCH_WORK_DIR"
-
-      - name: Download big blocks
-        if: env.BENCH_BIG_BLOCKS == 'true'
-        run: |
-          set -euo pipefail
-          BIG_BLOCKS_DIR="$HOME/.reth-bench-big-blocks"
-          echo "BENCH_BIG_BLOCKS_DIR=${BIG_BLOCKS_DIR}" >> "$GITHUB_ENV"
-          if [ "${{ steps.big-blocks-check.outputs.needed }}" = "false" ]; then
-            echo "Big blocks cached at $BIG_BLOCKS_DIR, skipping download"
-            echo "Payload files: $(find "$BIG_BLOCKS_DIR/payloads" -name '*.json' | wc -l)"
-            exit 0
-          fi
-          MC="mc --config-dir /home/ubuntu/.mc"
-          MANIFEST="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.json"
-          rm -rf "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
-
-          # Download and parse manifest
-          echo "Downloading manifest from $MANIFEST..."
-          $MC cat "$MANIFEST" > "$BIG_BLOCKS_DIR/manifest.json"
-          UPLOAD_PATH=$(jq -r '.upload_path' "$BIG_BLOCKS_DIR/manifest.json")
-          COUNT=$(jq -r '.count' "$BIG_BLOCKS_DIR/manifest.json")
-          TARGET_GAS=$(jq -r '.target_gas' "$BIG_BLOCKS_DIR/manifest.json")
-          echo "Manifest: count=$COUNT, target_gas=$TARGET_GAS, archive=$UPLOAD_PATH"
-
-          # Download and extract archive
-          ARCHIVE="minio/$UPLOAD_PATH"
-          echo "Downloading big blocks from $ARCHIVE..."
-          $MC cat "$ARCHIVE" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
-          echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
-
-          # Verify expected directory structure
-          if [ ! -d "$BIG_BLOCKS_DIR/payloads" ]; then
-            echo "::error::Big blocks archive missing expected payloads/ directory"
-            ls -laR "$BIG_BLOCKS_DIR"
-            exit 1
-          fi
-          echo "Payload files: $(find "$BIG_BLOCKS_DIR/payloads" -name '*.json' | wc -l)"
-          # Save manifest hash for freshness check on next run
-          echo "${{ steps.big-blocks-check.outputs.remote-hash }}" > "$HOME/.reth-bench-big-blocks-hash"
 
       - name: Start metrics proxy
         run: |
@@ -1374,9 +1309,11 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
+            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
+              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
+              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
@@ -1410,9 +1347,11 @@ jobs:
         with:
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
+            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
+              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
+              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
@@ -1435,6 +1374,11 @@ jobs:
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
               body: `cc @${process.env.BENCH_ACTOR}\n\n⚠️ Benchmark cancelled. [View logs](${jobUrl})`,
             });
+
+      - name: Clean build outputs
+        if: always()
+        run: |
+          sudo rm -rf ../reth-baseline/target ../reth-feature/target "$BENCH_WORK_DIR" 2>/dev/null || true
 
       - name: Restore system settings
         if: always()

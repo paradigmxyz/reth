@@ -13,6 +13,7 @@ use crate::{
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandleProvider;
+use reth_storage_api::BalProvider;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 
@@ -63,7 +64,10 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     pub fn request_handler<Client>(
         self,
         client: Client,
-    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N> {
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N>
+    where
+        Client: BalProvider,
+    {
         let Self { mut network, transactions, .. } = self;
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);

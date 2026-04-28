@@ -27,8 +27,9 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    errors::SparseTrieResult, ConfigurableSparseTrie, DeferredDrops, LeafUpdate,
-    RevealableSparseTrie, SparseStateTrie, SparseTrie,
+    errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
+    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
+    SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
@@ -46,6 +47,8 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
+    /// The parent block's state root.
+    parent_state_root: B256,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
 
@@ -120,6 +123,7 @@ where
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
+        parent_state_root: B256,
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
@@ -138,6 +142,7 @@ where
             updates: hashed_state_rx,
             proof_worker_handle,
             trie,
+            parent_state_root,
             chunk_size,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
@@ -359,10 +364,25 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) =
-            self.trie.root_with_updates(&self.proof_worker_handle).map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+        let (state_root, trie_updates) = match self.trie.root_with_updates() {
+            Ok(result) => result,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                ) =>
+            {
+                // A still-blind account trie means this block never changed state, so preserve
+                // the cached parent root instead of fetching and revealing
+                // the unchanged root node.
+                (self.parent_state_root, TrieUpdates::default())
+            }
+            Err(err) => {
+                return Err(ParallelStateRootError::Other(format!(
+                    "could not calculate state root: {err:?}"
+                )))
+            }
+        };
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
@@ -873,6 +893,13 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
+    use reth_provider::{
+        providers::{OverlayBuilder, OverlayStateProviderFactory},
+        test_utils::create_test_provider_factory,
+        ChainSpecProvider,
+    };
+    use reth_trie_db::ChangesetCache;
+    use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     #[test]
@@ -952,5 +979,50 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
+            ArenaParallelSparseTrie::default(),
+        ));
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            1,
+        );
+
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+
+        let outcome = task.run().expect("state root computation should succeed");
+
+        assert_eq!(outcome.state_root, parent_state_root);
+        assert!(outcome.trie_updates.is_empty());
+        assert!(task.trie.state_trie_ref().is_none(), "blind trie should not be revealed");
     }
 }

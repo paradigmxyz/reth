@@ -15,6 +15,9 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
+/// Default number of cache hits before an invalid header entry is evicted and reprocessed.
+pub const DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
+
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
 
@@ -102,6 +105,11 @@ pub struct TreeConfig {
     block_buffer_limit: u32,
     /// Number of invalid headers to keep in cache.
     max_invalid_header_cache_length: u32,
+    /// Number of cache hits before an invalid header entry is evicted and reprocessed.
+    ///
+    /// Setting this to `0` effectively disables the cache because entries are evicted on the
+    /// first lookup.
+    invalid_header_hit_eviction_threshold: u8,
     /// Maximum number of blocks to execute sequentially in a batch.
     ///
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
@@ -170,6 +178,23 @@ pub struct TreeConfig {
     share_execution_cache_with_payload_builder: bool,
     /// Whether to share sparse trie with the payload builder.
     share_sparse_trie_with_payload_builder: bool,
+    /// Whether to suppress persistence cycles while building a payload.
+    ///
+    /// When enabled, persistence is deferred from the moment an FCU with payload attributes
+    /// arrives until the next FCU without attributes. This avoids persistence I/O competing
+    /// with block building on latency-sensitive chains.
+    suppress_persistence_during_build: bool,
+    /// Whether to disable BAL (Block Access List, EIP-7928) based parallel execution.
+    /// When disabled, falls back to transaction-based prewarming even when a BAL is available.
+    disable_bal_parallel_execution: bool,
+    /// Whether to disable BAL-driven parallel state root computation.
+    /// When disabled, the BAL hashed post state is not sent to the multiproof task for
+    /// early parallel state root computation.
+    disable_bal_parallel_state_root: bool,
+    /// Whether to disable BAL (Block Access List) batched IO during prewarming.
+    /// When disabled, falls back to individual per-slot storage reads instead of
+    /// batched cursor reads via `storage_range`.
+    disable_bal_batch_io: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -189,6 +214,7 @@ impl Default for TreeConfig {
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
+            invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
@@ -212,6 +238,10 @@ impl Default for TreeConfig {
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
+            suppress_persistence_during_build: false,
+            disable_bal_parallel_execution: true,
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -227,6 +257,7 @@ impl TreeConfig {
         persistence_backpressure_threshold: u64,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
+        invalid_header_hit_eviction_threshold: u8,
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
@@ -260,6 +291,7 @@ impl TreeConfig {
             persistence_backpressure_threshold,
             block_buffer_limit,
             max_invalid_header_cache_length,
+            invalid_header_hit_eviction_threshold,
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
@@ -283,6 +315,10 @@ impl TreeConfig {
             state_root_task_timeout,
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build: false,
+            disable_bal_parallel_execution: true,
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -311,6 +347,14 @@ impl TreeConfig {
     /// Return the maximum invalid cache header length.
     pub const fn max_invalid_header_cache_length(&self) -> u32 {
         self.max_invalid_header_cache_length
+    }
+
+    /// Return the invalid header cache hit eviction threshold.
+    ///
+    /// Setting this to `0` effectively disables the cache because entries are evicted on the
+    /// first lookup.
+    pub const fn invalid_header_hit_eviction_threshold(&self) -> u8 {
+        self.invalid_header_hit_eviction_threshold
     }
 
     /// Return the maximum execute block batch size.
@@ -440,6 +484,15 @@ impl TreeConfig {
         max_invalid_header_cache_length: u32,
     ) -> Self {
         self.max_invalid_header_cache_length = max_invalid_header_cache_length;
+        self
+    }
+
+    /// Setter for the invalid header cache hit eviction threshold.
+    pub const fn with_invalid_header_hit_eviction_threshold(
+        mut self,
+        invalid_header_hit_eviction_threshold: u8,
+    ) -> Self {
+        self.invalid_header_hit_eviction_threshold = invalid_header_hit_eviction_threshold;
         self
     }
 
@@ -643,6 +696,56 @@ impl TreeConfig {
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
         self.share_sparse_trie_with_payload_builder = share_sparse_trie_with_payload_builder;
+        self
+    }
+
+    /// Returns whether persistence is suppressed during payload building.
+    pub const fn suppress_persistence_during_build(&self) -> bool {
+        self.suppress_persistence_during_build
+    }
+
+    /// Setter for whether to suppress persistence during payload building.
+    pub const fn with_suppress_persistence_during_build(mut self, value: bool) -> Self {
+        self.suppress_persistence_during_build = value;
+        self
+    }
+
+    /// Returns whether BAL-based parallel execution is disabled.
+    pub const fn disable_bal_parallel_execution(&self) -> bool {
+        self.disable_bal_parallel_execution
+    }
+
+    /// Setter for whether to disable BAL-based parallel execution.
+    pub const fn without_bal_parallel_execution(
+        mut self,
+        disable_bal_parallel_execution: bool,
+    ) -> Self {
+        self.disable_bal_parallel_execution = disable_bal_parallel_execution;
+        self
+    }
+
+    /// Returns whether BAL-driven parallel state root computation is disabled.
+    pub const fn disable_bal_parallel_state_root(&self) -> bool {
+        self.disable_bal_parallel_state_root
+    }
+
+    /// Setter for whether to disable BAL-driven parallel state root computation.
+    pub const fn without_bal_parallel_state_root(
+        mut self,
+        disable_bal_parallel_state_root: bool,
+    ) -> Self {
+        self.disable_bal_parallel_state_root = disable_bal_parallel_state_root;
+        self
+    }
+
+    /// Returns whether BAL batched IO is disabled.
+    pub const fn disable_bal_batch_io(&self) -> bool {
+        self.disable_bal_batch_io
+    }
+
+    /// Setter for whether to disable BAL batched IO.
+    pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
+        self.disable_bal_batch_io = disable_bal_batch_io;
         self
     }
 

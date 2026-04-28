@@ -25,7 +25,6 @@ use std::{
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
-    time::Instant,
 };
 use tokio::sync::oneshot;
 use tracing::*;
@@ -144,7 +143,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, tx, enqueued_at }),
+                    Some(BeaconEngineMessage::NewPayload { payload, tx }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -174,7 +173,6 @@ where
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
                                 payload,
                                 tx,
-                                enqueued_at,
                             }))
                         }
                     };
@@ -193,12 +191,11 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, tx, enqueued_at },
+                        BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             payload: T::block_to_payload(reorg_block),
                             tx: reorg_payload_tx,
-                            enqueued_at: Instant::now(),
                         },
                         // Reorg forkchoice state
                         BeaconEngineMessage::ForkchoiceUpdated {
@@ -290,7 +287,7 @@ where
         let tx_recovered =
             tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
         let gas_used = match builder.execute_transaction(tx_recovered) {
-            Ok(gas_used) => gas_used,
+            Ok(gas_used) => gas_used.tx_gas_used(),
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 hash,
                 error,

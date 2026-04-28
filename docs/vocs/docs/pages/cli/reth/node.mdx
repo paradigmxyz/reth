@@ -87,8 +87,8 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
-      --enable-discv5-discovery
-          Enable Discv5 discovery
+      --disable-discv5-discovery
+          Disable Discv5 discovery
 
       --disable-nat
           Disable Nat discovery
@@ -821,6 +821,11 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+      --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
+          `RocksDB` block cache size (e.g., 512MB, 4GB).
+
+          Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -950,6 +955,13 @@ Engine:
 
           [default: 0]
 
+      --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
+          Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.
+
+          Set to `0` to effectively disable the cache because entries are evicted on the first lookup.
+
+          [default: 128]
+
       --engine.legacy-state-root
           Enable legacy state root
 
@@ -1055,6 +1067,20 @@ Engine:
           The engine and payload builder contend for the same trie — if a builder task is still running when `newPayload` arrives, the engine will block until the trie is stored back.
 
           The builder also anchors the trie at the built block's state root, so if the next `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
+
+      --engine.suppress-persistence-during-build
+          Suppress persistence while building a payload.
+
+          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
+
+      --engine.disable-bal-parallel-execution
+          Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled, falling back to transaction-based prewarming even when a BAL is available
+
+      --engine.disable-bal-parallel-state-root
+          Disable BAL-driven parallel state root computation. When set, the BAL hashed post state is not sent to the multiproof task for early parallel state root computation
+
+      --engine.disable-bal-batch-io
+          Disable BAL (Block Access List) batched IO during prewarming. When set, falls back to individual per-slot storage reads instead of batched cursor reads
 
 ERA:
       --era.enable
