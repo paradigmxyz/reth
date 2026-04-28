@@ -18,7 +18,7 @@ use crate::tree::{
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, AccountChanges};
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
@@ -797,15 +797,36 @@ where
 
         let start = Instant::now();
 
-        for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
-        }
-        for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
+        for slot in unique_bal_storage_slots(account) {
+            let _ = state_provider.storage(account.address, slot);
         }
 
         self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
     }
+}
+
+fn unique_bal_storage_slots(account: &AccountChanges) -> Vec<StorageKey> {
+    let total_slots = account.storage_changes.len() + account.storage_reads.len();
+    if total_slots == 0 {
+        return Vec::new();
+    }
+    if total_slots == 1 {
+        if let Some(slot) = account.storage_changes.first() {
+            return vec![StorageKey::from(slot.slot)];
+        }
+        return vec![StorageKey::from(account.storage_reads[0])];
+    }
+
+    let mut slots = Vec::with_capacity(total_slots);
+    for slot in &account.storage_changes {
+        slots.push(StorageKey::from(slot.slot));
+    }
+    for &slot in &account.storage_reads {
+        slots.push(StorageKey::from(slot));
+    }
+    slots.sort_unstable();
+    slots.dedup();
+    slots
 }
 
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
@@ -906,4 +927,33 @@ pub struct PrewarmMetrics {
     pub(crate) transaction_errors: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_bal_storage_slots;
+    use alloy_eip7928::{AccountChanges, SlotChanges, StorageChange};
+    use alloy_primitives::{Address, StorageKey, U256};
+
+    #[test]
+    fn unique_bal_storage_slots_dedupes_reads_and_changes() {
+        let repeated = U256::from(7u64);
+        let distinct = U256::from(11u64);
+        let account = AccountChanges {
+            address: Address::repeat_byte(0x11),
+            storage_changes: vec![
+                SlotChanges::new(repeated, vec![StorageChange::new(1, U256::from(1u64))]),
+                SlotChanges::new(distinct, vec![StorageChange::new(2, U256::from(2u64))]),
+            ],
+            storage_reads: vec![repeated, distinct, repeated],
+            balance_changes: Vec::new(),
+            nonce_changes: Vec::new(),
+            code_changes: Vec::new(),
+        };
+
+        let slots = unique_bal_storage_slots(&account);
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0], StorageKey::from(repeated));
+        assert_eq!(slots[1], StorageKey::from(distinct));
+    }
 }
