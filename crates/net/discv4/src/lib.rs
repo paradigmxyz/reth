@@ -47,8 +47,7 @@ use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
-    fmt,
-    io,
+    fmt, io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
     rc::Rc,
@@ -2026,7 +2025,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 
 /// Handles decoding, rate-limiting, and deduplication of incoming discv4 packets.
 ///
-/// Used by both the standalone [`receive_loop`] and the shared-port mode via
+/// Used by both the standalone receive loop and the shared-port mode via
 /// [`Discv4::bind_shared`].
 #[derive(Debug)]
 pub struct IngressHandler {

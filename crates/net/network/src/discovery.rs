@@ -117,20 +117,26 @@ impl Discovery {
                 {
                     let socket = bind_socket(discovery_v4_addr).await?;
 
-                    let (discv4, mut discv4_service, ingress) =
-                        Discv4::bind_shared(socket.clone(), local_enr, sk, config).map_err(
-                            |err| {
-                                NetworkError::from_io_error(
-                                    err,
-                                    ServiceKind::Discovery(discovery_v4_addr),
-                                )
-                            },
-                        )?;
+                    let (discv4, mut discv4_service, ingress) = Discv4::bind_shared(
+                        socket.clone(),
+                        local_enr,
+                        sk,
+                        config,
+                    )
+                    .map_err(|err| {
+                        NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_v4_addr))
+                    })?;
 
                     let discv4_updates = discv4_service.update_stream();
                     let discv4_service = discv4_service.spawn();
                     debug!(target:"net", ?discovery_v4_addr, "started discovery v4 (shared port)");
-                    (Some(discv4), Some(discv4_updates), Some(discv4_service), Some(ingress), Some(socket))
+                    (
+                        Some(discv4),
+                        Some(discv4_updates),
+                        Some(discv4_service),
+                        Some(ingress),
+                        Some(socket),
+                    )
                 } else {
                     let (discv4, mut discv4_service) =
                         Discv4::bind(discovery_v4_addr, local_enr, sk, config).await.map_err(

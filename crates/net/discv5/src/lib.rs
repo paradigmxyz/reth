@@ -498,7 +498,7 @@ pub fn build_local_enr(
 
         // Prefer v6 when both are configured
         v6.map(SocketAddr::V6)
-            .or(v4.map(SocketAddr::V4))
+            .or_else(|| v4.map(SocketAddr::V4))
             .unwrap_or_else(|| SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))
     };
 
