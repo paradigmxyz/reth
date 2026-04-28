@@ -691,10 +691,11 @@ impl HashedPostStateSorted {
         Self { accounts, storages }
     }
 
-    /// Merges the batch and removes any top-level keys present in the mask.
+    /// Merges the batch and removes any overlapping keys present in the mask.
     ///
-    /// For duplicate keys in the batch, later items take precedence over earlier ones. The order
-    /// of the mask does not matter.
+    /// Account keys are masked at the top level, while storage entries are only masked at the slot
+    /// level unless the mask wipes the entire storage. For duplicate keys in the batch, later
+    /// items take precedence over earlier ones. The order of the mask does not matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
         let accounts = kway_merge_disjoint_sorted(
             batch.iter().map(|item| item.accounts.len()).sum(),
@@ -705,6 +706,13 @@ impl HashedPostStateSorted {
         struct StorageAcc<'a> {
             wiped: bool,
             sealed: bool,
+            slot_count: usize,
+            slices: Vec<&'a [(B256, U256)]>,
+        }
+
+        #[derive(Default)]
+        struct StorageMaskAcc<'a> {
+            wiped: bool,
             slices: Vec<&'a [(B256, U256)]>,
         }
 
@@ -718,6 +726,7 @@ impl HashedPostStateSorted {
                 let entry = storages.entry(*hashed_address).or_insert_with(|| StorageAcc {
                     wiped: false,
                     sealed: false,
+                    slot_count: 0,
                     slices: Vec::new(),
                 });
 
@@ -726,6 +735,7 @@ impl HashedPostStateSorted {
                 }
 
                 entry.slices.push(storage.storage_slots.as_slice());
+                entry.slot_count += storage.storage_slots.len();
                 if storage.wiped {
                     entry.wiped = true;
                     entry.sealed = true;
@@ -733,17 +743,42 @@ impl HashedPostStateSorted {
             }
         }
 
+        let mut storage_masks: B256Map<StorageMaskAcc<'a>> = B256Map::with_capacity_and_hasher(
+            mask.iter().map(|item| item.storages.len()).sum(),
+            Default::default(),
+        );
         for item in mask {
-            for hashed_address in item.storages.keys() {
-                storages.remove(hashed_address);
+            for (hashed_address, storage) in &item.storages {
+                let entry = storage_masks.entry(*hashed_address).or_default();
+                if entry.wiped {
+                    continue;
+                }
+                if storage.wiped {
+                    entry.wiped = true;
+                    entry.slices.clear();
+                } else {
+                    entry.slices.push(storage.storage_slots.as_slice());
+                }
             }
         }
 
         let storages = storages
             .into_iter()
-            .map(|(hashed_address, entry)| {
-                let storage_slots = kway_merge_sorted(entry.slices);
-                (hashed_address, HashedStorageSorted { wiped: entry.wiped, storage_slots })
+            .filter_map(|(hashed_address, entry)| {
+                let storage_slots = match storage_masks.get(&hashed_address) {
+                    Some(mask_entry) if mask_entry.wiped => return None,
+                    Some(mask_entry) => kway_merge_disjoint_sorted(
+                        entry.slot_count,
+                        entry.slices,
+                        mask_entry.slices.iter().copied(),
+                    ),
+                    None => kway_merge_sorted(entry.slices),
+                };
+
+                (!storage_slots.is_empty() || entry.wiped).then_some((
+                    hashed_address,
+                    HashedStorageSorted { wiped: entry.wiped, storage_slots },
+                ))
             })
             .collect();
 
@@ -1639,10 +1674,13 @@ mod tests {
 
         let remove_a = HashedPostStateSorted::new(
             vec![(removed_account, None)],
-            B256Map::from_iter([(
-                removed_storage,
-                HashedStorageSorted { wiped: true, storage_slots: vec![] },
-            )]),
+            B256Map::from_iter([
+                (
+                    kept_storage,
+                    HashedStorageSorted { wiped: false, storage_slots: vec![(slot2, U256::ZERO)] },
+                ),
+                (removed_storage, HashedStorageSorted { wiped: true, storage_slots: vec![] }),
+            ]),
         );
 
         let remove_b = HashedPostStateSorted::new(
@@ -1661,7 +1699,7 @@ mod tests {
             result.storages.get(&kept_storage),
             Some(&HashedStorageSorted {
                 wiped: false,
-                storage_slots: vec![(slot1, U256::from(3)), (slot2, U256::from(4))],
+                storage_slots: vec![(slot1, U256::from(3))],
             })
         );
         assert!(!result.storages.contains_key(&removed_storage));
@@ -1706,6 +1744,34 @@ mod tests {
 
         assert!(result.accounts.is_empty());
         assert!(result.storages.is_empty());
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_ignores_empty_storage_mask() {
+        let storage = B256::with_last_byte(31);
+        let slot = B256::with_last_byte(32);
+
+        let batch = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] },
+            )]),
+        );
+        let mask = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![] },
+            )]),
+        );
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
+
+        assert_eq!(
+            result.storages.get(&storage),
+            Some(&HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] })
+        );
     }
 
     /// Test non-wiped storage merges both zero and non-zero valued slots
