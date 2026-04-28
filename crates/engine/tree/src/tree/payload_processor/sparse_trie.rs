@@ -863,7 +863,18 @@ impl PendingTargets {
 
     /// Takes the pending targets, replacing with empty defaults.
     fn take(&mut self) -> (MultiProofTargetsV2, usize) {
-        (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
+        let mut targets = std::mem::take(&mut self.targets);
+        self.len = 0;
+
+        dedup_targets(&mut targets.account_targets);
+        let mut len = targets.account_targets.len();
+
+        for slots in targets.storage_targets.values_mut() {
+            dedup_targets(slots);
+            len += slots.len();
+        }
+
+        (targets, len)
     }
 
     /// Adds a target to the account targets.
@@ -877,6 +888,28 @@ impl PendingTargets {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
+}
+
+fn dedup_targets(targets: &mut Vec<ProofV2Target>) {
+    if targets.len() < 2 {
+        return;
+    }
+
+    targets
+        .sort_unstable_by(|a, b| a.key_nibbles.cmp(&b.key_nibbles).then(a.min_len.cmp(&b.min_len)));
+
+    let mut deduped = 0;
+    for idx in 1..targets.len() {
+        if targets[idx].key_nibbles == targets[deduped].key_nibbles {
+            targets[deduped].min_len = targets[deduped].min_len.min(targets[idx].min_len);
+            continue;
+        }
+
+        deduped += 1;
+        targets[deduped] = targets[idx];
+    }
+
+    targets.truncate(deduped + 1);
 }
 
 /// Message type for the sparse trie task.
@@ -979,6 +1012,33 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn pending_targets_take_dedups_keys_and_keeps_lowest_min_len() {
+        let address = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+
+        let mut pending = PendingTargets::default();
+        pending.push_account_target(ProofV2Target::new(address).with_min_len(4));
+        pending.push_account_target(ProofV2Target::new(address).with_min_len(2));
+        pending.extend_storage_targets(
+            &address,
+            vec![
+                ProofV2Target::new(slot).with_min_len(3),
+                ProofV2Target::new(slot).with_min_len(1),
+            ],
+        );
+
+        let (targets, len) = pending.take();
+
+        assert_eq!(len, 2);
+        assert_eq!(targets.account_targets.len(), 1);
+        assert_eq!(targets.account_targets[0].min_len, 2);
+
+        let storage_targets = targets.storage_targets.get(&address).unwrap();
+        assert_eq!(storage_targets.len(), 1);
+        assert_eq!(storage_targets[0].min_len, 1);
     }
 
     #[test]
