@@ -47,7 +47,7 @@ impl DatabaseEnvMetrics {
         for table in Tables::ALL {
             let table_name = table.name();
             let metrics = array::from_fn(|index| {
-                let operation = Operation::ALL[index];
+                let operation = Operation::from_index(index);
                 OperationMetrics::new_with_labels(&[
                     (Labels::Table.as_str(), table_name),
                     (Labels::Operation.as_str(), operation.as_str()),
@@ -108,7 +108,7 @@ impl DatabaseEnvMetrics {
         f: impl FnOnce() -> R,
     ) -> R {
         if let Some(metrics) = self.operations.get(table) {
-            metrics[operation as usize].record(value_size, f)
+            metrics[operation.index()].record(value_size, f)
         } else {
             f()
         }
@@ -201,7 +201,6 @@ impl TransactionOutcome {
 }
 
 /// Types of operations conducted on the database: get, put, delete, and various cursor operations.
-#[repr(usize)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, EnumCount, EnumIter)]
 pub(crate) enum Operation {
     /// Database get operation.
@@ -227,18 +226,38 @@ pub(crate) enum Operation {
 }
 
 impl Operation {
-    const ALL: [Self; Self::COUNT] = [
-        Self::Get,
-        Self::PutUpsert,
-        Self::PutAppend,
-        Self::Delete,
-        Self::CursorUpsert,
-        Self::CursorInsert,
-        Self::CursorAppend,
-        Self::CursorAppendDup,
-        Self::CursorDeleteCurrent,
-        Self::CursorDeleteCurrentDuplicates,
-    ];
+    /// Returns the index of the operation in the cached per-table operation array.
+    pub(crate) const fn index(&self) -> usize {
+        match self {
+            Self::Get => 0,
+            Self::PutUpsert => 1,
+            Self::PutAppend => 2,
+            Self::Delete => 3,
+            Self::CursorUpsert => 4,
+            Self::CursorInsert => 5,
+            Self::CursorAppend => 6,
+            Self::CursorAppendDup => 7,
+            Self::CursorDeleteCurrent => 8,
+            Self::CursorDeleteCurrentDuplicates => 9,
+        }
+    }
+
+    /// Returns the operation for the given index in the cached per-table operation array.
+    const fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::Get,
+            1 => Self::PutUpsert,
+            2 => Self::PutAppend,
+            3 => Self::Delete,
+            4 => Self::CursorUpsert,
+            5 => Self::CursorInsert,
+            6 => Self::CursorAppend,
+            7 => Self::CursorAppendDup,
+            8 => Self::CursorDeleteCurrent,
+            9 => Self::CursorDeleteCurrentDuplicates,
+            _ => panic!("invalid operation index"),
+        }
+    }
 
     /// Returns the operation as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
