@@ -31,7 +31,6 @@ use rocksdb::{
     WriteBatchWithTransaction, WriteOptions, DB,
 };
 use std::{
-    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -1389,7 +1388,7 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut account_history: AddressMap<Vec<u64>> = AddressMap::default();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1404,7 +1403,8 @@ impl RocksDBProvider {
             }
         }
 
-        // Write account history using proper shard append logic
+        // RocksDB batches do not depend on key order, so avoid BTreeMap bookkeeping while we
+        // aggregate the per-address block lists.
         for (address, indices) in account_history {
             batch.append_account_history_shard(address, indices)?;
         }
@@ -1422,7 +1422,7 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        let mut storage_history: HashMap<(Address, B256), Vec<u64>> = HashMap::default();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1443,7 +1443,8 @@ impl RocksDBProvider {
             }
         }
 
-        // Write storage history using proper shard append logic
+        // RocksDB batches do not depend on key order, so avoid BTreeMap bookkeeping while we
+        // aggregate the per-slot block lists.
         for ((address, slot), indices) in storage_history {
             batch.append_storage_history_shard(address, slot, indices)?;
         }
