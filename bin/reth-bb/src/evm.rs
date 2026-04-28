@@ -7,15 +7,16 @@
 //! `execute_transaction` to apply segment-boundary changes.
 
 use crate::evm_config::BigBlockSegment;
+use alloy_consensus::TransactionEnvelope;
 use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, ExecutableTx, GasOutput, OnStateHook, StateChangeSource, StateDB,
+        ExecutableTx, GasOutput, OnStateHook, StateChangeSource, StateDB,
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
-    Database, EthEvm, EthEvmFactory, Evm, FromRecoveredTx, FromTxWithEncoded,
+    Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::B256;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -116,7 +117,8 @@ pub(crate) type BalIndexReader<DB> = fn(&DB) -> u64;
 /// Gas counters reset at each boundary so that each segment's real gas limit
 /// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
 /// are applied to receipts and totals in `finish()`.
-pub(crate) struct BbBlockExecutor<'a, DB, I, P, Spec>
+#[expect(missing_debug_implementations)]
+pub struct BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: Database,
 {
@@ -431,12 +433,11 @@ where
         self.inner_mut().execute_transaction_without_commit(tx)
     }
 
-    fn commit_transaction(
-        &mut self,
-        output: Self::Result,
-    ) -> Result<GasOutput, BlockExecutionError> {
-        self.maybe_apply_boundary()?;
-        let gas_used = self.inner_mut().commit_transaction(output)?;
+    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
+        self.maybe_apply_boundary()
+            .expect("segment boundary application must succeed before committing transaction");
+
+        let gas_used = self.inner_mut().commit_transaction(output);
 
         // Fix up cumulative_gas_used on the just-committed receipt so that
         // the receipt root task (which reads receipts incrementally) sees
@@ -451,7 +452,7 @@ where
         if let Some(plan) = &mut self.plan {
             plan.tx_counter += 1;
         }
-        Ok(gas_used)
+        gas_used
     }
 
     fn finish(
@@ -613,6 +614,12 @@ where
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
+    type TxExecutionResult = EthTxResult<
+        <EthEvmFactory as EvmFactory>::HaltReason,
+        <TransactionSigned as TransactionEnvelope>::TxType,
+    >;
+    type Executor<'a, DB: StateDB, I: Inspector<EthEvmContext<DB>>> =
+        BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -622,10 +629,10 @@ where
         &'a self,
         evm: EthEvm<DB, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    ) -> Self::Executor<'a, DB, I>
     where
-        DB: StateDB + 'a,
-        I: Inspector<EthEvmContext<DB>> + 'a,
+        DB: StateDB,
+        I: Inspector<EthEvmContext<DB>>,
     {
         let plan = self.peek_plan();
         BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, plan, None, None)

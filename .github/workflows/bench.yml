@@ -82,7 +82,7 @@ on:
           - on-error
           - never
       abba:
-        description: "Run ABBA (BFFB) interleaved order; false = single AB pass"
+        description: "Run ABBA (FBBF) interleaved order; false = single FB pass"
         required: false
         default: "true"
         type: boolean
@@ -950,21 +950,8 @@ jobs:
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Running benchmarks...'});
 
-      # Interleaved run order (B-F-F-B) to reduce systematic bias from
+      # Interleaved run order (F-B-B-F) to reduce systematic bias from
       # thermal drift and cache warming.
-      - name: "Run benchmark: baseline (1/2)"
-        id: run-baseline-1
-        env:
-          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
-          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-1,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
-        run: |
-          LAST_RUN_START=$(date +%s)
-          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
-          cat > "$BENCH_LABELS_FILE" <<LABELS
-          {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
-          LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
-
       - name: "Run benchmark: feature (1/2)"
         id: run-feature-1
         env:
@@ -978,19 +965,18 @@ jobs:
           LABELS
           taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
 
-      - name: "Run benchmark: feature (2/2)"
-        if: env.BENCH_ABBA != 'false'
-        id: run-feature-2
+      - name: "Run benchmark: baseline (1/2)"
+        id: run-baseline-1
         env:
-          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
-          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-2,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-1,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
         run: |
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
-          {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
 
       - name: "Run benchmark: baseline (2/2)"
         if: env.BENCH_ABBA != 'false'
@@ -1005,6 +991,20 @@ jobs:
           {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
           taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
+
+      - name: "Run benchmark: feature (2/2)"
+        if: env.BENCH_ABBA != 'false'
+        id: run-feature-2
+        env:
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-2,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+        run: |
+          LAST_RUN_START=$(date +%s)
+          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
 
       - name: Stop metrics proxy & generate Grafana URL
         id: metrics
@@ -1199,9 +1199,29 @@ jobs:
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
           git -C "${TMP_DIR}" add "${CHART_DIR}"
+          if git -C "${TMP_DIR}" diff --cached --quiet; then
+            echo "Charts for ${CHART_DIR} are already present, skipping push"
+            echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            rm -rf "${TMP_DIR}"
+            exit 0
+          fi
           git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
             commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
-          git -C "${TMP_DIR}" push origin HEAD:main
+
+          for attempt in 1 2 3 4 5; do
+            if git -C "${TMP_DIR}" push origin HEAD:main; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Failed to push charts after ${attempt} attempts"
+              rm -rf "${TMP_DIR}"
+              exit 1
+            fi
+            sleep "$attempt"
+            git -C "${TMP_DIR}" fetch origin main
+            git -C "${TMP_DIR}" rebase origin/main
+          done
+
           echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           rm -rf "${TMP_DIR}"
 
@@ -1243,7 +1263,7 @@ jobs:
             // Samply profile links (URLs point directly to Firefox Profiler)
             if (process.env.BENCH_SAMPLY === 'true') {
               const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-              const runs = abba ? ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'] : ['baseline-1', 'feature-1'];
+              const runs = abba ? ['feature-1', 'baseline-1', 'baseline-2', 'feature-2'] : ['feature-1', 'baseline-1'];
               const links = [];
               for (const run of runs) {
                 try {
@@ -1322,10 +1342,10 @@ jobs:
               ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
               ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
+              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
@@ -1360,10 +1380,10 @@ jobs:
               ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
               ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
+              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
