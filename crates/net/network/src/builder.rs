@@ -124,9 +124,8 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         announcement_policy: A,
     ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
-        const TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024; // 1GB
         let (tx, rx) = memory_bounded_channel(
-            TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            transactions_manager_config.tx_channel_memory_limit_bytes,
             NETWORK_POOL_TRANSACTIONS_SCOPE,
         );
         network.set_transactions(tx);

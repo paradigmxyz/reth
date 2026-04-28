@@ -51,8 +51,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-/// Memory limit for the transaction manager channel in tests (1 GiB).
-const TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
+use crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -480,7 +479,7 @@ where
     /// Set a new transactions manager that's connected to the peer's network
     pub fn install_transactions_manager(&mut self, pool: Pool) {
         let (tx, rx) =
-            memory_bounded_channel(TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
+            memory_bounded_channel(DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
         self.network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
             self.handle(),
@@ -499,7 +498,7 @@ where
     {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
         let (tx, rx) =
-            memory_bounded_channel(TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
+            memory_bounded_channel(DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
         network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
             network.handle().clone(),
@@ -541,7 +540,7 @@ where
     {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
         let (tx, rx) =
-            memory_bounded_channel(TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
+            memory_bounded_channel(DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
         network.set_transactions(tx);
 
         let announcement_policy = StrictEthAnnouncementFilter::default();

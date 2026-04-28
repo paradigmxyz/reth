@@ -47,7 +47,7 @@ use reth_eth_wire::{
     RequestTxHashes, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::{TransactionSigned, TxType};
-use reth_metrics::common::mpsc::{Budgeted, MemoryBoundedReceiver};
+use reth_metrics::common::mpsc::MemoryBoundedReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     NetworkEvent, NetworkEventListenerProvider, PeerKind, PeerRequest, PeerRequestSender, Peers,
@@ -1621,7 +1621,7 @@ where
             "Network transaction events stream",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
             this.transaction_events.poll_next_unpin(cx),
-            |budgeted: Budgeted<NetworkTransactionEvent<N>>| this.on_network_tx_event(budgeted.msg),
+            |event: NetworkTransactionEvent<N>| this.on_network_tx_event(event),
         );
 
         // Advance inflight fetch requests (flush transaction fetcher and queue for
@@ -2169,11 +2169,9 @@ struct TxManagerPollDurations {
     acc_cmds: Duration,
 }
 
-impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N>
-where
-    N::BroadcastedTransaction: InMemorySize,
-    N::PooledTransaction: InMemorySize,
-{
+impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N> {
+    // `N::BroadcastedTransaction` and `N::PooledTransaction` already implement
+    // `InMemorySize` via `SignedTransaction: InMemorySize`, so no extra bound is needed.
     fn size(&self) -> usize {
         match self {
             Self::IncomingTransactions { peer_id, msg } => {
@@ -3124,11 +3122,13 @@ mod tests {
             .build(client.clone());
 
         let mut network_manager = NetworkManager::new(network_config).await.unwrap();
-        const TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
         let (to_tx_manager_tx, from_network_rx) =
             reth_metrics::common::mpsc::memory_bounded_channel::<
                 NetworkTransactionEvent<EthNetworkPrimitives>,
-            >(TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES, "test_tx_channel");
+            >(
+                crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+                "test_tx_channel",
+            );
         network_manager.set_transactions(to_tx_manager_tx);
         let network_handle = network_manager.handle().clone();
         let network_service_handle = tokio::spawn(network_manager);

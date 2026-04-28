@@ -406,6 +406,10 @@ struct MeteredPollSenderMetrics {
 }
 
 /// Shared state for tracking memory budget across sender and receiver.
+///
+/// `used` is a pure accounting counter — it does not gate access to any other
+/// shared memory, so all operations on it use [`Ordering::Relaxed`]. Cross-thread
+/// publication of message contents is handled by the underlying mpsc channel.
 #[derive(Debug)]
 struct MemoryBudget {
     /// Current number of bytes used by buffered messages.
@@ -419,30 +423,39 @@ struct MemoryBudget {
 /// Holds the size of the message and a reference to the shared budget counter.
 /// When dropped, it atomically decreases the used counter.
 #[derive(Debug)]
-pub struct BudgetGuard {
+struct BudgetGuard {
     size: usize,
     budget: Arc<MemoryBudget>,
 }
 
 impl Drop for BudgetGuard {
     fn drop(&mut self) {
-        self.budget.used.fetch_sub(self.size, Ordering::Release);
+        self.budget.used.fetch_sub(self.size, Ordering::Relaxed);
     }
 }
 
-/// Message envelope that holds the memory budget until the message is dropped.
+/// Message envelope that holds the memory budget while the message sits in the channel.
+///
+/// The guard is dropped (releasing the budget) as soon as the receiver dequeues
+/// the message via [`MemoryBoundedReceiver::recv`] / [`MemoryBoundedReceiver::poll_recv`],
+/// so the budget tracks bytes *currently in the channel queue*, not bytes in flight
+/// downstream of the receiver.
 #[derive(Debug)]
-pub struct Budgeted<T> {
-    /// The inner message.
-    pub msg: T,
-    /// Guard that releases budget when dropped.
+struct Budgeted<T> {
+    msg: T,
     _guard: BudgetGuard,
 }
 
 /// A sender that enforces a byte budget before enqueueing messages.
 ///
-/// Uses a shared atomic counter to track memory usage. Each message's size is
-/// added to the counter on send and subtracted when the message is dropped.
+/// Uses a shared atomic counter to track memory usage. Each message's size is added
+/// to the counter on send and subtracted when the message is dequeued by the receiver.
+///
+/// The current call sites (specifically [`crate::common::mpsc::MemoryBoundedSender`] used
+/// for the `NetworkManager → TransactionsManager` channel) have a single producer driven
+/// from a single `poll`, so the `fetch_add → check → fetch_sub-on-overflow` reservation
+/// pattern can never race with itself. The atomic is still used so the receiver can
+/// release budget from a different task.
 #[derive(Debug, Clone)]
 pub struct MemoryBoundedSender<T: InMemorySize> {
     /// The underlying unbounded metered sender
@@ -459,10 +472,10 @@ impl<T: InMemorySize> MemoryBoundedSender<T> {
         let size = msg.size();
 
         // Reserve budget: add first, check after
-        let prev = self.budget.used.fetch_add(size, Ordering::AcqRel);
+        let prev = self.budget.used.fetch_add(size, Ordering::Relaxed);
         if prev.saturating_add(size) > self.budget.max_bytes {
             // Over budget, undo
-            self.budget.used.fetch_sub(size, Ordering::Release);
+            self.budget.used.fetch_sub(size, Ordering::Relaxed);
             return Err(TrySendError::Full(msg));
         }
 
@@ -477,6 +490,9 @@ impl<T: InMemorySize> MemoryBoundedSender<T> {
 }
 
 /// A receiver for memory-bounded messages.
+///
+/// On receive, the budget reserved for the message is released immediately and the
+/// inner `T` is yielded — callers do not need to opt into any wrapper type.
 #[derive(Debug)]
 pub struct MemoryBoundedReceiver<T> {
     /// The underlying unbounded metered receiver
@@ -485,18 +501,30 @@ pub struct MemoryBoundedReceiver<T> {
 
 impl<T> MemoryBoundedReceiver<T> {
     /// Receives the next message, returning `None` if the channel is closed.
-    pub async fn recv(&mut self) -> Option<Budgeted<T>> {
-        self.inner.recv().await
+    ///
+    /// Releases the message's reserved budget before returning.
+    pub async fn recv(&mut self) -> Option<T> {
+        self.inner.recv().await.map(unwrap_budgeted)
     }
 
     /// Polls to receive the next message on this channel.
-    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Budgeted<T>>> {
-        self.inner.poll_recv(cx)
+    ///
+    /// Releases the message's reserved budget before returning.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        self.inner.poll_recv(cx).map(|opt| opt.map(unwrap_budgeted))
     }
 }
 
+/// Releases the budget guard and returns the inner message.
+fn unwrap_budgeted<T>(b: Budgeted<T>) -> T {
+    // Destructuring binds `_guard` so it is dropped when this function returns,
+    // which runs `BudgetGuard::drop` and releases the reserved bytes.
+    let Budgeted { msg, _guard } = b;
+    msg
+}
+
 impl<T> Stream for MemoryBoundedReceiver<T> {
-    type Item = Budgeted<T>;
+    type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.poll_recv(cx)
@@ -505,8 +533,9 @@ impl<T> Stream for MemoryBoundedReceiver<T> {
 
 /// Creates a new memory-bounded channel with the given byte budget.
 ///
-/// Messages are wrapped in [`Budgeted`] which tracks their size and automatically
-/// releases budget when dropped by the receiver.
+/// The budget tracks bytes currently buffered in the channel; it is reserved on
+/// [`MemoryBoundedSender::try_send`] and released as soon as the receiver dequeues
+/// the message.
 pub fn memory_bounded_channel<T: InMemorySize>(
     max_bytes: usize,
     scope: &'static str,

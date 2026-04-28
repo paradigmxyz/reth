@@ -52,7 +52,6 @@ use reth_network_api::{
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
-use reth_primitives_traits::InMemorySize;
 use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
@@ -171,11 +170,7 @@ impl NetworkManager {
     }
 }
 
-impl<N: NetworkPrimitives> NetworkManager<N>
-where
-    N::BroadcastedTransaction: InMemorySize,
-    N::PooledTransaction: InMemorySize,
-{
+impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn with_transactions(
