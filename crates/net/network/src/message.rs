@@ -13,9 +13,12 @@ use reth_eth_wire::{
     NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
     NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{snap::SnapProtocolMessage, RawCapabilityMessage};
 use reth_network_api::PeerRequest;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_primitives_traits::Block;
 use std::{
     sync::Arc,
@@ -128,6 +131,9 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetReceipts(GetReceipts),
+
+    /// A snap protocol request.
+    Snap(SnapProtocolMessage),
 }
 
 /// Corresponding variant for [`PeerRequest`].
@@ -177,6 +183,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a block access lists request.
         response: oneshot::Receiver<RequestResult<BlockAccessLists>>,
     },
+    /// Represents a response to a snap protocol request.
+    Snap {
+        /// The receiver channel for the snap response.
+        response: oneshot::Receiver<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -220,6 +231,10 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 Ok(res) => PeerResponseResult::BlockAccessLists(res),
                 Err(err) => PeerResponseResult::BlockAccessLists(Err(err.into())),
             },
+            Self::Snap { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Snap(res),
+                Err(err) => PeerResponseResult::Snap(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -244,6 +259,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts70(RequestResult<Receipts70<N::Receipt>>),
     /// Represents a result containing block access lists or an error.
     BlockAccessLists(RequestResult<BlockAccessLists>),
+    /// Represents a result containing a snap protocol response or an error.
+    Snap(RequestResult<SnapResponse>),
 }
 
 // === impl PeerResponseResult ===
@@ -295,6 +312,10 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
                 }
                 Err(err) => Err(err),
             },
+            Self::Snap(_) => {
+                // Snap responses are not sent via EthMessage; they use the snap sub-protocol.
+                Err(RequestError::BadResponse)
+            }
         }
     }
 
@@ -309,6 +330,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(res) => res.as_ref().err(),
             Self::Receipts70(res) => res.as_ref().err(),
             Self::BlockAccessLists(res) => res.as_ref().err(),
+            Self::Snap(res) => res.as_ref().err(),
         }
     }
 

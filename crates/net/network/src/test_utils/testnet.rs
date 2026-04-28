@@ -27,7 +27,8 @@ use reth_network_api::{
 };
 use reth_network_peers::PeerId;
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+    noop::NoopProvider, BalStoreHandle, BlockReader, BlockReaderIdExt, HeaderProvider,
+    StateProviderFactory,
 };
 use reth_tasks::Runtime;
 use reth_tokio_util::EventStream;
@@ -466,7 +467,8 @@ where
         let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
-        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
+        let request_handler =
+            EthRequestHandler::new(self.client.clone(), peers, rx, BalStoreHandle::default());
         self.request_handler = Some(request_handler);
     }
 

@@ -34,7 +34,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
-    ChainSpecProvider, FullProvider,
+    BalProvider, ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
@@ -913,13 +913,20 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         PropPolicy: TransactionPropagationPolicy<N>,
         AnnPolicy: AnnouncementFilteringPolicy<N>,
     {
-        let (handle, network, txpool, eth) = builder
+        let bal_store = self.provider().bal_store().clone();
+        let mut net_builder = builder
             .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
-            .request_handler(self.provider().clone())
-            .split_with_handle();
+            .request_handler_with_bal_store(self.provider().clone(), bal_store);
+
+        let snap = net_builder.snap_request_handler(crate::snap_provider::ProviderSnapState::new(
+            self.provider().clone(),
+        ));
+
+        let (handle, network, txpool, eth) = net_builder.split_with_handle();
 
         self.executor.spawn_critical_blocking_task("p2p txpool", txpool);
         self.executor.spawn_critical_blocking_task("p2p eth request handler", eth);
+        self.executor.spawn_critical_blocking_task("p2p snap request handler", snap);
 
         let default_peers_path = self.config().datadir().known_peers();
         let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);

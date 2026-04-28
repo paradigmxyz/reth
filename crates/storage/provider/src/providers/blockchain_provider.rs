@@ -115,6 +115,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         })
     }
 
+    /// Returns a reference to the underlying [`ProviderFactory`].
+    pub fn database(&self) -> &ProviderFactory<N> {
+        &self.database
+    }
+
+    /// Sets the BAL store for this provider.
+    pub fn set_bal_store(&mut self, bal_store: BalStoreHandle) {
+        self.bal_store = bal_store;
+    }
+
     /// Gets a clone of `canonical_in_memory_state`.
     pub fn canonical_in_memory_state(&self) -> CanonicalInMemoryState<N::Primitives> {
         self.canonical_in_memory_state.clone()

@@ -368,7 +368,115 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
                 OnIncomingMessageOutcome::Ok
             }
-            EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
+            EthMessage::Other(raw_msg) => {
+                // Check if this is a snap protocol response by trying to decode it.
+                let eth_msg_count = reth_eth_wire::EthMessageID::message_count(self.conn.version());
+                let raw_id = raw_msg.id as u8;
+                if raw_id >= eth_msg_count {
+                    let snap_id = raw_id - eth_msg_count;
+                    if let Ok(snap_msg) = reth_eth_wire_types::snap::SnapProtocolMessage::decode(
+                        snap_id,
+                        &mut raw_msg.payload.as_ref(),
+                    ) {
+                        return self.on_incoming_snap_response(snap_msg);
+                    }
+                }
+                self.try_emit_broadcast(PeerMessage::Other(raw_msg)).into()
+            }
+        }
+    }
+
+    /// Handle an incoming snap protocol response by matching it to an inflight request.
+    fn on_incoming_snap_response(
+        &mut self,
+        snap_msg: reth_eth_wire_types::snap::SnapProtocolMessage,
+    ) -> OnIncomingMessageOutcome<N> {
+        use reth_eth_wire_types::snap::SnapProtocolMessage;
+        use reth_network_p2p::snap::client::SnapResponse;
+
+        let (request_id, snap_response) = match snap_msg {
+            SnapProtocolMessage::AccountRange(msg) => {
+                (msg.request_id, SnapResponse::AccountRange(msg))
+            }
+            SnapProtocolMessage::StorageRanges(msg) => {
+                (msg.request_id, SnapResponse::StorageRanges(msg))
+            }
+            SnapProtocolMessage::ByteCodes(msg) => (msg.request_id, SnapResponse::ByteCodes(msg)),
+            SnapProtocolMessage::TrieNodes(msg) => (msg.request_id, SnapResponse::TrieNodes(msg)),
+            // Incoming snap *requests* from the remote peer are handled separately
+            _ => {
+                let peer_req = self.create_snap_incoming_request(snap_msg);
+                return self.try_emit_request(PeerMessage::EthRequest(peer_req)).into();
+            }
+        };
+
+        if let Some(req) = self.inflight_requests.remove(&request_id) {
+            match req.request {
+                RequestState::Waiting(
+                    PeerRequest::GetAccountRange { response, .. } |
+                    PeerRequest::GetStorageRanges { response, .. } |
+                    PeerRequest::GetByteCodes { response, .. } |
+                    PeerRequest::GetTrieNodes { response, .. },
+                ) => {
+                    trace!(peer_id=?self.remote_peer_id, ?request_id, "received snap response from peer");
+                    let _ = response.send(Ok(snap_response));
+                    self.update_request_timeout(req.timestamp, Instant::now());
+                }
+                RequestState::Waiting(request) => {
+                    request.send_bad_response();
+                }
+                RequestState::TimedOut => {
+                    self.update_request_timeout(req.timestamp, Instant::now());
+                }
+            }
+        } else {
+            trace!(peer_id=?self.remote_peer_id, ?request_id, "received snap response to unknown request");
+            self.on_bad_message();
+        }
+
+        OnIncomingMessageOutcome::Ok
+    }
+
+    /// Creates a `PeerRequest` for an incoming snap request from the remote peer.
+    ///
+    /// This converts snap protocol request messages into `PeerRequest` variants so they can be
+    /// dispatched to the snap request handler.
+    fn create_snap_incoming_request(
+        &mut self,
+        snap_msg: reth_eth_wire_types::snap::SnapProtocolMessage,
+    ) -> PeerRequest<N> {
+        use reth_eth_wire_types::snap::SnapProtocolMessage;
+
+        let (tx, response) = oneshot::channel();
+        let request_id = match &snap_msg {
+            SnapProtocolMessage::GetAccountRange(msg) => msg.request_id,
+            SnapProtocolMessage::GetStorageRanges(msg) => msg.request_id,
+            SnapProtocolMessage::GetByteCodes(msg) => msg.request_id,
+            SnapProtocolMessage::GetTrieNodes(msg) => msg.request_id,
+            _ => unreachable!("only request variants reach here"),
+        };
+
+        let received = ReceivedRequest {
+            request_id,
+            rx: PeerResponse::Snap { response },
+            received: Instant::now(),
+        };
+        self.received_requests_from_remote.push(received);
+
+        match snap_msg {
+            SnapProtocolMessage::GetAccountRange(req) => {
+                PeerRequest::GetAccountRange { request: req, response: tx }
+            }
+            SnapProtocolMessage::GetStorageRanges(req) => {
+                PeerRequest::GetStorageRanges { request: req, response: tx }
+            }
+            SnapProtocolMessage::GetByteCodes(req) => {
+                PeerRequest::GetByteCodes { request: req, response: tx }
+            }
+            SnapProtocolMessage::GetTrieNodes(req) => {
+                PeerRequest::GetTrieNodes { request: req, response: tx }
+            }
+            _ => unreachable!("only request variants reach here"),
         }
     }
 
@@ -389,9 +497,26 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id).map_versioned(version);
 
-        self.queued_outgoing.push_back(msg.into());
+        if request.is_snap_request() {
+            // Snap requests are encoded as snap protocol messages and sent as raw
+            // capability messages through the multiplexed connection.
+            let snap_msg = request.create_snap_request_message(request_id);
+            let encoded = snap_msg.encode();
+            // Adjust the message ID for multiplexing: add the eth message count offset
+            let eth_msg_count = reth_eth_wire::EthMessageID::message_count(version);
+            let mut adjusted = Vec::with_capacity(encoded.len());
+            adjusted.push(encoded[0] + eth_msg_count);
+            adjusted.extend_from_slice(&encoded[1..]);
+            self.queued_outgoing.push_back(OutgoingMessage::Raw(RawCapabilityMessage::new(
+                adjusted[0] as usize,
+                adjusted[1..].to_vec().into(),
+            )));
+        } else {
+            let msg = request.create_request_message(request_id).map_versioned(version);
+            self.queued_outgoing.push_back(msg.into());
+        }
+
         let req = InflightRequest {
             request: RequestState::Waiting(request),
             timestamp: Instant::now(),
@@ -449,6 +574,35 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ///
     /// This will queue the response to be sent to the peer
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
+        if let PeerResponseResult::Snap(res) = resp {
+            // Snap responses need to be sent as raw capability messages
+            if let Ok(snap_resp) = res {
+                let snap_msg = match snap_resp {
+                    reth_network_p2p::snap::client::SnapResponse::AccountRange(msg) => {
+                        reth_eth_wire_types::snap::SnapProtocolMessage::AccountRange(msg)
+                    }
+                    reth_network_p2p::snap::client::SnapResponse::StorageRanges(msg) => {
+                        reth_eth_wire_types::snap::SnapProtocolMessage::StorageRanges(msg)
+                    }
+                    reth_network_p2p::snap::client::SnapResponse::ByteCodes(msg) => {
+                        reth_eth_wire_types::snap::SnapProtocolMessage::ByteCodes(msg)
+                    }
+                    reth_network_p2p::snap::client::SnapResponse::TrieNodes(msg) => {
+                        reth_eth_wire_types::snap::SnapProtocolMessage::TrieNodes(msg)
+                    }
+                };
+                let encoded = snap_msg.encode();
+                let eth_msg_count = reth_eth_wire::EthMessageID::message_count(self.conn.version());
+                let mut adjusted = Vec::with_capacity(encoded.len());
+                adjusted.push(encoded[0] + eth_msg_count);
+                adjusted.extend_from_slice(&encoded[1..]);
+                self.queued_outgoing.push_back(OutgoingMessage::Raw(RawCapabilityMessage::new(
+                    adjusted[0] as usize,
+                    adjusted[1..].to_vec().into(),
+                )));
+            }
+            return;
+        }
         match resp.try_into_message(id) {
             Ok(msg) => {
                 self.queued_outgoing.push_back(msg.into());

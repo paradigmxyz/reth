@@ -131,6 +131,7 @@ pub mod import;
 pub mod message;
 pub mod peers;
 pub mod protocol;
+pub mod snap_requests;
 pub mod transactions;
 
 mod budget;

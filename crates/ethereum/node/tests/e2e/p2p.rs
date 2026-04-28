@@ -2,6 +2,7 @@ use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
 use alloy_eips::Encodable2718;
 use alloy_network::TxSignerSync;
+use alloy_primitives::B256;
 use alloy_provider::{Provider, ProviderBuilder};
 use futures::future::JoinAll;
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
@@ -291,6 +292,128 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     for node in nodes {
         assert!(node.rpc.inner.eth_api().transaction_by_hash(tx_hash).await?.is_some());
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires serving in-memory state; serving node keeps ~2 blocks unpersisted"]
+async fn can_snap_sync_frozen_head() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let seed: [u8; 32] = rand::rng().random();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {seed:?}");
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    // Do NOT auto-connect nodes — we want to prevent accidental eth sync
+    let (mut nodes, _) = setup_engine_with_connection::<EthereumNode>(
+        2,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+        false, // do not auto-connect
+    )
+    .await?;
+
+    let mut node_b = nodes.pop().unwrap();
+    let mut node_a = nodes.pop().unwrap();
+
+    // Advance Node A by 300 blocks with random transactions (creates contracts + storage)
+    advance_with_random_transactions(&mut node_a, 300, &mut rng, true).await?;
+
+    // Wait for hashed state to stabilize in MDBX
+    let _target_root = {
+        let mut prev = node_a.snap_state_root().await;
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let current = node_a.snap_state_root().await;
+            if current == prev && current != B256::ZERO {
+                break current;
+            }
+            prev = current;
+        }
+    };
+
+    let target_hash = node_a.block_hash(300);
+
+    // Connect Node B to Node A (after blocks are produced, head is frozen)
+    node_b.connect(&mut node_a).await;
+
+    // Trigger engine-driven snap sync: send the head FCU so the engine tree
+    // detects a fresh node and starts the SnapSyncOrchestrator.
+    node_b.sync_to(target_hash).await?;
+
+    // Verify state root matches Node A
+    let node_b_root = node_b.snap_state_root().await;
+    let node_a_root = node_a.snap_state_root().await;
+    assert_eq!(node_b_root, node_a_root, "State roots should match after snap sync");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn can_snap_sync_catch_up() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let seed: [u8; 32] = rand::rng().random();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {seed:?}");
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .amsterdam_activated()
+            .build(),
+    );
+
+    // Do NOT auto-connect — prevent accidental eth sync
+    let (mut nodes, _) = setup_engine_with_connection::<EthereumNode>(
+        2,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+        false,
+    )
+    .await?;
+
+    let mut node_b = nodes.pop().unwrap();
+    let mut node_a = nodes.pop().unwrap();
+
+    // Build initial state on Node A (30 blocks)
+    advance_with_random_transactions(&mut node_a, 30, &mut rng, true).await?;
+
+    let initial_target = node_a.block_hash(30);
+
+    // Connect Node B to Node A
+    node_b.connect(&mut node_a).await;
+
+    // Advance Node A further BEFORE triggering snap sync on Node B.
+    advance_with_random_transactions(&mut node_a, 20, &mut rng, true).await?;
+
+    // Now trigger snap sync on Node B targeting the initial block.
+    node_b.update_forkchoice(initial_target, initial_target).await?;
+
+    // Continue advancing Node A to push even further
+    advance_with_random_transactions(&mut node_a, 10, &mut rng, true).await?;
+
+    let final_hash = node_a.block_hash(60);
+
+    // Wait for Node B to sync
+    node_b.sync_to(final_hash).await?;
 
     Ok(())
 }

@@ -18,7 +18,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BalStoreHandle, BlockReader, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -63,6 +63,8 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
+    /// Store for Block Access Lists (BALs) used to serve snap/2 requests.
+    bal_store: BalStoreHandle,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
@@ -70,11 +72,17 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 // === impl EthRequestHandler ===
 impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     /// Create a new instance
-    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
+    pub fn new(
+        client: C,
+        peers: PeersHandle,
+        incoming: Receiver<IncomingEthRequest<N>>,
+        bal_store: BalStoreHandle,
+    ) -> Self {
         Self {
             client,
             peers,
             incoming_requests: ReceiverStream::new(incoming),
+            bal_store,
             metrics: Default::default(),
         }
     }
@@ -292,13 +300,13 @@ where
         request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
-        // TODO: BAL serving is not fully implemented yet. Per EIP-8159, unavailable BALs are
-        // returned as empty BAL entries while preserving request order, so we currently return
-        // one RLP-encoded empty BAL (`0xc0`) per requested hash.
-        let access_lists = request
-            .0
+        let hashes = request.0;
+        let results = self.bal_store.get_by_hashes(&hashes).unwrap_or_default();
+        let found = results.iter().filter(|r| r.is_some()).count();
+        tracing::info!(target: "net::eth", requested=hashes.len(), found, hashes=?hashes, "BAL request received");
+        let access_lists = results
             .into_iter()
-            .map(|_| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]))
+            .map(|opt| opt.unwrap_or_else(|| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])))
             .collect();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }

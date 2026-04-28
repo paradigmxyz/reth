@@ -1,14 +1,21 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
-    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
-    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
-    Receipts70, UnifiedStatus,
+    message::RequestPair,
+    snap::{
+        GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
+        SnapProtocolMessage,
+    },
+    BlockAccessLists, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
+    EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders,
+    GetNodeData, GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
+    PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_tokio_util::EventStream;
@@ -262,6 +269,42 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
+    /// Requests an account range from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetAccountRange {
+        /// The request for account range.
+        request: GetAccountRangeMessage,
+        /// The channel to send the response for account range.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests storage ranges from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetStorageRanges {
+        /// The request for storage ranges.
+        request: GetStorageRangesMessage,
+        /// The channel to send the response for storage ranges.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests bytecodes from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetByteCodes {
+        /// The request for bytecodes.
+        request: GetByteCodesMessage,
+        /// The channel to send the response for bytecodes.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests trie nodes from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetTrieNodes {
+        /// The request for trie nodes.
+        request: GetTrieNodesMessage,
+        /// The channel to send the response for trie nodes.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -283,6 +326,10 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
+            Self::GetAccountRange { response, .. } |
+            Self::GetStorageRanges { response, .. } |
+            Self::GetByteCodes { response, .. } |
+            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -292,6 +339,60 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
         match self {
             Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
             _ => true,
+        }
+    }
+
+    /// Returns `true` if this is a snap protocol request.
+    pub const fn is_snap_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetAccountRange { .. } |
+                Self::GetStorageRanges { .. } |
+                Self::GetByteCodes { .. } |
+                Self::GetTrieNodes { .. }
+        )
+    }
+
+    /// Creates the [`SnapProtocolMessage`] for snap request types.
+    ///
+    /// Panics if called on a non-snap request variant.
+    pub fn create_snap_request_message(&self, request_id: u64) -> SnapProtocolMessage {
+        match self {
+            Self::GetAccountRange { request, .. } => {
+                SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                    request_id,
+                    root_hash: request.root_hash,
+                    starting_hash: request.starting_hash,
+                    limit_hash: request.limit_hash,
+                    response_bytes: request.response_bytes,
+                })
+            }
+            Self::GetStorageRanges { request, .. } => {
+                SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+                    request_id,
+                    root_hash: request.root_hash,
+                    account_hashes: request.account_hashes.clone(),
+                    starting_hash: request.starting_hash,
+                    limit_hash: request.limit_hash,
+                    response_bytes: request.response_bytes,
+                })
+            }
+            Self::GetByteCodes { request, .. } => {
+                SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+                    request_id,
+                    hashes: request.hashes.clone(),
+                    response_bytes: request.response_bytes,
+                })
+            }
+            Self::GetTrieNodes { request, .. } => {
+                SnapProtocolMessage::GetTrieNodes(GetTrieNodesMessage {
+                    request_id,
+                    root_hash: request.root_hash,
+                    paths: request.paths.clone(),
+                    response_bytes: request.response_bytes,
+                })
+            }
+            _ => unreachable!("create_snap_request_message called on non-snap request"),
         }
     }
 
@@ -324,6 +425,12 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
                     request_id,
                     message: request.clone(),
                 })
+            }
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetTrieNodes { .. } => {
+                unreachable!("snap requests use create_snap_request_message")
             }
         }
     }

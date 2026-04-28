@@ -106,6 +106,23 @@ where
                         tracing::error!( %err, "backfill sync task dropped");
                         return Poll::Ready(ChainEvent::FatalError);
                     }
+                    BackfillEvent::SnapSyncStarted(events_tx) => {
+                        this.handler.on_event(FromOrchestrator::SnapSyncStarted(events_tx));
+                        return Poll::Ready(ChainEvent::SnapSyncStarted);
+                    }
+                    BackfillEvent::SnapSyncFinished(result) => {
+                        return match result {
+                            Ok(outcome) => {
+                                tracing::info!(?outcome, "snap sync finished");
+                                this.handler.on_event(FromOrchestrator::SnapSyncFinished(outcome));
+                                Poll::Ready(ChainEvent::SnapSyncFinished)
+                            }
+                            Err(err) => {
+                                tracing::error!(%err, "snap sync failed");
+                                Poll::Ready(ChainEvent::FatalError)
+                            }
+                        }
+                    }
                 },
                 Poll::Pending => {}
             }
@@ -160,6 +177,10 @@ pub enum ChainEvent<T> {
     BackfillSyncStarted,
     /// Backfill sync finished
     BackfillSyncFinished,
+    /// Snap sync started
+    SnapSyncStarted,
+    /// Snap sync finished
+    SnapSyncFinished,
     /// Fatal error
     FatalError,
     /// Event emitted by the handler
@@ -174,6 +195,12 @@ impl<T: Display> Display for ChainEvent<T> {
             }
             Self::BackfillSyncFinished => {
                 write!(f, "BackfillSyncFinished")
+            }
+            Self::SnapSyncStarted => {
+                write!(f, "SnapSyncStarted")
+            }
+            Self::SnapSyncFinished => {
+                write!(f, "SnapSyncFinished")
             }
             Self::FatalError => {
                 write!(f, "FatalError")
@@ -225,6 +252,10 @@ pub enum FromOrchestrator {
     BackfillSyncFinished(ControlFlow),
     /// Invoked when backfill sync started
     BackfillSyncStarted,
+    /// Invoked when snap sync started, carries the event sender for forwarding chain events.
+    SnapSyncStarted(tokio::sync::mpsc::UnboundedSender<reth_engine_snap::SnapSyncEvent>),
+    /// Invoked when snap sync finished.
+    SnapSyncFinished(reth_engine_snap::SnapSyncOutcome),
     /// Gracefully terminate the engine service.
     ///
     /// When this variant is received, the engine will persist all remaining in-memory blocks

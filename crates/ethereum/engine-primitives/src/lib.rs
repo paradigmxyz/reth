@@ -54,6 +54,10 @@ impl<
     ) -> Self::ExecutionData {
         T::block_to_payload(block)
     }
+
+    fn built_payload_to_execution_data(payload: &Self::BuiltPayload) -> Self::ExecutionData {
+        T::built_payload_to_execution_data(payload)
+    }
 }
 
 impl<T> EngineTypes for EthEngineTypes<T>
@@ -93,5 +97,19 @@ impl PayloadTypes for EthPayloadTypes {
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
         ExecutionData { payload, sidecar }
+    }
+
+    fn built_payload_to_execution_data(payload: &Self::BuiltPayload) -> Self::ExecutionData {
+        if let Some(bal) = payload.block_access_list() {
+            let block = payload.block();
+            let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_bal(
+                block.hash(),
+                &block.clone().into_block(),
+                bal.clone(),
+            );
+            ExecutionData { payload, sidecar }
+        } else {
+            Self::block_to_payload(payload.block().clone())
+        }
     }
 }

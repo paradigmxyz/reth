@@ -34,6 +34,7 @@ use crate::{
     protocol::IntoRlpxSubProtocol,
     required_block_filter::RequiredBlockFilter,
     session::SessionManager,
+    snap_requests::IncomingSnapRequest,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
@@ -133,6 +134,9 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// requests. This channel size is set at
     /// [`ETH_REQUEST_CHANNEL_CAPACITY`](crate::builder::ETH_REQUEST_CHANNEL_CAPACITY)
     to_eth_request_handler: Option<mpsc::Sender<IncomingEthRequest<N>>>,
+    /// Sender half to send events to the
+    /// [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler) task, if configured.
+    to_snap_request_handler: Option<mpsc::Sender<IncomingSnapRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -199,6 +203,30 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) {
         self.to_eth_request_handler = Some(tx);
+    }
+
+    /// Sets the dedicated channel for events intended for the
+    /// [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler).
+    pub fn with_snap_request_handler(mut self, tx: mpsc::Sender<IncomingSnapRequest>) -> Self {
+        self.set_snap_request_handler(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
+    /// [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler).
+    pub fn set_snap_request_handler(&mut self, tx: mpsc::Sender<IncomingSnapRequest>) {
+        self.to_snap_request_handler = Some(tx);
+    }
+
+    /// Creates a [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler) and wires it to
+    /// the network manager, returning the handler to be spawned by the caller.
+    pub fn snap_request_handler<S: crate::snap_requests::SnapStateProvider>(
+        &mut self,
+        snap_provider: S,
+    ) -> crate::snap_requests::SnapRequestHandler<S> {
+        let (tx, rx) = mpsc::channel(256);
+        self.set_snap_request_handler(tx);
+        crate::snap_requests::SnapRequestHandler::new(snap_provider, rx)
     }
 
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
@@ -363,6 +391,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             event_sender,
             to_transactions_manager: None,
             to_eth_request_handler: None,
+            to_snap_request_handler: None,
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
@@ -513,6 +542,18 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         }
     }
 
+    /// Sends an event to the [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler) if
+    /// configured.
+    fn delegate_snap_request(&self, event: IncomingSnapRequest) {
+        if let Some(ref reqs) = self.to_snap_request_handler {
+            let _ = reqs.try_send(event).map_err(|e| {
+                if let TrySendError::Full(_) = e {
+                    debug!(target:"net", "SnapRequestHandler channel is full!");
+                }
+            });
+        }
+    }
+
     /// Handle an incoming request from the peer
     fn on_eth_request(&self, peer_id: PeerId, req: PeerRequest<N>) {
         match req {
@@ -560,6 +601,34 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             }
             PeerRequest::GetBlockAccessLists { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetBlockAccessLists {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetAccountRange { request, response } => {
+                self.delegate_snap_request(IncomingSnapRequest::GetAccountRange {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetStorageRanges { request, response } => {
+                self.delegate_snap_request(IncomingSnapRequest::GetStorageRanges {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetByteCodes { request, response } => {
+                self.delegate_snap_request(IncomingSnapRequest::GetByteCodes {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetTrieNodes { request, response } => {
+                self.delegate_snap_request(IncomingSnapRequest::GetTrieNodes {
                     peer_id,
                     request,
                     response,

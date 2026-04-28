@@ -14,6 +14,8 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
+use reth_storage_api::BalStore;
+use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -151,6 +153,26 @@ impl BalCache {
 impl Default for BalCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl BalStore for BalCache {
+    fn insert(
+        &self,
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        bal: Bytes,
+    ) -> ProviderResult<()> {
+        BalCache::insert(self, block_hash, block_number, bal);
+        Ok(())
+    }
+
+    fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        Ok(BalCache::get_by_hashes(self, block_hashes))
+    }
+
+    fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>> {
+        Ok(BalCache::get_by_range(self, start, count))
     }
 }
 

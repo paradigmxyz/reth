@@ -2,6 +2,7 @@ use crate::{
     bal_cache::BalCache, capabilities::EngineCapabilities, metrics::EngineApiMetrics,
     EngineApiError, EngineApiResult,
 };
+use reth_storage_api::BalStoreHandle;
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
@@ -24,8 +25,8 @@ use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTy
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, MessageValidationKind,
-    PayloadOrAttributes, PayloadTypes,
+    validate_payload_timestamp, BuiltPayload, EngineApiMessageVersion, ExecutionPayload,
+    MessageValidationKind, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -100,7 +101,7 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
-        Self::with_bal_cache(
+        Self::with_bal_store(
             provider,
             chain_spec,
             beacon_consensus,
@@ -112,7 +113,7 @@ where
             validator,
             accept_execution_requests_hash,
             network,
-            BalCache::new(),
+            BalStoreHandle::new(BalCache::new()),
         )
     }
 
@@ -124,13 +125,48 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Runtime,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
         bal_cache: BalCache,
+    ) -> Self {
+        Self::with_bal_store(
+            provider,
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            tx_pool,
+            task_spawner,
+            client,
+            capabilities,
+            validator,
+            accept_execution_requests_hash,
+            network,
+            BalStoreHandle::new(bal_cache),
+        )
+    }
+
+    /// Create new instance of [`EngineApi`] with an explicit BAL store handle.
+    ///
+    /// Use this when sharing a [`BalStoreHandle`] between the Engine API and the
+    /// P2P `EthRequestHandler` so both read/write the same underlying store.
+    #[expect(clippy::too_many_arguments)]
+    pub fn with_bal_store(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
+        tx_pool: Pool,
+        task_spawner: Runtime,
+        client: ClientVersionV1,
+        capabilities: EngineCapabilities,
+        validator: Validator,
+        accept_execution_requests_hash: bool,
+        network: impl NetworkInfo + 'static,
+        bal_store: BalStoreHandle,
     ) -> Self {
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
@@ -146,14 +182,14 @@ where
             validator,
             accept_execution_requests_hash,
             is_syncing,
-            bal_cache,
+            bal_store,
         });
         Self { inner }
     }
 
-    /// Returns a reference to the BAL cache.
-    pub fn bal_cache(&self) -> &BalCache {
-        &self.inner.bal_cache
+    /// Returns a reference to the BAL store handle.
+    pub fn bal_store(&self) -> &BalStoreHandle {
+        &self.inner.bal_store
     }
 
     /// Caches the BAL if the status is valid.
@@ -161,7 +197,7 @@ where
         if status.is_valid() &&
             let Some(bal) = bal
         {
-            self.inner.bal_cache.insert(num_hash.hash, num_hash.number, bal);
+            let _ = self.inner.bal_store.insert(num_hash.hash, num_hash.number, bal);
         }
     }
 
@@ -473,12 +509,22 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::BuiltPayload> {
-        self.inner
+        let payload = self.inner
             .payload_store
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)
+            .map_err(|_| EngineApiError::UnknownPayload)?;
+
+        // Cache the BAL eagerly — the built payload carries the BAL bytes but
+        // they may be lost during the ExecutionData V3/V4 conversion when the
+        // header doesn't yet have block_access_list_hash set.
+        if let Some(bal) = payload.block_access_list() {
+            let num_hash = payload.block().num_hash();
+            let _ = self.inner.bal_store.insert(num_hash.hash, num_hash.number, bal.clone());
+        }
+
+        Ok(payload)
     }
 
     /// Helper function for validating the payload timestamp and retrieving & converting the payload
@@ -1076,20 +1122,20 @@ where
         res
     }
 
-    /// Retrieves BALs for the given block hashes from the cache.
+    /// Retrieves BALs for the given block hashes from the store.
     ///
-    /// Returns the RLP-encoded BALs for blocks found in the cache.
+    /// Returns the RLP-encoded BALs for blocks found in the store.
     /// Missing blocks are returned as empty bytes.
     pub fn get_bals_by_hash(&self, block_hashes: Vec<BlockHash>) -> Vec<alloy_primitives::Bytes> {
-        let results = self.inner.bal_cache.get_by_hashes(&block_hashes);
+        let results = self.inner.bal_store.get_by_hashes(&block_hashes).unwrap_or_default();
         results.into_iter().map(|opt| opt.unwrap_or_default()).collect()
     }
 
-    /// Retrieves BALs for a range of blocks from the cache.
+    /// Retrieves BALs for a range of blocks from the store.
     ///
     /// Returns the RLP-encoded BALs for blocks in the range `[start, start + count)`.
     pub fn get_bals_by_range(&self, start: u64, count: u64) -> Vec<alloy_primitives::Bytes> {
-        self.inner.bal_cache.get_by_range(start, count)
+        self.inner.bal_store.get_by_range(start, count).unwrap_or_default()
     }
 }
 
@@ -1457,29 +1503,6 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
-
-    /// Handler for `engine_getBALsByHashV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_hash_v1(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
-        Ok(self.get_bals_by_hash(block_hashes))
-    }
-
-    /// Handler for `engine_getBALsByRangeV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_range_v1(
-        &self,
-        start: U64,
-        count: U64,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
-        Ok(self.get_bals_by_range(start.to(), count.to()))
-    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1538,8 +1561,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     accept_execution_requests_hash: bool,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
-    /// Cache for Block Access Lists (BALs) per EIP-7928.
-    bal_cache: BalCache,
+    /// Store for Block Access Lists (BALs) per EIP-7928.
+    bal_store: BalStoreHandle,
 }
 
 #[cfg(test)]

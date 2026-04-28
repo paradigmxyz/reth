@@ -29,6 +29,7 @@ members = [
     "crates/engine/primitives/",
     "crates/engine/execution-cache/",
     "crates/engine/tree/",
+    "crates/engine/snap/",
     "crates/engine/util/",
     "crates/era",
     "crates/era-downloader",
@@ -345,6 +346,7 @@ reth-ecies = { path = "crates/net/ecies" }
 reth-engine-local = { path = "crates/engine/local" }
 reth-execution-cache = { path = "crates/engine/execution-cache" }
 reth-engine-primitives = { path = "crates/engine/primitives", default-features = false }
+reth-engine-snap = { path = "crates/engine/snap" }
 reth-engine-tree = { path = "crates/engine/tree" }
 reth-engine-util = { path = "crates/engine/util" }
 reth-era = { path = "crates/era" }

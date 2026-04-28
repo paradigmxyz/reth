@@ -5,7 +5,7 @@
 //! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`.
 
 use crate::{
-    backfill::PipelineSync,
+    backfill::CombinedBackfillSync,
     chain::ChainOrchestrator,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
@@ -71,15 +71,21 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
         S,
         BasicBlockDownloader<Client, <N::Primitives as NodePrimitives>::Block>,
     >,
-    PipelineSync<N>,
+    CombinedBackfillSync<N, Client, ProviderFactory<N>>,
 >
 where
     N: ProviderNodeTypes,
-    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block> + 'static,
+    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block>
+        + reth_network_p2p::snap::client::SnapClient
+        + reth_network_p2p::block_access_lists::client::BlockAccessListsClient
+        + Clone
+        + 'static,
     S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
     V: EngineValidator<N::Payload> + WaitForCaches,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
+    let snap_client = client.clone();
+    let snap_provider = provider.clone();
     let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
     let persistence_handle =
@@ -87,6 +93,7 @@ where
 
     let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
+    let snap_runtime = runtime.clone();
     let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
         blockchain_db,
         consensus,
@@ -104,7 +111,13 @@ where
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
     let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
-    let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
+    let backfill_sync = CombinedBackfillSync::new(
+        pipeline,
+        pipeline_task_spawner,
+        snap_client,
+        snap_provider,
+        snap_runtime,
+    );
 
     ChainOrchestrator::new(handler, backfill_sync)
 }

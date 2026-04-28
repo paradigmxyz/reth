@@ -34,6 +34,8 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_rpc_engine_api::BalCache;
+use reth_storage_api::BalStoreHandle;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -75,6 +77,10 @@ impl EngineNodeLauncher {
             >,
         >,
         CB: NodeComponentsBuilder<T>,
+        <CB::Components as NodeComponents<T>>::Network: BlockDownloaderProvider<
+            Client: reth_network_p2p::snap::client::SnapClient
+                        + reth_network_p2p::block_access_lists::client::BlockAccessListsClient,
+        >,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
@@ -121,7 +127,9 @@ impl EngineNodeLauncher {
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                Ok(BlockchainProvider::new(provider_factory)?)
+                let mut provider = BlockchainProvider::new(provider_factory)?;
+                provider.set_bal_store(BalStoreHandle::new(BalCache::new()));
+                Ok(provider)
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
@@ -324,8 +332,14 @@ impl EngineNodeLauncher {
                                     network_handle.update_sync_state(SyncState::Idle);
                                 }
                             }
-                            ChainEvent::BackfillSyncStarted => {
+                            ChainEvent::BackfillSyncStarted |
+                            ChainEvent::SnapSyncStarted => {
                                 network_handle.update_sync_state(SyncState::Syncing);
+                            }
+                            ChainEvent::SnapSyncFinished => {
+                                if startup_sync_state_idle {
+                                    network_handle.update_sync_state(SyncState::Idle);
+                                }
                             }
                             ChainEvent::FatalError => {
                                 error!(target: "reth::cli", "Fatal error in consensus engine");
@@ -434,6 +448,10 @@ where
         >,
     >,
     CB: NodeComponentsBuilder<T> + 'static,
+    <CB::Components as NodeComponents<T>>::Network: BlockDownloaderProvider<
+        Client: reth_network_p2p::snap::client::SnapClient
+                    + reth_network_p2p::block_access_lists::client::BlockAccessListsClient,
+    >,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,

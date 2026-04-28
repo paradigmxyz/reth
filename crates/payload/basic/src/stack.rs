@@ -141,6 +141,13 @@ where
             Self::Right(r) => r.requests(),
         }
     }
+
+    fn block_access_list(&self) -> Option<&alloy_primitives::Bytes> {
+        match self {
+            Self::Left(l) => l.block_access_list(),
+            Self::Right(r) => r.block_access_list(),
+        }
+    }
 }
 
 impl<L, R> PayloadBuilder for PayloadBuilderStack<L, R>

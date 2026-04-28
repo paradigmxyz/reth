@@ -8,6 +8,7 @@ use eyre::Ok;
 use futures_util::Future;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
+use reth_db_api::transaction::DbTx;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
@@ -15,12 +16,13 @@ use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
-    HeaderProvider, StageCheckpointReader,
+    DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
+use reth_storage_api::DBProvider;
 use std::pin::Pin;
 use tokio_stream::StreamExt;
 use url::Url;
@@ -312,7 +314,7 @@ where
         self.inner
             .add_ons_handle
             .beacon_engine_handle
-            .new_payload(Payload::block_to_payload(payload.block().clone()))
+            .new_payload(Payload::built_payload_to_execution_data(&payload))
             .await?;
 
         Ok(block_hash)
@@ -364,5 +366,27 @@ where
         let res: ExecutionPayloadEnvelopeV5 =
             client.request("testing_buildBlockV1", [request]).await?;
         eyre::Ok(res)
+    }
+
+    /// Computes the current state root from the persisted `HashedAccounts` /
+    /// `HashedStorages` tables in MDBX.  This reflects the latest block whose
+    /// hashed state has been committed to disk by the engine persistence layer.
+    ///
+    /// Uses [`NoopTrieCursorFactory`] so the root is computed purely from the
+    /// hashed leaf data, without depending on the incremental trie tables.
+    pub async fn snap_state_root(&self) -> B256
+    where
+        Node::Provider: DatabaseProviderFactory,
+        <Node::Provider as DatabaseProviderFactory>::Provider: DBProvider,
+        <<Node::Provider as DatabaseProviderFactory>::Provider as DBProvider>::Tx: DbTx,
+    {
+        use reth_trie::{trie_cursor::noop::NoopTrieCursorFactory, StateRoot};
+        use reth_trie_db::DatabaseHashedCursorFactory;
+
+        let provider = self.inner.provider.database_provider_ro().expect("open ro provider");
+        let tx = provider.tx_ref();
+        StateRoot::new(NoopTrieCursorFactory::default(), DatabaseHashedCursorFactory::new(tx))
+            .root()
+            .unwrap_or(B256::ZERO)
     }
 }

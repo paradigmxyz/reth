@@ -16,6 +16,7 @@ use reth_eth_wire::{
     BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, GetReceipts70,
     NetworkPrimitives, NewBlockHashes, NewBlockPayload, UnifiedStatus,
 };
+use reth_eth_wire_types::snap::SnapProtocolMessage;
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
 use reth_network_p2p::receipts::client::ReceiptsResponse;
@@ -435,6 +436,26 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         (request, response)
                     }
                 }
+                BlockRequest::Snap(snap_msg) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = match snap_msg {
+                        SnapProtocolMessage::GetAccountRange(req) => {
+                            PeerRequest::GetAccountRange { request: req, response }
+                        }
+                        SnapProtocolMessage::GetStorageRanges(req) => {
+                            PeerRequest::GetStorageRanges { request: req, response }
+                        }
+                        SnapProtocolMessage::GetByteCodes(req) => {
+                            PeerRequest::GetByteCodes { request: req, response }
+                        }
+                        SnapProtocolMessage::GetTrieNodes(req) => {
+                            PeerRequest::GetTrieNodes { request: req, response }
+                        }
+                        _ => unreachable!("only request variants are used"),
+                    };
+                    let response = PeerResponse::Snap { response: rx };
+                    (request, response)
+                }
             };
             let _ = peer.request_tx.to_session_tx.try_send(request);
             peer.pending_response = Some(response);
@@ -490,6 +511,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             PeerResponseResult::BlockAccessLists(res) => {
                 self.state_fetcher.on_block_access_lists_response(peer, res)
             }
+            PeerResponseResult::Snap(res) => self.state_fetcher.on_snap_response(peer, res),
             _ => None,
         };
 

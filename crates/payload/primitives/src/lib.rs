@@ -54,6 +54,17 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData;
+
+    /// Converts a built payload into the execution payload format.
+    ///
+    /// Unlike [`block_to_payload`](Self::block_to_payload), this has access to the full built
+    /// payload including sidecar data such as the block access list (BAL).
+    ///
+    /// The default implementation delegates to [`block_to_payload`](Self::block_to_payload),
+    /// discarding any extra data beyond the block itself.
+    fn built_payload_to_execution_data(payload: &Self::BuiltPayload) -> Self::ExecutionData {
+        Self::block_to_payload(payload.block().clone())
+    }
 }
 
 /// Validates the timestamp depending on the version called:

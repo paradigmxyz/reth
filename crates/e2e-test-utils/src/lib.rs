@@ -4,7 +4,7 @@ use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_network_api::test_utils::PeersHandleProvider;
+use reth_network_api::{test_utils::PeersHandleProvider, BlockDownloaderProvider};
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -33,6 +33,9 @@ pub mod setup_import;
 
 /// Helper for network operations
 mod network;
+
+/// Snap sync utilities for E2E tests.
+pub mod snap;
 
 /// Helper for rpc operations
 mod rpc;
@@ -153,7 +156,11 @@ where
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
                     TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                    Network: PeersHandleProvider,
+                    Network: PeersHandleProvider
+                                 + BlockDownloaderProvider<
+                                     Client: reth_network_p2p::snap::client::SnapClient
+                                                 + reth_network_p2p::block_access_lists::client::BlockAccessListsClient,
+                                 >,
                 >,
             >,
             AddOns: RethRpcAddOns<
@@ -175,7 +182,11 @@ impl<T> NodeBuilderHelper for T where
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
                     TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                    Network: PeersHandleProvider,
+                    Network: PeersHandleProvider
+                                 + BlockDownloaderProvider<
+                                     Client: reth_network_p2p::snap::client::SnapClient
+                                                 + reth_network_p2p::block_access_lists::client::BlockAccessListsClient,
+                                 >,
                 >,
             >,
             AddOns: RethRpcAddOns<

@@ -60,6 +60,11 @@ pub trait BackfillSync: Send {
 pub enum BackfillAction {
     /// Start backfilling with the given target.
     Start(PipelineTarget),
+    /// Start snap sync (for fresh nodes with no state).
+    ///
+    /// Carries the target block hash from the FCU so the orchestrator can resolve
+    /// the head from peers if it's not available locally.
+    StartSnapSync(alloy_primitives::B256),
 }
 
 /// The events that can be emitted on backfill sync.
@@ -74,6 +79,10 @@ pub enum BackfillEvent {
     /// Sync task was dropped after it was started, unable to receive it because
     /// channel closed. This would indicate a panicked task.
     TaskDropped(String),
+    /// Snap sync started. Contains the event sender for forwarding chain events.
+    SnapSyncStarted(tokio::sync::mpsc::UnboundedSender<reth_engine_snap::SnapSyncEvent>),
+    /// Snap sync finished.
+    SnapSyncFinished(Result<reth_engine_snap::SnapSyncOutcome, reth_engine_snap::SnapSyncError>),
 }
 
 /// Pipeline sync.
@@ -110,7 +119,7 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
     }
 
     /// Returns `true` if the pipeline is active.
-    const fn is_pipeline_active(&self) -> bool {
+    pub(crate) const fn is_pipeline_active(&self) -> bool {
         !self.is_pipeline_idle()
     }
 
@@ -181,6 +190,7 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
     fn on_action(&mut self, event: BackfillAction) {
         match event {
             BackfillAction::Start(target) => self.set_pipeline_sync_target(target),
+            BackfillAction::StartSnapSync(_) => {}
         }
     }
 
@@ -223,6 +233,405 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
+    }
+}
+
+/// A snap sync controller that manages the snap sync lifecycle.
+///
+/// Snap sync runs in two phases:
+///  - **Phase A** – download headers 1..pivot via `HeaderStage` so that static files
+///    are populated before any state download begins.
+///  - **Phase B** – hand off to the `SnapSyncOrchestrator` for state download.
+#[derive(Debug)]
+struct SnapSyncController<C, F> {
+    client: C,
+    factory: F,
+    runtime: Runtime,
+    /// The target hash that was passed to `start()`, kept around so we can
+    /// forward it to the orchestrator after Phase A completes.
+    target_hash: Option<alloy_primitives::B256>,
+    /// State of the snap sync: `None` = idle, `Some` = running.
+    state: Option<SnapSyncState>,
+}
+
+/// Running state of snap sync.
+#[derive(Debug)]
+enum SnapSyncState {
+    /// Phase A: downloading headers via `HeaderStage`.
+    DownloadingHeaders {
+        result_rx: oneshot::Receiver<Result<(), String>>,
+    },
+    /// Phase B: state download via orchestrator.
+    DownloadingState {
+        /// Sender for forwarding engine events to the orchestrator.
+        /// Kept alive so the orchestrator's receiver doesn't close prematurely.
+        #[expect(dead_code)]
+        events_tx: tokio::sync::mpsc::UnboundedSender<reth_engine_snap::SnapSyncEvent>,
+        /// Receiver for the orchestrator result.
+        result_rx: oneshot::Receiver<
+            Result<reth_engine_snap::SnapSyncOutcome, reth_engine_snap::SnapSyncError>,
+        >,
+    },
+}
+
+impl<C, F> SnapSyncController<C, F>
+where
+    C: reth_network_p2p::snap::client::SnapClient
+        + reth_network_p2p::block_access_lists::client::BlockAccessListsClient
+        + reth_network_p2p::headers::client::HeadersClient<
+            Header = <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+        >
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    F: reth_provider::DatabaseProviderFactory
+        + reth_provider::StaticFileProviderFactory
+        + reth_storage_api::HeaderSyncGapProvider<
+            Header = <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+        >
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    F::Provider: reth_storage_api::DBProvider
+        + reth_provider::HeaderProvider
+        + reth_provider::BlockHashReader
+        + reth_provider::StorageSettingsCache,
+    F::ProviderRW: reth_storage_api::DBProvider
+        + reth_provider::StaticFileProviderFactory
+        + reth_storage_api::StageCheckpointWriter,
+    <F::Provider as reth_storage_api::DBProvider>::Tx: reth_db::transaction::DbTx,
+    <F::ProviderRW as reth_storage_api::DBProvider>::Tx: reth_db::transaction::DbTxMut,
+    <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader:
+        reth_db::table::Value + reth_primitives_traits::FullBlockHeader,
+{
+    fn new(client: C, factory: F, runtime: Runtime) -> Self {
+        Self { client, factory, runtime, target_hash: None, state: None }
+    }
+
+    fn is_active(&self) -> bool {
+        self.state.is_some()
+    }
+
+    /// Start snap sync. Returns `None` because the `SnapSyncStarted` event is
+    /// emitted later, once Phase A (header download) completes.
+    fn start(&mut self, target_hash: alloy_primitives::B256) -> Option<BackfillEvent> {
+        if self.is_active() {
+            return None;
+        }
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let client = self.client.clone();
+        let factory = self.factory.clone();
+
+        self.runtime.spawn_critical_blocking_task(
+            "snap sync header download",
+            async move {
+                let result = Self::run_header_stage(client, factory, target_hash).await;
+                let _ = result_tx.send(result);
+            },
+        );
+
+        self.target_hash = Some(target_hash);
+        self.state = Some(SnapSyncState::DownloadingHeaders { result_rx });
+
+        // No event yet – we emit SnapSyncStarted after headers finish.
+        None
+    }
+
+    /// Phase A: resolve the pivot from peers and run `HeaderStage` to fill
+    /// static files with headers 1..pivot.
+    async fn run_header_stage(
+        client: C,
+        factory: F,
+        target_hash: alloy_primitives::B256,
+    ) -> Result<(), String> {
+        use alloy_consensus::BlockHeader;
+        use reth_config::config::EtlConfig;
+        use reth_consensus::noop::NoopConsensus;
+        use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
+        use reth_stages::stages::HeaderStage;
+        use reth_stages_api::{ExecInput, Stage, StageCheckpoint, StageExt, StageId};
+        use reth_storage_api::{DBProvider, StageCheckpointWriter};
+
+        tracing::info!(target: "sync::snap", %target_hash, "Phase A: resolving target header from peers");
+
+        // 1. Resolve the target header from peers to get block number.
+        let target_header = client
+            .get_header(alloy_eips::BlockHashOrNumber::Hash(target_hash))
+            .await
+            .map_err(|e| format!("failed to fetch target header: {e}"))?
+            .into_data()
+            .ok_or_else(|| "peer returned empty response for target header".to_string())?;
+        let target_number = target_header.number();
+
+        // 2. Compute pivot = target - PIVOT_OFFSET.
+        let pivot_number = target_number.saturating_sub(reth_engine_snap::PIVOT_OFFSET);
+        if pivot_number == 0 {
+            tracing::info!(target: "sync::snap", "Target too low for header stage, skipping Phase A");
+            return Ok(());
+        }
+
+        // 3. Resolve the pivot header from peers to get its hash.
+        let pivot_header = client
+            .get_header(alloy_eips::BlockHashOrNumber::Number(pivot_number))
+            .await
+            .map_err(|e| format!("failed to fetch pivot header: {e}"))?
+            .into_data()
+            .ok_or_else(|| "peer returned empty response for pivot header".to_string())?;
+        let pivot_sealed = reth_primitives_traits::SealedHeader::seal_slow(pivot_header);
+        let pivot_hash = pivot_sealed.hash();
+
+        tracing::info!(
+            target: "sync::snap",
+            target_number,
+            pivot_number,
+            %pivot_hash,
+            "Phase A: downloading headers 1..{pivot_number}"
+        );
+
+        // 4. Build the tip channel and downloader.
+        let (_tip_tx, tip_rx) = tokio::sync::watch::channel(pivot_hash);
+        let downloader = ReverseHeadersDownloaderBuilder::default()
+            .build(client, NoopConsensus::arc());
+
+        // 5. Build and run the HeaderStage.
+        let mut stage = HeaderStage::new(
+            factory.clone(),
+            downloader,
+            tip_rx,
+            EtlConfig::default(),
+        );
+
+        let input = ExecInput {
+            target: Some(pivot_number),
+            checkpoint: Some(StageCheckpoint::new(0)),
+        };
+
+        // Phase 1 of stage: download headers into ETL (async).
+        <HeaderStage<F, _> as StageExt<F::ProviderRW>>::execute_ready(&mut stage, input)
+            .await
+            .map_err(|e| format!("header download failed: {e}"))?;
+
+        // Phase 2 of stage: write headers to static files + DB (sync).
+        let provider_rw =
+            factory.database_provider_rw().map_err(|e| format!("db error: {e}"))?;
+        let _output = Stage::<F::ProviderRW>::execute(&mut stage, &provider_rw, input)
+            .map_err(|e| format!("header write failed: {e}"))?;
+
+        // Save stage checkpoint.
+        provider_rw
+            .save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(pivot_number))
+            .map_err(|e| format!("checkpoint save failed: {e}"))?;
+
+        // Commit.
+        provider_rw.commit().map_err(|e| format!("commit failed: {e}"))?;
+
+        use reth_provider::providers::StaticFileWriter;
+        factory
+            .static_file_provider()
+            .commit()
+            .map_err(|e| format!("static file commit failed: {e}"))?;
+
+        tracing::info!(target: "sync::snap", pivot_number, "Phase A complete: headers written to static files");
+        Ok(())
+    }
+
+    /// Spawn the Phase B orchestrator and return the started event.
+    fn start_orchestrator(&mut self) -> BackfillEvent {
+        let target_hash = self.target_hash.take().expect("target_hash set during start()");
+        let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (result_tx, result_rx) = oneshot::channel();
+
+        let orchestrator = reth_engine_snap::orchestrator::SnapSyncOrchestrator::new(
+            self.client.clone(),
+            self.factory.clone(),
+        );
+
+        self.runtime.spawn_critical_blocking_task("snap sync orchestrator", async move {
+            let result = orchestrator.run(events_rx, target_hash).await;
+            let _ = result_tx.send(result);
+        });
+
+        let started_tx = events_tx.clone();
+        self.state = Some(SnapSyncState::DownloadingState { events_tx, result_rx });
+        BackfillEvent::SnapSyncStarted(started_tx)
+    }
+
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BackfillEvent> {
+        let Some(state) = &mut self.state else {
+            return Poll::Pending;
+        };
+
+        match state {
+            SnapSyncState::DownloadingHeaders { result_rx } => {
+                match result_rx.poll_unpin(cx) {
+                    Poll::Ready(Ok(Ok(()))) => {
+                        // Phase A succeeded – transition to Phase B.
+                        let event = self.start_orchestrator();
+                        Poll::Ready(event)
+                    }
+                    Poll::Ready(Ok(Err(e))) => {
+                        self.state = None;
+                        self.target_hash = None;
+                        Poll::Ready(BackfillEvent::TaskDropped(
+                            format!("snap sync header download failed: {e}"),
+                        ))
+                    }
+                    Poll::Ready(Err(_)) => {
+                        self.state = None;
+                        self.target_hash = None;
+                        Poll::Ready(BackfillEvent::TaskDropped(
+                            "snap sync header download task dropped".into(),
+                        ))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+            SnapSyncState::DownloadingState { result_rx, .. } => {
+                match result_rx.poll_unpin(cx) {
+                    Poll::Ready(Ok(result)) => {
+                        self.state = None;
+                        self.target_hash = None;
+                        Poll::Ready(BackfillEvent::SnapSyncFinished(result))
+                    }
+                    Poll::Ready(Err(_)) => {
+                        self.state = None;
+                        self.target_hash = None;
+                        Poll::Ready(BackfillEvent::TaskDropped(
+                            "snap sync task dropped".into(),
+                        ))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+    }
+}
+
+/// Combined backfill sync that supports both pipeline sync and snap sync.
+///
+/// Only one sync mode can be active at a time.
+#[derive(Debug)]
+pub struct CombinedBackfillSync<N: ProviderNodeTypes, C, F> {
+    pipeline: PipelineSync<N>,
+    snap: SnapSyncController<C, F>,
+    pending_event: Option<BackfillEvent>,
+}
+
+impl<N: ProviderNodeTypes, C, F> CombinedBackfillSync<N, C, F>
+where
+    C: reth_network_p2p::snap::client::SnapClient
+        + reth_network_p2p::block_access_lists::client::BlockAccessListsClient
+        + reth_network_p2p::headers::client::HeadersClient<
+            Header = <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+        >
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    F: reth_provider::DatabaseProviderFactory
+        + reth_provider::StaticFileProviderFactory
+        + reth_storage_api::HeaderSyncGapProvider<
+            Header = <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+        >
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    F::Provider: reth_storage_api::DBProvider
+        + reth_provider::HeaderProvider
+        + reth_provider::BlockHashReader
+        + reth_provider::StorageSettingsCache,
+    F::ProviderRW: reth_storage_api::DBProvider
+        + reth_provider::StaticFileProviderFactory
+        + reth_storage_api::StageCheckpointWriter,
+    <F::Provider as reth_storage_api::DBProvider>::Tx: reth_db::transaction::DbTx,
+    <F::ProviderRW as reth_storage_api::DBProvider>::Tx: reth_db::transaction::DbTxMut,
+    <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader:
+        reth_db::table::Value + reth_primitives_traits::FullBlockHeader,
+{
+    /// Creates a new combined backfill sync.
+    pub fn new(
+        pipeline: Pipeline<N>,
+        pipeline_task_spawner: Runtime,
+        client: C,
+        factory: F,
+        snap_runtime: Runtime,
+    ) -> Self {
+        Self {
+            pipeline: PipelineSync::new(pipeline, pipeline_task_spawner),
+            snap: SnapSyncController::new(client, factory, snap_runtime),
+            pending_event: None,
+        }
+    }
+}
+
+impl<N: ProviderNodeTypes, C, F> BackfillSync for CombinedBackfillSync<N, C, F>
+where
+    C: reth_network_p2p::snap::client::SnapClient
+        + reth_network_p2p::block_access_lists::client::BlockAccessListsClient
+        + reth_network_p2p::headers::client::HeadersClient<
+            Header = <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+        >
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    F: reth_provider::DatabaseProviderFactory
+        + reth_provider::StaticFileProviderFactory
+        + reth_storage_api::HeaderSyncGapProvider<
+            Header = <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+        >
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    F::Provider: reth_storage_api::DBProvider
+        + reth_provider::HeaderProvider
+        + reth_provider::BlockHashReader
+        + reth_provider::StorageSettingsCache,
+    F::ProviderRW: reth_storage_api::DBProvider
+        + reth_provider::StaticFileProviderFactory
+        + reth_storage_api::StageCheckpointWriter,
+    <F::Provider as reth_storage_api::DBProvider>::Tx: reth_db::transaction::DbTx,
+    <F::ProviderRW as reth_storage_api::DBProvider>::Tx: reth_db::transaction::DbTxMut,
+    <<F::ProviderRW as reth_storage_api::NodePrimitivesProvider>::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader:
+        reth_db::table::Value + reth_primitives_traits::FullBlockHeader,
+{
+    fn on_action(&mut self, action: BackfillAction) {
+        match action {
+            BackfillAction::Start(target) => {
+                if self.snap.is_active() {
+                    tracing::warn!(target: "consensus::engine::sync", "Ignoring pipeline start while snap sync is active");
+                    return;
+                }
+                self.pipeline.on_action(BackfillAction::Start(target));
+            }
+            BackfillAction::StartSnapSync(target_hash) => {
+                if self.pipeline.is_pipeline_active() {
+                    tracing::warn!(target: "consensus::engine::sync", "Ignoring snap sync start while pipeline is active");
+                    return;
+                }
+                self.pending_event = self.snap.start(target_hash);
+            }
+        }
+    }
+
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BackfillEvent> {
+        // Return any pending event first (e.g. snap sync started)
+        if let Some(event) = self.pending_event.take() {
+            return Poll::Ready(event);
+        }
+
+        // Poll snap sync
+        if let Poll::Ready(event) = self.snap.poll(cx) {
+            return Poll::Ready(event);
+        }
+
+        // Poll pipeline
+        self.pipeline.poll(cx)
     }
 }
 

@@ -65,6 +65,9 @@ pub trait ExecutionPayload:
     ///
     /// Returns `None` for pre-Amsterdam blocks.
     fn slot_number(&self) -> Option<u64>;
+
+    /// Returns this block's state root.
+    fn state_root(&self) -> B256;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -110,6 +113,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn slot_number(&self) -> Option<u64> {
         self.payload.slot_number()
+    }
+
+    fn state_root(&self) -> B256 {
+        self.payload.as_v1().state_root
     }
 }
 

@@ -29,7 +29,7 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
@@ -310,6 +310,11 @@ where
     building_payload: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
+    /// Sender for forwarding engine events to the snap sync orchestrator.
+    /// `Some` when snap sync is active.
+    snap_events_tx: Option<tokio::sync::mpsc::UnboundedSender<reth_engine_snap::SnapSyncEvent>>,
+    /// Whether this is a fresh node (no blocks), eligible for snap sync.
+    fresh_node: bool,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -337,6 +342,8 @@ where
             .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("runtime", &self.runtime)
+            .field("snap_events_tx", &self.snap_events_tx.is_some())
+            .field("fresh_node", &self.fresh_node)
             .finish()
     }
 }
@@ -349,6 +356,7 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
+        + BalProvider
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
@@ -401,6 +409,8 @@ where
             execution_timing_stats: HashMap::new(),
             building_payload: false,
             runtime,
+            snap_events_tx: None,
+            fresh_node: false,
         }
     }
 
@@ -440,7 +450,9 @@ where
             kind,
         );
 
-        let task = Self::new(
+        let fresh_node = best_block_number == 0;
+
+        let mut task = Self::new(
             provider,
             consensus,
             payload_validator,
@@ -456,6 +468,8 @@ where
             changeset_cache,
             runtime,
         );
+        task.fresh_node = fresh_node;
+
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
             increase_thread_priority();
@@ -734,10 +748,25 @@ where
         // This validation **MUST** be instantly run in all cases even during active sync process.
 
         let num_hash = payload.num_hash();
+
+        // Forward to snap sync orchestrator if active
+        if let Some(events_tx) = &self.snap_events_tx {
+            let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewBlock {
+                number: payload.block_number(),
+                hash: payload.block_hash(),
+                state_root: payload.state_root(),
+                parent_hash: payload.parent_hash(),
+                bal: payload.block_access_list().cloned(),
+            });
+        }
+
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         let block_hash = num_hash.hash;
+
+        // Extract BAL before the payload is consumed
+        let bal = payload.block_access_list().cloned();
 
         // Check for invalid ancestors
         if let Some(invalid) = self.find_invalid_ancestor(&payload) {
@@ -753,6 +782,13 @@ where
         } else {
             TreeOutcome::new(self.try_buffer_payload(payload)?)
         };
+
+        // Cache BAL in the provider's store if the payload was accepted
+        if outcome.outcome.is_valid() {
+            if let Some(bal) = bal {
+                let _ = self.provider.bal_store().insert(block_hash, num_hash.number, bal);
+            }
+        }
 
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
@@ -1121,6 +1157,13 @@ where
         // Record metrics
         self.record_forkchoice_metrics();
 
+        // Forward head to snap sync orchestrator if active
+        if let Some(events_tx) = &self.snap_events_tx {
+            let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewHead {
+                head_hash: state.head_block_hash,
+            });
+        }
+
         // Pre-validation of forkchoice state
         if let Some(early_result) = self.validate_forkchoice_state(state)? {
             return Ok(TreeOutcome::new(early_result));
@@ -1316,6 +1359,17 @@ where
         &self,
         state: ForkchoiceState,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
+        // For fresh nodes, trigger snap sync instead of downloading missing blocks
+        if self.fresh_node && self.backfill_sync_state.is_idle() {
+            debug!(target: "engine::tree", "Fresh node detected, triggering snap sync");
+            return Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Syncing,
+            )))
+            .with_event(TreeEvent::BackfillAction(BackfillAction::StartSnapSync(
+                state.head_block_hash,
+            ))));
+        }
+
         // We don't have the block to perform the forkchoice update
         // We assume the FCU is valid and at least the head is missing,
         // so we need to start syncing to it
@@ -1539,6 +1593,23 @@ where
                         error!(target: "engine::tree", %err, "Termination failed");
                     }
                     return Ok(ops::ControlFlow::Break(()))
+                }
+                FromOrchestrator::SnapSyncStarted(events_tx) => {
+                    debug!(target: "engine::tree", "received snap sync started event");
+                    self.backfill_sync_state = BackfillSyncState::Active;
+                    self.snap_events_tx = Some(events_tx);
+
+                    // Replay latest known head if we can resolve it
+                    if let Some(state) = self.state.forkchoice_state_tracker.sync_target_state() {
+                        if let Some(events_tx) = &self.snap_events_tx {
+                            let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewHead {
+                                head_hash: state.head_block_hash,
+                            });
+                        }
+                    }
+                }
+                FromOrchestrator::SnapSyncFinished(outcome) => {
+                    self.on_snap_sync_finished(outcome)?;
                 }
             },
             FromEngine::Request(request) => {
@@ -1902,6 +1973,62 @@ where
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
         self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
+    }
+
+    /// Handles snap sync completion.
+    fn on_snap_sync_finished(
+        &mut self,
+        outcome: reth_engine_snap::SnapSyncOutcome,
+    ) -> Result<(), InsertBlockFatalError> {
+        debug!(target: "engine::tree", synced_to = outcome.synced_to, %outcome.block_hash, "snap sync finished");
+        self.backfill_sync_state = BackfillSyncState::Idle;
+        self.snap_events_tx = None;
+        self.fresh_node = false;
+
+        let backfill_height = outcome.synced_to;
+        let backfill_hash = outcome.block_hash;
+
+        // Remove all blocks below the snap sync height
+        self.state.buffer.remove_old_blocks(backfill_height);
+        self.purge_timing_stats(backfill_height, None);
+        self.canonical_in_memory_state.clear_state();
+
+        // Update canonical head — try DB first, fall back to outcome data
+        if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
+            self.state.tree_state.set_canonical_head(new_head.num_hash());
+            self.persistence_state.finish(new_head.hash(), new_head.number());
+            self.canonical_in_memory_state.set_canonical_head(new_head);
+        } else {
+            let num_hash = BlockNumHash { hash: backfill_hash, number: backfill_height };
+            self.state.tree_state.set_canonical_head(num_hash);
+            self.persistence_state.finish(backfill_hash, backfill_height);
+        }
+
+        // Remove executed blocks below the snap sync height
+        let backfill_num_hash = self
+            .provider
+            .block_hash(backfill_height)?
+            .map(|hash| BlockNumHash { hash, number: backfill_height })
+            .unwrap_or(BlockNumHash { hash: backfill_hash, number: backfill_height });
+        self.state.tree_state.remove_until(
+            backfill_num_hash,
+            self.persistence_state.last_persisted_block.hash,
+            Some(backfill_num_hash),
+        );
+
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+        self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
+
+        // Trigger a pipeline run for MerkleExecute + Finish.
+        // The orchestrator already set all other stage checkpoints to the snap target,
+        // so only MerkleExecute (builds AccountsTrie/StoragesTrie from hashed leaves)
+        // and Finish will run.
+        self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
+            backfill_hash.into(),
+        )));
+        self.backfill_sync_state = BackfillSyncState::Pending;
+
+        Ok(())
     }
 
     /// Attempts to make the given target canonical.
@@ -2786,6 +2913,16 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
+            // During snap sync, forward downloaded blocks to the orchestrator
+            // for header persistence and BAL resolution
+            if let Some(events_tx) = &self.snap_events_tx {
+                let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::DownloadedBlock {
+                    number: block.number(),
+                    hash: block.hash(),
+                    state_root: block.header().state_root(),
+                    parent_hash: block.header().parent_hash(),
+                });
+            }
             return Ok(None)
         }
 
