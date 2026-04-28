@@ -13,15 +13,15 @@ rpc-compat:
   # syncing mode, the test expects syncing to be false on start
   - eth_syncing/check-syncing (reth)
 
-engine-withdrawals: [ ]
+engine-withdrawals: []
 
-engine-api: [ ]
+engine-api: []
 
-engine-cancun: [ ]
+engine-cancun: []
 
-sync: [ ]
+sync: []
 
-engine-auth: [ ]
+engine-auth: []
 
 # EIP-7610 related tests (Revert creation in case of non-empty storage):
 #
@@ -99,6 +99,40 @@ eels/consume-engine:
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Shanghai-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE2-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Amsterdam-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE2-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_engine_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Prague-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Prague-blockchain_test_engine_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Prague-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Shanghai-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Paris-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Shanghai-blockchain_test_engine_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Cancun-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Shanghai-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Paris-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Cancun-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Shanghai-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Osaka-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Paris-blockchain_test_engine_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Prague-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Osaka-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Cancun-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Paris-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Osaka-blockchain_test_engine_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Osaka-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Cancun-blockchain_test_engine_from_state_test-empty-initcode]-reth
 
 # Blob limit tests:
 #
@@ -193,3 +227,37 @@ eels/consume-rlp:
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_1-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_2-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Shanghai-tx_type_0-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Amsterdam-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE2-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE2-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Prague-blockchain_test_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Prague-blockchain_test_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Prague-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Shanghai-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Cancun-blockchain_test_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Paris-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Shanghai-blockchain_test_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Shanghai-blockchain_test_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Paris-blockchain_test_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Cancun-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Shanghai-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Cancun-blockchain_test_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Osaka-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Paris-blockchain_test_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Osaka-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Prague-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Cancun-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Paris-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Osaka-blockchain_test_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Osaka-blockchain_test_from_state_test-initcode-with-deploy]-reth
