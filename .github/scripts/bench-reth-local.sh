@@ -430,7 +430,9 @@ run_bench() {
   echo "▸ Running benchmark: ${label}..."
   cd "$RETH_REPO"
   if command -v taskset &>/dev/null; then
-    taskset -c 0 "${SCRIPTS_DIR}/bench-reth-run.sh" "$label" "$binary" "$output_dir"
+    # Pin the bench harness to the last core, leaving lower cores for reth.
+    local last_cpu=$(( $(nproc) - 1 ))
+    taskset -c "$last_cpu" "${SCRIPTS_DIR}/bench-reth-run.sh" "$label" "$binary" "$output_dir"
   else
     "${SCRIPTS_DIR}/bench-reth-run.sh" "$label" "$binary" "$output_dir"
   fi
