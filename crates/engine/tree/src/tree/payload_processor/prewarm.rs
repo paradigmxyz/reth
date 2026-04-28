@@ -757,7 +757,9 @@ where
         provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
-        if account.storage_changes.is_empty() && account.storage_reads.is_empty() {
+        if self.disable_bal_batch_io ||
+            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
+        {
             return;
         }
 
