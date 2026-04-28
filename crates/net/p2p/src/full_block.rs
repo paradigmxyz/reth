@@ -139,7 +139,7 @@ where
             blocks: self.get_full_block_range(hash, count),
             client,
             block_result: None,
-            access_lists: OptionalRangeAccessListsState::WaitingForBlocks,
+            access_lists: OptionalBlockAccessListsState::WaitingForBlocks,
         }
     }
 }
@@ -464,7 +464,7 @@ where
     blocks: FetchFullBlockRangeFuture<Client>,
     client: Client,
     block_result: Option<Vec<SealedBlock<Client::Block>>>,
-    access_lists: OptionalRangeAccessListsState<<Client as BlockAccessListsClient>::Output>,
+    access_lists: OptionalBlockAccessListsState<<Client as BlockAccessListsClient>::Output>,
 }
 
 impl<Client> FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
@@ -483,14 +483,14 @@ where
     }
 
     fn start_access_lists_request_if_possible(&mut self) {
-        if !matches!(self.access_lists, OptionalRangeAccessListsState::WaitingForBlocks) {
+        if !matches!(self.access_lists, OptionalBlockAccessListsState::WaitingForBlocks) {
             return
         }
 
         // BALs are requested by block hash, so wait until the block range is fully assembled.
         let Some(blocks) = self.block_result.as_ref() else { return };
         let hashes = blocks.iter().map(|block| block.hash()).collect::<Vec<_>>();
-        self.access_lists = OptionalRangeAccessListsState::Pending(
+        self.access_lists = OptionalBlockAccessListsState::Pending(
             self.client.get_block_access_lists_with_requirement(hashes, BalRequirement::Optional),
         );
     }
@@ -501,7 +501,7 @@ where
         let received = access_lists.0.len();
 
         if received == expected {
-            self.access_lists = OptionalRangeAccessListsState::Ready(Some(access_lists));
+            self.access_lists = OptionalBlockAccessListsState::Ready(Some(access_lists));
             return
         }
 
@@ -518,7 +518,7 @@ where
 
         // Optional BAL data must not block block range downloads. Short responses can happen due to
         // response limits, so keep the blocks and surface BALs as unavailable.
-        self.access_lists = OptionalRangeAccessListsState::Ready(None);
+        self.access_lists = OptionalBlockAccessListsState::Ready(None);
     }
 
     fn on_access_lists_error(&mut self, err: crate::error::RequestError) {
@@ -530,17 +530,18 @@ where
         );
 
         // Optional BAL requests may complete without an eth/71-capable peer.
-        self.access_lists = OptionalRangeAccessListsState::Ready(None);
+        self.access_lists = OptionalBlockAccessListsState::Ready(None);
     }
 
+    /// Drives the optional BAL request until it is pending or has reached a terminal state.
     fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
         self.start_access_lists_request_if_possible();
 
         loop {
             let poll = match &mut self.access_lists {
-                OptionalRangeAccessListsState::Pending(fut) => fut.poll_unpin(cx),
-                OptionalRangeAccessListsState::WaitingForBlocks |
-                OptionalRangeAccessListsState::Ready(_) => return,
+                OptionalBlockAccessListsState::Pending(fut) => fut.poll_unpin(cx),
+                OptionalBlockAccessListsState::WaitingForBlocks |
+                OptionalBlockAccessListsState::Ready(_) => return,
             };
 
             match poll {
@@ -551,6 +552,7 @@ where
         }
     }
 
+    /// Returns the block range once blocks and the optional BAL lookup are both complete.
     fn take_response(
         &mut self,
     ) -> Option<(Vec<SealedBlock<Client::Block>>, Option<BlockAccessLists>)> {
@@ -558,11 +560,11 @@ where
             let blocks = self.block_result.take().expect("blocks checked as ready");
             let access_lists = match std::mem::replace(
                 &mut self.access_lists,
-                OptionalRangeAccessListsState::Ready(None),
+                OptionalBlockAccessListsState::Ready(None),
             ) {
-                OptionalRangeAccessListsState::Ready(access_lists) => access_lists,
-                OptionalRangeAccessListsState::WaitingForBlocks |
-                OptionalRangeAccessListsState::Pending(_) => {
+                OptionalBlockAccessListsState::Ready(access_lists) => access_lists,
+                OptionalBlockAccessListsState::WaitingForBlocks |
+                OptionalBlockAccessListsState::Pending(_) => {
                     unreachable!("access lists checked as done")
                 }
             };
@@ -603,7 +605,7 @@ where
 }
 
 /// Tracks an optional BAL range request and its completed result.
-enum OptionalRangeAccessListsState<Req> {
+enum OptionalBlockAccessListsState<Req> {
     /// The block hashes needed for `GetBlockAccessLists` are not known yet.
     WaitingForBlocks,
     /// A `GetBlockAccessLists` request is in flight.
@@ -612,7 +614,7 @@ enum OptionalRangeAccessListsState<Req> {
     Ready(Option<BlockAccessLists>),
 }
 
-impl<Req> OptionalRangeAccessListsState<Req> {
+impl<Req> OptionalBlockAccessListsState<Req> {
     const fn is_done(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
