@@ -1,3 +1,4 @@
+use super::SaveBlocksPlan;
 use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
@@ -73,7 +74,6 @@ use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
-use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -568,16 +568,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode
     /// only). The main thread writes MDBX data (indices, state, trie - Full mode only).
     ///
-    /// `blocks` is split into four consecutive regions:
-    /// - `blocks[..trie_catchup_block_count]` are `trie_catchup_blocks`: their non-trie outputs are
-    ///   already durable, and this call only persists their trie state.
-    /// - `blocks[trie_catchup_block_count..full_persist_end]` are `full_persist_blocks`: this call
-    ///   persists both their non-trie outputs and trie data.
-    /// - `blocks[full_persist_end..in_memory_block_start]` are `deferred_trie_blocks`: this call
-    ///   persists only their non-trie outputs, and they mask trie writes for older blocks in the
-    ///   same durable checkpoint.
-    /// - `blocks[in_memory_block_start..]` are `in_memory_blocks`: they remain fully in memory and
-    ///   do not affect durable trie masking until a later call persists their non-trie outputs.
+    /// `plan.steps` describes which ranges of `plan.blocks` persist non-state/trie data, which
+    /// ranges persist state/trie data, and which ranges should mask durable state/trie writes.
+    ///
+    /// In the partial-persistence case this typically includes:
+    /// - a trie catchup prefix whose non-state/trie data is already durable;
+    /// - a fully persisted middle region;
+    /// - and a state-masking tail whose non-state/trie data becomes durable in this call while its
+    ///   state/trie data remains in memory.
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
@@ -586,53 +584,55 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         target = "providers::db",
         skip_all,
         fields(
-            block_count = blocks.len(),
-            trie_catchup_block_count,
-            full_persist_block_count,
-            deferred_trie_block_count
+            block_count = plan.blocks.len(),
+            step_count = plan.steps.len()
         )
     )]
     pub fn save_blocks(
         &self,
-        blocks: &[ExecutedBlock<N::Primitives>],
-        trie_catchup_block_count: usize,
-        full_persist_block_count: usize,
-        deferred_trie_block_count: usize,
+        plan: &SaveBlocksPlan<N::Primitives>,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
+        let blocks = &plan.blocks;
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
             return Ok(())
         }
 
-        let full_persist_end = trie_catchup_block_count + full_persist_block_count;
-        let in_memory_block_start = full_persist_end + deferred_trie_block_count;
-        if in_memory_block_start > blocks.len() {
-            return Err(ProviderError::Database(reth_db_api::DatabaseError::Other(format!(
-                "save block plan ({trie_catchup_block_count} catchup + {full_persist_block_count} full + {deferred_trie_block_count} deferred) exceeds block count {}",
-                blocks.len()
-            ))))
-        }
+        let persist_rest_range = plan.persist_rest_range();
+        let persist_rest_blocks =
+            persist_rest_range.as_ref().map(|range| &blocks[range.clone()]).unwrap_or(&[]);
+        let state_trie_blocks = plan
+            .steps
+            .iter()
+            .filter(|step| step.persists_state_trie())
+            .flat_map(|step| blocks[step.block_range.clone()].iter())
+            .map(|block| block.trie_data())
+            .collect::<Vec<_>>();
 
-        let trie_catchup_blocks = &blocks[..trie_catchup_block_count];
-        let full_persist_blocks = &blocks[trie_catchup_block_count..full_persist_end];
-        let deferred_trie_blocks = &blocks[full_persist_end..in_memory_block_start];
-        let non_trie_blocks = &blocks[trie_catchup_block_count..in_memory_block_start];
+        let mut state_trie_masking_ranges = plan
+            .steps
+            .iter()
+            .filter_map(|step| step.state_trie_masking_range.clone())
+            .filter(|range| !range.is_empty())
+            .collect::<Vec<_>>();
+        state_trie_masking_ranges.sort_unstable_by_key(|range| (range.start, range.end));
+        state_trie_masking_ranges.dedup_by(|left, right| left == right);
+        let state_trie_masking_blocks = state_trie_masking_ranges
+            .iter()
+            .flat_map(|range| blocks[range.clone()].iter())
+            .map(|block| block.trie_data())
+            .collect::<Vec<_>>();
 
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
         let first_number = blocks.first().unwrap().recovered_block().number();
-        let last_non_trie_block_number = non_trie_blocks
-            .last()
-            .or_else(|| trie_catchup_blocks.last())
-            .expect("checked non-empty block range")
-            .recovered_block()
-            .number();
+        let last_block_number = plan.last_block().expect("checked non-empty block range").number;
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
-        let tx_nums: SmallVec<[TxNumber; 4]> = if non_trie_blocks.is_empty() {
-            SmallVec::new()
+        let tx_nums: Vec<TxNumber> = if persist_rest_blocks.is_empty() {
+            Vec::new()
         } else {
             let first_tx_num = self
                 .tx
@@ -641,9 +641,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .map(|(n, _)| n + 1)
                 .unwrap_or_default();
 
-            let mut nums = SmallVec::with_capacity(non_trie_blocks.len());
+            let mut nums = Vec::with_capacity(persist_rest_blocks.len());
             let mut current = first_tx_num;
-            for block in non_trie_blocks {
+            for block in persist_rest_blocks {
                 nums.push(current);
                 current += block.recovered_block().body().transaction_count() as u64;
             }
@@ -653,15 +653,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut timings =
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
-        let has_non_trie_blocks = !non_trie_blocks.is_empty();
-        let rocksdb_enabled = has_non_trie_blocks && self.cached_storage_settings().storage_v2;
-        let first_non_trie_block_number =
-            non_trie_blocks.first().map(|block| block.recovered_block().number());
-        let sf_ctx = if let Some(first_non_trie_block_number) = first_non_trie_block_number {
+        let has_persist_rest_blocks = !persist_rest_blocks.is_empty();
+        let rocksdb_enabled = has_persist_rest_blocks && self.cached_storage_settings().storage_v2;
+        let first_persist_rest_block_number =
+            persist_rest_blocks.first().map(|block| block.recovered_block().number());
+        let sf_ctx = if let Some(first_persist_rest_block_number) = first_persist_rest_block_number
+        {
             Some(self.static_file_write_ctx(
                 save_mode,
-                first_non_trie_block_number,
-                last_non_trie_block_number,
+                first_persist_rest_block_number,
+                last_block_number,
             )?)
         } else {
             None
@@ -688,11 +689,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
-            if has_non_trie_blocks {
+            if has_persist_rest_blocks {
                 let sf_provider = &self.static_file_provider;
-                let first_non_trie_block_number =
-                    first_non_trie_block_number.expect("checked deferred trie blocks");
-                let sf_ctx = sf_ctx.expect("checked deferred trie blocks");
+                let first_persist_rest_block_number =
+                    first_persist_rest_block_number.expect("checked persist_rest blocks");
+                let sf_ctx = sf_ctx.expect("checked persist_rest blocks");
                 let sf_span = span.clone();
                 let sf_tx_nums = tx_nums.clone();
                 let sf_result = &mut sf_result;
@@ -703,7 +704,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let start = Instant::now();
                     *sf_result = Some(
                         sf_provider
-                            .write_blocks_data(non_trie_blocks, &sf_tx_nums, sf_ctx, runtime)
+                            .write_blocks_data(persist_rest_blocks, &sf_tx_nums, sf_ctx, runtime)
                             .map(|()| start.elapsed()),
                     );
                 });
@@ -711,7 +712,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 // RocksDB writes
                 if rocksdb_enabled {
                     let rocksdb_provider = self.rocksdb_provider.clone();
-                    let rocksdb_ctx = self.rocksdb_write_ctx(first_non_trie_block_number);
+                    let rocksdb_ctx = self.rocksdb_write_ctx(first_persist_rest_block_number);
                     let rocksdb_span = span.clone();
                     let rocksdb_tx_nums = tx_nums.clone();
                     let rocksdb_result = &mut rocksdb_result;
@@ -721,7 +722,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         *rocksdb_result = Some(
                             rocksdb_provider
                                 .write_blocks_data(
-                                    non_trie_blocks,
+                                    persist_rest_blocks,
                                     &rocksdb_tx_nums,
                                     rocksdb_ctx,
                                     runtime,
@@ -736,17 +737,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if has_non_trie_blocks &&
+            if has_persist_rest_blocks &&
                 !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
-                let total_tx_count: usize = non_trie_blocks
+                let total_tx_count: usize = persist_rest_blocks
                     .iter()
                     .map(|b| b.recovered_block().body().transaction_count())
                     .sum();
                 let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
-                for (i, block) in non_trie_blocks.iter().enumerate() {
+                for (i, block) in persist_rest_blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
                     for (tx_num, transaction) in
                         (tx_nums[i]..).zip(recovered_block.body().transactions_iter())
@@ -772,7 +773,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            for (i, block) in non_trie_blocks.iter().enumerate() {
+            for (i, block) in persist_rest_blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
@@ -801,22 +802,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                let trie_persist_data: Vec<_> = trie_catchup_blocks
-                    .iter()
-                    .chain(full_persist_blocks.iter())
-                    .map(|block| block.trie_data())
-                    .collect();
                 // Only blocks whose non-trie outputs are durably written in this call can mask
                 // trie writes. A fully in-memory suffix must not suppress the durable trie
                 // frontier because its changesets are not on disk yet.
-                let trie_masking_data: Vec<_> =
-                    deferred_trie_blocks.iter().map(|block| block.trie_data()).collect();
-
                 let start = Instant::now();
-                if !trie_persist_data.is_empty() {
-                    let merged_hashed_state = HashedPostStateSorted::disjoint_by_keys(
-                        trie_persist_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
-                        trie_masking_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                if !state_trie_blocks.is_empty() {
+                    let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
+                        state_trie_blocks.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                        state_trie_masking_blocks
+                            .iter()
+                            .map(|data| data.hashed_state.as_ref())
+                            .collect(),
                     );
                     if !merged_hashed_state.is_empty() {
                         self.write_hashed_state(&merged_hashed_state)?;
@@ -825,10 +821,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                if !trie_persist_data.is_empty() {
-                    let merged_trie = TrieUpdatesSorted::disjoint_by_keys(
-                        trie_persist_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
-                        trie_masking_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                if !state_trie_blocks.is_empty() {
+                    let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
+                        state_trie_blocks.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                        state_trie_masking_blocks
+                            .iter()
+                            .map(|data| data.trie_updates.as_ref())
+                            .collect(),
                     );
                     if !merged_trie.is_empty() {
                         self.write_trie_updates_sorted(&merged_trie)?;
@@ -838,19 +837,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() && has_non_trie_blocks {
+            if save_mode.with_state() && has_persist_rest_blocks {
                 let start = Instant::now();
-                let first_non_trie_block_number =
-                    non_trie_blocks.first().unwrap().recovered_block().number();
-                self.update_history_indices(
-                    first_non_trie_block_number..=last_non_trie_block_number,
-                )?;
+                let first_persist_rest_block_number =
+                    persist_rest_blocks.first().unwrap().recovered_block().number();
+                self.update_history_indices(first_persist_rest_block_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
             }
 
             // Update pipeline progress
             let start = Instant::now();
-            self.update_pipeline_stages(last_non_trie_block_number, false)?;
+            self.update_pipeline_stages(last_block_number, false)?;
             if save_mode.with_state() {
                 let current_trie_persisted_tip =
                     self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
@@ -859,17 +856,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             .and_then(|finish| finish.partial_state_trie)
                             .unwrap_or(checkpoint.block_number)
                     });
-                let partial_state_trie =
-                    if let Some(last_full_persist_block) = full_persist_blocks.last() {
-                        Some(last_full_persist_block.recovered_block().number())
-                    } else if let Some(last_trie_catchup_block) = trie_catchup_blocks.last() {
-                        Some(last_trie_catchup_block.recovered_block().number())
-                    } else {
-                        current_trie_persisted_tip.or(Some(last_non_trie_block_number))
-                    };
+                let partial_state_trie = plan
+                    .last_state_trie_block()
+                    .map(|last_state_trie_block| last_state_trie_block.number)
+                    .or(current_trie_persisted_tip)
+                    .or(Some(last_block_number));
                 self.save_stage_checkpoint(
                     StageId::Finish,
-                    StageCheckpoint::new(last_non_trie_block_number)
+                    StageCheckpoint::new(last_block_number)
                         .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie }),
                 )?;
             }
@@ -881,7 +875,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })?;
 
         // Collect results from spawned tasks.
-        if has_non_trie_blocks {
+        if has_persist_rest_blocks {
             timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
             if rocksdb_enabled {
@@ -898,7 +892,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.metrics.record_save_blocks(&timings);
         debug!(
             target: "providers::db",
-            range = ?first_number..=last_non_trie_block_number,
+            range = ?first_number..=last_block_number,
             "Appended block data"
         );
 
@@ -1230,10 +1224,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if block_number < earliest_available {
-            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
-        }
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
         // Get the block body
@@ -3683,10 +3673,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
         self.save_blocks(
-            std::slice::from_ref(&executed_block),
-            0,
-            1,
-            0,
+            &SaveBlocksPlan::new(
+                vec![executed_block],
+                vec![super::SaveBlocksPlanStep::new(0..1, None, true)],
+            ),
             SaveBlocksMode::BlocksOnly,
         )?;
 
@@ -4102,6 +4092,7 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
+        providers::database::SaveBlocksPlanStep,
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
@@ -4112,7 +4103,7 @@ mod tests {
     };
     use reth_chain_state::{test_utils::TestBlockBuilder, ComputedTrieData, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
-    use reth_ethereum_primitives::Receipt;
+    use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -4126,6 +4117,28 @@ mod tests {
         sync::{mpsc, Arc},
         time::Duration,
     };
+
+    fn full_save_plan(
+        blocks: impl IntoIterator<Item = ExecutedBlock<EthPrimitives>>,
+    ) -> SaveBlocksPlan<EthPrimitives> {
+        let blocks = blocks.into_iter().collect::<Vec<_>>();
+        let full_range = 0..blocks.len();
+        SaveBlocksPlan::new(
+            blocks,
+            vec![SaveBlocksPlanStep::new(
+                full_range.clone(),
+                Some(full_range.end..full_range.end),
+                true,
+            )],
+        )
+    }
+
+    fn partial_save_plan(
+        blocks: impl IntoIterator<Item = ExecutedBlock<EthPrimitives>>,
+        steps: Vec<SaveBlocksPlanStep>,
+    ) -> SaveBlocksPlan<EthPrimitives> {
+        SaveBlocksPlan::new(blocks.into_iter().collect(), steps)
+    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -4655,7 +4668,10 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed), 0, 1, 0, SaveBlocksMode::Full)
+            .save_blocks(
+                &full_save_plan(std::slice::from_ref(&genesis_executed).to_vec()),
+                SaveBlocksMode::Full,
+            )
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -4717,36 +4733,30 @@ mod tests {
         );
         let full_persist_trie_updates = TrieUpdatesSorted::new(
             vec![
-                (kept_account_node.clone(), Some(branch(0b0000_1111_0000_1111))),
-                (deferred_masked_account_node.clone(), Some(branch(0b1111_0000_1111_0000))),
-                (in_memory_overlap_account_node.clone(), Some(branch(0b1010_1010_1010_1010))),
+                (kept_account_node, Some(branch(0b0000_1111_0000_1111))),
+                (deferred_masked_account_node, Some(branch(0b1111_0000_1111_0000))),
+                (in_memory_overlap_account_node, Some(branch(0b1010_1010_1010_1010))),
             ],
             B256Map::from_iter([
                 (
                     kept_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(kept_storage_node.clone(), Some(branch(0b1010)))],
+                        storage_nodes: vec![(kept_storage_node, Some(branch(0b1010)))],
                     },
                 ),
                 (
                     deferred_masked_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(
-                            deferred_masked_storage_node.clone(),
-                            Some(branch(0b0101)),
-                        )],
+                        storage_nodes: vec![(deferred_masked_storage_node, Some(branch(0b0101)))],
                     },
                 ),
                 (
                     in_memory_overlap_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(
-                            in_memory_overlap_storage_node.clone(),
-                            Some(branch(0b0110)),
-                        )],
+                        storage_nodes: vec![(in_memory_overlap_storage_node, Some(branch(0b0110)))],
                     },
                 ),
             ]),
@@ -4773,15 +4783,12 @@ mod tests {
             )]),
         );
         let deferred_trie_updates = TrieUpdatesSorted::new(
-            vec![(deferred_masked_account_node.clone(), Some(branch(0b0011_0011)))],
+            vec![(deferred_masked_account_node, Some(branch(0b0011_0011)))],
             B256Map::from_iter([(
                 deferred_masked_storage,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(
-                        deferred_masked_storage_node.clone(),
-                        Some(branch(0b1100)),
-                    )],
+                    storage_nodes: vec![(deferred_masked_storage_node, Some(branch(0b1100)))],
                 },
             )]),
         );
@@ -4819,28 +4826,22 @@ mod tests {
         );
         let in_memory_only_trie_updates = TrieUpdatesSorted::new(
             vec![
-                (in_memory_overlap_account_node.clone(), Some(branch(0b0101_0101))),
-                (in_memory_only_account_node.clone(), Some(branch(0b1111_0000))),
+                (in_memory_overlap_account_node, Some(branch(0b0101_0101))),
+                (in_memory_only_account_node, Some(branch(0b1111_0000))),
             ],
             B256Map::from_iter([
                 (
                     in_memory_overlap_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(
-                            in_memory_overlap_storage_node.clone(),
-                            Some(branch(0b1001)),
-                        )],
+                        storage_nodes: vec![(in_memory_overlap_storage_node, Some(branch(0b1001)))],
                     },
                 ),
                 (
                     in_memory_only_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(
-                            in_memory_only_storage_node.clone(),
-                            Some(branch(0b1111)),
-                        )],
+                        storage_nodes: vec![(in_memory_only_storage_node, Some(branch(0b1111)))],
                     },
                 ),
             ]),
@@ -4857,7 +4858,18 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let blocks = vec![full_persist_block, deferred_trie_block, in_memory_only_block];
-        provider_rw.save_blocks(&blocks, 0, 1, 1, SaveBlocksMode::Full).unwrap();
+        provider_rw
+            .save_blocks(
+                &partial_save_plan(
+                    blocks,
+                    vec![
+                        SaveBlocksPlanStep::new(0..1, Some(1..2), true),
+                        SaveBlocksPlanStep::new(1..2, None, true),
+                    ],
+                ),
+                SaveBlocksMode::Full,
+            )
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -4899,10 +4911,7 @@ mod tests {
             .is_none());
 
         let mut account_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
-        assert!(account_trie
-            .seek_exact(StoredNibbles(kept_account_node.clone()))
-            .unwrap()
-            .is_some());
+        assert!(account_trie.seek_exact(StoredNibbles(kept_account_node)).unwrap().is_some());
         assert!(account_trie
             .seek_exact(StoredNibbles(deferred_masked_account_node))
             .unwrap()
@@ -4958,16 +4967,32 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis), 0, 1, 0, SaveBlocksMode::Full)
+            .save_blocks(
+                &full_save_plan(std::slice::from_ref(&genesis).to_vec()),
+                SaveBlocksMode::Full,
+            )
             .unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks[..2], 0, 2, 0, SaveBlocksMode::Full).unwrap();
+        provider_rw
+            .save_blocks(&full_save_plan(blocks[..2].to_vec()), SaveBlocksMode::Full)
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks, 2, 0, 2, SaveBlocksMode::Full).unwrap();
+        provider_rw
+            .save_blocks(
+                &partial_save_plan(
+                    blocks,
+                    vec![
+                        SaveBlocksPlanStep::new(0..2, Some(2..4), false),
+                        SaveBlocksPlanStep::new(2..4, None, true),
+                    ],
+                ),
+                SaveBlocksMode::Full,
+            )
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -5576,7 +5601,10 @@ mod tests {
         );
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed), 0, 1, 0, SaveBlocksMode::Full)
+            .save_blocks(
+                &full_save_plan(std::slice::from_ref(&genesis_executed).to_vec()),
+                SaveBlocksMode::Full,
+            )
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -5649,7 +5677,7 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks, 0, blocks.len(), 0, SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(&full_save_plan(blocks), SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

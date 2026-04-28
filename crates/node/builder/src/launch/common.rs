@@ -541,8 +541,6 @@ where
             [rocksdb_unwind, static_file_unwind, partial_trie_unwind].into_iter().flatten().min();
 
         if let Some(unwind_block) = unwind_target {
-            // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
             let inconsistency_source = [
                 rocksdb_unwind.map(|_| "RocksDB"),
                 static_file_unwind.map(|_| "static file"),
@@ -552,6 +550,8 @@ where
             .flatten()
             .collect::<Vec<_>>()
             .join(" and ");
+            // Highly unlikely to happen, and given its destructive nature, it's better to panic
+            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
             assert_ne!(
                 unwind_block, 0,
                 "A {} inconsistency was found that would trigger an unwind to block 0",

@@ -792,7 +792,8 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode, SaveBlocksPlan,
+        SaveBlocksPlanStep,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -1011,10 +1012,10 @@ mod tests {
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
                 provider_rw
                     .save_blocks(
-                        std::slice::from_ref(&lowest_memory_block),
-                        0,
-                        1,
-                        0,
+                        &SaveBlocksPlan::new(
+                            vec![lowest_memory_block],
+                            vec![SaveBlocksPlanStep::new(0..1, Some(1..1), true)],
+                        ),
                         SaveBlocksMode::Full,
                     )
                     .unwrap();

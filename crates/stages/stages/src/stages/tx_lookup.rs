@@ -337,13 +337,12 @@ mod tests {
             result,
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint {
-                block_number,
-                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed,
-                    total
-                })),
-                ..
-            }, done: true }) if block_number == previous_stage && processed == total &&
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                }, done: true }) if block_number == previous_stage && processed == total &&
                 total == runner.db.count_entries::<tables::Transactions>().unwrap() as u64
         );
 
@@ -384,13 +383,12 @@ mod tests {
             result,
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint {
-                block_number,
-                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed,
-                    total
-                })),
-                ..
-            }, done: true }) if block_number == previous_stage && processed == total &&
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                }, done: true }) if block_number == previous_stage && processed == total &&
                 total == runner.db.count_entries::<tables::Transactions>().unwrap() as u64
         );
 

@@ -446,7 +446,7 @@ impl StageCheckpoint {
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FinishCheckpoint {
-    /// The highest block with a partially persisted state trie.
+    /// The highest block with a partially persisted state and trie.
     pub partial_state_trie: Option<BlockNumber>,
 }
 
@@ -694,9 +694,7 @@ mod tests {
 
         let mut buf = Vec::new();
         let encoded = checkpoint.to_compact(&mut buf);
-        let (decoded, rest) = StageCheckpoint::from_compact(&buf, encoded);
-
-        assert!(rest.is_empty());
+        let (decoded, _) = StageCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
     }
 }

@@ -2,19 +2,19 @@ use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
-    persistence::{PersistenceHandle, SaveBlocksPlan},
+    persistence::PersistenceHandle,
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
+    MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -29,18 +29,18 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksPlan,
+    SaveBlocksPlanStep, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -61,7 +61,6 @@ pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
-pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
@@ -72,10 +71,9 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache,
+    CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
+    PayloadExecutionCache, SavedCache,
 };
-pub use types::{ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
@@ -156,7 +154,6 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlay_worker_pool: Arc<WorkerPool>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -164,11 +161,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(
-                canonical_block,
-                engine_kind,
-                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
-            ),
+            tree_state: TreeState::new(canonical_block, engine_kind),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -315,7 +308,7 @@ where
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
-    execution_timing_stats: B256Map<Box<ExecutionTimingStats>>,
+    execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
@@ -360,7 +353,6 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
-        + BalProvider
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
@@ -410,7 +402,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
-            execution_timing_stats: B256Map::default(),
+            execution_timing_stats: HashMap::new(),
             building_payload: false,
             runtime,
         }
@@ -440,8 +432,8 @@ where
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
         let persistence_state = PersistenceState {
-            non_trie_persisted_tip: BlockNumHash::new(best_block_number, header.hash()),
-            trie_persisted_tip: BlockNumHash::new(best_block_number, header.hash()),
+            last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
+            last_state_trie_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
         };
 
@@ -452,7 +444,6 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            runtime.state_trie_overlay_worker_pool(),
         );
 
         let task = Self::new(
@@ -498,7 +489,7 @@ where
         self.state
             .tree_state
             .canonical_block_number()
-            .saturating_sub(self.persistence_state.non_trie_persisted_tip.number)
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
     /// Returns `true` when the main loop should stop draining the tree input channel.
@@ -1360,8 +1351,8 @@ where
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
     fn remove_blocks(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, non_trie_persisted_tip=?self.persistence_state.non_trie_persisted_tip.number, "Removing blocks using persistence task");
-        if new_tip_num < self.persistence_state.non_trie_persisted_tip.number {
+        debug!(target: "engine::tree", ?new_tip_num, last_persisted_block=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+        if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
@@ -1377,22 +1368,19 @@ where
             return
         }
 
-        let non_trie_persisted_tip =
-            plan.non_trie_persisted_tip().expect("checked non-empty persisting blocks");
+        let last_block = plan.last_block().expect("checked non-empty persisting blocks");
 
         debug!(
             target: "engine::tree",
             count = plan.blocks.len(),
-            trie_catchup_blocks = plan.trie_catchup_block_count,
-            full_persist_blocks = plan.full_persist_block_count,
-            deferred_trie_blocks = plan.deferred_trie_block_count,
+            steps = ?plan.steps,
             blocks = ?plan.blocks.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
             "Persisting blocks"
         );
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(plan, tx);
 
-        self.persistence_state.start_save(non_trie_persisted_tip, rx);
+        self.persistence_state.start_save(last_block, rx);
     }
 
     /// Triggers new persistence actions if no persistence task is currently in progress.
@@ -1480,31 +1468,25 @@ where
     ) -> Result<(), AdvancePersistenceError> {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let PersistenceResult { non_trie_persisted_tip, trie_persisted_tip, commit_duration } =
-            result;
-        let Some(BlockNumHash {
-            hash: non_trie_persisted_tip_hash,
-            number: non_trie_persisted_tip_number,
-        }) = non_trie_persisted_tip
+        let PersistenceResult { last_block, last_state_trie_block, commit_duration } = result;
+        let Some(BlockNumHash { hash: last_block_hash, number: last_block_number }) = last_block
         else {
             // if this happened, then we persisted no blocks because we sent an empty vec of blocks
             warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
             return Ok(())
         };
 
-        let non_trie_persisted_tip =
-            BlockNumHash::new(non_trie_persisted_tip_number, non_trie_persisted_tip_hash);
-        let trie_persisted_tip =
-            self.trie_persisted_tip(non_trie_persisted_tip, trie_persisted_tip)?;
+        let last_block = BlockNumHash::new(last_block_number, last_block_hash);
+        let last_state_trie_persisted_block =
+            self.last_state_trie_persisted_block(last_block, last_state_trie_block)?;
 
-        debug!(target: "engine::tree", ?non_trie_persisted_tip_hash, ?non_trie_persisted_tip_number, trie_persisted_tip = trie_persisted_tip.number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-        self.persistence_state.finish(non_trie_persisted_tip, trie_persisted_tip);
+        debug!(target: "engine::tree", ?last_block_hash, ?last_block_number, last_state_trie_persisted_block = last_state_trie_persisted_block.number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_block, last_state_trie_persisted_block);
 
         // Evict trie changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
         // the finalized block if set.
-        let min_threshold =
-            non_trie_persisted_tip_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
+        let min_threshold = last_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
         let eviction_threshold =
             if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
                 // Use the minimum of finalized block and retention threshold to be conservative
@@ -1515,7 +1497,7 @@ where
             };
         debug!(
             target: "engine::tree",
-            non_trie_persisted = non_trie_persisted_tip_number,
+            last_persisted_block = last_block_number,
             finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
             eviction_threshold,
             "Evicting changesets below threshold"
@@ -1525,45 +1507,48 @@ where
         // Invalidate cached overlay since the anchor has changed
         self.state.tree_state.invalidate_cached_overlay();
 
-        self.on_new_persisted_block(trie_persisted_tip)?;
+        self.on_new_persisted_block(last_state_trie_persisted_block)?;
 
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get();
+                let _ = prepared.overlay.get(prepared.anchor_hash);
             });
         }
 
-        self.purge_timing_stats(non_trie_persisted_tip_number, commit_duration);
+        self.purge_timing_stats(last_block_number, commit_duration);
 
         Ok(())
     }
 
     /// Returns the highest block that can be dropped from memory after persistence completes.
-    fn trie_persisted_tip(
+    fn last_state_trie_persisted_block(
         &self,
-        non_trie_persisted_tip: BlockNumHash,
-        trie_persisted_tip: Option<u64>,
+        last_block: BlockNumHash,
+        last_state_trie_block: Option<u64>,
     ) -> ProviderResult<BlockNumHash> {
-        let Some(trie_persisted_tip) =
-            trie_persisted_tip.filter(|block_number| *block_number < non_trie_persisted_tip.number)
-        else {
-            return Ok(non_trie_persisted_tip)
-        };
+        let Some(last_state_trie_block) = last_state_trie_block else { return Ok(last_block) };
+        debug_assert!(
+            last_state_trie_block <= last_block.number,
+            "state/trie frontier cannot exceed the last persisted block"
+        );
+        if last_state_trie_block >= last_block.number {
+            return Ok(last_block)
+        }
 
         let hash = self
             .canonical_in_memory_state
-            .hash_by_number(trie_persisted_tip)
+            .hash_by_number(last_state_trie_block)
             .map(Ok)
             .unwrap_or_else(|| {
                 self.provider
-                    .block_hash(trie_persisted_tip)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(trie_persisted_tip.into()))
+                    .block_hash(last_state_trie_block)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(last_state_trie_block.into()))
             })?;
 
-        Ok(BlockNumHash::new(trie_persisted_tip, hash))
+        Ok(BlockNumHash::new(last_state_trie_block, hash))
     }
 
     /// Handles a message from the engine.
@@ -1592,31 +1577,15 @@ where
             },
             FromEngine::Request(request) => {
                 match request {
-                    EngineApiRequest::InsertExecutedBlock(payload) => {
-                        let block_num_hash = payload.recovered_block.num_hash();
+                    EngineApiRequest::InsertExecutedBlock(block) => {
+                        let block_num_hash = block.recovered_block().num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
-                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-                            // block already known to the tree (e.g. delivered via newPayload first)
-                            return Ok(ops::ControlFlow::Continue(()))
-                        }
-
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
-
-                        let block = match self
-                            .payload_validator
-                            .on_inserted_executed_block(payload, &self.state)
-                        {
-                            Ok(block) => block,
-                            Err(err) => {
-                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
-                                return Ok(ops::ControlFlow::Continue(()))
-                            }
-                        };
 
                         // if the parent is the canonical head, we can insert the block as the
                         // pending block
@@ -1628,6 +1597,7 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
+                        self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -1865,7 +1835,7 @@ where
         } else {
             self.state.tree_state.remove_until(
                 backfill_num_hash,
-                self.persistence_state.non_trie_persisted_tip.hash,
+                self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
             );
         }
@@ -1890,33 +1860,33 @@ where
             self.canonical_in_memory_state.set_canonical_head(new_head);
         }
 
-        // check if we need to run backfill again by comparing the most recent backfill target
-        // height to the backfill height
+        // check if we need to run backfill again by comparing the most recent finalized height to
+        // the backfill height
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
         else {
             return Ok(())
         };
-        if !self.engine_kind.is_opstack() && sync_target_state.finalized_block_hash.is_zero() {
-            // no finalized block, can't check distance on non-OP Stack chains
+        if sync_target_state.finalized_block_hash.is_zero() {
+            // no finalized block, can't check distance
             return Ok(())
         }
-        let target_hash = self.backfill_target_hash(sync_target_state);
-        if target_hash.is_zero() {
-            return Ok(())
-        }
-        // get the block number of the backfill target block, if we have it buffered
-        let newest_target = self.state.buffer.block(&target_hash).map(|block| block.number());
+        // get the block number of the finalized block, if we have it
+        let newest_finalized = self
+            .state
+            .buffer
+            .block(&sync_target_state.finalized_block_hash)
+            .map(|block| block.number());
 
-        // The block number that the backfill finished at - if the progress or newest target is
-        // None then we can't check the distance anyways.
+        // The block number that the backfill finished at - if the progress or newest
+        // finalized is None then we can't check the distance anyways.
         //
-        // If both are Some, we perform another distance check and return the desired backfill
-        // target
+        // If both are Some, we perform another distance check and return the desired
+        // backfill target
         if let Some(backfill_target) =
-            ctrl.block_number().zip(newest_target).and_then(|(progress, target_number)| {
+            ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
                 // Determines whether or not we should run backfill again, in case
                 // the new gap is still large enough and requires running backfill again
-                self.backfill_sync_target(progress, target_number, None)
+                self.backfill_sync_target(progress, finalized_number, None)
             })
         {
             // request another backfill run
@@ -1976,35 +1946,7 @@ where
             self.on_canonical_chain_update(chain_update);
         }
 
-        self.on_canonicalized_sync_target(target);
-
         Ok(())
-    }
-
-    /// Applies the tracked forkchoice state once its sync target head becomes canonical.
-    fn on_canonicalized_sync_target(&mut self, target: B256) {
-        let Some(sync_target_state) = self
-            .state
-            .forkchoice_state_tracker
-            .sync_target_state()
-            .filter(|state| state.head_block_hash == target)
-        else {
-            return;
-        };
-
-        if let Err(outcome) = self.ensure_consistent_forkchoice_state(sync_target_state) {
-            debug!(
-                target: "engine::tree",
-                head = %sync_target_state.head_block_hash,
-                safe = %sync_target_state.safe_block_hash,
-                finalized = %sync_target_state.finalized_block_hash,
-                ?outcome,
-                "Canonicalized sync target head before safe/finalized could be applied"
-            );
-            return;
-        }
-
-        self.state.forkchoice_state_tracker.promote_sync_target_to_valid(sync_target_state);
     }
 
     /// Convenience function to handle an optional tree event.
@@ -2115,7 +2057,7 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.non_trie_persisted_tip.number;
+        let min_block = self.persistence_state.last_persisted_block.number;
         self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
             self.config.persistence_threshold()
     }
@@ -2131,10 +2073,11 @@ where
 
         let mut blocks = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
-        let trie_persisted_tip_number = self.persistence_state.trie_persisted_tip.number;
-        let non_trie_persisted_tip_number = self.persistence_state.non_trie_persisted_tip.number;
+        let last_state_trie_persisted_block_number =
+            self.persistence_state.last_state_trie_persisted_block.number;
+        let last_persisted_block_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
-        let non_trie_target_number = match target {
+        let last_block_target_number = match target {
             PersistTarget::Threshold => {
                 canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
             }
@@ -2144,18 +2087,18 @@ where
         debug!(
             target: "engine::tree",
             ?current_hash,
-            ?trie_persisted_tip_number,
-            ?non_trie_persisted_tip_number,
+            ?last_state_trie_persisted_block_number,
+            ?last_persisted_block_number,
             ?canonical_head_number,
             target = ?target,
             "Returning save plan"
         );
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= trie_persisted_tip_number {
+            if block.recovered_block().number() <= last_state_trie_persisted_block_number {
                 break;
             }
 
-            if block.recovered_block().number() <= non_trie_target_number {
+            if block.recovered_block().number() <= last_block_target_number {
                 blocks.push(block.clone());
             }
 
@@ -2165,20 +2108,37 @@ where
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
 
-        let trie_catchup_block_count = non_trie_persisted_tip_number
-            .saturating_sub(trie_persisted_tip_number)
+        let trie_catchup_block_count = last_persisted_block_number
+            .saturating_sub(last_state_trie_persisted_block_number)
             .min(blocks.len() as u64) as usize;
-        let non_trie_block_count = blocks.len().saturating_sub(trie_catchup_block_count);
-        let deferred_trie_block_count =
-            non_trie_block_count.min(self.config.deferred_trie_blocks() as usize);
-        let full_persist_block_count = non_trie_block_count - deferred_trie_block_count;
+        let persist_rest_block_count = blocks.len().saturating_sub(trie_catchup_block_count);
+        let state_masking_block_count =
+            persist_rest_block_count.min(self.config.num_state_masking_blocks() as usize);
+        let full_persist_block_count = persist_rest_block_count - state_masking_block_count;
+        let full_persist_start = trie_catchup_block_count;
+        let state_masking_start = full_persist_start + full_persist_block_count;
+        let state_masking_range = state_masking_start..blocks.len();
+        let mut steps = Vec::new();
 
-        Ok(SaveBlocksPlan::new(
-            blocks,
-            trie_catchup_block_count,
-            full_persist_block_count,
-            deferred_trie_block_count,
-        ))
+        if trie_catchup_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(
+                0..trie_catchup_block_count,
+                Some(state_masking_range.clone()),
+                false,
+            ));
+        }
+        if full_persist_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(
+                full_persist_start..state_masking_start,
+                Some(state_masking_range.clone()),
+                true,
+            ));
+        }
+        if state_masking_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(state_masking_range, None, true));
+        }
+
+        Ok(SaveBlocksPlan::new(blocks, steps))
     }
 
     /// This clears the blocks from the in-memory tree state that no longer need to stay resident
@@ -2202,7 +2162,7 @@ where
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(in_memory_persisted_block, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks_until(
-            self.persistence_state.non_trie_persisted_tip,
+            self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
         );
         Ok(())
@@ -2247,7 +2207,9 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
+        // Skip building trie input and anchor for DB-loaded blocks.
+        let trie_data =
+            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
@@ -2408,10 +2370,7 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(ConsensusEngineEvent::InvalidBlock {
-            block: Box::new(head),
-            error: PayloadValidationError::LinksToRejectedPayload.to_string(),
-        });
+        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
 
         Ok(status)
     }
@@ -2588,90 +2547,92 @@ where
         }
     }
 
-    /// Returns the block hash that backfill should target.
+    /// Returns the target hash to sync to if the distance from the local tip to the block is
+    /// greater than the threshold and we're not synced to the finalized block yet (if we've seen
+    /// that block already).
     ///
-    /// Defaults to the finalized block hash. On OP Stack, the CL finalizes in large batches and the
-    /// finalized hash can lag the canonical tip by a wide margin, so backfill targets the head.
-    ///
-    /// The zero-finalized optimistic-sync fallback for non-OP Stack chains is handled by
-    /// [`Self::backfill_sync_target`].
-    const fn backfill_target_hash(&self, state: ForkchoiceState) -> B256 {
-        if self.engine_kind.is_opstack() {
-            state.head_block_hash
-        } else {
-            state.finalized_block_hash
-        }
-    }
-
-    /// Returns the target hash to sync to if the distance from the local tip is greater than the
-    /// threshold and we're not yet synced to the backfill target (see
-    /// [`Self::backfill_target_hash`]).
-    ///
-    /// If this is invoked after a new block has been downloaded, the downloaded block could be
-    /// the (missing) target block.
+    /// If this is invoked after a new block has been downloaded, the downloaded block could be the
+    /// (missing) finalized block.
     fn backfill_sync_target(
         &self,
         canonical_tip_num: u64,
         target_block_number: u64,
         downloaded_block: Option<BlockNumHash>,
     ) -> Option<B256> {
-        let state = self.state.forkchoice_state_tracker.sync_target_state()?;
-        let target_hash = self.backfill_target_hash(state);
+        let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
 
-        // check if the downloaded block is the tracked backfill target
-        let exceeds_backfill_threshold = match downloaded_block.as_ref() {
-            // if we downloaded the target block we can now check how far we're off
-            Some(downloaded_block) if downloaded_block.hash == target_hash => {
-                self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
-            }
-            _ => match self.state.buffer.block(&target_hash) {
-                // if we have buffered the target block, we should check how far we're off
-                Some(buffered_target) => {
-                    self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_target.number())
+        // check if the downloaded block is the tracked finalized block
+        let exceeds_backfill_threshold =
+            match (downloaded_block.as_ref(), sync_target_state.as_ref()) {
+                // if we downloaded the finalized block we can now check how far we're off
+                (Some(downloaded_block), Some(state))
+                    if downloaded_block.hash == state.finalized_block_hash =>
+                {
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
                 }
-                // check if the distance exceeds the threshold for backfill sync
-                None => self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number),
-            },
-        };
+                _ => match sync_target_state
+                    .as_ref()
+                    .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
+                {
+                    Some(buffered_finalized) => {
+                        // if we have buffered the finalized block, we should check how far we're
+                        // off
+                        self.exceeds_backfill_run_threshold(
+                            canonical_tip_num,
+                            buffered_finalized.number(),
+                        )
+                    }
+                    None => {
+                        // check if the distance exceeds the threshold for backfill sync
+                        self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+                    }
+                },
+            };
 
-        if !exceeds_backfill_threshold {
-            return None
+        // if the number of missing blocks is greater than the max, trigger backfill
+        if exceeds_backfill_threshold && let Some(state) = sync_target_state {
+            // if we have already canonicalized the finalized block, we should skip backfill
+            match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                Err(err) => {
+                    warn!(target: "engine::tree", %err, "Failed to get finalized block header");
+                }
+                Ok(None) => {
+                    // ensure the finalized block is known (not the zero hash)
+                    if !state.finalized_block_hash.is_zero() {
+                        // we don't have the block yet and the distance exceeds the allowed
+                        // threshold
+                        return Some(state.finalized_block_hash)
+                    }
+
+                    // OPTIMISTIC SYNCING
+                    //
+                    // It can happen when the node is doing an
+                    // optimistic sync, where the CL has no knowledge of the finalized hash,
+                    // but is expecting the EL to sync as high
+                    // as possible before finalizing.
+                    //
+                    // This usually doesn't happen on ETH mainnet since CLs use the more
+                    // secure checkpoint syncing.
+                    //
+                    // However, optimism chains will do this. The risk of a reorg is however
+                    // low.
+                    debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                    return Some(state.head_block_hash)
+                }
+                Ok(Some(_)) => {
+                    // we're fully synced to the finalized block
+                }
+            }
         }
 
-        // if we have already canonicalized the target block, we should skip backfill
-        match self.provider.header_by_hash_or_number(target_hash.into()) {
-            Err(err) => {
-                warn!(target: "engine::tree", %err, "Failed to get backfill target block header");
-                None
-            }
-            // we don't have the block yet and the distance exceeds the allowed threshold
-            Ok(None) if !target_hash.is_zero() => Some(target_hash),
-            Ok(None) => {
-                // OPTIMISTIC SYNCING
-                //
-                // It can happen when the node is doing an
-                // optimistic sync, where the CL has no knowledge of the finalized hash,
-                // but is expecting the EL to sync as high
-                // as possible before finalizing.
-                //
-                // This usually doesn't happen on ETH mainnet since CLs use the more
-                // secure checkpoint syncing.
-                //
-                // However, optimism chains will do this. The risk of a reorg is however
-                // low.
-                debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
-                Some(state.head_block_hash)
-            }
-            // we're fully synced to the target block
-            Ok(Some(_)) => None,
-        }
+        None
     }
 
     /// This method tries to detect whether on-disk and in-memory states have diverged. It might
     /// happen if a reorg is happening while we are persisting a block.
     fn find_disk_reorg(&self) -> ProviderResult<Option<u64>> {
         let mut canonical = self.state.tree_state.current_canonical_head;
-        let mut persisted = self.persistence_state.non_trie_persisted_tip;
+        let mut persisted = self.persistence_state.last_persisted_block;
 
         let parent_num_hash = |num_hash: NumHash| -> ProviderResult<NumHash> {
             Ok(self
@@ -2979,7 +2940,12 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
+        execute: impl FnOnce(
+            &mut V,
+            Input,
+            TreeCtx<'_, N>,
+        )
+            -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2997,7 +2963,7 @@ where
 
         // Only query DB if block could be persisted (number <= last persisted block).
         // New blocks from CL always have number > last persisted, so skip DB lookup for them.
-        if block_num_hash.number <= self.persistence_state.non_trie_persisted_tip.number {
+        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
@@ -3049,23 +3015,7 @@ where
 
         let start = Instant::now();
 
-        let ValidationOutput {
-            executed_block: executed,
-            execution_timing_stats: timing_stats,
-            raw_bal,
-        } = execute(&mut self.payload_validator, input, ctx)?;
-
-        if let Some(raw_bal) = raw_bal {
-            let num_hash = executed.recovered_block().num_hash();
-            if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
-                warn!(
-                    target: "engine::tree",
-                    ?num_hash,
-                    %err,
-                    "Failed to store validated block access list"
-                );
-            }
-        }
+        let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
@@ -3153,10 +3103,9 @@ where
         } else {
             self.state.invalid_headers.insert(block.block_with_parent());
         }
-        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock {
-            block: Box::new(block),
-            error: validation_err.to_string(),
-        }));
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
+            Box::new(block),
+        )));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
@@ -3389,7 +3338,7 @@ where
 
         self.state.tree_state.remove_until(
             upper_bound,
-            self.persistence_state.non_trie_persisted_tip.hash,
+            self.persistence_state.last_persisted_block.hash,
             num,
         );
         Ok(())
