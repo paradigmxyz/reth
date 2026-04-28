@@ -12,10 +12,9 @@
 //! across rayon workers. Instead we take a [`StateProviderBuilder`] (which IS `Send + Sync`
 //! through its Arc'd factory) and have each rayon worker lazily build its own
 //! `CachedStateProvider<StateProviderBox, true>` via [`rayon::iter::ParallelIterator::map_init`].
-//! Same pattern that `prefetch_bal_storage` uses in `prewarm.rs:740`.
 //!
-//! A provider error in any phase aborts the whole build: unlike the opportunistic `prewarm.rs`
-//! prefetch, a missing snapshot entry is unrecoverable here (workers would surface it as
+//! A provider error in any phase aborts the whole build: a missing snapshot entry is
+//! unrecoverable here (workers would surface it as
 //! `BalError::AccountNotFound`).
 //!
 //! Structured in four phases:

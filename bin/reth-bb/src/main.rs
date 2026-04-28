@@ -358,7 +358,14 @@ fn main() {
 
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching big block node");
-        let handle = builder.launch_node(BbNode::new(pending.clone())).await?;
+
+        // Force-enable BAL parallel execution: reth-bb's reason for existing is to exercise
+        // that path on replayed big blocks.
+        let node_builder = builder.node(BbNode::new(pending.clone()));
+        let mut launcher = node_builder.engine_api_launcher();
+        launcher.engine_tree_config =
+            launcher.engine_tree_config.clone().without_bal_parallel_execution(false);
+        let handle = node_builder.launch_with(launcher).await?;
 
         handle.wait_for_node_exit().await
     }) {

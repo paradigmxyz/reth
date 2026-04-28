@@ -272,7 +272,8 @@ where
         );
         // BAL blocks stream sparse-trie updates either through the serial BAL prewarm path or the
         // parallel BAL execute path. Non-BAL blocks use the normal execution state hook.
-        let bal_will_dispatch = config.bal_execute_path_enabled() && env.decoded_bal.is_some();
+        let bal_will_dispatch =
+            !config.disable_bal_parallel_execution() && env.decoded_bal.is_some();
         let install_state_hook = env.decoded_bal.is_none();
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -480,11 +481,11 @@ where
         let skip_prewarm = self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD ||
             bal_will_dispatch;
+        let maybe_decoded_bal = env.decoded_bal.clone();
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
-        let maybe_decoded_bal = env.decoded_bal.clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,

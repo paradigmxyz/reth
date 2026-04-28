@@ -1033,7 +1033,7 @@ where
     //     point, the snapshot-build overhead exceeds the gain. Tune empirically once workers are
     //     parallel; meaningless while the commit loop is sequential.
     const fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> bool {
-        bal.is_some() && self.config.bal_execute_path_enabled()
+        bal.is_some() && !self.config.disable_bal_parallel_execution()
     }
 
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]
