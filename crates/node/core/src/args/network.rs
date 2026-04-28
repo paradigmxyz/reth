@@ -365,8 +365,6 @@ pub struct NetworkArgs {
     /// When the budget is exhausted, new events are dropped (see metric
     /// `total_dropped_tx_events_at_full_capacity`). Acts as a backstop against unbounded
     /// memory growth under sustained P2P transaction flooding.
-    ///
-    /// Default is 1 GiB.
     #[arg(long = "tx-channel-memory-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().tx_channel_memory_limit_bytes, verbatim_doc_comment)]
     pub tx_channel_memory_limit_bytes: usize,
 

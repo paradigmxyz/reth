@@ -61,8 +61,6 @@ pub mod tx_manager {
     /// Caps the total in-flight bytes of `NetworkTransactionEvent`s buffered between the two
     /// tasks. When the budget is exhausted, new events are dropped (see metric
     /// `total_dropped_tx_events_at_full_capacity`).
-    ///
-    /// Default is 1 GiB.
     pub const DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
 }
 
