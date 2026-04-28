@@ -2802,10 +2802,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
-        // Drain and sort updates lexicographically by nibbles path.
+        // Sort by the already-hashed key first. The byte order of `B256` matches the unpacked
+        // nibble order, so we can postpone `Nibbles::unpack` until after sorting.
+        let mut sorted: Vec<_> = updates.drain().collect();
+        sorted.sort_unstable_by_key(|(key, _)| *key);
         let mut sorted: Vec<_> =
-            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+            sorted.into_iter().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
 
         let threshold = self.parallelism_thresholds.min_updates;
 
@@ -3123,6 +3125,22 @@ mod tests {
     use reth_trie_common::{Nibbles, ProofV2Target};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
+
+    #[test]
+    fn hashed_key_order_matches_unpacked_nibbles() {
+        let mut by_hash = [
+            B256::from([0x10; 32]),
+            B256::from([0x01; 32]),
+            B256::from([0x11; 32]),
+            B256::from([0x00; 32]),
+        ];
+        let mut by_nibbles = by_hash;
+
+        by_hash.sort_unstable();
+        by_nibbles.sort_unstable_by_key(|key| Nibbles::unpack(*key));
+
+        assert_eq!(by_hash, by_nibbles);
+    }
 
     /// Test harness for proptest-based arena sparse trie testing.
     ///
