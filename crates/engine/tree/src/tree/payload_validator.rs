@@ -617,6 +617,7 @@ where
         let root_time = Instant::now();
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
+        let mut state_root_error = None;
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
 
@@ -685,6 +686,7 @@ where
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
                         state_root_task_failed = true;
+                        state_root_error = Some(error);
                     }
                 }
             }
@@ -703,6 +705,7 @@ where
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
+                        state_root_error = Some(error);
                     }
                 }
             }
@@ -720,6 +723,10 @@ where
             // fallback is to compute the state root regularly in sync
             if self.config.state_root_fallback() {
                 debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
+            } else if let Some(error) = state_root_error {
+                warn!(target: "engine::tree::payload_validator", %error, "Failed to compute state root in parallel");
+                let error = ProviderError::from(error);
+                return Err(InsertBlockError::new(block.into_sealed_block(), error.into()).into())
             } else {
                 warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
