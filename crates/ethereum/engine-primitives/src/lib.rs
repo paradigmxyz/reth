@@ -102,12 +102,15 @@ impl PayloadTypes for EthPayloadTypes {
     fn built_payload_to_execution_data(payload: &Self::BuiltPayload) -> Self::ExecutionData {
         if let Some(bal) = payload.block_access_list() {
             let block = payload.block();
-            let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_bal(
+            let raw_block = block.clone().into_block();
+            let sidecar =
+                alloy_rpc_types_engine::ExecutionPayloadSidecar::from_block(&raw_block);
+            let v4 = alloy_rpc_types_engine::ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block.hash(),
-                &block.clone().into_block(),
+                &raw_block,
                 bal.clone(),
             );
-            ExecutionData { payload, sidecar }
+            ExecutionData { payload: ExecutionPayload::V4(v4), sidecar }
         } else {
             Self::block_to_payload(payload.block().clone())
         }

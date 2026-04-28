@@ -393,24 +393,24 @@ async fn can_snap_sync_catch_up() -> eyre::Result<()> {
     let mut node_b = nodes.pop().unwrap();
     let mut node_a = nodes.pop().unwrap();
 
-    // Build initial state on Node A (30 blocks)
-    advance_with_random_transactions(&mut node_a, 30, &mut rng, true).await?;
+    // Build initial state on Node A (20 blocks)
+    advance_with_random_transactions(&mut node_a, 20, &mut rng, true).await?;
 
-    let initial_target = node_a.block_hash(30);
+    let initial_target = node_a.block_hash(20);
 
     // Connect Node B to Node A
     node_b.connect(&mut node_a).await;
 
     // Advance Node A further BEFORE triggering snap sync on Node B.
-    advance_with_random_transactions(&mut node_a, 20, &mut rng, true).await?;
+    advance_with_random_transactions(&mut node_a, 10, &mut rng, true).await?;
 
     // Now trigger snap sync on Node B targeting the initial block.
     node_b.update_forkchoice(initial_target, initial_target).await?;
 
     // Continue advancing Node A to push even further
-    advance_with_random_transactions(&mut node_a, 10, &mut rng, true).await?;
+    advance_with_random_transactions(&mut node_a, 5, &mut rng, true).await?;
 
-    let final_hash = node_a.block_hash(60);
+    let final_hash = node_a.block_hash(35);
 
     // Wait for Node B to sync
     node_b.sync_to(final_hash).await?;

@@ -913,10 +913,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         PropPolicy: TransactionPropagationPolicy<N>,
         AnnPolicy: AnnouncementFilteringPolicy<N>,
     {
-        let bal_store = self.provider().bal_store().clone();
         let mut net_builder = builder
             .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
-            .request_handler_with_bal_store(self.provider().clone(), bal_store);
+            .request_handler(self.provider().clone());
 
         let snap = net_builder.snap_request_handler(crate::snap_provider::ProviderSnapState::new(
             self.provider().clone(),

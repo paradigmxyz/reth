@@ -478,15 +478,6 @@ where
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
 
-    let block_access_list = is_amsterdam
-        .then(|| {
-            let bal = db.take_built_alloy_bal();
-            tracing::info!(target: "payload_builder", id=%payload_id, is_amsterdam, has_bal=bal.is_some(), bal_len=?bal.as_ref().map(|b| b.len()), "BAL extraction from state");
-            bal
-        })
-        .flatten()
-        .map(|bal| alloy_rlp::encode(&bal).into());
-
     let sealed_block = Arc::new(block.into_sealed_block());
     debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 

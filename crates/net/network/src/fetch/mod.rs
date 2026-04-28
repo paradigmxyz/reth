@@ -788,6 +788,10 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetBlockBodies { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
+            Self::GetAccountRange { response, .. } => response.send(Err(err)).ok(),
+            Self::GetStorageRanges { response, .. } => response.send(Err(err)).ok(),
+            Self::GetByteCodes { response, .. } => response.send(Err(err)).ok(),
+            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
