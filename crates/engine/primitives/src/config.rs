@@ -39,6 +39,9 @@ pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// Minimum host parallelism required to use the state root task.
+pub const MIN_STATE_ROOT_TASK_PARALLELISM: usize = 5;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -63,12 +66,18 @@ const fn default_cross_block_cache_size() -> usize {
 /// - Multiproof computation spawned in payload processor
 /// - Storage root computation spawned in trie parallel proof
 pub fn has_enough_parallelism() -> bool {
+    state_root_task_available_parallelism()
+        .is_some_and(|num| num >= MIN_STATE_ROOT_TASK_PARALLELISM)
+}
+
+/// Returns the host parallelism used when deciding whether the state root task can run.
+pub fn state_root_task_available_parallelism() -> Option<usize> {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+        std::thread::available_parallelism().ok().map(|num| num.get())
     }
     #[cfg(not(feature = "std"))]
-    false
+    None
 }
 
 /// The configuration of the engine tree.
@@ -449,6 +458,11 @@ impl TreeConfig {
     pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
         self.has_enough_parallelism = has_enough_parallelism;
         self
+    }
+
+    /// Returns whether the host has enough parallelism for the state root task.
+    pub const fn has_enough_parallelism(&self) -> bool {
+        self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.

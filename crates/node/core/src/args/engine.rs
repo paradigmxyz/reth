@@ -3,10 +3,12 @@
 use clap::{builder::Resettable, Args};
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
-    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    state_root_task_available_parallelism, TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+    DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS, DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    MIN_STATE_ROOT_TASK_PARALLELISM,
 };
 use std::{sync::OnceLock, time::Duration};
+use tracing::info;
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -544,6 +546,26 @@ impl EngineArgs {
             .without_bal_batch_io(self.disable_bal_batch_io);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
+
+        let state_root_algorithm = if config.state_root_fallback() {
+            "synchronous"
+        } else if config.use_state_root_task() {
+            "state-root-task"
+        } else {
+            "parallel"
+        };
+
+        info!(
+            target: "reth::cli",
+            available_parallelism = ?state_root_task_available_parallelism(),
+            required_parallelism = MIN_STATE_ROOT_TASK_PARALLELISM,
+            has_enough_parallelism = config.has_enough_parallelism(),
+            legacy_state_root = config.legacy_state_root(),
+            state_root_fallback = config.state_root_fallback(),
+            state_root_algorithm,
+            "Configured state root algorithm"
+        );
+
         config
     }
 }

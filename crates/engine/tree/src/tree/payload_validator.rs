@@ -25,7 +25,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    state_root_task_available_parallelism, ConfigureEngineEvm, ExecutableTxIterator,
+    ExecutionPayload, InvalidBlockHook, PayloadValidator, MIN_STATE_ROOT_TASK_PARALLELISM,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -463,10 +464,15 @@ where
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
 
-        debug!(
+        info!(
             target: "engine::tree::payload_validator",
             ?strategy,
-            "Decided which state root algorithm to run"
+            available_parallelism = ?state_root_task_available_parallelism(),
+            required_parallelism = MIN_STATE_ROOT_TASK_PARALLELISM,
+            has_enough_parallelism = self.config.has_enough_parallelism(),
+            legacy_state_root = self.config.legacy_state_root(),
+            state_root_fallback = self.config.state_root_fallback(),
+            "Selected state root algorithm"
         );
 
         // Get an iterator over the transactions in the payload

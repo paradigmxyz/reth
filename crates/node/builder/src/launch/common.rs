@@ -230,8 +230,15 @@ impl LaunchContext {
         // Configure the implicit global rayon pool for `par_iter` usage.
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
-        let _ = reserved_cpu_cores;
-        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
+        let detected_parallelism = available_parallelism().ok().map(NonZeroUsize::get);
+        let num_threads = detected_parallelism.unwrap_or(1);
+        info!(
+            target: "reth::cli",
+            available_parallelism = ?detected_parallelism,
+            reserved_cpu_cores,
+            global_rayon_threads = num_threads,
+            "Configuring global rayon thread pool"
+        );
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))

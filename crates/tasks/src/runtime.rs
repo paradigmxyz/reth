@@ -26,6 +26,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
+#[cfg(feature = "rayon")]
+use tracing::info;
 use tracing::{debug, error};
 use tracing_futures::Instrument;
 
@@ -787,6 +789,7 @@ impl RuntimeBuilder {
             proof_account_worker_pool,
             prewarming_pool,
         ) = {
+            let detected_parallelism = available_parallelism().ok().map(NonZeroUsize::get);
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
@@ -836,7 +839,9 @@ impl RuntimeBuilder {
                     .thread_name(|i| format!("prewarm-{i:02}")),
             )?;
 
-            debug!(
+            info!(
+                target: "reth::tasks",
+                available_parallelism = ?detected_parallelism,
                 default_threads,
                 rpc_threads,
                 storage_threads,
