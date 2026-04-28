@@ -529,7 +529,8 @@ where
             "Access list range download failed",
         );
 
-        // Optional BAL requests may complete without an eth/71-capable peer.
+        // Optional BAL lookup is best-effort: missing eth/71 support or request failures should not
+        // block returning the downloaded block range.
         self.access_lists = OptionalBlockAccessListsState::Ready(None);
     }
 
