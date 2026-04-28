@@ -426,14 +426,14 @@ where
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                let mut all: Vec<_> = transactions.into_iter().collect();
-                let rest = all.split_off(prefetch.min(all.len()));
+                let mut iter = transactions.into_iter();
 
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
 
                 // Convert the remaining transactions in parallel.
+                let rest: Vec<_> = iter.collect();
                 rest.into_par_iter()
                     .enumerate()
                     .map(|(i, tx)| {

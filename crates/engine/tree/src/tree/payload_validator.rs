@@ -292,22 +292,31 @@ where
     pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
+        predecoded_block: Option<&'a SealedBlock<N::Block>>,
     ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         Ok(match input {
-            BlockOrPayload::Payload(payload) => {
+            BlockOrPayload::Payload(payload) if predecoded_block.is_none() => {
                 let iter = self
                     .evm_config
                     .tx_iterator_for_payload(payload)
                     .map_err(NewPayloadError::other)?;
                 Either::Left(iter)
             }
-            BlockOrPayload::Block(block) => {
+            BlockOrPayload::Payload(_) => {
+                let block =
+                    predecoded_block.expect("payload path only reaches here with a decoded block");
                 let txs = block.body().clone_transactions();
-                let convert = |tx: N::SignedTx| tx.try_into_recovered();
+                let convert = N::SignedTx::try_into_recovered;
+                Either::Right((txs, convert))
+            }
+            BlockOrPayload::Block(block) => {
+                let block = predecoded_block.unwrap_or(block);
+                let txs = block.body().clone_transactions();
+                let convert = N::SignedTx::try_into_recovered;
                 Either::Right((txs, convert))
             }
         })
@@ -414,21 +423,22 @@ where
                 );
                 Either::Left(handle)
             }
-            BlockOrPayload::Block(_) => Either::Right(()),
+            BlockOrPayload::Block(block) => Either::Right(block.clone()),
         };
 
         // Returns the sealed block, either by awaiting the background conversion task (for
         // payloads) or by extracting the already-converted block directly.
-        let convert_to_block =
+        let mut convert_to_block = Some(
             move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
                 match convert_to_block {
                     Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
-                    Either::Right(()) => {
-                        let BlockOrPayload::Block(block) = input else { unreachable!() };
+                    Either::Right(block) => {
+                        let _ = input;
                         Ok(block)
                     }
                 }
-            };
+            },
+        );
 
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
@@ -437,7 +447,11 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let block = convert_to_block(input)?;
+                        let block = convert_to_block
+                            .take()
+                            .expect("block conversion should only be taken once")(
+                            input
+                        )?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -468,7 +482,9 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                convert_to_block(input)?,
+                convert_to_block.take().expect("block conversion should only be taken once")(
+                    input,
+                )?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -481,7 +497,9 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                convert_to_block(input)?,
+                convert_to_block.take().expect("block conversion should only be taken once")(
+                    input,
+                )?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -517,8 +535,16 @@ where
             "Decided which state root algorithm to run"
         );
 
+        let predecoded_block = is_payload
+            .then(|| {
+                convert_to_block.take().expect("block conversion should only be taken once")(
+                    input.clone(),
+                )
+            })
+            .transpose()?;
+
         // Get an iterator over the transactions in the payload
-        let txs = self.tx_iterator_for(&input)?;
+        let txs = self.tx_iterator_for(&input, predecoded_block.as_ref())?;
 
         // Create lazy overlay from ancestors - this doesn't block, allowing execution to start
         // before the trie data is ready. The overlay will be computed on first access.
@@ -602,7 +628,12 @@ where
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
             });
 
-        let block = convert_to_block(input)?;
+        let block = match predecoded_block {
+            Some(block) => block,
+            None => {
+                convert_to_block.take().expect("block conversion should only be taken once")(input)?
+            }
+        };
         let transaction_root = is_payload.then(|| {
             let body = block.body().clone();
             let parent_span = Span::current();
