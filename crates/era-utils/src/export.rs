@@ -2,8 +2,8 @@
 //! and injecting them into era1 files with `Era1Writer`.
 
 use crate::calculate_td_by_number;
-use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_consensus::{BlockHeader, Sealable, TxReceipt};
+use alloy_primitives::{BlockNumber, U256};
 use eyre::{eyre, Result};
 use reth_era::{
     common::file_ops::{EraFileId, StreamWriter},
@@ -13,7 +13,7 @@ use reth_era::{
         types::{
             execution::{
                 Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-                TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+                HeaderRecord, TotalDifficulty, MAX_BLOCKS_PER_ERA1,
             },
             group::{BlockIndex, Era1Id},
         },
@@ -139,17 +139,21 @@ where
 
         let headers = provider.headers_range(start_block..=end_block)?;
 
-        // Extract first 4 bytes of last block's state root as historical identifier
-        let historical_root = headers
-            .last()
-            .map(|header| {
-                let state_root = header.state_root();
-                [state_root[0], state_root[1], state_root[2], state_root[3]]
+        // Pre-compute accumulator from headers to determine filename
+        let mut precompute_td = total_difficulty;
+        let header_records: Vec<HeaderRecord> = headers
+            .iter()
+            .map(|h| {
+                precompute_td += h.difficulty();
+                HeaderRecord { block_hash: h.hash_slow(), total_difficulty: precompute_td }
             })
-            .unwrap_or([0u8; 4]);
+            .collect();
+        let accumulator = Accumulator::from_header_records(&header_records)
+            .map_err(|e| eyre!("Failed to compute accumulator: {e}"))?;
+        let file_hash: [u8; 4] = accumulator.root[..4].try_into().unwrap();
 
-        let era1_id = Era1Id::new(&config.network, start_block, block_count as u32)
-            .with_hash(historical_root);
+        let era1_id =
+            Era1Id::new(&config.network, start_block, block_count as u32).with_hash(file_hash);
 
         let era1_id = if config.max_blocks_per_file == MAX_BLOCKS_PER_ERA1 as u64 {
             era1_id
@@ -166,7 +170,6 @@ where
         let mut offsets = Vec::<i64>::with_capacity(block_count);
         let mut position = VERSION_ENTRY_SIZE as i64;
         let mut blocks_written = 0;
-        let mut final_header_data = Vec::new();
 
         for (i, header) in headers.into_iter().enumerate() {
             let expected_block_number = start_block + i as u64;
@@ -177,11 +180,6 @@ where
                 expected_block_number,
                 &mut total_difficulty,
             )?;
-
-            // Save last block's header data for accumulator
-            if expected_block_number == end_block {
-                final_header_data = compressed_header.data.clone();
-            }
 
             let difficulty = TotalDifficulty::new(total_difficulty);
 
@@ -218,10 +216,12 @@ where
             }
         }
         if blocks_written > 0 {
-            let accumulator_hash =
-                B256::from_slice(&final_header_data[0..32.min(final_header_data.len())]);
-            let accumulator = Accumulator::new(accumulator_hash);
-            let block_index = BlockIndex::new(start_block, offsets);
+            // Convert absolute offsets to relative (measured from block-index entry start)
+            let accumulator_entry_size = (ENTRY_HEADER_SIZE + 32) as i64;
+            let block_index_position = position + accumulator_entry_size;
+            let relative_offsets: Vec<i64> =
+                offsets.iter().map(|&abs| abs - block_index_position).collect();
+            let block_index = BlockIndex::new(start_block, relative_offsets);
 
             writer.write_accumulator(&accumulator)?;
             writer.write_block_index(&block_index)?;
@@ -310,7 +310,9 @@ where
 
     let compressed_header = CompressedHeader::from_header(&header)?;
     let compressed_body = CompressedBody::from_body(&body)?;
-    let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
+    let receipts_with_bloom: Vec<_> =
+        receipts.iter().map(|r| TxReceipt::with_bloom_ref(r)).collect();
+    let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts_with_bloom)
         .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
 
     Ok((compressed_header, compressed_body, compressed_receipts))

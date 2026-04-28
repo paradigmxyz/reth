@@ -11,7 +11,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError};
+use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -151,11 +151,15 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     fn new(
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
+        invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
     ) -> Self {
         Self {
-            invalid_headers: InvalidHeaderCache::new(max_invalid_header_cache_length),
+            invalid_headers: InvalidHeaderCache::new(
+                max_invalid_header_cache_length,
+                invalid_header_hit_eviction_threshold,
+            ),
             buffer: BlockBuffer::new(block_buffer_limit),
             tree_state: TreeState::new(canonical_block, engine_kind),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
@@ -446,6 +450,7 @@ where
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
+            config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
         );
@@ -1560,9 +1565,9 @@ where
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get();
+                let _ = prepared.overlay.get(prepared.anchor_hash);
             });
         }
 
@@ -3156,8 +3161,22 @@ where
         );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
-        // keep track of the invalid header
-        self.state.invalid_headers.insert(block.block_with_parent());
+        // keep track of the invalid header unless the consensus impl considers it transient
+        let is_transient = match &validation_err {
+            InsertBlockValidationError::Consensus(err) => self.consensus.is_transient_error(err),
+            _ => false,
+        };
+        if is_transient {
+            warn!(
+                target: "engine::tree",
+                invalid_hash=%block.hash(),
+                invalid_number=block.number(),
+                %validation_err,
+                "Skipping invalid header cache insert for transient validation error",
+            );
+        } else {
+            self.state.invalid_headers.insert(block.block_with_parent());
+        }
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));

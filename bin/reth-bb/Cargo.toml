@@ -69,6 +69,7 @@ default = [
     "jemalloc",
     "reth-cli-util/jemalloc",
     "asm-keccak",
+    "keccak-cache-global",
     "min-debug-logs",
 ]
 
@@ -87,6 +88,12 @@ asm-keccak = [
     "alloy-evm/asm-keccak",
     "revm/asm-keccak",
     "revm-primitives/asm-keccak",
+]
+
+keccak-cache-global = [
+    "reth-node-core/keccak-cache-global",
+    "reth-node-ethereum/keccak-cache-global",
+    "alloy-primitives/keccak-cache-global",
 ]
 
 min-debug-logs = [

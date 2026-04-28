@@ -1110,10 +1110,11 @@ mod tests {
     impl BlockAccessListsClient for FullBlockWithAccessListsClient {
         type Output = futures::future::Ready<PeerRequestResult<BlockAccessLists>>;
 
-        fn get_block_access_lists_with_priority(
+        fn get_block_access_lists_with_priority_and_requirement(
             &self,
             hashes: Vec<B256>,
             _priority: Priority,
+            _requirement: crate::block_access_lists::client::BalRequirement,
         ) -> Self::Output {
             self.access_list_requests.fetch_add(1, Ordering::SeqCst);
 

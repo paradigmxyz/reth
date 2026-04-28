@@ -719,8 +719,15 @@ pub struct DiscoveryArgs {
     pub disable_discv4_discovery: bool,
 
     /// Enable Discv5 discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    ///
+    /// Discv5 is now enabled by default, so this flag is a no-op and will be removed in a future
+    /// release.
+    #[arg(long, conflicts_with = "disable_discovery", hide = true)]
     pub enable_discv5_discovery: bool,
+
+    /// Disable Discv5 discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_discv5_discovery: bool,
 
     /// Disable Nat discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
@@ -852,21 +859,23 @@ impl DiscoveryArgs {
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
-    /// Returns true if discv5 discovery should be configured
+    /// Returns true if discv5 discovery should be configured.
+    ///
+    /// Discv5 is enabled by default and can be disabled with `--disable-discv5-discovery`.
     const fn should_enable_discv5(&self) -> bool {
-        if self.disable_discovery {
+        if self.disable_discovery || self.disable_discv5_discovery {
             return false;
         }
 
-        self.enable_discv5_discovery ||
-            self.discv5_addr.is_some() ||
-            self.discv5_addr_ipv6.is_some()
+        true
     }
 
-    /// Set the discovery port to zero, to allow the OS to assign a random unused port when
-    /// discovery binds to the socket.
+    /// Set the discovery ports to zero, to allow the OS to assign random unused ports when
+    /// discovery binds to the sockets.
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
+        self.discv5_port = 0;
+        self.discv5_port_ipv6 = 0;
         self
     }
 
@@ -896,6 +905,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_discv5_discovery: false,
             disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,

@@ -2,7 +2,7 @@
 
 use crate::{is_database_empty, TableSet, Tables};
 use eyre::Context;
-use reth_tracing::tracing::info;
+use reth_tracing::tracing::{info, warn};
 use std::path::Path;
 
 pub use crate::implementation::mdbx::*;
@@ -12,12 +12,75 @@ pub use reth_libmdbx::*;
 /// versions. These will be dropped during database initialization.
 const ORPHAN_TABLES: &[&str] = &["AccountsTrieChangeSets", "StoragesTrieChangeSets"];
 
+/// Checks if the given path resides on a ZFS filesystem and logs a warning.
+///
+/// ZFS uses copy-on-write (COW) semantics which conflict with MDBX's write patterns, leading to
+/// significant performance degradation.
+fn warn_if_zfs(path: &Path) {
+    if matches!(is_zfs(path), Ok(true)) {
+        warn!(
+            target: "reth::db",
+            path = %path.display(),
+            "Database is on a ZFS filesystem. ZFS's copy-on-write behavior causes significant \
+             performance degradation with MDBX. Consider using ext4 or xfs instead."
+        );
+    }
+}
+
+/// Returns `true` if the given path is on a ZFS filesystem.
+#[cfg(target_os = "linux")]
+fn is_zfs(path: &Path) -> std::io::Result<bool> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    /// ZFS filesystem magic number.
+    const ZFS_SUPER_MAGIC: i64 = 0x2fc12fc1;
+
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
+    unsafe {
+        let mut stat: libc::statfs = std::mem::zeroed();
+        if libc::statfs(c_path.as_ptr(), &raw mut stat) == 0 {
+            Ok(stat.f_type == ZFS_SUPER_MAGIC)
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
+/// Returns `true` if the given path is on a ZFS filesystem.
+#[cfg(target_os = "macos")]
+fn is_zfs(path: &Path) -> std::io::Result<bool> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
+    unsafe {
+        let mut stat: libc::statfs = std::mem::zeroed();
+        if libc::statfs(c_path.as_ptr(), &raw mut stat) == 0 {
+            let fstype = std::ffi::CStr::from_ptr(stat.f_fstypename.as_ptr());
+            Ok(fstype.to_bytes() == b"zfs")
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
+/// ZFS detection is unsupported on this platform, always returns `Ok(false)`.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn is_zfs(_path: &Path) -> std::io::Result<bool> {
+    Ok(false)
+}
+
 /// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
 pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
     let rpath = path.as_ref();
+    warn_if_zfs(rpath);
+
     if is_database_empty(rpath) {
         reth_fs_util::create_dir_all(rpath)
             .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
