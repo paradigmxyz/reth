@@ -128,7 +128,8 @@ where
     /// the given hash and count.
     ///
     /// The block range is always the primary result. Access lists are requested after the block
-    /// range is downloaded, and `None` is returned when optional BAL data is unavailable.
+    /// range is downloaded. `Some` may contain a partial prefix when the peer truncates the BAL
+    /// response, while `None` means the optional BAL lookup failed or was unavailable.
     pub fn get_full_block_range_with_optional_access_lists(
         &self,
         hash: B256,
@@ -500,11 +501,6 @@ where
         let expected = self.block_result.as_ref().map_or(0, Vec::len);
         let received = access_lists.0.len();
 
-        if received == expected {
-            self.access_lists = OptionalBlockAccessListsState::Ready(Some(access_lists));
-            return
-        }
-
         if received > expected {
             debug!(
                 target: "downloaders",
@@ -514,11 +510,13 @@ where
                 "Received wrong access list range response",
             );
             self.client.report_bad_message(peer);
+            self.access_lists = OptionalBlockAccessListsState::Ready(None);
+            return
         }
 
-        // Optional BAL data must not block block range downloads. Short responses can happen due to
-        // response limits, so keep the blocks and surface BALs as unavailable.
-        self.access_lists = OptionalBlockAccessListsState::Ready(None);
+        // Short BAL responses are allowed by the wire protocol. Preserve the returned prefix and
+        // let callers decide whether they need to fetch the remaining entries.
+        self.access_lists = OptionalBlockAccessListsState::Ready(Some(access_lists));
     }
 
     fn on_access_lists_error(&mut self, err: RequestError) {
@@ -1511,7 +1509,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_full_block_range_with_access_lists_returns_none_after_empty_response() {
+    async fn download_full_block_range_with_access_lists_preserves_empty_response() {
         let client = FullBlockWithAccessListsClient::default();
         client.empty_first_response.store(true, Ordering::SeqCst);
         let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
@@ -1528,16 +1526,17 @@ mod tests {
 
         let (blocks, received_access_lists) = response;
         assert_eq!(blocks.len(), 3);
-        assert!(received_access_lists.is_none());
+        assert_eq!(received_access_lists, Some(BlockAccessLists(Vec::new())));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
-    async fn download_full_block_range_with_access_lists_returns_none_after_short_response() {
+    async fn download_full_block_range_with_access_lists_preserves_short_response() {
         let client = FullBlockWithAccessListsClient::default();
         client.set_access_list_soft_limit(2);
         let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..5);
 
+        let access_lists = Arc::clone(&client.access_lists);
         let request_count = Arc::clone(&client.access_list_requests);
         let client = FullBlockClient::test_client(client);
 
@@ -1549,7 +1548,15 @@ mod tests {
         .expect("range request should complete without access lists");
 
         assert_eq!(blocks.len(), 5);
-        assert!(received_access_lists.is_none());
+        let expected = {
+            let access_lists = access_lists.lock();
+            blocks
+                .iter()
+                .take(2)
+                .map(|block| access_lists.get(&block.hash()).cloned().expect("access list exists"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(received_access_lists, Some(BlockAccessLists(expected)));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
 
