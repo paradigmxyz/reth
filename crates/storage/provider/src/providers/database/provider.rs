@@ -1512,10 +1512,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
                 for block in start..=static_end {
                     let block_changesets = self.account_block_changeset(block)?;
                     for changeset in block_changesets {
-                        changed_accounts_and_blocks
-                            .entry(changeset.address)
-                            .or_default()
-                            .push(block);
+                        let blocks =
+                            changed_accounts_and_blocks.entry(changeset.address).or_default();
+                        if blocks.last().copied() != Some(block) {
+                            blocks.push(block);
+                        }
                     }
                 }
             }
@@ -1528,7 +1529,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
                     let (index, account) = entry?;
-                    accounts.entry(account.address).or_default().push(index);
+                    let blocks = accounts.entry(account.address).or_default();
+                    if blocks.last().copied() != Some(index) {
+                        blocks.push(index);
+                    }
                     Ok(accounts)
                 },
             )?;
@@ -2381,10 +2385,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
                 |mut storages: BTreeMap<(Address, B256), Vec<u64>>, (index, storage)| {
-                    storages
-                        .entry((index.address(), storage.key))
-                        .or_default()
-                        .push(index.block_number());
+                    let blocks = storages.entry((index.address(), storage.key)).or_default();
+                    let block_number = index.block_number();
+                    if blocks.last().copied() != Some(block_number) {
+                        blocks.push(block_number);
+                    }
                     Ok(storages)
                 },
             )
@@ -2398,10 +2403,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
                      entry|
                      -> ProviderResult<_> {
                         let (index, storage) = entry?;
-                        storages
-                            .entry((index.address(), storage.key))
-                            .or_default()
-                            .push(index.block_number());
+                        let blocks = storages.entry((index.address(), storage.key)).or_default();
+                        let block_number = index.block_number();
+                        if blocks.last().copied() != Some(block_number) {
+                            blocks.push(block_number);
+                        }
                         Ok(storages)
                     },
                 )?;
