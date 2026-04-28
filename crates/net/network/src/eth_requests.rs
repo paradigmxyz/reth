@@ -328,22 +328,17 @@ where
     fn on_block_access_lists_request(
         &self,
         _peer_id: PeerId,
-        request: GetBlockAccessLists,
+        mut request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
-        // Cap the number of hashes we look up per EIP-8159 implementation-defined limits.
-        let hashes = if request.0.len() > MAX_BLOCK_ACCESS_LISTS_SERVE {
-            &request.0[..MAX_BLOCK_ACCESS_LISTS_SERVE]
-        } else {
-            &request.0[..]
-        };
+        request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists = self
             .client
             .bal_store()
-            .get_by_hashes_with_limit(hashes, limit)
-            .unwrap_or_else(|_| empty_block_access_lists_with_limit(hashes.len(), limit));
+            .get_by_hashes_with_limit(&request.0, limit)
+            .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
