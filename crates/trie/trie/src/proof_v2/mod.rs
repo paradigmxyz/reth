@@ -856,6 +856,53 @@ where
         Ok(entry)
     }
 
+    /// Wraps [`TrieCursor::next`], skipping cached branches whose sub-tries must be recalculated
+    /// from leaves.
+    fn trie_cursor_next(
+        &mut self,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, StateProofError> {
+        let mut entry = self.trie_cursor.next()?;
+        while let Some((ref path, ref branch)) = entry {
+            if !self.should_skip_cached_branch(path, branch) {
+                break
+            }
+            entry = self.trie_cursor.next()?;
+        }
+        Ok(entry)
+    }
+
+    /// Advances the trie cursor to the first cached branch at-or-after `key`.
+    ///
+    /// When we are already walking descendants of the current branch, reuse the cursor's current
+    /// position and step forward with `next()` instead of starting another seek.
+    fn trie_cursor_advance_to(
+        &mut self,
+        key: Nibbles,
+        branch_path: &Nibbles,
+        trie_cursor_state: &mut TrieCursorState,
+    ) -> Result<(), StateProofError> {
+        let mut entry = match trie_cursor_state.path() {
+            Some(path) if path < &key && path.starts_with(branch_path) => {
+                trace!(target: TRACE_TARGET, ?key, ?path, "Advancing trie cursor with next");
+                self.trie_cursor_next()?
+            }
+            _ => {
+                trace!(target: TRACE_TARGET, ?key, "Seeking trie cursor to child path");
+                self.trie_cursor_seek(key)?
+            }
+        };
+
+        while let Some((ref path, _)) = entry {
+            if path >= &key {
+                break
+            }
+            entry = self.trie_cursor_next()?;
+        }
+
+        *trie_cursor_state = TrieCursorState::seeked(entry);
+        Ok(())
+    }
+
     /// Returns true if the cached branch should be skipped entirely and its sub-trie recalculated
     /// from leaves.
     fn should_skip_cached_branch(
@@ -1245,8 +1292,8 @@ where
             // All trie nodes prior to `child_path` will not be modified further, so we can seek the
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
-                trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(child_path)?);
+                let branch_path = self.branch_path;
+                self.trie_cursor_advance_to(child_path, &branch_path, trie_cursor_state)?;
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -2313,6 +2360,70 @@ mod tests {
             expected_root,
             got_root,
             "Root hash with prefix set invalidation should match fresh computation"
+        );
+    }
+
+    #[test]
+    fn test_trie_cursor_steps_between_sibling_cached_branches() {
+        reth_tracing::init_test_tracing();
+
+        let val = U256::from(1u64);
+        let key_610 = B256::right_padding_from(&[0x61, 0x00]);
+        let key_611 = B256::right_padding_from(&[0x61, 0x10]);
+        let key_620 = B256::right_padding_from(&[0x62, 0x00]);
+        let key_621 = B256::right_padding_from(&[0x62, 0x10]);
+
+        let mut harness = TrieTestHarness::new(
+            [(key_610, val), (key_611, val), (key_620, val), (key_621, val)].into_iter().collect(),
+        );
+
+        let mut trie_nodes: BTreeMap<_, _> = harness
+            .storage_trie_updates()
+            .storage_nodes
+            .iter()
+            .map(|(path, branch)| (*path, branch.clone()))
+            .collect();
+
+        let shared_branch_path = Nibbles::from_nibbles([0x6]);
+        let shared_branch =
+            trie_nodes.get_mut(&shared_branch_path).expect("expected shared branch at nibble 6");
+        *shared_branch = BranchNodeCompact::new(
+            shared_branch.state_mask,
+            shared_branch.tree_mask,
+            TrieMask::default(),
+            Vec::new(),
+            shared_branch.root_hash,
+        );
+        harness.set_trie_nodes(trie_nodes);
+
+        let trie_factory = harness.trie_cursor_factory();
+        let trie_cursor = trie_factory.storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+
+        let root_node = calculator.storage_root_node(harness.hashed_address()).unwrap();
+        let got_root =
+            calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
+        pretty_assertions::assert_eq!(harness.original_root(), got_root);
+
+        let visits = trie_factory.visited_storage_keys(harness.hashed_address()).clone();
+        assert!(
+            visits.iter().any(|visit| matches!(visit.visit_type, crate::mock::KeyVisitType::Next)),
+            "expected trie cursor to advance with next(), got visits: {visits:?}"
+        );
+        assert!(
+            !visits.iter().any(|visit| {
+                matches!(
+                    &visit.visit_type,
+                    crate::mock::KeyVisitType::SeekNonExact(path)
+                        if path == &Nibbles::from_nibbles([0x6, 0x1]) ||
+                            path == &Nibbles::from_nibbles([0x6, 0x2])
+                )
+            }),
+            "expected sibling cached branches to reuse next() instead of seek(), got visits: {visits:?}"
         );
     }
 
