@@ -361,8 +361,44 @@ where
         let (prefetch_tx, prefetch_rx) = oneshot::channel();
         let (stream_tx, stream_rx) = oneshot::channel();
 
+        if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+            let stream_ctx = ctx.clone();
+            executor.bal_streaming_pool().spawn(move || {
+                let branch_span = debug_span!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    parent: &stream_parent_span,
+                    "bal_hashed_state_stream",
+                    bal_accounts = stream_bal.as_bal().len(),
+                );
+                let provider_parent_span = branch_span.clone();
+                let _span = branch_span.entered();
+
+                stream_bal.as_bal().par_iter().for_each_init(
+                    || {
+                        (
+                            stream_ctx.clone(),
+                            None::<Box<dyn AccountReader>>,
+                            provider_parent_span.clone(),
+                        )
+                    },
+                    |(ctx, provider, parent_span), account_changes| {
+                        ctx.send_bal_hashed_state(
+                            parent_span,
+                            provider,
+                            account_changes,
+                            &to_sparse_trie_task,
+                        );
+                    },
+                );
+
+                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                let _ = stream_tx.send(());
+            });
+        } else {
+            let _ = stream_tx.send(());
+        }
+
         if ctx.saved_cache.is_some() {
-            let prefetch_ctx = ctx.clone();
             executor.prewarming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -376,7 +412,7 @@ where
                 prefetch_bal.as_bal().par_iter().for_each_init(
                     || {
                         (
-                            prefetch_ctx.clone(),
+                            ctx.clone(),
                             None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
                             provider_parent_span.clone(),
                         )
@@ -393,36 +429,6 @@ where
             });
         } else {
             let _ = prefetch_tx.send(());
-        }
-
-        if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-            executor.bal_streaming_pool().spawn(move || {
-                let branch_span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: &stream_parent_span,
-                    "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
-                );
-                let provider_parent_span = branch_span.clone();
-                let _span = branch_span.entered();
-
-                stream_bal.as_bal().par_iter().for_each_init(
-                    || (ctx.clone(), None::<Box<dyn AccountReader>>, provider_parent_span.clone()),
-                    |(ctx, provider, parent_span), account_changes| {
-                        ctx.send_bal_hashed_state(
-                            parent_span,
-                            provider,
-                            account_changes,
-                            &to_sparse_trie_task,
-                        );
-                    },
-                );
-
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
-                let _ = stream_tx.send(());
-            });
-        } else {
-            let _ = stream_tx.send(());
         }
 
         prefetch_rx
