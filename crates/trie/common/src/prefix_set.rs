@@ -1,4 +1,4 @@
-use crate::Nibbles;
+use crate::{Nibbles, TrieMask};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256Map, B256Set};
 use core::ops::Range;
@@ -254,6 +254,41 @@ impl PrefixSet {
         }
 
         false
+    }
+
+    /// Returns a mask of the immediate child nibbles that have at least one changed descendant
+    /// below `prefix`.
+    #[inline]
+    pub fn child_mask(&mut self, prefix: &Nibbles) -> TrieMask {
+        if prefix.len() >= 64 {
+            return TrieMask::default()
+        }
+
+        if self.all {
+            return TrieMask::new(u16::MAX)
+        }
+
+        while self.index > 0 && &self.keys[self.index] > prefix {
+            self.index -= 1;
+        }
+
+        let mut mask = TrieMask::default();
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key.starts_with(prefix) {
+                self.index += idx;
+                if key.len() > prefix.len() {
+                    mask.set_bit(key.get_unchecked(prefix.len()));
+                }
+                continue
+            }
+
+            if key > prefix {
+                self.index += idx;
+                break
+            }
+        }
+
+        mask
     }
 
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.

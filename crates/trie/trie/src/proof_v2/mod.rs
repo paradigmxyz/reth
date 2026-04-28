@@ -867,17 +867,8 @@ where
             return false
         }
 
-        let mut num_unmatched = 0u32;
-        let mut child_path = *cached_path;
-        for nibble in 0u8..16 {
-            if cached_branch.state_mask.is_bit_set(nibble) {
-                child_path.truncate(cached_path.len());
-                child_path.push_unchecked(nibble);
-                if !self.prefix_set.contains(&child_path) {
-                    num_unmatched += 1;
-                }
-            }
-        }
+        let dirty_child_nibbles = self.prefix_set.child_mask(cached_path);
+        let num_unmatched = (cached_branch.state_mask & !dirty_child_nibbles).count_ones();
 
         if num_unmatched <= 1 {
             trace!(
@@ -1095,17 +1086,8 @@ where
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
             // children have already been constructed.
             if self.prefix_set.contains(&self.branch_path) {
-                let branch_path_len = self.branch_path.len();
-                let mut child_path = self.branch_path;
-                for nibble in 0u8..16 {
-                    if !curr_state_mask.is_bit_set(nibble) {
-                        child_path.truncate(branch_path_len);
-                        child_path.push_unchecked(nibble);
-                        if self.prefix_set.contains(&child_path) {
-                            next_child_nibbles.set_bit(nibble);
-                        }
-                    }
-                }
+                next_child_nibbles |=
+                    self.prefix_set.child_mask(&self.branch_path) & !curr_state_mask;
             }
 
             let _orig_next_child_nibbles = next_child_nibbles;
