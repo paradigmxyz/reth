@@ -1,9 +1,7 @@
 //! Helpers for testing.
 
 use crate::{ConfigureEvm, EvmEnvFor};
-use alloy_evm::block::{BlockExecutor, BlockExecutorFor};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
-use revm::database::State;
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
 /// [`ConfigureEvm`] bounds.
@@ -32,7 +30,6 @@ where
     Inner: ConfigureEvm,
 {
     type Primitives = Inner::Primitives;
-    type TxExecutionResult = Inner::TxExecutionResult;
     type Error = Inner::Error;
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
@@ -71,18 +68,6 @@ where
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<crate::ExecutionCtxFor<'_, Self>, Self::Error> {
         self.inner().context_for_next_block(parent, attributes)
-    }
-
-    fn executor_for_block<'a, DB: crate::Database>(
-        &'a self,
-        db: &'a mut State<DB>,
-        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<
-        impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>
-            + BlockExecutor<Result = Self::TxExecutionResult>,
-        Self::Error,
-    > {
-        self.inner().executor_for_block(db, block)
     }
 }
 

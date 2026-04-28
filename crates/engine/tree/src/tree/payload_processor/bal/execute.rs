@@ -253,7 +253,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                     feasibility.record_and_check(worker_result.result())?;
                     gas_tracker.record_result(worker_result.result());
                     canonical_executor.evm_mut().db_mut().bump_bal_index();
-                    commit_worker_result(&mut canonical_executor, worker_result)?;
+                    commit_worker_result(&mut canonical_executor, worker_result);
                 }
 
                 Ok(())
@@ -347,14 +347,11 @@ where
     result_rx
 }
 
-fn commit_worker_result<E>(
-    executor: &mut E,
-    worker_result: E::Result,
-) -> Result<(), BlockExecutionError>
+fn commit_worker_result<E>(executor: &mut E, worker_result: E::Result)
 where
     E: BlockExecutor,
 {
-    executor.commit_transaction(worker_result).map(|_| ())
+    executor.commit_transaction(worker_result);
 }
 
 #[cfg(test)]
