@@ -3,7 +3,7 @@ use crate::{
     block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::{BodiesClient, SingleBodyRequest},
     download::DownloadClient,
-    error::PeerRequestResult,
+    error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, SingleHeaderRequest},
     priority::Priority,
     BlockClient,
@@ -521,7 +521,7 @@ where
         self.access_lists = OptionalBlockAccessListsState::Ready(None);
     }
 
-    fn on_access_lists_error(&mut self, err: crate::error::RequestError) {
+    fn on_access_lists_error(&mut self, err: RequestError) {
         debug!(
             target: "downloaders",
             %err,
