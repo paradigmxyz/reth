@@ -989,7 +989,7 @@ impl Discv4Service {
         let key = kad_key(peer_id);
         match self.kbuckets.entry(&key) {
             BucketEntry::Present(entry, _) => Some(f(entry.value())),
-            BucketEntry::Pending(mut entry, _) => Some(f(entry.value())),
+            BucketEntry::Pending(entry, _) => Some(f(entry.value())),
             _ => None,
         }
     }
@@ -1015,7 +1015,7 @@ impl Discv4Service {
             kbucket::Entry::Present(mut entry, _) => {
                 entry.value_mut().update_with_enr(last_enr_seq)
             }
-            kbucket::Entry::Pending(mut entry, _) => entry.value().update_with_enr(last_enr_seq),
+            kbucket::Entry::Pending(mut entry, _) => entry.value_mut().update_with_enr(last_enr_seq),
             _ => return,
         };
 
@@ -1067,8 +1067,8 @@ impl Discv4Service {
             }
             kbucket::Entry::Pending(mut entry, mut status) => {
                 // endpoint is now proven
-                entry.value().establish_proof();
-                entry.value().update_with_enr(last_enr_seq);
+                entry.value_mut().establish_proof();
+                entry.value_mut().update_with_enr(last_enr_seq);
 
                 if !status.is_connected() {
                     status.state = ConnectionState::Connected;
@@ -1200,7 +1200,7 @@ impl Discv4Service {
                 } else {
                     is_proven = entry.value().has_endpoint_proof;
                 }
-                entry.value().update_with_enr(ping.enr_sq)
+                entry.value_mut().update_with_enr(ping.enr_sq)
             }
             kbucket::Entry::Absent(entry) => {
                 let mut node = NodeEntry::new(record);
@@ -1430,7 +1430,7 @@ impl Discv4Service {
                         (entry.value().record, id)
                     }
                     kbucket::Entry::Pending(mut entry, _) => {
-                        let id = entry.value().update_with_fork_id(fork_id);
+                        let id = entry.value_mut().update_with_fork_id(fork_id);
                         (entry.value().record, id)
                     }
                     _ => return,
@@ -1580,7 +1580,7 @@ impl Discv4Service {
                         }
                     }
                 }
-                BucketEntry::Pending(mut entry, _) => {
+                BucketEntry::Pending(entry, _) => {
                     if entry.value().has_endpoint_proof {
                         if entry
                             .value()
@@ -1684,7 +1684,7 @@ impl Discv4Service {
                     entry.value().find_node_failures
                 }
                 kbucket::Entry::Pending(mut entry, _) => {
-                    entry.value().inc_failed_request();
+                    entry.value_mut().inc_failed_request();
                     entry.value().find_node_failures
                 }
                 _ => continue,
