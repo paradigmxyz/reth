@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -697,6 +697,9 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
+    ///
+    /// If provided, `oob_block_access_list` is an out-of-band RLP-encoded BAL supplied alongside
+    /// the payload. It takes precedence over the payload's inline BAL during validation.
     #[instrument(
         level = "debug",
         target = "engine::tree",
@@ -706,6 +709,7 @@ where
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
+        oob_block_access_list: Option<Bytes>,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
 
@@ -754,7 +758,7 @@ where
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let mut outcome = if self.backfill_sync_state.is_idle() {
-            self.try_insert_payload(payload)?.into_outcome()
+            self.try_insert_payload(payload, oob_block_access_list)?.into_outcome()
         } else {
             TreeOutcome::new(self.try_buffer_payload(payload)?)
         };
@@ -780,13 +784,14 @@ where
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
+        oob_block_access_list: Option<Bytes>,
     ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
         let mut latest_valid_hash = None;
 
-        match self.insert_payload(payload) {
+        match self.insert_payload(payload, oob_block_access_list) {
             Ok(status) => {
                 let (status, already_seen) = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -1623,7 +1628,7 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload(payload, None);
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
@@ -1652,6 +1657,7 @@ where
                             }
                             BeaconEngineMessage::RethNewPayload {
                                 payload,
+                                oob_block_access_list,
                                 wait_for_persistence,
                                 wait_for_caches,
                                 tx,
@@ -1703,7 +1709,8 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
+                                let mut output =
+                                    self.on_new_payload(payload, oob_block_access_list);
                                 let latency = start.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
@@ -2832,14 +2839,20 @@ where
     ///
     /// Returns `InsertPayloadOk` if the payload was successfully inserted and executed,
     /// or `InsertPayloadError` if validation or execution failed.
+    ///
+    /// If provided, `oob_block_access_list` is an out-of-band RLP-encoded BAL supplied alongside
+    /// the payload. It takes precedence over the payload's inline BAL during validation.
     fn insert_payload(
         &mut self,
         payload: T::ExecutionData,
+        oob_block_access_list: Option<Bytes>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             payload.block_with_parent(),
             payload,
-            |validator, payload, ctx| validator.validate_payload(payload, ctx),
+            |validator, payload, ctx| {
+                validator.validate_payload(payload, ctx, oob_block_access_list)
+            },
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
         )
     }

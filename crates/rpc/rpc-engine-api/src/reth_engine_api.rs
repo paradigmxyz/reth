@@ -49,7 +49,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
         let (status, timings) = self
             .beacon_engine_handle
-            .reth_new_payload(payload, wait_for_persistence, wait_for_caches)
+            .reth_new_payload(payload, wait_for_persistence, wait_for_caches, None)
             .await
             .map_err(EngineApiError::from)?;
         Ok(RethPayloadStatus {

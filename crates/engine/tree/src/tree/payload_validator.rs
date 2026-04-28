@@ -48,13 +48,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{
-    bal::{Bal, DecodedBal},
-    BlockAccessList,
-};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{map::B256Set, Bytes, B256};
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
@@ -377,6 +374,9 @@ where
     /// - Block execution
     /// - State root computation
     /// - Fork detection
+    ///
+    /// If provided, `decoded_bal` is the already-decoded BAL selected for this payload before
+    /// execution. `None` means no BAL was supplied or present.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
@@ -390,6 +390,7 @@ where
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
+        decoded_bal: Option<Arc<DecodedBal>>,
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
@@ -490,12 +491,6 @@ where
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
-
-        // Extract the decoded BAL, if valid and available.
-        let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
-            .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }))
-        .map(Arc::new);
 
         let env = ExecutionEnv {
             evm_env,
@@ -1886,6 +1881,17 @@ enum StateRootStrategy {
     Synchronous,
 }
 
+/// Decodes the BAL for a payload, preferring out-of-band BAL bytes over the payload's inline BAL.
+fn decode_payload_access_list<P: ExecutionPayload>(
+    payload: &P,
+    oob_block_access_list: Option<Bytes>,
+) -> Result<Option<Arc<DecodedBal>>, alloy_rlp::Error> {
+    oob_block_access_list
+        .or_else(|| payload.block_access_list().cloned())
+        .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list).map(Arc::new))
+        .transpose()
+}
+
 /// Type that validates the payloads processed by the engine.
 ///
 /// This provides the necessary functions for validating/executing payloads/blocks.
@@ -1923,10 +1929,14 @@ pub trait EngineValidator<
     ) -> Result<SealedBlock<N::Block>, NewPayloadError>;
 
     /// Validates a payload received from engine API.
+    ///
+    /// If provided, `oob_block_access_list` is an out-of-band RLP-encoded BAL and is used instead
+    /// of the payload's inline BAL.
     fn validate_payload(
         &mut self,
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
+        oob_block_access_list: Option<Bytes>,
     ) -> ValidationOutcome<N>;
 
     /// Validates a block downloaded from the network.
@@ -1997,8 +2007,11 @@ where
         &mut self,
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
+        oob_block_access_list: Option<Bytes>,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx)
+        let decoded_bal = decode_payload_access_list(&payload, oob_block_access_list)
+            .map_err(|err| NewPayloadError::Other(Box::new(err)))?;
+        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx, decoded_bal)
     }
 
     fn validate_block(
@@ -2006,7 +2019,7 @@ where
         block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
+        self.validate_block_with_state(BlockOrPayload::Block(block), ctx, None)
     }
 
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
@@ -2099,27 +2112,6 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
-        }
-    }
-
-    /// Returns the block access list embedded in a payload, if present.
-    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        match self {
-            Self::Payload(payload) => payload.block_access_list().map(|block_access_list| {
-                alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
-            }),
-            Self::Block(_) => None,
-        }
-    }
-
-    /// Returns the decoded block access list, if present and successfully decoded.
-    pub fn try_decoded_access_list(&self) -> Result<Option<DecodedBal>, alloy_rlp::Error> {
-        match self {
-            Self::Payload(payload) => payload
-                .block_access_list()
-                .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
-                .transpose(),
-            Self::Block(_) => Ok(None),
         }
     }
 

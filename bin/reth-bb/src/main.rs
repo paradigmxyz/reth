@@ -7,7 +7,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 mod evm;
 mod evm_config;
 
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 
 use alloy_rpc_types::engine::{ExecutionData, ForkchoiceState, ForkchoiceUpdated};
 use async_trait::async_trait;
@@ -66,6 +66,7 @@ pub trait BbRethEngineApi {
         wait_for_persistence: Option<bool>,
         wait_for_caches: Option<bool>,
         big_block_data: Option<BigBlockData<ExecutionData>>,
+        oob_block_access_list: Option<Bytes>,
     ) -> RpcResult<RethPayloadStatus>;
 
     /// `reth_forkchoiceUpdated` – pass-through.
@@ -91,6 +92,7 @@ impl BbRethEngineApiServer for BbRethEngineApiHandler {
         wait_for_persistence: Option<bool>,
         wait_for_caches: Option<bool>,
         big_block_data: Option<BigBlockData<ExecutionData>>,
+        oob_block_access_list: Option<Bytes>,
     ) -> RpcResult<RethPayloadStatus> {
         let wait_for_persistence = wait_for_persistence.unwrap_or(true);
         let wait_for_caches = wait_for_caches.unwrap_or(true);
@@ -99,6 +101,7 @@ impl BbRethEngineApiServer for BbRethEngineApiHandler {
             wait_for_persistence,
             wait_for_caches,
             has_big_block_data = big_block_data.is_some(),
+            has_oob_bal = oob_block_access_list.is_some(),
             "Serving bb reth_newPayload"
         );
 
@@ -118,7 +121,7 @@ impl BbRethEngineApiServer for BbRethEngineApiHandler {
 
         let (status, timings) = self
             .engine
-            .reth_new_payload(payload, wait_for_persistence, wait_for_caches)
+            .reth_new_payload(payload, wait_for_persistence, wait_for_caches, oob_block_access_list)
             .await
             .map_err(EngineApiError::from)?;
 

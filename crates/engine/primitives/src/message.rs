@@ -1,6 +1,7 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
     PayloadStatus, PayloadStatusEnum,
@@ -206,6 +207,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     RethNewPayload {
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
+        /// Optional out-of-band RLP-encoded block access list.
+        oob_block_access_list: Option<Bytes>,
         /// Whether to wait for in-flight persistence to complete before processing.
         wait_for_persistence: bool,
         /// Whether to wait for execution cache and sparse trie locks before processing.
@@ -303,10 +306,12 @@ where
         payload: Payload::ExecutionData,
         wait_for_persistence: bool,
         wait_for_caches: bool,
+        oob_block_access_list: Option<Bytes>,
     ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::RethNewPayload {
             payload,
+            oob_block_access_list,
             wait_for_persistence,
             wait_for_caches,
             tx,
