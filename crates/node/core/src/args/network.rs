@@ -31,7 +31,8 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
                 DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
         },

@@ -56,7 +56,7 @@ pub mod tx_manager {
 
     /// Default memory limit (in bytes) for the channel between
     /// [`NetworkManager`](crate::NetworkManager) and
-    /// [`TransactionsManager`](super::TransactionsManager).
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     ///
     /// Caps the total in-flight bytes of `NetworkTransactionEvent`s buffered between the two
     /// tasks. When the budget is exhausted, new events are dropped (see metric
