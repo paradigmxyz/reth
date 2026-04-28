@@ -306,9 +306,10 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_engine_primitives::BlobCellsAndProofsV1;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
@@ -807,6 +808,14 @@ where
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v3(versioned_hashes)
+    }
+
+    fn get_blobs_for_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
 }
 

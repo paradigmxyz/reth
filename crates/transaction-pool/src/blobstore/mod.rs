@@ -1,14 +1,15 @@
 //! Storage for blob data of EIP4844 transactions.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
-    eip7594::BlobTransactionSidecarVariant,
+    eip4844::{env_settings::EnvKzgSettings, Blob, BlobAndProofV1, BlobAndProofV2},
+    eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB},
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B128, B256};
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
+use reth_engine_primitives::BlobCellsAndProofsV1;
 use std::{
     fmt,
     sync::{
@@ -109,11 +110,116 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
 
+    /// Return the [`BlobCellsAndProofsV1`]s for a list of blob versioned hashes and requested cell
+    /// indices.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_by_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
+
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
 
     /// How many blobs are in the blob store.
     fn blobs_len(&self) -> usize;
+}
+
+/// Cell indices requested by `engine_getBlobsV4`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct BlobCellMask {
+    value: u128,
+}
+
+impl BlobCellMask {
+    /// Creates a mask from the Engine API 16-byte, big-endian bitarray.
+    pub(crate) fn new(indices_bitarray: B128) -> Self {
+        Self { value: u128::from(indices_bitarray) }
+    }
+
+    /// Returns the number of selected cells.
+    pub(crate) const fn count(self) -> usize {
+        self.value.count_ones() as usize
+    }
+
+    /// Iterates selected cell indices in ascending order.
+    pub(crate) fn selected_indices(self) -> impl Iterator<Item = usize> {
+        let mut bits = self.value;
+        core::iter::from_fn(move || {
+            if bits == 0 {
+                return None;
+            }
+
+            let index = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            Some(index)
+        })
+    }
+}
+
+/// Returns the requested cells and proofs for a blob inside an EIP-7594 sidecar.
+pub(crate) fn blob_cells_and_proofs(
+    blob_sidecar: &BlobTransactionSidecarEip7594,
+    blob_index: usize,
+    cell_mask: BlobCellMask,
+) -> Result<Option<BlobCellsAndProofsV1>, BlobStoreError> {
+    let Some(blob) = blob_sidecar.blobs.get(blob_index) else { return Ok(None) };
+
+    let proof_start = blob_index * CELLS_PER_EXT_BLOB;
+    let Some(proofs) = blob_sidecar.cell_proofs.get(proof_start..proof_start + CELLS_PER_EXT_BLOB)
+    else {
+        return Ok(None)
+    };
+
+    // SAFETY: alloy's `Blob` and c-kzg's `Blob` have the same memory layout.
+    let blob = unsafe { core::mem::transmute::<&Blob, &c_kzg::Blob>(blob) };
+    let cells = EnvKzgSettings::Default
+        .get()
+        .compute_cells(blob)
+        .map_err(|err| BlobStoreError::Other(Box::new(err)))?;
+
+    let mut blob_cells = Vec::with_capacity(cell_mask.count());
+    let mut selected_proofs = Vec::with_capacity(cell_mask.count());
+    for cell_index in cell_mask.selected_indices() {
+        // TODO(eip8070): Once the sparse blob pool stores partial cell data, use stored cell
+        // availability here and return `None` for requested cells that are not locally available.
+        // Reth currently stores full EIP-7594 sidecars, so every selected cell can be recomputed.
+        blob_cells.push(Some(cells[cell_index].to_bytes().into()));
+        selected_proofs.push(Some(proofs[cell_index]));
+    }
+
+    Ok(Some(BlobCellsAndProofsV1 { blob_cells, proofs: selected_proofs }))
+}
+
+/// Finds requested blob cells for matching versioned hashes in an EIP-7594 sidecar.
+pub(crate) fn match_versioned_hashes_cells(
+    blob_sidecar: &BlobTransactionSidecarEip7594,
+    versioned_hashes: &[B256],
+    cell_mask: BlobCellMask,
+) -> Result<Vec<(usize, BlobCellsAndProofsV1)>, BlobStoreError> {
+    let mut result = Vec::new();
+    let mut cells_by_blob_index = Vec::<(usize, BlobCellsAndProofsV1)>::new();
+    for (hash_idx, versioned_hash) in versioned_hashes.iter().enumerate() {
+        if let Some(blob_index) = blob_sidecar.versioned_hash_index(versioned_hash) {
+            if let Some((_, cells_and_proofs)) =
+                cells_by_blob_index.iter().find(|(idx, _)| *idx == blob_index)
+            {
+                result.push((hash_idx, cells_and_proofs.clone()));
+                continue;
+            }
+
+            if let Some(cells_and_proofs) =
+                blob_cells_and_proofs(blob_sidecar, blob_index, cell_mask)?
+            {
+                result.push((hash_idx, cells_and_proofs.clone()));
+                cells_by_blob_index.push((blob_index, cells_and_proofs));
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Error variants that can occur when interacting with a blob store.

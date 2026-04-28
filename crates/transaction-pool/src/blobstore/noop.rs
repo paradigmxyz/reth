@@ -3,7 +3,8 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B128, B256};
+use reth_engine_primitives::BlobCellsAndProofsV1;
 use std::sync::Arc;
 
 /// A blobstore implementation that does nothing
@@ -82,6 +83,14 @@ impl BlobStore for NoopBlobStore {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_by_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        _indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
     }
 

@@ -70,8 +70,9 @@ use alloy_eips::{
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, TxKind, B128, B256, U256};
 use futures_util::{ready, Stream};
+use reth_engine_primitives::BlobCellsAndProofsV1;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
@@ -722,6 +723,17 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
+
+    /// Return the [`BlobCellsAndProofsV1`]s for a list of blob versioned hashes and requested cell
+    /// indices.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_blobs_for_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.

@@ -19,6 +19,7 @@ reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
+reth-engine-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
@@ -33,6 +34,7 @@ alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
+c-kzg.workspace = true
 
 # async/futures
 futures-util.workspace = true

@@ -21,6 +21,9 @@ use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
+use reth_evm as _;
+use reth_payload_builder_primitives as _;
+
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 #[cfg(feature = "std")]
 pub use reth_evm::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
@@ -28,6 +31,9 @@ pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
 pub use error::*;
+
+mod blob;
+pub use blob::BlobCellsAndProofsV1;
 
 mod forkchoice;
 pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
