@@ -1015,7 +1015,9 @@ impl Discv4Service {
             kbucket::Entry::Present(mut entry, _) => {
                 entry.value_mut().update_with_enr(last_enr_seq)
             }
-            kbucket::Entry::Pending(mut entry, _) => entry.value_mut().update_with_enr(last_enr_seq),
+            kbucket::Entry::Pending(mut entry, _) => {
+                entry.value_mut().update_with_enr(last_enr_seq)
+            }
             _ => return,
         };
 
