@@ -121,6 +121,9 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: usize,
+    /// Whether the BAL-driven parallel execution path is enabled. When false, BAL blocks fall
+    /// back to the serial executor. Default false.
+    bal_parallel_execution_enabled: bool,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Multiproof task chunk size for proof targets.
@@ -196,6 +199,7 @@ impl Default for TreeConfig {
             disable_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
+            bal_parallel_execution_enabled: false,
             has_enough_parallelism: has_enough_parallelism(),
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
@@ -267,6 +271,7 @@ impl TreeConfig {
             disable_prewarming,
             state_provider_metrics,
             cross_block_cache_size,
+            bal_parallel_execution_enabled: false,
             has_enough_parallelism,
             multiproof_chunk_size,
             reserved_cpu_cores,
@@ -352,6 +357,11 @@ impl TreeConfig {
     /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
+    }
+
+    /// Returns whether the BAL-driven parallel execution path is enabled.
+    pub const fn bal_parallel_execution_enabled(&self) -> bool {
+        self.bal_parallel_execution_enabled
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -467,6 +477,12 @@ impl TreeConfig {
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
+        self
+    }
+
+    /// Setter for whether the BAL-driven parallel execution path is enabled.
+    pub const fn with_bal_parallel_execution_enabled(mut self, enabled: bool) -> Self {
+        self.bal_parallel_execution_enabled = enabled;
         self
     }
 
