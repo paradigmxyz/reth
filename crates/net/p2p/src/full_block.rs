@@ -498,7 +498,8 @@ where
 
     fn on_access_lists_response(&mut self, response: WithPeerId<BlockAccessLists>) {
         let (peer, access_lists) = response.split();
-        let expected = self.block_result.as_ref().map_or(0, Vec::len);
+        let expected =
+            self.block_result.as_ref().expect("blocks should be ready before BAL response").len();
         let received = access_lists.0.len();
 
         if received > expected {
@@ -532,22 +533,20 @@ where
         self.access_lists = OptionalBlockAccessListsState::Ready(None);
     }
 
-    /// Drives the optional BAL request until it is pending or has reached a terminal state.
+    /// Starts and polls the optional BAL request once, if it is ready to make progress.
     fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
         self.start_access_lists_request_if_possible();
 
-        loop {
-            let poll = match &mut self.access_lists {
-                OptionalBlockAccessListsState::Pending(fut) => fut.poll_unpin(cx),
-                OptionalBlockAccessListsState::WaitingForBlocks |
-                OptionalBlockAccessListsState::Ready(_) => return,
-            };
+        let poll = match &mut self.access_lists {
+            OptionalBlockAccessListsState::Pending(fut) => fut.poll_unpin(cx),
+            OptionalBlockAccessListsState::WaitingForBlocks |
+            OptionalBlockAccessListsState::Ready(_) => return,
+        };
 
-            match poll {
-                Poll::Pending => return,
-                Poll::Ready(Ok(access_lists)) => self.on_access_lists_response(access_lists),
-                Poll::Ready(Err(err)) => self.on_access_lists_error(err),
-            }
+        match poll {
+            Poll::Pending => {}
+            Poll::Ready(Ok(access_lists)) => self.on_access_lists_response(access_lists),
+            Poll::Ready(Err(err)) => self.on_access_lists_error(err),
         }
     }
 
