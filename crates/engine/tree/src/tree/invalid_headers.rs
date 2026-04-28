@@ -61,7 +61,9 @@ impl InvalidHeaderCache {
         header_hash: B256,
         invalid_ancestor: BlockWithParent,
     ) {
-        if self.get(&header_hash).is_none() {
+        // Use the underlying map directly to avoid the hit-count side effects of `self.get`,
+        // which would otherwise consume an access quota and could evict the entry.
+        if self.headers.get(&header_hash).is_none() {
             warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
             self.insert_entry(header_hash, invalid_ancestor);
 
@@ -73,7 +75,9 @@ impl InvalidHeaderCache {
 
     /// Inserts an invalid ancestor into the map.
     pub fn insert(&mut self, invalid_ancestor: BlockWithParent) {
-        if self.get(&invalid_ancestor.block.hash).is_none() {
+        // Use the underlying map directly to avoid the hit-count side effects of `self.get`,
+        // which would otherwise consume an access quota and could evict the entry.
+        if self.headers.get(&invalid_ancestor.block.hash).is_none() {
             warn!(target: "consensus::engine", ?invalid_ancestor, "Bad block with hash");
             self.insert_entry(invalid_ancestor.block.hash, invalid_ancestor);
 
@@ -136,5 +140,23 @@ mod tests {
 
         assert!(cache.get(&header.hash()).is_none());
         assert_eq!(cache.headers.len(), 0);
+    }
+
+    #[test]
+    fn test_insert_existing_does_not_consume_hit_quota() {
+        let hit_eviction_threshold = 5;
+        let mut cache = InvalidHeaderCache::new(10, hit_eviction_threshold);
+        let header = SealedHeader::seal_slow(Header::default());
+        cache.insert(header.block_with_parent());
+
+        // bump hit_count via the wrapped get()
+        cache.get(&header.hash());
+        cache.get(&header.hash());
+        assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 2);
+
+        // re-inserting an existing entry must not increment hit_count or evict it
+        cache.insert(header.block_with_parent());
+        cache.insert_with_invalid_ancestor(header.hash(), header.block_with_parent());
+        assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 2);
     }
 }
