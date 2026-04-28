@@ -1572,13 +1572,12 @@ impl<'db> RocksReadSnapshot<'db> {
     pub(crate) fn walk_visible_storage_history_keys(
         &self,
         address: Address,
-        start_key: B256,
         visible_tip: BlockNumber,
         mut on_key: impl FnMut(B256) -> ProviderResult<bool>,
     ) -> ProviderResult<()> {
         let cf = self.cf_handle::<StoragesHistory>()?;
         let mut iter = self.inner.raw_iterator_cf(cf);
-        let start = StorageShardedKey::new(address, start_key, 0u64).encode();
+        let start = StorageShardedKey::new(address, B256::ZERO, 0u64).encode();
 
         iter.seek(start.as_ref());
         iter.status().map_err(|e| {

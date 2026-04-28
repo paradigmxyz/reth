@@ -634,7 +634,7 @@ impl<
             let rocksdb = rocksdb_ref
                 .expect("storage_v2 historical range queries require a RocksDB snapshot");
 
-            rocksdb.walk_visible_storage_history_keys(account, B256::ZERO, visible_tip, |key| {
+            rocksdb.walk_visible_storage_history_keys(account, visible_tip, |key| {
                 let history = rocksdb.storage_history_info(
                     account,
                     key,
