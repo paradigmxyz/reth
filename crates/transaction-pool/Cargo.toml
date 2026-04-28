@@ -17,11 +17,14 @@ reth-chain-state.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
+revm.workspace = true
 revm-interpreter.workspace = true
 revm-primitives.workspace = true
 
@@ -52,6 +55,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 bitflags.workspace = true
 auto_impl.workspace = true
+imbl.workspace = true
 smallvec.workspace = true
 
 # testing
@@ -68,10 +72,8 @@ paste.workspace = true
 rand.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-criterion.workspace = true
 assert_matches.workspace = true
 tempfile.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures.workspace = true
 
@@ -83,6 +85,7 @@ serde = [
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "bitflags/serde",
+    "imbl/serde",
     "parking_lot/serde",
     "rand?/serde",
     "smallvec/serde",
@@ -92,6 +95,7 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
     "reth-storage-api/serde",
+    "revm/serde",
 ]
 test-utils = [
     "rand",
@@ -103,10 +107,14 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-ethereum-primitives/test-utils",
     "alloy-primitives/rand",
+    "reth-evm/test-utils",
+    "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
 arbitrary = [
     "proptest",
     "proptest-arbitrary-interop",
+    "imbl/arbitrary",
     "reth-chainspec/arbitrary",
     "reth-eth-wire-types/arbitrary",
     "alloy-consensus/arbitrary",
@@ -118,29 +126,6 @@ arbitrary = [
     "revm-interpreter/arbitrary",
     "reth-ethereum-primitives/arbitrary",
     "revm-primitives/arbitrary",
+    "revm/arbitrary",
+    "imbl/arbitrary",
 ]
-
-[[bench]]
-name = "truncate"
-required-features = ["test-utils", "arbitrary"]
-harness = false
-
-[[bench]]
-name = "reorder"
-required-features = ["test-utils", "arbitrary"]
-harness = false
-
-[[bench]]
-name = "priority"
-required-features = ["arbitrary"]
-harness = false
-
-[[bench]]
-name = "insertion"
-required-features = ["test-utils", "arbitrary"]
-harness = false
-
-[[bench]]
-name = "canonical_state_change"
-required-features = ["test-utils", "arbitrary"]
-harness = false

@@ -15,23 +15,15 @@ pre-build = [
     "apt-get update && apt-get install --assume-yes --no-install-recommends llvm-dev libclang-dev clang",
 ]
 
-[target.x86_64-pc-windows-gnu]
-# Why do we need a custom Dockerfile on Windows:
-# 1. `reth-libmdbx` stopped working with MinGW 9.3 that cross image comes with.
-# 2. To be able to update the version of MinGW, we need to also update the Ubuntu that the image is based on.
-#
-# Also see https://github.com/cross-rs/cross/issues/1667
-# Inspired by https://github.com/cross-rs/cross/blob/9e2298e17170655342d3248a9c8ac37ef92ba38f/docker/Dockerfile.x86_64-pc-windows-gnu#L51
-dockerfile = "./Dockerfile.x86_64-pc-windows-gnu"
-
 [target.riscv64gc-unknown-linux-gnu]
 image = "ubuntu:24.04"
 pre-build = [
     "apt update",
-    "apt install --yes gcc gcc-riscv64-linux-gnu libclang-dev make",
+    "apt install --yes gcc gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libclang-dev make",
 ]
 env.passthrough = [
     "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc",
+    "CXX_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-g++",
 ]
 
 [build.env]

@@ -1,6 +1,6 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{setup_engine_with_connection, testsuite::Environment, NodeBuilderHelper};
+use crate::{testsuite::Environment, E2ETestSetupBuilder, NodeBuilderHelper};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
@@ -10,7 +10,6 @@ use reth_ethereum_primitives::Block;
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
-use reth_payload_builder::EthPayloadBuilderAttributes;
 use revm::state::EvmState;
 use std::{marker::PhantomData, path::Path, sync::Arc};
 use tokio::{
@@ -38,6 +37,8 @@ pub struct Setup<I> {
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
     pub is_dev: bool,
+    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    pub storage_v2: bool,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
     /// Holds the import result to keep nodes alive when using imported chain
@@ -58,6 +59,7 @@ impl<I> Default for Setup<I> {
             tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
+            storage_v2: false,
             _phantom: Default::default(),
             import_result_holder: None,
             import_rlp_path: None,
@@ -123,6 +125,12 @@ where
     /// Set the engine tree configuration
     pub const fn with_tree_config(mut self, tree_config: TreeConfig) -> Self {
         self.tree_config = tree_config;
+        self
+    }
+
+    /// Enable v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    pub const fn with_storage_v2(mut self) -> Self {
+        self.storage_v2 = true;
         self
     }
 
@@ -194,23 +202,32 @@ where
         self.shutdown_tx = Some(shutdown_tx);
 
         let is_dev = self.is_dev;
+        let storage_v2 = self.storage_v2;
         let node_count = self.network.node_count;
+        let tree_config = self.tree_config.clone();
 
         let attributes_generator = Self::create_static_attributes_generator::<N>();
 
-        let result = setup_engine_with_connection::<N>(
+        let mut builder = E2ETestSetupBuilder::<N, _>::new(
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
-            is_dev,
-            self.tree_config.clone(),
             attributes_generator,
-            self.network.connect_nodes,
         )
-        .await;
+        .with_tree_config_modifier(move |base| {
+            tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
+        })
+        .with_node_config_modifier(move |config| config.set_dev(is_dev))
+        .with_connect_nodes(self.network.connect_nodes);
+
+        if storage_v2 {
+            builder = builder.with_storage_v2();
+        }
+
+        let result = builder.build().await;
 
         let mut node_clients = Vec::new();
         match result {
-            Ok((nodes, executor, _wallet)) => {
+            Ok((nodes, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
                     node_clients.push(node.to_node_client()?);
@@ -218,12 +235,11 @@ where
 
                 // spawn a separate task just to handle the shutdown
                 tokio::spawn(async move {
-                    // keep nodes and executor in scope to ensure they're not dropped
+                    // keep nodes in scope to ensure they're not dropped
                     let _nodes = nodes;
-                    let _executor = executor;
                     // Wait for shutdown signal
                     let _ = shutdown_rx.recv().await;
-                    // nodes and executor will be dropped here when the test completes
+                    // nodes will be dropped here when the test completes
                 });
             }
             Err(e) => {
@@ -247,15 +263,13 @@ where
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 
-        let attributes_generator = move |timestamp| {
-            let attributes = PayloadAttributes {
-                timestamp,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-            };
-            EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+        let attributes_generator = move |timestamp| PayloadAttributes {
+            timestamp,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: alloy_primitives::Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: None,
         };
 
         crate::setup_import::setup_engine_with_chain_import(
@@ -271,23 +285,20 @@ where
 
     /// Create a static attributes generator that doesn't capture any instance data
     fn create_static_attributes_generator<N>(
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
-           + Copy
-           + use<N, I>
+    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Copy + use<N, I>
     where
         N: NodeBuilderHelper<Payload = I>,
     {
         move |timestamp| {
-            let attributes = PayloadAttributes {
+            PayloadAttributes {
                 timestamp,
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: alloy_primitives::Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-            };
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
-                EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
-            )
+                slot_number: None,
+            }
+            .into()
         }
     }
 

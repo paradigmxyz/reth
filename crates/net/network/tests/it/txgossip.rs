@@ -22,7 +22,7 @@ use tokio::join;
 async fn test_tx_gossip() {
     reth_tracing::init_test_tracing();
 
-    let provider = MockEthProvider::default();
+    let provider = MockEthProvider::default().with_genesis_block();
     let net = Testnet::create_with(2, provider.clone()).await;
 
     // install request handlers
@@ -61,7 +61,7 @@ async fn test_tx_gossip() {
 async fn test_tx_propagation_policy_trusted_only() {
     reth_tracing::init_test_tracing();
 
-    let provider = MockEthProvider::default();
+    let provider = MockEthProvider::default().with_genesis_block();
 
     let policy = TransactionPropagationKind::Trusted;
     let net = Testnet::create_with(2, provider.clone()).await;
@@ -129,7 +129,7 @@ async fn test_tx_propagation_policy_trusted_only() {
 async fn test_tx_ingress_policy_trusted_only() {
     reth_tracing::init_test_tracing();
 
-    let provider = MockEthProvider::default();
+    let provider = MockEthProvider::default().with_genesis_block();
 
     let tx_manager_config = TransactionsManagerConfig {
         ingress_policy: TransactionIngressPolicy::Trusted,
@@ -195,7 +195,7 @@ async fn test_tx_ingress_policy_trusted_only() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_4844_tx_gossip_penalization() {
     reth_tracing::init_test_tracing();
-    let provider = MockEthProvider::default();
+    let provider = MockEthProvider::default().with_genesis_block();
     let net = Testnet::create_with(2, provider.clone()).await;
 
     // install request handlers
@@ -246,7 +246,7 @@ async fn test_4844_tx_gossip_penalization() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_sending_invalid_transactions() {
     reth_tracing::init_test_tracing();
-    let provider = MockEthProvider::default();
+    let provider = MockEthProvider::default().with_genesis_block();
     let net = Testnet::create_with(2, provider.clone()).await;
     // install request handlers
     let net = net.with_eth_pool();

@@ -17,6 +17,7 @@ reth-exex-types.workspace = true
 reth-db-api.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-tokio-util.workspace = true
 reth-config.workspace = true
 reth-prune-types.workspace = true

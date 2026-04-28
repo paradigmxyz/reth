@@ -57,32 +57,7 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
-        }
-    }
-}
-
-#[cfg(feature = "op")]
-impl<ChainSpec>
-    PayloadAttributesBuilder<op_alloy_rpc_types_engine::OpPayloadAttributes, ChainSpec::Header>
-    for LocalPayloadAttributesBuilder<ChainSpec>
-where
-    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
-{
-    fn build(
-        &self,
-        parent: &SealedHeader<ChainSpec::Header>,
-    ) -> op_alloy_rpc_types_engine::OpPayloadAttributes {
-        op_alloy_rpc_types_engine::OpPayloadAttributes {
-            payload_attributes: self.build(parent),
-            // Add dummy system transaction
-            transactions: Some(vec![
-                reth_optimism_chainspec::constants::TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056
-                    .into(),
-            ]),
-            no_tx_pool: None,
-            gas_limit: None,
-            eip_1559_params: None,
-            min_base_fee: None,
+            slot_number: self.chain_spec.is_amsterdam_active_at_timestamp(timestamp).then_some(0),
         }
     }
 }

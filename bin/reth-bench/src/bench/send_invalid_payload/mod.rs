@@ -1,16 +1,23 @@
 //! Command for sending invalid payloads to test Engine API rejection.
 
 mod invalidation;
+use alloy_rpc_client::ClientBuilder;
 use invalidation::InvalidationConfig;
 
-use alloy_primitives::{Address, B256};
-use alloy_provider::network::AnyRpcBlock;
+use crate::bench::helpers::fetch_block_access_list;
+
+use super::helpers::{load_jwt_secret, read_input};
+use alloy_consensus::TxEnvelope;
+use alloy_primitives::{Address, Bytes, B256};
+use alloy_provider::{
+    network::{AnyNetwork, AnyRpcBlock},
+    RootProvider,
+};
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
-use op_alloy_consensus::OpTxEnvelope;
 use reth_cli_runner::CliContext;
-use std::io::{BufReader, Read, Write};
+use std::io::Write;
 
 /// Command for generating and sending an invalid `engine_newPayload` request.
 ///
@@ -104,6 +111,9 @@ pub struct Command {
     #[arg(long, value_name = "HASH", help_heading = "Explicit Value Overrides")]
     requests_hash: Option<B256>,
 
+    /// Override the slot number with a specific value.
+    #[arg(long, value_name = "U64", help_heading = "Explicit Value Overrides")]
+    slot_number: Option<u64>,
     // ==================== Auto-Invalidation Flags ====================
     /// Invalidate the parent hash by setting it to a random value.
     #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
@@ -157,6 +167,14 @@ pub struct Command {
     #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
     invalidate_requests_hash: bool,
 
+    /// Invalidate the block access list by setting it to a random value (EIP-7928).
+    #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
+    invalidate_block_access_list: bool,
+
+    /// Invalidate the slot number by setting it to an random value.(EIP-7843).
+    #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
+    invalidate_slot_number: bool,
+
     // ==================== Meta Flags ====================
     /// Skip block hash recalculation after modifications.
     #[arg(long, default_value_t = false, help_heading = "Meta Flags")]
@@ -180,27 +198,6 @@ enum Mode {
 }
 
 impl Command {
-    /// Read input from either a file or stdin
-    fn read_input(&self) -> Result<String> {
-        Ok(match &self.path {
-            Some(path) => reth_fs_util::read_to_string(path)?,
-            None => String::from_utf8(
-                BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
-            )?,
-        })
-    }
-
-    /// Load JWT secret from either a file or use the provided string directly
-    fn load_jwt_secret(&self) -> Result<Option<String>> {
-        match &self.jwt_secret {
-            Some(secret) => match std::fs::read_to_string(secret) {
-                Ok(contents) => Ok(Some(contents.trim().to_string())),
-                Err(_) => Ok(Some(secret.clone())),
-            },
-            None => Ok(None),
-        }
-    }
-
     /// Build `InvalidationConfig` from command flags
     const fn build_invalidation_config(&self) -> InvalidationConfig {
         InvalidationConfig {
@@ -219,6 +216,7 @@ impl Command {
             block_hash: self.block_hash,
             blob_gas_used: self.blob_gas_used,
             excess_blob_gas: self.excess_blob_gas,
+            slot_number: self.slot_number,
             invalidate_parent_hash: self.invalidate_parent_hash,
             invalidate_state_root: self.invalidate_state_root,
             invalidate_receipts_root: self.invalidate_receipts_root,
@@ -231,18 +229,22 @@ impl Command {
             invalidate_withdrawals: self.invalidate_withdrawals,
             invalidate_blob_gas_used: self.invalidate_blob_gas_used,
             invalidate_excess_blob_gas: self.invalidate_excess_blob_gas,
+            invalidate_block_access_list: self.invalidate_block_access_list,
+            invalidate_slot_number: self.invalidate_slot_number,
         }
     }
 
     /// Execute the command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
-        let block_json = self.read_input()?;
-        let jwt_secret = self.load_jwt_secret()?;
+        let block_json = read_input(self.path.as_deref())?;
+        let jwt_secret = load_jwt_secret(self.jwt_secret.as_deref())?;
 
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
             .into_inner()
             .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-            .try_map_transactions(|tx| tx.try_into_either::<OpTxEnvelope>())?
+            .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+            })?
             .into_consensus();
 
         let config = self.build_invalidation_config();
@@ -252,14 +254,21 @@ impl Command {
         let blob_versioned_hashes =
             block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
         let use_v4 = block.header.requests_hash.is_some();
+        let use_v5 = block.header.block_access_list_hash.is_some();
         let requests_hash = self.requests_hash.or(block.header.requests_hash);
 
-        let mut execution_payload = ExecutionPayload::from_block_slow(&block).0;
+        let mut execution_payload = if use_v5 {
+            let encoded_bal = self.fetch_encoded_block_access_list(block.header.number).await?;
+            ExecutionPayload::from_block_slow_with_bal(&block, encoded_bal).0
+        } else {
+            ExecutionPayload::from_block_slow(&block).0
+        };
 
         let changes = match &mut execution_payload {
             ExecutionPayload::V1(p) => config.apply_to_payload_v1(p),
             ExecutionPayload::V2(p) => config.apply_to_payload_v2(p),
             ExecutionPayload::V3(p) => config.apply_to_payload_v3(p),
+            ExecutionPayload::V4(p) => config.apply_to_payload_v4(p),
         };
 
         let skip_recalc = self.skip_hash_recalc || config.should_skip_hash_recalc();
@@ -274,6 +283,9 @@ impl Command {
                         ExecutionPayload::V1(p) => p.block_hash,
                         ExecutionPayload::V2(p) => p.payload_inner.block_hash,
                         ExecutionPayload::V3(p) => p.payload_inner.payload_inner.block_hash,
+                        ExecutionPayload::V4(p) => {
+                            p.payload_inner.payload_inner.payload_inner.block_hash
+                        }
                     }
                 }
             };
@@ -282,6 +294,9 @@ impl Command {
                 ExecutionPayload::V1(p) => p.block_hash = new_hash,
                 ExecutionPayload::V2(p) => p.payload_inner.block_hash = new_hash,
                 ExecutionPayload::V3(p) => p.payload_inner.payload_inner.block_hash = new_hash,
+                ExecutionPayload::V4(p) => {
+                    p.payload_inner.payload_inner.payload_inner.block_hash = new_hash
+                }
             }
         }
 
@@ -323,7 +338,13 @@ impl Command {
         match self.mode {
             Mode::Execute => {
                 let mut command = std::process::Command::new("cast");
-                let method = if use_v4 { "engine_newPayloadV4" } else { "engine_newPayloadV3" };
+                let method = if use_v5 {
+                    "engine_newPayloadV5"
+                } else if use_v4 {
+                    "engine_newPayloadV4"
+                } else {
+                    "engine_newPayloadV3"
+                };
                 command.arg("rpc").arg(method).arg("--raw");
                 if let Some(rpc_url) = self.rpc_url {
                     command.arg("--rpc-url").arg(rpc_url);
@@ -363,5 +384,18 @@ impl Command {
         }
 
         Ok(())
+    }
+
+    async fn fetch_encoded_block_access_list(&self, block_number: u64) -> Result<Bytes> {
+        let rpc_url = self
+            .rpc_url
+            .as_deref()
+            .ok_or_eyre("--rpc-url is required to fetch the block access list for V5 payloads")?;
+        let client = ClientBuilder::default()
+            .layer(alloy_transport::layers::RetryBackoffLayer::new(10, 800, u64::MAX))
+            .http(rpc_url.parse()?);
+        let provider = RootProvider::<AnyNetwork>::new(client);
+        let bal = fetch_block_access_list(&provider, block_number).await?;
+        Ok(alloy_rlp::encode(bal).into())
     }
 }

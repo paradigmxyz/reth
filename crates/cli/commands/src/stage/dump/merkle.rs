@@ -10,6 +10,7 @@ use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableIm
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
+use reth_node_api::HeaderTy;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
@@ -24,6 +25,7 @@ use reth_stages::{
 };
 use tracing::info;
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn dump_merkle_stage<N>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
@@ -32,14 +34,15 @@ pub(crate) async fn dump_merkle_stage<N>(
     should_run: bool,
     evm_config: impl ConfigureEvm<Primitives = N::Primitives>,
     consensus: impl FullConsensus<N::Primitives> + 'static,
+    runtime: reth_tasks::Runtime,
 ) -> Result<()>
 where
-    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+    N: ProviderNodeTypes<DB = DatabaseEnv>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::Headers, _>(
+        tx.import_table_with_range::<tables::Headers<HeaderTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,
@@ -59,10 +62,11 @@ where
     if should_run {
         dry_run(
             ProviderFactory::<N>::new(
-                Arc::new(output_db),
+                output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                runtime,
             )?,
             to,
             from,
@@ -124,12 +128,14 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     AccountHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
+        commit_entries: u64::MAX,
         etl_config: EtlConfig::default(),
     }
     .execute(&provider, execute_input)?;
     StorageHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
+        commit_entries: u64::MAX,
         etl_config: EtlConfig::default(),
     }
     .execute(&provider, execute_input)?;

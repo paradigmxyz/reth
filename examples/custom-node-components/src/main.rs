@@ -5,6 +5,7 @@
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
+    evm::primitives::ConfigureEvm,
     node::{
         api::{FullNodeTypes, NodeTypes},
         builder::{components::PoolBuilder, BuilderContext},
@@ -12,7 +13,7 @@ use reth_ethereum::{
         EthereumNode,
     },
     pool::{
-        blobstore::InMemoryBlobStore, EthTransactionPool, PoolConfig,
+        blobstore::InMemoryBlobStore, CoinbaseTipOrdering, EthTransactionPool, Pool, PoolConfig,
         TransactionValidationTaskExecutor,
     },
     provider::CanonStateSubscriptions,
@@ -22,7 +23,7 @@ use reth_tracing::tracing::{debug, info};
 
 fn main() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 // use the default ethereum node types
                 .with_types::<EthereumNode>()
@@ -49,23 +50,28 @@ pub struct CustomPoolBuilder {
 /// Implement the [`PoolBuilder`] trait for the custom pool builder
 ///
 /// This will be used to build the transaction pool and its maintenance tasks during launch.
-impl<Node> PoolBuilder<Node> for CustomPoolBuilder
+impl<Node, Evm> PoolBuilder<Node, Evm> for CustomPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+    Evm: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
+    type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore, Evm>;
 
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        ctx: &BuilderContext<Node>,
+        evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = InMemoryBlobStore::default();
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .with_head_timestamp(ctx.head().timestamp)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .kzg_settings(ctx.kzg_settings()?)
+                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
-            reth_ethereum::pool::Pool::eth_pool(validator, blob_store, self.pool_config);
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, self.pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
@@ -91,7 +97,7 @@ where
             );
 
             // spawn the maintenance task
-            ctx.task_executor().spawn_critical(
+            ctx.task_executor().spawn_critical_task(
                 "txpool maintenance task",
                 reth_ethereum::pool::maintain::maintain_transaction_pool_future(
                     client,

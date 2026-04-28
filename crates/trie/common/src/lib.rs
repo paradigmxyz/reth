@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+mod execution_witness;
+pub use execution_witness::ExecutionWitnessMode;
+
 /// Lazy initialization wrapper for trie data.
 mod lazy;
 pub use lazy::{LazyTrieData, SortedTrieData};
@@ -33,20 +36,30 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
+/// V2 proof targets and chunking.
+pub mod target_v2;
+pub use target_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target};
+
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
-pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
+pub use nibbles::{
+    depth_first_cmp, Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles,
+    StoredNibblesSubKey,
+};
 
 mod storage;
-pub use storage::StorageTrieEntry;
+pub use storage::{PackedStorageTrieEntry, StorageTrieEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
 
 mod trie;
 pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
+
+mod trie_node_v2;
+pub use trie_node_v2::*;
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -85,4 +98,6 @@ pub mod serde_bincode_compat {
 }
 
 /// Re-export
-pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{
+    nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
+};

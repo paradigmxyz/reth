@@ -6,16 +6,33 @@ on:
   push:
     branches: [main]
 
+permissions: {}
+
 jobs:
   check-dashboard:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
-      - name: Check for ${DS_PROMETHEUS} in overview.json
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate dashboard format
         run: |
-          if grep -Fn '${DS_PROMETHEUS}' etc/grafana/dashboards/overview.json; then
-            echo "Error: overview.json contains '\${DS_PROMETHEUS}' placeholder"
-            echo "Please replace it with '\${datasource}'"
-            exit 1
-          fi
-          echo "✓ overview.json does not contain '\${DS_PROMETHEUS}' placeholder"
+          python3 -c "
+          import json, sys
+          with open('etc/grafana/dashboards/overview.json') as f:
+              d = json.load(f)
+          errors = []
+          if '__inputs' not in d:
+              errors.append('missing __inputs')
+          if '__requires' not in d:
+              errors.append('missing __requires')
+          if d.get('id') is not None:
+              errors.append('contains internal id field — use export-dashboard.py')
+          if errors:
+              for e in errors:
+                  print(f'Error: {e}', file=sys.stderr)
+              sys.exit(1)
+          print('✓ overview.json is a valid exported dashboard')
+          "

@@ -35,11 +35,11 @@ impl From<SubPool> for Destination {
 
 /// Tracks the result after updating the pool
 #[derive(Debug)]
-pub(crate) struct UpdateOutcome<T: PoolTransaction> {
+pub struct UpdateOutcome<T: PoolTransaction> {
     /// transactions promoted to the pending pool
-    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
+    pub promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that failed and were discarded
-    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+    pub discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {

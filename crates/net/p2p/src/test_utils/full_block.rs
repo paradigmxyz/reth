@@ -8,13 +8,13 @@ use crate::{
 };
 use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use parking_lot::Mutex;
 use reth_eth_wire_types::HeadersDirection;
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
-use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, sync::Arc};
 
 /// A headers+bodies client that stores the headers and bodies in memory, with an artificial soft
 /// bodies response limit that is set to 20 by default.
@@ -22,8 +22,8 @@ use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
 /// This full block client can be [Clone]d and shared between multiple tasks.
 #[derive(Clone, Debug)]
 pub struct TestFullBlockClient {
-    headers: Arc<Mutex<HashMap<B256, Header>>>,
-    bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
+    headers: Arc<Mutex<B256Map<Header>>>,
+    bodies: Arc<Mutex<B256Map<BlockBody>>>,
     // soft response limit, max number of bodies to respond with
     soft_limit: usize,
 }
@@ -31,8 +31,8 @@ pub struct TestFullBlockClient {
 impl Default for TestFullBlockClient {
     fn default() -> Self {
         Self {
-            headers: Arc::new(Mutex::new(HashMap::default())),
-            bodies: Arc::new(Mutex::new(HashMap::default())),
+            headers: Arc::new(Mutex::new(B256Map::default())),
+            bodies: Arc::new(Mutex::new(B256Map::default())),
             soft_limit: 20,
         }
     }

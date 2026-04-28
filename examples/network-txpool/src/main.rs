@@ -16,6 +16,7 @@ use reth_ethereum::{
         EthPooledTransaction, Pool, TransactionListenerKind, TransactionPool,
     },
     provider::test_utils::NoopProvider,
+    tasks::Runtime,
 };
 
 #[tokio::main]
@@ -41,7 +42,7 @@ async fn main() -> eyre::Result<()> {
     let local_key = rng_secret_key();
 
     // Configure the network
-    let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+    let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key, Runtime::test())
         .mainnet_boot_nodes()
         .build(client);
     let transactions_manager_config = config.transactions_manager_config.clone();

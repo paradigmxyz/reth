@@ -3,8 +3,8 @@ use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -40,7 +40,7 @@ pub trait StateRootProvider {
 }
 
 /// A type that can compute the storage root for a given account.
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StorageRootProvider {
     /// Returns the storage root of the `HashedStorage` for target address on top of the current
     /// state.
@@ -66,7 +66,7 @@ pub trait StorageRootProvider {
 }
 
 /// A type that can generate state proof on top of a given post state.
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateProofProvider {
     /// Get account and storage proofs of target keys in the `HashedPostState`
     /// on top of the current state.
@@ -85,12 +85,17 @@ pub trait StateProofProvider {
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
 
-    /// Get trie witness for provided state.
-    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>>;
+    /// Get trie witness for provided state using the given witness generation mode.
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>>;
 }
 
 /// Trie Writer
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieWriter: Send {
     /// Writes trie updates to the database.
     ///
@@ -106,7 +111,7 @@ pub trait TrieWriter: Send {
 }
 
 /// Storage Trie Writer
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageTrieWriter: Send {
     /// Writes storage trie updates from the given storage trie map with already sorted updates.
     ///

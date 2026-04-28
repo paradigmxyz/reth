@@ -9,9 +9,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
-};
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
@@ -28,9 +26,10 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
-        BasicEngineApiBuilder, BasicEngineValidatorBuilder, EngineApiBuilder, EngineValidatorAddOn,
-        EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity, PayloadValidatorBuilder,
-        RethRpcAddOns, RpcAddOns, RpcHandle,
+        BasicEngineApiBuilder, BasicEngineValidatorBuilder, Either, EngineApiBuilder,
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity,
+        PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
+        RpcAddOns, RpcHandle, Stack,
     },
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
@@ -41,7 +40,7 @@ use reth_rpc::{
     TestingApi, ValidationApi,
 };
 use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
-use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
+use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_eth_api::{
     helpers::{
         config::{EthConfigApiServer, EthConfigHandler},
@@ -81,11 +80,8 @@ impl EthereumNode {
                 Primitives = EthPrimitives,
             >,
         >,
-        <Node::Types as NodeTypes>::Payload: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
+        <Node::Types as NodeTypes>::Payload:
+            PayloadTypes<BuiltPayload = EthBuiltPayload, PayloadAttributes = EthPayloadAttributes>,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -107,27 +103,16 @@ impl EthereumNode {
     /// use reth_chainspec::MAINNET;
     /// use reth_node_ethereum::EthereumNode;
     ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .open_read_only(MAINNET.clone(), "datadir")
-    ///     .unwrap();
+    /// fn demo(runtime: reth_tasks::Runtime) {
+    ///     let factory = EthereumNode::provider_factory_builder()
+    ///         .open_read_only(MAINNET.clone(), "datadir", runtime)
+    ///         .unwrap();
+    /// }
     /// ```
     ///
-    /// # Open a Providerfactory manually with all required components
-    ///
-    /// ```no_run
-    /// use reth_chainspec::ChainSpecBuilder;
-    /// use reth_db::open_db_read_only;
-    /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
-    /// use std::sync::Arc;
-    ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
-    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
-    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
-    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///     .build_provider_factory();
-    /// ```
+    /// See also [`ProviderFactory::new`](reth_provider::ProviderFactory::new) for constructing
+    /// a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required
+    /// components.
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
         ProviderFactoryBuilder::default()
     }
@@ -181,17 +166,21 @@ pub struct EthereumAddOns<
     EB = BasicEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
+    AuthHttpMiddleware = Identity,
 > {
-    inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
+    inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>,
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
+    EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
     /// Creates a new instance from the inner `RpcAddOns`.
-    pub const fn new(inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>) -> Self {
+    pub const fn new(
+        inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>,
+    ) -> Self {
         Self { inner }
     }
 }
@@ -215,11 +204,13 @@ where
             BasicEngineApiBuilder::default(),
             BasicEngineValidatorBuilder::default(),
             Default::default(),
+            Identity::new(),
         ))
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
+    EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
@@ -228,7 +219,7 @@ where
     pub fn with_engine_api<T>(
         self,
         engine_api_builder: T,
-    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware>
+    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware>
     where
         T: Send,
     {
@@ -240,7 +231,7 @@ where
     pub fn with_payload_validator<V, T>(
         self,
         payload_validator_builder: T,
-    ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware> {
+    ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware, AuthHttpMiddleware> {
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_payload_validator(payload_validator_builder))
     }
@@ -249,12 +240,51 @@ where
     pub fn with_rpc_middleware<T>(
         self,
         rpc_middleware: T,
-    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, T>
+    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, T, AuthHttpMiddleware>
     where
         T: Send,
     {
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_rpc_middleware(rpc_middleware))
+    }
+
+    /// Configures the HTTP transport middleware for the auth / Engine API server.
+    pub fn with_auth_http_middleware<T>(
+        self,
+        auth_http_middleware: T,
+    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, T>
+    where
+        T: Send,
+    {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.with_auth_http_middleware(auth_http_middleware))
+    }
+
+    /// Stacks an additional HTTP transport middleware layer for the auth / Engine API server.
+    pub fn layer_auth_http_middleware<T>(
+        self,
+        layer: T,
+    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Stack<AuthHttpMiddleware, T>> {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.layer_auth_http_middleware(layer))
+    }
+
+    /// Conditionally stacks an HTTP transport middleware layer for the auth / Engine API server.
+    #[expect(clippy::type_complexity)]
+    pub fn option_layer_auth_http_middleware<T>(
+        self,
+        layer: Option<T>,
+    ) -> EthereumAddOns<
+        N,
+        EthB,
+        PVB,
+        EB,
+        EVB,
+        RpcMiddleware,
+        Stack<AuthHttpMiddleware, Either<T, Identity>>,
+    > {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.option_layer_auth_http_middleware(layer))
     }
 
     /// Sets the tokio runtime for the RPC servers.
@@ -266,8 +296,8 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
-    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> NodeAddOns<N>
+    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -284,6 +314,7 @@ where
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
+    AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -296,7 +327,7 @@ where
             Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
-            Box::new(ctx.node.task_executor().clone()),
+            ctx.node.task_executor().clone(),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
         );
 
@@ -304,6 +335,7 @@ where
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
+        let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -325,6 +357,9 @@ where
                 if testing_skip_invalid_transactions {
                     testing_api = testing_api.with_skip_invalid_transactions();
                 }
+                if let Some(gas_limit) = testing_gas_limit_override {
+                    testing_api = testing_api.with_gas_limit_override(gas_limit);
+                }
                 container
                     .modules
                     .merge_if_module_configured(RethRpcModule::Testing, testing_api.into_rpc())?;
@@ -335,8 +370,8 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RethRpcAddOns<N>
-    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> RethRpcAddOns<N>
+    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -353,6 +388,7 @@ where
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
+    AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
     type EthApi = EthB::EthApi;
 
@@ -361,8 +397,8 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
-    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> EngineValidatorAddOn<N>
+    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -379,6 +415,7 @@ where
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: Send,
+    AuthHttpMiddleware: Send,
 {
     type ValidatorBuilder = EVB;
 
@@ -456,17 +493,22 @@ pub struct EthereumPoolBuilder {
     // TODO add options for txpool args
 }
 
-impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
+impl<Types, Node, Evm> PoolBuilder<Node, Evm> for EthereumPoolBuilder
 where
     Types: NodeTypes<
         ChainSpec: EthereumHardforks,
         Primitives: NodePrimitives<SignedTx = TransactionSigned>,
     >,
     Node: FullNodeTypes<Types = Types>,
+    Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>> + Clone + 'static,
 {
-    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore, Evm>;
 
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        ctx: &BuilderContext<Node>,
+        evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         let pool_config = ctx.pool_config();
 
         let blobs_disabled = ctx.config().txpool.disable_blobs_support ||
@@ -492,24 +534,24 @@ where
         let blob_store =
             reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .with_head_timestamp(ctx.head().timestamp)
-            .set_eip4844(!blobs_disabled)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
-            .with_local_transactions_config(pool_config.local_transactions_config.clone())
-            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
-            .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
-            .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .set_eip4844(!blobs_disabled)
+                .kzg_settings(ctx.kzg_settings()?)
+                .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
+                .with_local_transactions_config(pool_config.local_transactions_config.clone())
+                .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
+                .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
+                .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
+                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         if validator.validator().eip4844() {
             // initializing the KZG settings can be expensive, this should be done upfront so that
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
             let kzg_settings = validator.validator().kzg_settings().clone();
-            ctx.task_executor().spawn_blocking(async move {
+            ctx.task_executor().spawn_blocking_task(async move {
                 let _ = kzg_settings.get();
                 debug!(target: "reth::cli", "Initialized KZG settings");
             });

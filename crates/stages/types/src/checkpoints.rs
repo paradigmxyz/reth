@@ -406,7 +406,9 @@ impl StageCheckpoint {
             }
             _ => return self,
         });
-        _ = self.stage_checkpoint.map(|mut checkpoint| checkpoint.set_block_range(from, to));
+        if let Some(ref mut checkpoint) = self.stage_checkpoint {
+            checkpoint.set_block_range(from, to);
+        }
         self
     }
 
@@ -433,6 +435,9 @@ impl StageCheckpoint {
         }
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StageCheckpoint);
 
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.

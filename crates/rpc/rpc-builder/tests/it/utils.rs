@@ -14,12 +14,13 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::NoopProvider;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
+    middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::TokioTaskExecutor;
+use reth_tasks::Runtime;
 use reth_transaction_pool::{
     noop::NoopTransactionPool,
     test_utils::{TestPool, TestPoolBuilder},
@@ -28,12 +29,23 @@ use tokio::sync::mpsc::unbounded_channel;
 
 /// Localhost with port 0 so a free port is used.
 pub const fn test_address() -> SocketAddr {
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
 }
 
 /// Launches a new server for the auth module
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
+    launch_auth_with_config(config).await
+}
+
+/// Launches a new server for the auth module with the given config.
+pub async fn launch_auth_with_config<RpcMiddleware, HttpMiddleware>(
+    config: AuthServerConfig<RpcMiddleware, HttpMiddleware>,
+) -> AuthServerHandle
+where
+    RpcMiddleware: RethRpcMiddleware,
+    HttpMiddleware: RethAuthHttpMiddleware<RpcMiddleware>,
+{
     let (tx, _rx) = unbounded_channel();
     let beacon_engine_handle = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let client = ClientVersionV1 {
@@ -49,7 +61,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         beacon_engine_handle,
         spawn_test_payload_service().into(),
         NoopTransactionPool::default(),
-        Box::<TokioTaskExecutor>::default(),
+        Runtime::test(),
         client,
         EngineCapabilities::default(),
         EthereumEngineValidator::new(MAINNET.clone()),
@@ -134,7 +146,7 @@ pub fn test_rpc_builder(
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(Box::new(TokioTaskExecutor::default()))
+        .with_executor(Runtime::test())
         .with_evm_config(EthEvmConfig::mainnet())
         .with_consensus(NoopConsensus::default())
 }

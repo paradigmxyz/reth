@@ -11,9 +11,9 @@ use alloy_eips::{
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
-    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
-    PayloadStatus,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
+    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
+    PayloadId, PayloadStatus,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
@@ -21,6 +21,7 @@ use alloy_rpc_types_eth::{
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+use serde_json::Value;
 
 /// Helper trait for the engine api server.
 ///
@@ -126,6 +127,20 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
+    /// Post Amsterdam forkchoice update handler
+    ///
+    /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
+    /// `slotNumber` field in the `payloadAttributes`, if payload attributes
+    /// are provided.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    #[method(name = "forkchoiceUpdatedV4")]
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -211,6 +226,17 @@ pub trait EngineApi<Engine: EngineTypes> {
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
+    /// Returns `ExecutionPayloadBodyV2` objects for the given block hashes.
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    #[method(name = "getPayloadBodiesByHashV2")]
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     ///
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -229,6 +255,26 @@ pub trait EngineApi<Engine: EngineTypes> {
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
+
+    /// Returns `ExecutionPayloadBodyV2` objects for the given block range.
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
+    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
+    /// adversarial.
+    ///
+    /// Implementers should take care when acting on the input to this method, specifically
+    /// ensuring that the range is limited properly, and that the range boundaries are computed
+    /// correctly and without panics.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    #[method(name = "getPayloadBodiesByRangeV2")]
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2>;
 
     /// This function will return the [`ClientVersionV1`] object.
     /// See also:
@@ -278,18 +324,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>>;
-
-    /// Returns the Block Access Lists for the given block hashes.
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    #[method(name = "getBALsByHashV1")]
-    async fn get_bals_by_hash_v1(&self, block_hashes: Vec<BlockHash>) -> RpcResult<Vec<Bytes>>;
-
-    /// Returns the Block Access Lists for the given block range.
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    #[method(name = "getBALsByRangeV1")]
-    async fn get_bals_by_range_v1(&self, start: U64, count: U64) -> RpcResult<Vec<Bytes>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
@@ -359,4 +393,19 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
+
+    /// Returns the EIP-7928 block access list for a block by hash.
+    #[method(name = "getBlockAccessListByBlockHash")]
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a block by number.
+    #[method(name = "getBlockAccessListByBlockNumber")]
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list bytes for a block by number.
+    #[method(name = "getBlockAccessListRaw")]
+    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }

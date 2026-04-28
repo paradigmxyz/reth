@@ -27,8 +27,8 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
-      --enable-discv5-discovery
-          Enable Discv5 discovery
+      --disable-discv5-discovery
+          Disable Discv5 discovery
 
       --disable-nat
           Disable Nat discovery
@@ -226,12 +226,20 @@ Networking:
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
 
+      --eth-max-message-size <BYTES>
+          Maximum allowed ETH message size in bytes. Default is 10 MiB
+
       --netrestrict <NETRESTRICT>
           Restrict network communication to the given IP networks (CIDR masks).
 
           Comma separated list of CIDR network specifications. Only peers with IP addresses within these ranges will be allowed to connect.
 
           Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+
+      --enforce-enr-fork-id
+          Enforce EIP-868 ENR fork ID validation for discovered peers.
+
+          When enabled, peers discovered without a confirmed fork ID are not added to the peer set until their fork ID is verified via EIP-868 ENR request. This filters out peers from other networks that pollute the discovery table.
 
 Datadir:
       --datadir <DATA_DIR>
@@ -283,7 +291,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
@@ -316,9 +324,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

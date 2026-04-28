@@ -197,9 +197,14 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         self.historical.multiproof(input, targets)
     }
 
-    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        mut input: TrieInput,
+        target: HashedPostState,
+        mode: reth_trie::ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.witness(input, target)
+        self.historical.witness(input, target, mode)
     }
 }
 

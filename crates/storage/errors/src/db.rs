@@ -10,6 +10,7 @@ use core::{
     fmt::{Debug, Display},
     str::FromStr,
 };
+use reth_codecs::DecompressError;
 
 /// Database error type.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -82,6 +83,13 @@ impl From<DatabaseWriteError> for DatabaseError {
     }
 }
 
+impl From<reth_codecs::DecompressError> for DatabaseError {
+    #[inline]
+    fn from(_: DecompressError) -> Self {
+        Self::Decode
+    }
+}
+
 /// Database write error.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("write operation {:?} failed for key \"{}\" in table {}: {}",
@@ -115,6 +123,8 @@ pub enum DatabaseWriteOperation {
     PutUpsert,
     /// Put append.
     PutAppend,
+    /// Flush to disk.
+    Flush,
 }
 
 /// Database log level.

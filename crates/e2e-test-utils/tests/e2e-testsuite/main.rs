@@ -19,7 +19,6 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
-use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tracing::debug;
@@ -161,6 +160,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                 suggested_fee_recipient: Address::random(),
                 withdrawals: None,
                 parent_beacon_block_root: None,
+                slot_number: None,
             },
         ));
 
@@ -370,15 +370,14 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
             .build(),
     );
 
-    let (nodes, _tasks, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
-            EthPayloadBuilderAttributes::default()
-        })
-        .with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
-        })
-        .build()
-        .await?;
+    let (nodes, _wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
+        PayloadAttributes::default()
+    })
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
+    })
+    .build()
+    .await?;
 
     assert_eq!(nodes.len(), 1);
 

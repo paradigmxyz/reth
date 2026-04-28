@@ -108,5 +108,9 @@ fn eest_fixtures() {
         .join("execution-spec-tests")
         .join("blockchain_tests");
 
+    if !suite_path.exists() {
+        return;
+    }
+
     BlockchainTests::new(suite_path).run();
 }

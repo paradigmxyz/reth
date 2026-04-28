@@ -1,42 +1,39 @@
 //! Runs the `reth bench` command, calling first newPayload for each block, then calling
 //! forkchoiceUpdated.
-//!
-//! Supports configurable waiting behavior:
-//! - **`--wait-time`**: Fixed sleep interval between blocks.
-//! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
-//!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence.
-//!
-//! Both options can be used together or independently.
 
 use crate::{
     bench::{
         context::BenchContext,
+        helpers::{fetch_block_access_list, parse_duration},
+        metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
     },
-    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
+    valid_payload::{
+        block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+    },
 };
-use alloy_eips::BlockNumHash;
-use alloy_network::Ethereum;
-use alloy_provider::{Provider, RootProvider};
-use alloy_pubsub::SubscriptionStream;
-use alloy_rpc_client::RpcClient;
-use alloy_rpc_types_engine::ForkchoiceState;
-use alloy_transport_ws::WsConnect;
+use alloy_consensus::TxEnvelope;
+use alloy_eips::Encodable2718;
+use alloy_primitives::B256;
+use alloy_provider::{
+    ext::DebugApi,
+    network::{AnyNetwork, AnyRpcBlock},
+    Provider, RootProvider,
+};
+use alloy_rpc_types_engine::{
+    ExecutionData, ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes,
+};
 use clap::Parser;
-use eyre::{Context, OptionExt};
-use futures::StreamExt;
-use humantime::parse_duration;
+use eyre::{bail, ensure, Context, OptionExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
+use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
 use std::time::{Duration, Instant};
-use tracing::{debug, info};
-use url::Url;
-
-const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
+use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -45,19 +42,28 @@ pub struct Command {
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
     rpc_url: String,
 
+    /// Build a separate fork with `testing_buildBlockV1` and alternate forkchoice updates between
+    /// the canonical chain and that fork on every block while the fork grows up to the configured
+    /// depth.
+    ///
+    /// This requires enabling the hidden `testing` RPC module on the target node,
+    /// for example with `reth node --http --http.api eth,testing`.
+    #[arg(
+        long,
+        value_name = "DEPTH",
+        num_args = 0..=1,
+        default_missing_value = "8",
+        value_parser = parse_reorg_depth,
+        verbatim_doc_comment
+    )]
+    reorg: Option<usize>,
+
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
-
-    /// Wait for blocks to be persisted before sending the next batch.
-    ///
-    /// When enabled, waits for every Nth block to be persisted using the
-    /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
-    /// doesn't outpace persistence.
-    ///
-    /// The subscription uses the regular RPC websocket endpoint (no JWT required).
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
-    wait_for_persistence: bool,
 
     /// Engine persistence threshold used for deciding when to wait for persistence.
     ///
@@ -72,6 +78,19 @@ pub struct Command {
     )]
     persistence_threshold: u64,
 
+    /// Timeout for waiting on persistence at each checkpoint.
+    ///
+    /// Must be long enough to account for the persistence thread being blocked
+    /// by pruning after the previous save.
+    #[arg(
+        long = "persistence-timeout",
+        value_name = "PERSISTENCE_TIMEOUT",
+        value_parser = parse_duration,
+        default_value = "120s",
+        verbatim_doc_comment
+    )]
+    persistence_timeout: Duration,
+
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
     #[arg(
@@ -82,133 +101,244 @@ pub struct Command {
     )]
     rpc_block_buffer_size: usize,
 
+    /// Weather to enable bal by default or not.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    enable_bal: bool,
+
     #[command(flatten)]
     benchmark: BenchmarkArgs,
+}
+
+#[derive(Debug)]
+struct PreparedBuiltBlock {
+    block_hash: B256,
+    params: serde_json::Value,
+}
+
+#[derive(Debug)]
+struct QueuedForkBlock {
+    block_number: u64,
+    prepared: PreparedBuiltBlock,
+}
+
+#[derive(Debug)]
+struct ReorgState {
+    depth: usize,
+    fork_length: usize,
+    branch_point_hash: Option<B256>,
+    fork_parent_hash: Option<B256>,
+}
+
+impl ReorgState {
+    const fn new(depth: usize) -> Self {
+        Self { depth, fork_length: 0, branch_point_hash: None, fork_parent_hash: None }
+    }
+
+    const fn push_fork_head(&mut self, canonical_parent_hash: B256, fork_head_hash: B256) {
+        if self.fork_length == 0 {
+            self.branch_point_hash = Some(canonical_parent_hash);
+        }
+        self.fork_length += 1;
+        self.fork_parent_hash = Some(fork_head_hash);
+    }
+
+    fn forkchoice_state(&self, fork_head_hash: B256) -> eyre::Result<ForkchoiceState> {
+        let branch_point_hash = self.branch_point_hash.ok_or_eyre("missing reorg branch point")?;
+
+        Ok(ForkchoiceState {
+            head_block_hash: fork_head_hash,
+            safe_block_hash: branch_point_hash,
+            finalized_block_hash: branch_point_hash,
+        })
+    }
+
+    const fn reset(&mut self) {
+        self.fork_length = 0;
+        self.branch_point_hash = None;
+        self.fork_parent_hash = None;
+    }
 }
 
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        // Log mode configuration
-        if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+        if self.reorg.is_some() && self.benchmark.rlp_blocks {
+            bail!("--reorg cannot be combined with --rlp-blocks")
         }
-        if self.wait_for_persistence {
-            info!(
-                "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
-                self.persistence_threshold + 1,
-                self.persistence_threshold
-            );
+        if self.reorg.is_some() && self.enable_bal {
+            bail!("--reorg cannot be combined with --enable-bal")
         }
 
-        // Set up waiter based on configured options (duration takes precedence)
-        let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), _) => Some(PersistenceWaiter::with_duration(duration)),
-            (None, true) => {
-                let sub = self.setup_persistence_subscription().await?;
-                Some(PersistenceWaiter::with_subscription(
-                    sub,
-                    self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
-                ))
-            }
-            (None, false) => None,
-        };
+        // Log mode configuration
+        if let Some(duration) = self.wait_time {
+            info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
+        }
+        if let Some(depth) = self.reorg {
+            info!(target: "reth-bench", depth, "Using testing_buildBlockV1 reorg mode");
+        }
 
         let BenchContext {
             benchmark_mode,
             block_provider,
             auth_provider,
-            mut next_block,
-            is_optimism,
-            ..
+            local_rpc_provider,
+            next_block,
+            use_reth_namespace,
+            rlp_blocks,
+            wait_for_persistence,
+            no_wait_for_caches,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+
+        let total_blocks = benchmark_mode.total_blocks();
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
+
+        if use_reth_namespace {
+            info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
+        }
 
         let buffer_size = self.rpc_block_buffer_size;
 
-        // Use a oneshot channel to propagate errors from the spawned task
-        let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
+        let mut blocks = Box::pin(
+            stream::iter((next_block..)
+                .take_while(|next_block| {
+                    benchmark_mode.contains(*next_block)
+                }))
+                .map(|next_block| {
+                    let block_provider = block_provider.clone();
+                    async move {
+                        let block_res = block_provider
+                            .get_block_by_number(next_block.into())
+                            .full()
+                            .await
+                            .wrap_err_with(|| {
+                                format!("Failed to fetch block by number {next_block}")
+                            });
+                        let block =
+                            match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
+                                Ok(block) => block,
+                                Err(e) => {
+                                    tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
+                                    return Err(e)
+                                }
+                            };
 
-        tokio::task::spawn(async move {
-            while benchmark_mode.contains(next_block) {
-                let block_res = block_provider
-                    .get_block_by_number(next_block.into())
-                    .full()
-                    .await
-                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
-                    Ok(block) => block,
-                    Err(e) => {
-                        tracing::error!("Failed to fetch block {next_block}: {e}");
-                        let _ = error_sender.send(e);
-                        break;
+                        let rlp = if rlp_blocks {
+                            let rlp = match block_provider
+                                .debug_get_raw_block(next_block.into())
+                                .await
+                            {
+                                Ok(rlp) => rlp,
+                                Err(e) => {
+                                    tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}: {e}");
+                                    return Err(e.into())
+                                }
+                            };
+                            Some(rlp)
+                        } else {
+                            None
+                        };
+
+                        let head_block_hash = block.header.hash;
+                        let safe_block_hash = block_provider
+                            .get_block_by_number(block.header.number.saturating_sub(32).into());
+
+                        let finalized_block_hash = block_provider
+                            .get_block_by_number(block.header.number.saturating_sub(64).into());
+
+                        let (safe, finalized) =
+                            tokio::join!(safe_block_hash, finalized_block_hash);
+
+                        let safe_block_hash = match safe {
+                            Ok(Some(block)) => block.header.hash,
+                            Ok(None) | Err(_) => head_block_hash,
+                        };
+
+                        let finalized_block_hash = match finalized {
+                            Ok(Some(block)) => block.header.hash,
+                            Ok(None) | Err(_) => head_block_hash,
+                        };
+
+                        Ok((block, head_block_hash, safe_block_hash, finalized_block_hash, rlp))
                     }
-                };
-
-                let head_block_hash = block.header.hash;
-                let safe_block_hash = block_provider
-                    .get_block_by_number(block.header.number.saturating_sub(32).into());
-
-                let finalized_block_hash = block_provider
-                    .get_block_by_number(block.header.number.saturating_sub(64).into());
-
-                let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
-
-                let safe_block_hash = match safe {
-                    Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash,
-                };
-
-                let finalized_block_hash = match finalized {
-                    Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash,
-                };
-
-                next_block += 1;
-                if let Err(e) = sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
-                    .await
-                {
-                    tracing::error!("Failed to send block data: {e}");
-                    break;
-                }
-            }
-        });
+                })
+                .buffered(buffer_size),
+        );
 
         let mut results = Vec::new();
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
-
-        while let Some((block, head, safe, finalized)) = {
+        let mut reorg_state = self.reorg.map(ReorgState::new);
+        let mut queued_fork_block = None;
+        while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
-            let result = receiver.recv().await;
+            let result = blocks.try_next().await?;
             total_wait_time += wait_start.elapsed();
             result
         } {
             let gas_used = block.header.gas_used;
             let gas_limit = block.header.gas_limit;
             let block_number = block.header.number;
+            let canonical_parent_hash = block.header.parent_hash;
             let transaction_count = block.transactions.len() as u64;
-
-            debug!(target: "reth-bench", ?block_number, "Sending payload");
-
-            let forkchoice_state = ForkchoiceState {
+            let deferred_branch_start_block = reorg_state
+                .as_ref()
+                .filter(|state| state.fork_length == 0 && queued_fork_block.is_none())
+                .map(|_| block.clone());
+            let canonical_forkchoice_state = ForkchoiceState {
                 head_block_hash: head,
                 safe_block_hash: safe,
                 finalized_block_hash: finalized,
             };
 
-            let (version, params) = block_to_new_payload(block, is_optimism)?;
+            let bal = if rlp.is_none() &&
+                (block.header.block_access_list_hash.is_some() || self.enable_bal)
+            {
+                Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+            } else {
+                None
+            };
+
+            let (version, params) = block_to_new_payload(
+                block,
+                rlp,
+                use_reth_namespace,
+                wait_for_persistence,
+                no_wait_for_caches,
+                bal,
+            )?;
+
+            debug!(target: "reth-bench", ?block_number, "Sending payload");
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params).await?;
+            let np_latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: np_latency,
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
+            };
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let fcu_start = Instant::now();
+            call_forkchoice_updated_with_reth(&auth_provider, version, canonical_forkchoice_state)
+                .await?;
+            let fcu_latency = fcu_start.elapsed();
 
-            call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
-
-            let total_latency = start.elapsed();
-            let fcu_latency = total_latency - new_payload_result.latency;
+            let total_latency =
+                if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,
@@ -218,13 +348,109 @@ impl Command {
                 total_latency,
             };
 
+            if let Some(reorg_state) = reorg_state.as_mut() {
+                if queued_fork_block.is_none() && reorg_state.fork_length == 0 {
+                    // A branch start uses a canonical parent, so it can be built lazily here
+                    // instead of being queued ahead of time.
+                    let block = deferred_branch_start_block
+                        .as_ref()
+                        .ok_or_eyre("missing deferred fork block for reorg branch start")?;
+                    queued_fork_block = Some(QueuedForkBlock {
+                        block_number,
+                        prepared: prepare_built_block(
+                            &local_rpc_provider,
+                            block,
+                            canonical_parent_hash,
+                            no_wait_for_caches,
+                        )
+                        .await?,
+                    });
+                }
+
+                let queued = queued_fork_block
+                    .take()
+                    .ok_or_eyre("missing queued fork block for reorg replay")?;
+                ensure!(
+                    queued.block_number == block_number,
+                    "queued fork block {} does not match source block {}",
+                    queued.block_number,
+                    block_number
+                );
+                let prepared = queued.prepared;
+
+                call_new_payload_with_reth(&auth_provider, None, prepared.params).await?;
+
+                reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
+                let forkchoice_state = reorg_state.forkchoice_state(prepared.block_hash)?;
+
+                info!(
+                    target: "reth-bench",
+                    block_number,
+                    branch_point = %forkchoice_state.safe_block_hash,
+                    fork_head = %prepared.block_hash,
+                    fork_depth = reorg_state.fork_length,
+                    max_reorg_depth = reorg_state.depth,
+                    "Switching forkchoice to reorg branch"
+                );
+
+                let fcu_start = Instant::now();
+                call_forkchoice_updated_with_reth(&auth_provider, None, forkchoice_state).await?;
+                let _fork_fcu_latency = fcu_start.elapsed();
+
+                let next_fork_block_number = block_number + 1;
+                if reorg_state.fork_length < reorg_state.depth {
+                    queued_fork_block = queue_fork_block(
+                        &block_provider,
+                        &local_rpc_provider,
+                        &benchmark_mode,
+                        next_fork_block_number,
+                        Some(prepared.block_hash),
+                        no_wait_for_caches,
+                    )
+                    .await?;
+                } else {
+                    info!(
+                        target: "reth-bench",
+                        block_number,
+                        reorg_depth = reorg_state.depth,
+                        "Resetting reorg branch after reaching max depth"
+                    );
+
+                    // `testing_buildBlockV1` resolves the parent from canonical state, so switch
+                    // back to the source chain before reseeding the next queued fork block.
+                    call_forkchoice_updated_with_reth(
+                        &auth_provider,
+                        version,
+                        canonical_forkchoice_state,
+                    )
+                    .await?;
+
+                    reorg_state.reset();
+                    queued_fork_block = None;
+                }
+            }
+
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
             // We want to measure engine throughput, not RPC fetch latency.
+            blocks_processed += 1;
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(%combined_result);
+            let progress = match total_blocks {
+                Some(total) => format!("{blocks_processed}/{total}"),
+                None => format!("{blocks_processed}"),
+            };
+            info!(target: "reth-bench", progress, %combined_result);
 
-            if let Some(w) = &mut waiter {
-                w.on_block(block_number).await?;
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+            }
+
+            if let Some(wait_time) = self.wait_time {
+                let remaining = wait_time.saturating_sub(start.elapsed());
+                if !remaining.is_zero() {
+                    tokio::time::sleep(remaining).await;
+                }
             }
 
             let gas_row =
@@ -232,306 +458,183 @@ impl Command {
             results.push((gas_row, combined_result));
         }
 
-        // Check if the spawned task encountered an error
-        if let Ok(error) = error_receiver.try_recv() {
-            return Err(error);
-        }
-
-        // Drop waiter - we don't need to wait for final blocks to persist
-        // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
-        drop(waiter);
-
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
             results.into_iter().unzip();
 
         if let Some(ref path) = self.benchmark.output {
-            write_benchmark_results(path, &gas_output_results, combined_results)?;
+            write_benchmark_results(path, &gas_output_results, &combined_results)?;
         }
 
-        let gas_output = TotalGasOutput::new(gas_output_results)?;
+        if let (Some(path), Some(scraper)) = (&self.benchmark.output, &metrics_scraper) {
+            scraper.write_csv(path)?;
+        }
+
+        let gas_output =
+            TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
 
         info!(
-            total_duration=?gas_output.total_duration,
-            total_gas_used=?gas_output.total_gas_used,
-            blocks_processed=?gas_output.blocks_processed,
-            "Total Ggas/s: {:.4}",
-            gas_output.total_gigagas_per_second()
+            target: "reth-bench",
+            total_gas_used = gas_output.total_gas_used,
+            total_duration = ?gas_output.total_duration,
+            execution_duration = ?gas_output.execution_duration,
+            blocks_processed = gas_output.blocks_processed,
+            wall_clock_ggas_per_second = format_args!("{:.4}", gas_output.total_gigagas_per_second()),
+            execution_ggas_per_second = format_args!("{:.4}", gas_output.execution_gigagas_per_second()),
+            "Benchmark complete"
         );
 
         Ok(())
     }
-
-    /// Returns the websocket RPC URL used for the persistence subscription.
-    ///
-    /// Preference:
-    /// - If `--ws-rpc-url` is provided, use it directly.
-    /// - Otherwise, derive a WS RPC URL from `--engine-rpc-url`.
-    ///
-    /// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
-    /// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
-    /// Since `BenchmarkArgs` only has the engine URL by default, we convert the scheme
-    /// (http→ws, https→wss) and force the port to 8546.
-    fn derive_ws_rpc_url(&self) -> eyre::Result<Url> {
-        if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
-            let parsed: Url = ws_url
-                .parse()
-                .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
-            info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
-            Ok(parsed)
-        } else {
-            let derived = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
-            debug!(
-                target: "reth-bench",
-                engine_url = %self.benchmark.engine_rpc_url,
-                %derived,
-                "Derived WebSocket RPC URL from engine RPC URL"
-            );
-            Ok(derived)
-        }
-    }
-
-    /// Establishes a websocket connection and subscribes to `reth_subscribePersistedBlock`.
-    async fn setup_persistence_subscription(&self) -> eyre::Result<PersistenceSubscription> {
-        let ws_url = self.derive_ws_rpc_url()?;
-
-        info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
-
-        let ws_connect = WsConnect::new(ws_url.to_string());
-        let client = RpcClient::connect_pubsub(ws_connect)
-            .await
-            .wrap_err("Failed to connect to WebSocket RPC endpoint")?;
-        let provider: RootProvider<Ethereum> = RootProvider::new(client);
-
-        let subscription = provider
-            .subscribe_to::<BlockNumHash>("reth_subscribePersistedBlock")
-            .await
-            .wrap_err("Failed to subscribe to persistence notifications")?;
-
-        info!("Subscribed to persistence notifications");
-
-        Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
-    }
 }
 
-/// Converts an engine API URL to the default RPC websocket URL.
-///
-/// Transformations:
-/// - `http`  → `ws`
-/// - `https` → `wss`
-/// - `ws` / `wss` keep their scheme
-/// - Port is always set to `8546`, reth's default RPC websocket port.
-///
-/// This is used when we only know the engine API URL (typically `:8551`) but
-/// need to connect to the node's WS RPC endpoint for persistence events.
-fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
-    let url: Url = engine_url
-        .parse()
-        .wrap_err_with(|| format!("Failed to parse engine RPC URL: {engine_url}"))?;
+async fn prepare_built_block(
+    block_provider: &RootProvider<AnyNetwork>,
+    block: &AnyRpcBlock,
+    parent_block_hash: B256,
+    no_wait_for_caches: bool,
+) -> eyre::Result<PreparedBuiltBlock> {
+    const MAX_BUILD_ATTEMPTS: usize = 10;
+    const BUILD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
-    let mut ws_url = url.clone();
+    let request = build_block_request(block, parent_block_hash)?;
+    let built_payload: ExecutionPayloadEnvelopeV5 = {
+        let mut attempts_remaining = MAX_BUILD_ATTEMPTS;
 
-    match ws_url.scheme() {
-        "http" => ws_url
-            .set_scheme("ws")
-            .map_err(|_| eyre::eyre!("Failed to set WS scheme for URL: {url}"))?,
-        "https" => ws_url
-            .set_scheme("wss")
-            .map_err(|_| eyre::eyre!("Failed to set WSS scheme for URL: {url}"))?,
-        "ws" | "wss" => {}
-        scheme => {
-            return Err(eyre::eyre!(
-            "Unsupported URL scheme '{scheme}' for URL: {url}. Expected http, https, ws, or wss."
-        ))
-        }
-    }
-
-    ws_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
-
-    Ok(ws_url)
-}
-
-/// Waits until the persistence subscription reports that `target` has been persisted.
-///
-/// Consumes subscription events until `last_persisted >= target`, or returns an error if:
-/// - the subscription stream ends unexpectedly, or
-/// - `timeout` elapses before `target` is observed.
-async fn wait_for_persistence(
-    stream: &mut SubscriptionStream<BlockNumHash>,
-    target: u64,
-    last_persisted: &mut u64,
-    timeout: Duration,
-) -> eyre::Result<()> {
-    tokio::time::timeout(timeout, async {
-        while *last_persisted < target {
-            match stream.next().await {
-                Some(persisted) => {
-                    *last_persisted = persisted.number;
-                    debug!(
+        loop {
+            match block_provider.client().request("testing_buildBlockV1", [request.clone()]).await {
+                Ok(payload) => break payload,
+                Err(err) if attempts_remaining > 1 && is_retryable_build_block_error(&err) => {
+                    warn!(
                         target: "reth-bench",
-                        persisted_block = ?last_persisted,
-                        "Received persistence notification"
+                        block_number = block.header.number,
+                        %parent_block_hash,
+                        attempts_remaining,
+                        error = %err,
+                        "Retrying testing_buildBlockV1 after transient fork build failure"
                     );
+                    attempts_remaining -= 1;
+                    tokio::time::sleep(BUILD_RETRY_INTERVAL).await;
                 }
-                None => {
-                    return Err(eyre::eyre!("Persistence subscription closed unexpectedly"));
+                Err(err) => {
+                    return Err(err).wrap_err_with(|| {
+                        format!(
+                            "Failed to build block {} via testing_buildBlockV1",
+                            block.header.number
+                        )
+                    })
                 }
             }
         }
-        Ok(())
-    })
-    .await
-    .map_err(|_| {
-        eyre::eyre!(
-            "Persistence timeout: target block {} not persisted within {:?}. Last persisted: {}",
-            target,
-            timeout,
-            last_persisted
+    };
+
+    let payload = &built_payload.execution_payload.payload_inner.payload_inner;
+    let block_hash = payload.block_hash;
+    let (payload, sidecar) = built_payload
+        .into_payload_and_sidecar(block.header.parent_beacon_block_root.unwrap_or_default());
+    // Fork payloads are built immediately before the next `testing_buildBlockV1` call. Leaving
+    // reth's default persistence wait enabled here gives the regular RPC side a consistent base
+    // state for the next synthetic fork block build.
+    let params = serde_json::to_value((
+        RethNewPayloadInput::ExecutionData(ExecutionData { payload, sidecar }),
+        None::<bool>,
+        no_wait_for_caches.then_some(false),
+    ))?;
+
+    Ok(PreparedBuiltBlock { block_hash, params })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn queue_fork_block(
+    block_provider: &RootProvider<AnyNetwork>,
+    local_rpc_provider: &RootProvider<AnyNetwork>,
+    benchmark_mode: &crate::bench_mode::BenchMode,
+    block_number: u64,
+    parent_block_hash: Option<B256>,
+    no_wait_for_caches: bool,
+) -> eyre::Result<Option<QueuedForkBlock>> {
+    if !benchmark_mode.contains(block_number) {
+        return Ok(None)
+    }
+
+    let future_block = block_provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(block_number))
+        .full()
+        .await
+        .wrap_err_with(|| format!("Failed to fetch block by number {block_number}"))?
+        .ok_or_eyre("Block not found")?;
+    let parent_block_hash = parent_block_hash.unwrap_or(future_block.header.parent_hash);
+
+    Ok(Some(QueuedForkBlock {
+        block_number,
+        prepared: prepare_built_block(
+            local_rpc_provider,
+            &future_block,
+            parent_block_hash,
+            no_wait_for_caches,
         )
-    })?
+        .await?,
+    }))
 }
 
-/// Wrapper that keeps both the subscription stream and the underlying provider alive.
-/// The provider must be kept alive for the subscription to continue receiving events.
-struct PersistenceSubscription {
-    _provider: RootProvider<Ethereum>,
-    stream: SubscriptionStream<BlockNumHash>,
+fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool {
+    let message = err.to_string();
+    message.contains("block not found: hash") ||
+        message.contains("block hash not found for block number")
 }
 
-impl PersistenceSubscription {
-    const fn new(
-        provider: RootProvider<Ethereum>,
-        stream: SubscriptionStream<BlockNumHash>,
-    ) -> Self {
-        Self { _provider: provider, stream }
-    }
+fn build_block_request(
+    block: &AnyRpcBlock,
+    parent_block_hash: B256,
+) -> eyre::Result<TestingBuildBlockRequestV1> {
+    let mut transactions = block
+        .clone()
+        .try_into_transactions()
+        .map_err(|_| eyre::eyre!("Block transactions must be fetched in full for --reorg"))?
+        .into_iter()
+        .map(|tx| {
+            let tx: TxEnvelope =
+                tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type in RPC block"))?;
+            if tx.is_eip4844() {
+                return Ok(None)
+            }
+            Ok(Some(tx.encoded_2718().into()))
+        })
+        .filter_map(|tx| tx.transpose())
+        .collect::<eyre::Result<Vec<_>>>()?;
 
-    const fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
-        &mut self.stream
-    }
+    // `testing_buildBlockV1` only takes raw transaction bytes, so we exclude blob transactions
+    // from the synthetic fork blocks rather than trying to reconstruct their sidecars.
+    // Keep only 90% of the remaining transactions so the alternate branch produces a materially
+    // different post-state instead of only differing by header data.
+    let keep = transactions.len().saturating_mul(9) / 10;
+    transactions.truncate(keep);
+
+    let rpc_block = block.clone().into_inner();
+
+    Ok(TestingBuildBlockRequestV1 {
+        parent_block_hash,
+        payload_attributes: PayloadAttributes {
+            timestamp: block.header.timestamp,
+            prev_randao: block.header.mix_hash.unwrap_or_default(),
+            suggested_fee_recipient: block.header.beneficiary,
+            withdrawals: rpc_block.withdrawals.map(|withdrawals| withdrawals.into_inner()),
+            parent_beacon_block_root: block.header.parent_beacon_block_root,
+            slot_number: block.header.slot_number,
+        },
+        transactions,
+        extra_data: Some(block.header.extra_data.clone()),
+    })
 }
 
-/// Encapsulates the block waiting logic.
-///
-/// Provides a simple `on_block()` interface that handles both:
-/// - Fixed duration waits (when `wait_time` is set)
-/// - Persistence-based waits (when `subscription` is set)
-///
-/// For persistence mode, waits after every `(threshold + 1)` blocks.
-struct PersistenceWaiter {
-    wait_time: Option<Duration>,
-    subscription: Option<PersistenceSubscription>,
-    blocks_sent: u64,
-    last_persisted: u64,
-    threshold: u64,
-    timeout: Duration,
-}
+fn parse_reorg_depth(value: &str) -> Result<usize, String> {
+    let depth = value
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| format!("invalid reorg depth {value:?}, expected a positive integer"))?;
 
-impl PersistenceWaiter {
-    const fn with_duration(wait_time: Duration) -> Self {
-        Self {
-            wait_time: Some(wait_time),
-            subscription: None,
-            blocks_sent: 0,
-            last_persisted: 0,
-            threshold: 0,
-            timeout: Duration::ZERO,
-        }
+    if depth == 0 {
+        return Err("reorg depth must be greater than 0".to_string())
     }
 
-    const fn with_subscription(
-        subscription: PersistenceSubscription,
-        threshold: u64,
-        timeout: Duration,
-    ) -> Self {
-        Self {
-            wait_time: None,
-            subscription: Some(subscription),
-            blocks_sent: 0,
-            last_persisted: 0,
-            threshold,
-            timeout,
-        }
-    }
-
-    /// Called once per block. Waits based on the configured mode.
-    #[allow(clippy::manual_is_multiple_of)]
-    async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
-        if let Some(wait_time) = self.wait_time {
-            tokio::time::sleep(wait_time).await;
-            return Ok(());
-        }
-
-        let Some(ref mut subscription) = self.subscription else {
-            return Ok(());
-        };
-
-        self.blocks_sent += 1;
-
-        if self.blocks_sent % (self.threshold + 1) == 0 {
-            debug!(
-                target: "reth-bench",
-                target_block = ?block_number,
-                last_persisted = self.last_persisted,
-                blocks_sent = self.blocks_sent,
-                "Waiting for persistence"
-            );
-
-            wait_for_persistence(
-                subscription.stream_mut(),
-                block_number,
-                &mut self.last_persisted,
-                self.timeout,
-            )
-            .await?;
-
-            debug!(
-                target: "reth-bench",
-                persisted = self.last_persisted,
-                "Persistence caught up"
-            );
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_engine_url_to_ws_url() {
-        // http -> ws, always uses port 8546
-        let result = engine_url_to_ws_url("http://localhost:8551").unwrap();
-        assert_eq!(result.as_str(), "ws://localhost:8546/");
-
-        // https -> wss
-        let result = engine_url_to_ws_url("https://localhost:8551").unwrap();
-        assert_eq!(result.as_str(), "wss://localhost:8546/");
-
-        // Custom engine port still maps to 8546
-        let result = engine_url_to_ws_url("http://localhost:9551").unwrap();
-        assert_eq!(result.port(), Some(8546));
-
-        // Already ws passthrough
-        let result = engine_url_to_ws_url("ws://localhost:8546").unwrap();
-        assert_eq!(result.scheme(), "ws");
-
-        // Invalid inputs
-        assert!(engine_url_to_ws_url("ftp://localhost:8551").is_err());
-        assert!(engine_url_to_ws_url("not a valid url").is_err());
-    }
-
-    #[tokio::test]
-    async fn test_waiter_with_duration() {
-        let mut waiter = PersistenceWaiter::with_duration(Duration::from_millis(1));
-
-        let start = Instant::now();
-        waiter.on_block(1).await.unwrap();
-        waiter.on_block(2).await.unwrap();
-        waiter.on_block(3).await.unwrap();
-
-        // Should have waited ~3ms total
-        assert!(start.elapsed() >= Duration::from_millis(3));
-    }
+    Ok(depth)
 }

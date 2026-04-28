@@ -237,17 +237,15 @@ where
             return Err(internal_rpc_err("block is not full"));
         };
 
-        // Crop page
-        let page_end = tx_len.saturating_sub(page_number * page_size);
-        let page_start = page_end.saturating_sub(page_size);
+        let page = block_transaction_page_range(tx_len, page_number, page_size);
 
         // Crop transactions
-        *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
+        *transactions = transactions.drain(page.clone()).collect::<Vec<_>>();
 
         // Crop receipts and transform them into OtsTransactionReceipt
         let timestamp = Some(block.header.timestamp());
         let receipts = receipts
-            .drain(page_start..page_end)
+            .drain(page)
             .zip(transactions.iter().map(Typed2718::ty))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
@@ -382,5 +380,36 @@ where
         // return the first found transaction, this behavior is consistent with etherscan's
         let found = traces.and_then(|traces| traces.first().copied());
         Ok(found)
+    }
+}
+
+/// Returns the transaction slice for an Otterscan block page.
+///
+/// Otterscan paginates in block order, so page `0` corresponds to the first transactions in the
+/// block instead of the tail.
+fn block_transaction_page_range(
+    tx_len: usize,
+    page_number: usize,
+    page_size: usize,
+) -> std::ops::Range<usize> {
+    let page_start = page_number.saturating_mul(page_size).min(tx_len);
+    let page_end = page_start.saturating_add(page_size).min(tx_len);
+    page_start..page_end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_transaction_page_range;
+
+    #[test]
+    fn block_transaction_page_range_returns_first_pages_in_block_order() {
+        assert_eq!(block_transaction_page_range(25, 0, 10), 0..10);
+        assert_eq!(block_transaction_page_range(25, 1, 10), 10..20);
+    }
+
+    #[test]
+    fn block_transaction_page_range_caps_pages_at_the_block_length() {
+        assert_eq!(block_transaction_page_range(25, 2, 10), 20..25);
+        assert_eq!(block_transaction_page_range(25, 3, 10), 25..25);
     }
 }

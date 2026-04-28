@@ -121,7 +121,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
         P2PStreamError: Into<Err>,
     {
-        self.into_satellite_stream_with_tuple_handshake(cap, move |proxy| async move {
+        self.into_satellite_stream_with_tuple_handshake(cap, async move |proxy| {
             let st = handshake(proxy).await?;
             Ok((st, ()))
         })
@@ -218,22 +218,28 @@ impl<St> RlpxProtocolMultiplexer<St> {
         status: UnifiedStatus,
         fork_filter: ForkFilter,
         handshake: Arc<dyn EthRlpxHandshake>,
+        eth_max_message_size: usize,
     ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy, N>>, UnifiedStatus), EthStreamError>
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
         let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
-        self.into_satellite_stream_with_tuple_handshake(&Capability::eth(eth_cap), move |proxy| {
-            let handshake = handshake.clone();
-            async move {
+        self.into_satellite_stream_with_tuple_handshake(
+            &Capability::eth(eth_cap),
+            async move |proxy| {
+                let handshake = handshake.clone();
                 let mut unauth = UnauthProxy { inner: proxy };
                 let their_status = handshake
                     .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
                     .await?;
-                let eth_stream = EthStream::new(eth_cap, unauth.into_inner());
+                let eth_stream = EthStream::with_max_message_size(
+                    eth_cap,
+                    unauth.into_inner(),
+                    eth_max_message_size,
+                );
                 Ok((eth_stream, their_status))
-            }
-        })
+            },
+        )
         .await
     }
 }
@@ -774,6 +780,7 @@ mod tests {
     use super::*;
     use crate::{
         handshake::EthHandshake,
+        message::MAX_MESSAGE_SIZE,
         test_utils::{
             connect_passthrough, eth_handshake, eth_hello,
             proto::{test_hello, TestProtoMessage},
@@ -812,14 +819,11 @@ mod tests {
 
         let multiplexer = RlpxProtocolMultiplexer::new(conn);
         let _satellite = multiplexer
-            .into_satellite_stream_with_handshake(
-                eth.capability().as_ref(),
-                move |proxy| async move {
-                    UnauthedEthStream::new(proxy)
-                        .handshake::<EthNetworkPrimitives>(status, fork_filter)
-                        .await
-                },
-            )
+            .into_satellite_stream_with_handshake(eth.capability().as_ref(), async move |proxy| {
+                UnauthedEthStream::new(proxy)
+                    .handshake::<EthNetworkPrimitives>(status, fork_filter)
+                    .await
+            })
             .await
             .unwrap();
     }
@@ -844,6 +848,7 @@ mod tests {
                     other_status,
                     other_fork_filter,
                     Arc::new(EthHandshake::default()),
+                    MAX_MESSAGE_SIZE,
                 )
                 .await
                 .unwrap();
@@ -879,6 +884,7 @@ mod tests {
                 status,
                 fork_filter,
                 Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
             )
             .await
             .unwrap();

@@ -3,14 +3,16 @@
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 use alloy_primitives::B256;
 use futures::{future, future::Either};
-use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
+    block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
+    receipts::client::{ReceiptsClient, ReceiptsFut},
     BlockClient,
 };
 use reth_network_peers::PeerId;
@@ -102,6 +104,65 @@ impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
     }
 }
 
+impl<N: NetworkPrimitives> ReceiptsClient for FetchClient<N> {
+    type Receipt = N::Receipt;
+    type Output = ReceiptsFut<N::Receipt>;
+
+    fn get_receipts_with_priority(&self, request: Vec<B256>, priority: Priority) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetReceipts { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+}
+
 impl<N: NetworkPrimitives> BlockClient for FetchClient<N> {
     type Block = N::Block;
+}
+
+impl<N: NetworkPrimitives> BlockAccessListsClient for FetchClient<N> {
+    type Output =
+        std::pin::Pin<Box<dyn Future<Output = PeerRequestResult<BlockAccessLists>> + Send + Sync>>;
+
+    /// Sends a `GetBlockAccessLists` request to an available peer.
+    fn get_block_access_lists_with_priority(
+        &self,
+        hashes: Vec<B256>,
+        priority: Priority,
+    ) -> Self::Output {
+        self.get_block_access_lists_with_priority_and_requirement(
+            hashes,
+            priority,
+            BalRequirement::Mandatory,
+        )
+    }
+
+    fn get_block_access_lists_with_priority_and_requirement(
+        &self,
+        hashes: Vec<B256>,
+        priority: Priority,
+        requirement: BalRequirement,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockAccessLists {
+                request: hashes,
+                response,
+                priority,
+                requirement,
+            })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
 }

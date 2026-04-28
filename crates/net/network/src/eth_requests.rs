@@ -6,18 +6,19 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, GetReceipts70, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
-    Receipts69, Receipts70,
+    BlockAccessLists, BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, GetReceipts70, HeadersDirection,
+    NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -44,6 +45,11 @@ pub const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// `SOFT_RESPONSE_LIMIT`.
 pub const MAX_BODIES_SERVE: usize = 1024;
+
+/// Maximum number of block access lists to serve.
+///
+/// Used to limit lookups.
+pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
@@ -170,7 +176,7 @@ where
 
         let mut total_bytes = 0;
 
-        for hash in request.0 {
+        for hash in request {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = block.into_body();
                 total_bytes += body.length();
@@ -290,7 +296,7 @@ where
         let mut receipts = Vec::new();
         let mut total_bytes = 0;
 
-        for hash in request.0 {
+        for hash in request {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
@@ -310,13 +316,57 @@ where
     }
 }
 
+impl<C, N> EthRequestHandler<C, N>
+where
+    N: NetworkPrimitives,
+    C: BalProvider,
+{
+    /// Handles [`GetBlockAccessLists`] queries.
+    ///
+    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
+    /// <https://eips.ethereum.org/EIPS/eip-8159>
+    fn on_block_access_lists_request(
+        &self,
+        _peer_id: PeerId,
+        mut request: GetBlockAccessLists,
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    ) {
+        request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+
+        let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
+        let access_lists = self
+            .client
+            .bal_store()
+            .get_by_hashes_with_limit(&request.0, limit)
+            .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
+        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+    }
+}
+
+/// Builds the error fallback response while still enforcing the BAL response soft limit.
+fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLimit) -> Vec<Bytes> {
+    let mut out = Vec::with_capacity(count);
+    let mut size = 0;
+    for _ in 0..count {
+        let bal = Bytes::from_static(&[0xc0]);
+        size += bal.len();
+        out.push(bal);
+
+        if limit.exceeds(size) {
+            break
+        }
+    }
+    out
+}
+
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {
@@ -351,6 +401,9 @@ where
                     }
                     IncomingEthRequest::GetReceipts70 { peer_id, request, response } => {
                         this.on_receipts70_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetBlockAccessLists { peer_id, request, response } => {
+                        this.on_block_access_lists_request(peer_id, request, response)
                     }
                 }
             },
@@ -436,5 +489,16 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetReceipts70,
         /// The channel sender for the response containing Receipts70.
         response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
+    },
+    /// Request Block Access Lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists {
+        /// The ID of the peer to request block access lists from.
+        peer_id: PeerId,
+        /// The requested block hashes.
+        request: GetBlockAccessLists,
+        /// The channel sender for the response containing block access lists.
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
 }

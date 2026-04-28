@@ -107,6 +107,11 @@ pub struct EthConfig {
     pub send_raw_transaction_sync_timeout: Duration,
     /// Maximum memory the EVM can allocate per RPC request.
     pub rpc_evm_memory_limit: u64,
+    /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+    ///
+    /// This is disabled by default, allowing blob transactions with EIP-4844 sidecars to be
+    /// submitted without automatic conversion.
+    pub force_blob_sidecar_upcasting: bool,
 }
 
 impl EthConfig {
@@ -140,6 +145,7 @@ impl Default for EthConfig {
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             rpc_evm_memory_limit: (1 << 32) - 1,
+            force_blob_sidecar_upcasting: false,
         }
     }
 }
@@ -240,6 +246,12 @@ impl EthConfig {
     /// Configures the maximum memory the EVM can allocate per RPC request.
     pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.rpc_evm_memory_limit = memory_limit;
+        self
+    }
+
+    /// Configures whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.
+    pub const fn force_blob_sidecar_upcasting(mut self, force: bool) -> Self {
+        self.force_blob_sidecar_upcasting = force;
         self
     }
 }

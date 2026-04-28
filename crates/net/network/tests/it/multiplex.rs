@@ -19,6 +19,7 @@ use reth_network::{
 };
 use reth_network_api::{Direction, NetworkInfo, PeerId, Peers};
 use reth_provider::{noop::NoopProvider, test_utils::MockEthProvider};
+use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -285,7 +286,7 @@ async fn test_connect_to_non_multiplex_peer() {
 
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .listener_port(0)
         .disable_discovery()
         .build(NoopProvider::default());

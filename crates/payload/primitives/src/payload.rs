@@ -56,8 +56,15 @@ pub trait ExecutionPayload:
     /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
 
+    /// Returns the total gas limit for this block.
+    fn gas_limit(&self) -> u64;
+
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
+    /// Returns the slot number included in this payload.
+    ///
+    /// Returns `None` for pre-Amsterdam blocks.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -78,7 +85,7 @@ impl ExecutionPayload for ExecutionData {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        None
+        self.payload.block_access_list()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -93,8 +100,16 @@ impl ExecutionPayload for ExecutionData {
         self.payload.as_v1().gas_used
     }
 
+    fn gas_limit(&self) -> u64 {
+        self.payload.as_v1().gas_limit
+    }
+
     fn transaction_count(&self) -> usize {
         self.payload.as_v1().transactions.len()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.payload.slot_number()
     }
 }
 
@@ -158,6 +173,22 @@ where
             Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,
         }
     }
+
+    /// Returns `block_access_list` from  payload.
+    pub fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.block_access_list(),
+            Self::PayloadAttributes(_attributes) => None,
+        }
+    }
+
+    /// Returns `slot_number` from  payload or attributes.
+    pub fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.slot_number(),
+            Self::PayloadAttributes(attributes) => attributes.slot_number(),
+        }
+    }
 }
 
 impl<'a, Payload, AttributesType> From<&'a AttributesType>
@@ -169,46 +200,6 @@ where
         Self::PayloadAttributes(attributes)
     }
 }
-
-#[cfg(feature = "op")]
-impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
-    fn parent_hash(&self) -> B256 {
-        self.parent_hash()
-    }
-
-    fn block_hash(&self) -> B256 {
-        self.block_hash()
-    }
-
-    fn block_number(&self) -> u64 {
-        self.block_number()
-    }
-
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload.as_v2().map(|p| &p.withdrawals)
-    }
-
-    fn block_access_list(&self) -> Option<&Bytes> {
-        None
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.sidecar.parent_beacon_block_root()
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.payload.as_v1().timestamp
-    }
-
-    fn gas_used(&self) -> u64 {
-        self.payload.as_v1().gas_used
-    }
-
-    fn transaction_count(&self) -> usize {
-        self.payload.as_v1().transactions.len()
-    }
-}
-
 /// Extended functionality for Ethereum execution payloads
 impl<Attributes> PayloadOrAttributes<'_, ExecutionData, Attributes>
 where

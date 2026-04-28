@@ -188,13 +188,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
-        for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) {
-                return Some(peer_id)
-            }
-        }
-
-        None
+        fallback_peers.iter().find(|peer_id| self.is_idle(peer_id))
     }
 
     /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
@@ -387,7 +381,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
             else {
-                return
+                continue
             };
 
             if let Some(peer_id) = fallback_peer {
@@ -448,8 +442,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             search_durations.find_idle_peer
         );
 
-        // peer should always exist since `is_session_active` already checked
-        let Some(peer) = peers.get(&peer_id) else { return false };
+        // peer may have disconnected between idle check and here, re-buffer hashes so they
+        // aren't lost from the pending fetch cache
+        let Some(peer) = peers.get(&peer_id) else {
+            self.buffer_hashes(hashes_to_request, None);
+            return false
+        };
         let conn_eth_version = peer.version;
 
         // fill the request with more hashes pending fetch that have been announced by the peer.
@@ -1453,6 +1451,26 @@ mod test {
             requested_hashes.into_iter().collect::<HashSet<_>>(),
             seen_hashes.into_iter().collect::<HashSet<_>>()
         )
+    }
+
+    #[test]
+    fn on_fetch_pending_hashes_rebuffers_on_disconnected_peer() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let peer_1 = PeerId::new([1; 64]);
+        let peer_2 = PeerId::new([2; 64]);
+        let hash_1 = B256::from_slice(&[1; 32]);
+
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_1, peer_1, 0, Some(128));
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_1, peer_2, 0, Some(128));
+
+        assert_eq!(tx_fetcher.num_pending_hashes(), 1);
+
+        // pass empty peers map — both peers are "disconnected"
+        let peers = HashMap::new();
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+
+        // hash should be re-buffered, not lost
+        assert_eq!(tx_fetcher.num_pending_hashes(), 1);
     }
 
     #[test]

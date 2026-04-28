@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
-use revm::database::BundleState;
+use revm::database::{states::BundleState, BundleAccount};
 
 pub use alloy_evm::block::BlockExecutionResult;
 
@@ -35,6 +35,11 @@ impl<T> BlockExecutionOutput<T> {
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.state.account(address).map(|a| a.info.as_ref().map(Into::into))
+    }
+
+    /// Returns the state [`BundleAccount`] for the given address.
+    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
+        self.state.account(address)
     }
 
     /// Get storage if value is known.

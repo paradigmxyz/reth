@@ -12,7 +12,7 @@
 extern crate alloc;
 
 mod payload;
-pub use payload::{payload_id, BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use payload::{BlobSidecars, EthBuiltPayload};
 
 mod error;
 pub use error::*;
@@ -46,16 +46,13 @@ impl<
     type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
-    type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        T::block_to_payload(block)
     }
 }
 
@@ -86,7 +83,6 @@ pub struct EthPayloadTypes;
 impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
-    type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
     type ExecutionData = ExecutionData;
 
     fn block_to_payload(

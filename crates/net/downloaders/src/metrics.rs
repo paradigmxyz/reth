@@ -60,6 +60,15 @@ impl BodyDownloaderMetrics {
             _error => self.unexpected_errors.increment(1),
         }
     }
+
+    /// Clear all gauge metrics by setting them to 0.
+    pub fn clear(&self) {
+        self.in_flight_requests.set(0);
+        self.buffered_responses.set(0);
+        self.buffered_blocks.set(0);
+        self.buffered_blocks_size_bytes.set(0);
+        self.queued_blocks.set(0);
+    }
 }
 
 /// Metrics for an individual response, i.e. the size in bytes, and length (number of bodies) in the

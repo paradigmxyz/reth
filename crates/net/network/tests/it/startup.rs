@@ -4,13 +4,14 @@ use std::{
 };
 
 use reth_chainspec::MAINNET;
-use reth_discv4::{Discv4Config, NatResolver, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{Discv4Config, NatResolver, DEFAULT_DISCOVERY_ADDR};
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
 };
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_storage_api::noop::NoopProvider;
+use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use tokio::net::TcpListener;
 
@@ -29,7 +30,7 @@ fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_is_default_syncing() {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .disable_discovery()
         .listener_port(0)
         .build(NoopProvider::default());
@@ -40,13 +41,13 @@ async fn test_is_default_syncing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_listener_addr_in_use() {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .disable_discovery()
         .listener_port(0)
         .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
     let listener_port = network.local_addr().port();
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .listener_port(listener_port)
         .disable_discovery()
         .build(NoopProvider::default());
@@ -72,27 +73,31 @@ async fn test_discovery_addr_in_use() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_discv5_and_discv4_same_socket_fails() {
+async fn test_discv5_and_discv4_same_socket_ok() {
+    // Pick a free port for the shared UDP discovery socket and TCP RLPx listener.
+    let test_port: u16 = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind to a port")
+        .local_addr()
+        .unwrap()
+        .port();
+
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
-        .listener_port(DEFAULT_DISCOVERY_PORT)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
+        .listener_port(test_port)
+        .discovery_port(test_port)
         .discovery_v5(
-            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT).into())
-                .discv5_config(
-                    discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
-                        DEFAULT_DISCOVERY_ADDR,
-                        DEFAULT_DISCOVERY_PORT,
-                    ))
-                    .build(),
-                ),
+            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, test_port).into()).discv5_config(
+                discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
+                    DEFAULT_DISCOVERY_ADDR,
+                    test_port,
+                ))
+                .build(),
+            ),
         )
         .disable_dns_discovery()
         .build(NoopProvider::default());
-    let addr = config.listener_addr;
-    let result = NetworkManager::new(config).await;
-    let err = result.err().unwrap();
-
-    assert!(is_addr_in_use_kind(&err, ServiceKind::Listener(addr)), "{err:?}")
+    let _network = NetworkManager::new(config).await.expect("shared port discovery should start");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -105,7 +110,7 @@ async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
         .port();
 
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .listener_port(test_port)
         .disable_discv4_discovery()
         .discovery_v5(
@@ -126,7 +131,7 @@ async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tcp_port_node_record_no_discovery() {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .listener_port(0)
         .disable_discovery()
         .build_with_noop_provider(MAINNET.clone());
@@ -144,7 +149,7 @@ async fn test_tcp_port_node_record_no_discovery() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tcp_port_node_record_discovery() {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .listener_port(0)
         .discovery_port(0)
         .disable_dns_discovery()
@@ -163,7 +168,7 @@ async fn test_tcp_port_node_record_discovery() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_node_record_address_with_nat() {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discv4_discovery()
         .disable_dns_discovery()
@@ -179,7 +184,7 @@ async fn test_node_record_address_with_nat() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_node_record_address_with_nat_disable_discovery() {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let config = NetworkConfigBuilder::eth(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discovery()
         .disable_nat()

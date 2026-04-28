@@ -47,23 +47,16 @@ pub fn default_max_tracing_requests() -> usize {
 pub const DEFAULT_PROOF_PERMITS: usize = 25;
 
 /// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
-
-/// The default IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
 
-/// The engine_api IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc";
-
 /// The `engine_api` IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
 /// The default limit for blocks count in `eth_simulateV1`.
 pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
+
+/// The default maximum number of total storage slots for `eth_getStorageValues`.
+pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
@@ -102,7 +95,7 @@ pub mod gas_oracle {
     pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
 
     /// The default minimum gas price, under which the sample will be ignored
-    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
+    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::ZERO;
 
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
@@ -132,4 +125,7 @@ pub mod cache {
 
     /// Default number of concurrent database requests.
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
+
+    /// Default maximum number of transaction hashes to cache for lookups.
+    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 30_000;
 }

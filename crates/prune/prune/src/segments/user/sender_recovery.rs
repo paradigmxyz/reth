@@ -1,14 +1,18 @@
 use crate::{
     db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, Segment},
     PrunerError,
 };
 use reth_db_api::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
+use reth_provider::{
+    BlockReader, DBProvider, EitherWriterDestination, StaticFileProviderFactory,
+    StorageSettingsCache, TransactionsProvider,
+};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
-use tracing::{instrument, trace};
+use reth_static_file_types::StaticFileSegment;
+use tracing::{debug, instrument, trace};
 
 #[derive(Debug)]
 pub struct SenderRecovery {
@@ -23,7 +27,11 @@ impl SenderRecovery {
 
 impl<Provider> Segment<Provider> for SenderRecovery
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + StorageSettingsCache
+        + StaticFileProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::SenderRecovery
@@ -37,8 +45,33 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    #[instrument(
+        name = "SenderRecovery::prune",
+        target = "pruner",
+        skip(self, provider),
+        ret(level = "trace")
+    )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        if EitherWriterDestination::senders(provider).is_static_file() {
+            debug!(target: "pruner", "Pruning transaction senders from static files.");
+
+            if self.mode.is_full() {
+                debug!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
+                return segments::delete_static_files_segment(
+                    provider,
+                    input,
+                    StaticFileSegment::TransactionSenders,
+                )
+            }
+
+            return segments::prune_static_files(
+                provider,
+                input,
+                StaticFileSegment::TransactionSenders,
+            )
+        }
+        debug!(target: "pruner", "Pruning transaction senders from database.");
+
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {

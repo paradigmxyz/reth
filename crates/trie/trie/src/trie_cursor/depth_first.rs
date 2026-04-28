@@ -1,41 +1,14 @@
 use super::TrieCursor;
 use crate::{BranchNodeCompact, Nibbles};
 use reth_storage_errors::db::DatabaseError;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, iter::FusedIterator};
 use tracing::trace;
 
 /// Compares two Nibbles in depth-first order.
 ///
-/// In depth-first ordering:
-/// - Descendants come before their ancestors (children before parents)
-/// - Siblings are ordered lexicographically
-///
-/// # Example
-///
-/// ```text
-/// 0x11 comes before 0x1 (child before parent)
-/// 0x12 comes before 0x1 (child before parent)
-/// 0x11 comes before 0x12 (lexicographical among siblings)
-/// 0x1 comes before 0x21 (lexicographical among siblings)
-/// Result: 0x11, 0x12, 0x1, 0x21
-/// ```
+/// See [`reth_trie_common::depth_first_cmp`] for details.
 pub fn cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
-    // If the two are of equal length, then compare them lexicographically
-    if a.len() == b.len() {
-        return a.cmp(b)
-    }
-
-    // If one is a prefix of the other, then the other comes first
-    let common_prefix_len = a.common_prefix_length(b);
-    if a.len() == common_prefix_len {
-        return Ordering::Greater
-    } else if b.len() == common_prefix_len {
-        return Ordering::Less
-    }
-
-    // Otherwise the nibble after the prefix determines the ordering. We know that neither is empty
-    // at this point, otherwise the previous if/else block would have caught it.
-    a.get_unchecked(common_prefix_len).cmp(&b.get_unchecked(common_prefix_len))
+    reth_trie_common::depth_first_cmp(a, b)
 }
 
 /// An iterator that traverses trie nodes in depth-first post-order.
@@ -145,11 +118,14 @@ impl<C: TrieCursor> Iterator for DepthFirstTrieIterator<C> {
             }
 
             if let Err(err) = self.fill_next() {
+                self.complete = true;
                 return Some(Err(err))
             }
         }
     }
 }
+
+impl<C: TrieCursor> FusedIterator for DepthFirstTrieIterator<C> {}
 
 #[cfg(test)]
 mod tests {
@@ -157,6 +133,35 @@ mod tests {
     use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
     use alloy_trie::TrieMask;
     use std::{collections::BTreeMap, sync::Arc};
+
+    /// A trie cursor that always returns an error on seek/next.
+    struct FailingTrieCursor;
+
+    impl TrieCursor for FailingTrieCursor {
+        fn seek_exact(
+            &mut self,
+            _key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn seek(
+            &mut self,
+            _key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            Err(DatabaseError::Other("test error".to_string()))
+        }
+
+        fn reset(&mut self) {}
+    }
 
     fn create_test_node(state_nibbles: &[u8], tree_nibbles: &[u8]) -> BranchNodeCompact {
         let mut state_mask = TrieMask::default();
@@ -397,5 +402,15 @@ mod tests {
         }
 
         assert_eq!(actual_order, expected_order);
+    }
+
+    #[test]
+    fn test_iterator_terminates_on_error() {
+        let mut iter = DepthFirstTrieIterator::new(FailingTrieCursor);
+
+        // First call should return the error.
+        assert!(iter.next().unwrap().is_err());
+        // Iterator must be fused after the error — no infinite error loop.
+        assert!(iter.next().is_none());
     }
 }

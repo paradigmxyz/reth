@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError, PayloadStatusEnum};
 use core::error;
 use reth_errors::{BlockExecutionError, ProviderError, RethError};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +69,12 @@ impl From<BlockExecutionError> for PayloadBuilderError {
     }
 }
 
+impl<T> From<mpsc::error::SendError<T>> for PayloadBuilderError {
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        Self::ChannelClosed
+    }
+}
+
 /// Thrown when the payload or attributes are known to be invalid __before__ processing.
 ///
 /// This is used mainly for
@@ -120,6 +126,28 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
+    /// Thrown if the current engine method version does not support a block access list
+    #[error("block access list not supported in this engine API version")]
+    BlockAccessListNotSupported,
+    /// Thrown if  `engine_newPayload` contains no block access list
+    /// after Amsterdam
+    #[error("no block access list post-Amsterdam")]
+    NoBlockAccessListPostAmsterdam,
+    /// Thrown if  `engine_newPayload` contains block access list
+    /// before Amsterdam
+    #[error("block access list pre-Amsterdam")]
+    HasBlockAccessListPreAmsterdam,
+    /// Thrown if the current engine method version does not support a slot number
+    #[error("slot number not supported in this engine API version")]
+    SlotNumberNotSupported,
+    /// Thrown if  `engine_newPayload` contains no slot number
+    /// after Amsterdam
+    #[error("no slot number post-Amsterdam")]
+    NoSlotNumberPostAmsterdam,
+    /// Thrown if  `engine_newPayload` contains slot number
+    /// before Amsterdam
+    #[error("slot number pre-Amsterdam")]
+    HasSlotNumberPreAmsterdam,
 }
 
 /// Error validating payload received over `newPayload` API.
@@ -139,9 +167,7 @@ impl NewPayloadError {
     pub fn other(err: impl error::Error + Send + Sync + 'static) -> Self {
         Self::Other(Box::new(err))
     }
-}
 
-impl NewPayloadError {
     /// Returns `true` if the error is caused by a block hash mismatch.
     #[inline]
     pub const fn is_block_hash_mismatch(&self) -> bool {

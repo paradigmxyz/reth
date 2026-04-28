@@ -1,9 +1,10 @@
 //! Generic value encoder types for proof calculation with lazy evaluation.
 
 use crate::{
-    hashed_cursor::HashedCursorFactory, proof_v2::ProofCalculator, trie_cursor::TrieCursorFactory,
+    hashed_cursor::HashedCursorFactory, prefix_set::PrefixSet, proof_v2::ProofCalculator,
+    trie_cursor::TrieCursorFactory,
 };
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
@@ -83,6 +84,8 @@ pub struct SyncAccountValueEncoder<T, H> {
     trie_cursor_factory: Rc<T>,
     /// Factory for creating hashed cursors.
     hashed_cursor_factory: Rc<H>,
+    /// Storage prefix sets keyed by hashed address.
+    storage_prefix_sets: Rc<B256Map<PrefixSet>>,
 }
 
 impl<T, H> SyncAccountValueEncoder<T, H> {
@@ -91,7 +94,16 @@ impl<T, H> SyncAccountValueEncoder<T, H> {
         Self {
             trie_cursor_factory: Rc::new(trie_cursor_factory),
             hashed_cursor_factory: Rc::new(hashed_cursor_factory),
+            storage_prefix_sets: Rc::new(B256Map::default()),
         }
+    }
+
+    /// Sets the storage prefix sets. When given, all cached storage trie hashes matching the
+    /// prefix sets will be invalidated during storage root calculation for the corresponding
+    /// accounts.
+    pub fn with_storage_prefix_sets(mut self, storage_prefix_sets: B256Map<PrefixSet>) -> Self {
+        self.storage_prefix_sets = Rc::new(storage_prefix_sets);
+        self
     }
 }
 
@@ -100,6 +112,7 @@ impl<T, H> SyncAccountValueEncoder<T, H> {
 pub struct SyncAccountDeferredValueEncoder<T, H> {
     trie_cursor_factory: Rc<T>,
     hashed_cursor_factory: Rc<H>,
+    storage_prefix_sets: Rc<B256Map<PrefixSet>>,
     hashed_address: B256,
     account: Account,
 }
@@ -109,39 +122,21 @@ where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
 {
-    // Synchronously computes the storage root for this account and RLP-encodes the resulting
-    // `TrieAccount` into `buf`
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        // Create cursors for storage proof calculation
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let hashed_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
-        // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
-
-        // Compute storage root by calling storage_proof with the root path as a target.
-        // This returns just the root node of the storage trie.
+        if let Some(prefix_set) = self.storage_prefix_sets.get(&self.hashed_address) {
+            storage_proof_calculator = storage_proof_calculator.with_prefix_set(prefix_set.clone());
+        }
+        let root_node = storage_proof_calculator.storage_root_node(self.hashed_address)?;
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])
-            .map(|nodes| {
-                // Encode the root node to RLP and hash it
-                let root_node =
-                    nodes.first().expect("storage_proof always returns at least the root");
-                root_node.node.encode(buf);
+            .compute_root_hash(&[root_node])?
+            .expect("storage_root_node returns a node at empty path");
 
-                let storage_root = alloy_primitives::keccak256(buf.as_slice());
-
-                // Clear the buffer so we can re-use it to encode the TrieAccount
-                buf.clear();
-
-                storage_root
-            })?;
-
-        // Combine account with storage root to create TrieAccount
         let trie_account = self.account.into_trie_account(storage_root);
-
-        // Encode the trie account
         trie_account.encode(buf);
 
         Ok(())
@@ -164,8 +159,9 @@ where
         // Return a deferred encoder that will synchronously compute the storage root when encode()
         // is called.
         SyncAccountDeferredValueEncoder {
-            trie_cursor_factory: self.trie_cursor_factory.clone(),
-            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+            trie_cursor_factory: Rc::clone(&self.trie_cursor_factory),
+            hashed_cursor_factory: Rc::clone(&self.hashed_cursor_factory),
+            storage_prefix_sets: Rc::clone(&self.storage_prefix_sets),
             hashed_address,
             account,
         }

@@ -8,13 +8,9 @@ use crate::{
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
+use imbl::OrdMap;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap},
-    ops::Bound::Unbounded,
-    sync::Arc,
-};
+use std::{cmp::Ordering, collections::hash_map::Entry, ops::Bound::Unbounded, sync::Arc};
 use tokio::sync::broadcast;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
@@ -36,7 +32,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
+    by_id: OrdMap<TransactionId, PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
     highest_nonces: FxHashMap<SenderId, PendingTransaction<T>>,
@@ -80,7 +76,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Returns
     ///
     /// Returns all transactions by id.
-    fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
+    fn clear_transactions(&mut self) -> OrdMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
         self.highest_nonces.clear();
         self.size_of.reset();
@@ -142,9 +138,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         base_fee_per_blob_gas: u64,
     ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
-        let mut submission_id = self.submission_id;
-        for tx in unlocked {
-            submission_id += 1;
+        for (submission_id, tx) in (self.submission_id + 1..).zip(unlocked) {
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();
@@ -431,7 +425,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // we prefer removing transactions with lower ordering
             let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
-            worst_transactions.sort();
+            worst_transactions.sort_unstable();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
@@ -527,7 +521,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// All transactions grouped by id
-    pub const fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
+    pub const fn by_id(&self) -> &OrdMap<TransactionId, PendingTransaction<T>> {
         &self.by_id
     }
 
@@ -566,6 +560,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
             .map(|(tx_id, _)| tx_id)
+    }
+
+    /// Returns all transactions for the given sender, using a `BTree` range query.
+    pub(crate) fn txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(_, tx)| tx.transaction.clone())
+            .collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.

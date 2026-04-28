@@ -2,14 +2,108 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader, TxReceipt,
+};
 use alloy_primitives::TxHash;
 use reth_primitives_traits::{
-    BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedBlock,
+    Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock,
+    SealedBlock,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcTypes};
 
-use crate::utils::calculate_gas_used_and_next_log_index;
+use crate::{utils::calculate_gas_used_and_next_log_index, TransactionSource};
+
+/// Cached data for a transaction lookup.
+#[derive(Debug, Clone)]
+pub struct CachedTransaction<B: Block, R> {
+    /// The block containing this transaction.
+    pub block: Arc<RecoveredBlock<B>>,
+    /// Index of the transaction within the block.
+    pub tx_index: usize,
+    /// Receipts for the block, if available.
+    pub receipts: Option<Arc<Vec<R>>>,
+}
+
+impl<B: Block, R> CachedTransaction<B, R> {
+    /// Creates a new cached transaction entry.
+    pub const fn new(
+        block: Arc<RecoveredBlock<B>>,
+        tx_index: usize,
+        receipts: Option<Arc<Vec<R>>>,
+    ) -> Self {
+        Self { block, tx_index, receipts }
+    }
+
+    /// Returns the `Recovered<&T>` transaction at the cached index.
+    pub fn recovered_transaction(&self) -> Option<Recovered<&<B::Body as BlockBody>::Transaction>> {
+        self.block.recovered_transaction(self.tx_index)
+    }
+
+    /// Converts this cached transaction into a [`TransactionSource::Block`].
+    ///
+    /// Returns `None` if the transaction index is out of bounds.
+    pub fn to_transaction_source(
+        &self,
+    ) -> Option<TransactionSource<<B::Body as BlockBody>::Transaction>> {
+        let tx = self.recovered_transaction()?;
+        Some(TransactionSource::Block {
+            transaction: tx.cloned(),
+            index: self.tx_index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            block_timestamp: self.block.timestamp(),
+            base_fee: self.block.base_fee_per_gas(),
+        })
+    }
+
+    /// Returns the receipt at the cached transaction index, if receipts are available.
+    pub fn receipt(&self) -> Option<&R> {
+        self.receipts.as_ref()?.get(self.tx_index)
+    }
+
+    /// Constructs a [`TransactionMeta`] for this cached transaction using the given tx hash.
+    pub fn transaction_meta(&self, tx_hash: TxHash) -> TransactionMeta
+    where
+        B::Header: BlockHeader,
+    {
+        TransactionMeta {
+            tx_hash,
+            index: self.tx_index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            base_fee: self.block.base_fee_per_gas(),
+            excess_blob_gas: self.block.header().excess_blob_gas(),
+            timestamp: self.block.timestamp(),
+        }
+    }
+
+    /// Converts this cached transaction into an RPC receipt using the given converter.
+    ///
+    /// Returns `None` if receipts are not available or the transaction index is out of bounds.
+    pub fn into_receipt<N, C>(
+        self,
+        converter: &C,
+    ) -> Option<Result<<C::Network as RpcTypes>::Receipt, C::Error>>
+    where
+        N: NodePrimitives<Block = B, Receipt = R>,
+        R: TxReceipt + Clone,
+        C: RpcConvert<Primitives = N>,
+    {
+        let receipts = self.receipts?;
+        let receipt = receipts.get(self.tx_index)?;
+        let tx_hash = *self.block.body().transactions().get(self.tx_index)?.tx_hash();
+        let tx = self.block.find_indexed(tx_hash)?;
+        convert_transaction_receipt::<N, C>(
+            self.block.as_ref(),
+            receipts.as_ref(),
+            tx,
+            receipt,
+            converter,
+        )
+    }
+}
 
 /// A pair of an [`Arc`] wrapped [`RecoveredBlock`] and its corresponding receipts.
 ///

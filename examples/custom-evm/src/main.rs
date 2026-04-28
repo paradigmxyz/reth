@@ -22,7 +22,7 @@ use reth_ethereum::{
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileOutput, PrecompileResult, Precompiles},
+            precompile::{PrecompileOutput, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -35,7 +35,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthereumNode,
     },
-    tasks::TaskManager,
+    tasks::Runtime,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -64,7 +64,7 @@ impl EvmFactory for MyEvmFactory {
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::new(spec).precompiles));
 
         if spec == SpecId::PRAGUE {
             evm = evm.with_precompiles(PrecompilesMap::from_static(prague_custom()));
@@ -110,7 +110,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let precompile = Precompile::new(
             PrecompileId::custom("custom"),
             address!("0x0000000000000000000000000000000000000999"),
-            |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+            |_, _, _| Ok(PrecompileOutput::new(0, Bytes::new(), 0)),
         );
         precompiles.extend([precompile]);
         precompiles
@@ -121,7 +121,7 @@ pub fn prague_custom() -> &'static Precompiles {
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let tasks = TaskManager::current();
+    let runtime = Runtime::test();
 
     // create a custom chain spec
     let spec = ChainSpec::builder()
@@ -138,7 +138,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(runtime)
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor

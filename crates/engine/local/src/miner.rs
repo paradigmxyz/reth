@@ -3,17 +3,16 @@
 use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
-use futures_util::{stream::Fuse, StreamExt};
+use futures_util::{stream::Fuse, Stream, StreamExt};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
-};
+use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{HeaderTy, SealedHeaderFor};
 use reth_storage_api::BlockReader;
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::VecDeque,
+    fmt,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -24,7 +23,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
 /// A mining mode for the local dev engine.
-#[derive(Debug)]
 pub enum MiningMode<Pool: TransactionPool + Unpin> {
     /// In this mode a block is built as soon as
     /// a valid transaction reaches the pool.
@@ -43,6 +41,25 @@ pub enum MiningMode<Pool: TransactionPool + Unpin> {
     },
     /// In this mode a block is built at a fixed interval.
     Interval(Interval),
+    /// In this mode a block is built when the trigger stream yields a value.
+    ///
+    /// This is a general-purpose trigger that can be fired on demand, for example via a channel
+    /// or any other [`Stream`] implementation.
+    Trigger(Pin<Box<dyn Stream<Item = ()> + Send + Sync>>),
+}
+
+impl<Pool: TransactionPool + Unpin> fmt::Debug for MiningMode<Pool> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Instant { max_transactions, accumulated, .. } => f
+                .debug_struct("Instant")
+                .field("max_transactions", max_transactions)
+                .field("accumulated", accumulated)
+                .finish(),
+            Self::Interval(interval) => f.debug_tuple("Interval").field(interval).finish(),
+            Self::Trigger(_) => f.debug_tuple("Trigger").finish(),
+        }
+    }
 }
 
 impl<Pool: TransactionPool + Unpin> MiningMode<Pool> {
@@ -56,6 +73,14 @@ impl<Pool: TransactionPool + Unpin> MiningMode<Pool> {
     pub fn interval(duration: Duration) -> Self {
         let start = tokio::time::Instant::now() + duration;
         Self::Interval(tokio::time::interval_at(start, duration))
+    }
+
+    /// Constructor for a [`MiningMode::Trigger`]
+    ///
+    /// Accepts any stream that yields `()` values, each of which triggers a new block to be
+    /// mined. This can be backed by a channel, a custom stream, or any other async source.
+    pub fn trigger(trigger: impl Stream<Item = ()> + Send + Sync + 'static) -> Self {
+        Self::Trigger(Box::pin(trigger))
     }
 }
 
@@ -91,6 +116,12 @@ impl<Pool: TransactionPool + Unpin> Future for MiningMode<Pool> {
                 }
                 Poll::Pending
             }
+            Self::Trigger(trigger) => {
+                if trigger.poll_next_unpin(cx).is_ready() {
+                    return Poll::Ready(())
+                }
+                Poll::Pending
+            }
         }
     }
 }
@@ -110,6 +141,11 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     last_header: SealedHeaderFor<<T::BuiltPayload as BuiltPayload>::Primitives>,
     /// Stores latest mined blocks.
     last_block_hashes: VecDeque<B256>,
+    /// Optional sleep duration between initiating payload building and resolving.
+    ///
+    /// When set, the miner sleeps after `fork_choice_updated` before calling
+    /// `resolve_kind`, giving the payload job time for multiple rebuild attempts.
+    payload_wait_time: Option<Duration>,
 }
 
 impl<T, B, Pool> LocalMiner<T, B, Pool>
@@ -139,7 +175,14 @@ where
             payload_builder,
             last_block_hashes: VecDeque::from([last_header.hash()]),
             last_header,
+            payload_wait_time: None,
         }
+    }
+
+    /// Sets the payload wait time, if any.
+    pub const fn with_payload_wait_time_opt(mut self, wait_time: Option<Duration>) -> Self {
+        self.payload_wait_time = wait_time;
+        self
     }
 
     /// Runs the [`LocalMiner`] in a loop, polling the miner and building payloads.
@@ -181,10 +224,7 @@ where
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
         let state = self.forkchoice_state();
-        let res = self
-            .to_engine
-            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
-            .await?;
+        let res = self.to_engine.fork_choice_updated(state, None).await?;
 
         if !res.is_valid() {
             eyre::bail!("Invalid fork choice update {state:?}: {res:?}")
@@ -201,7 +241,6 @@ where
             .fork_choice_updated(
                 self.forkchoice_state(),
                 Some(self.payload_attributes_builder.build(&self.last_header)),
-                EngineApiMessageVersion::default(),
             )
             .await?;
 
@@ -210,6 +249,10 @@ where
         }
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
+
+        if let Some(wait_time) = self.payload_wait_time {
+            tokio::time::sleep(wait_time).await;
+        }
 
         let Some(Ok(payload)) =
             self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await
