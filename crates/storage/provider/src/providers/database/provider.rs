@@ -624,6 +624,37 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .map(|block| block.trie_data())
             .collect::<Vec<_>>();
 
+        let plan_block_numbers =
+            blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>();
+        let plan_step_summaries = plan
+            .steps
+            .iter()
+            .map(|step| {
+                let block_numbers = blocks[step.block_range.clone()]
+                    .iter()
+                    .map(|block| block.recovered_block().number())
+                    .collect::<Vec<_>>();
+                let masking_block_numbers = step.state_trie_masking_range.as_ref().map(|range| {
+                    blocks[range.clone()]
+                        .iter()
+                        .map(|block| block.recovered_block().number())
+                        .collect::<Vec<_>>()
+                });
+                (block_numbers, masking_block_numbers, step.persist_rest)
+            })
+            .collect::<Vec<_>>();
+
+        debug!(
+            target: "providers::db",
+            ?plan_block_numbers,
+            ?plan_step_summaries,
+            ?persist_rest_range,
+            ?state_trie_masking_ranges,
+            state_trie_block_count = state_trie_blocks.len(),
+            state_trie_masking_block_count = state_trie_masking_blocks.len(),
+            "Resolved save_blocks plan"
+        );
+
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
         let first_number = blocks.first().unwrap().recovered_block().number();
@@ -802,18 +833,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Only blocks whose non-trie outputs are durably written in this call can mask
-                // trie writes. A fully in-memory suffix must not suppress the durable trie
-                // frontier because its changesets are not on disk yet.
+                // The durable state/trie frontier must reflect the highest block in
+                // `state_trie_blocks`. Masked-tail blocks stay entirely in memory and are applied
+                // later as an overlay, so overlapping keys from the persisted frontier must stay
+                // on disk.
                 let start = Instant::now();
                 if !state_trie_blocks.is_empty() {
-                    let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                        state_trie_blocks.iter().map(|data| data.hashed_state.as_ref()).collect(),
-                        state_trie_masking_blocks
-                            .iter()
-                            .map(|data| data.hashed_state.as_ref())
-                            .collect(),
-                    );
+                    let hashed_states = state_trie_blocks
+                        .iter()
+                        .rev()
+                        .map(|data| data.hashed_state.as_ref())
+                        .collect::<Vec<_>>();
+                    let merged_hashed_state = HashedPostStateSorted::merge_slice(&hashed_states);
                     if !merged_hashed_state.is_empty() {
                         self.write_hashed_state(&merged_hashed_state)?;
                     }
@@ -822,13 +853,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 let start = Instant::now();
                 if !state_trie_blocks.is_empty() {
-                    let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                        state_trie_blocks.iter().map(|data| data.trie_updates.as_ref()).collect(),
-                        state_trie_masking_blocks
-                            .iter()
-                            .map(|data| data.trie_updates.as_ref())
-                            .collect(),
-                    );
+                    let trie_updates = state_trie_blocks
+                        .iter()
+                        .rev()
+                        .map(|data| data.trie_updates.as_ref())
+                        .collect::<Vec<_>>();
+                    let merged_trie = TrieUpdatesSorted::merge_slice(&trie_updates);
                     if !merged_trie.is_empty() {
                         self.write_trie_updates_sorted(&merged_trie)?;
                     }
@@ -861,6 +891,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .map(|last_state_trie_block| last_state_trie_block.number)
                     .or(current_trie_persisted_tip)
                     .or(Some(last_block_number));
+                debug!(
+                    target: "providers::db",
+                    ?current_trie_persisted_tip,
+                    ?partial_state_trie,
+                    last_block_number,
+                    "Updating finish stage checkpoint for save_blocks"
+                );
                 self.save_stage_checkpoint(
                     StageId::Finish,
                     StageCheckpoint::new(last_block_number)
@@ -4628,7 +4665,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_blocks_only_masks_trie_with_deferred_blocks() {
+    fn test_save_blocks_preserves_persisted_frontier_entries_overlapping_masked_tail() {
         use reth_trie::{
             updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
             BranchNodeCompact, HashedPostStateSorted, HashedStorageSorted,
@@ -4885,19 +4922,16 @@ mod tests {
 
         let mut hashed_accounts = tx.cursor_read::<tables::HashedAccounts>().unwrap();
         assert!(hashed_accounts.seek_exact(kept_account).unwrap().is_some());
-        assert!(hashed_accounts.seek_exact(deferred_masked_account).unwrap().is_none());
+        assert!(hashed_accounts.seek_exact(deferred_masked_account).unwrap().is_some());
         assert!(hashed_accounts.seek_exact(in_memory_overlap_account).unwrap().is_some());
         assert!(hashed_accounts.seek_exact(in_memory_only_account).unwrap().is_none());
 
         let mut hashed_storages = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
         assert!(hashed_storages.seek_by_key_subkey(kept_storage, kept_slot).unwrap().is_some());
         assert!(hashed_storages
-            .walk_dup(Some(deferred_masked_storage), None)
+            .seek_by_key_subkey(deferred_masked_storage, deferred_masked_slot)
             .unwrap()
-            .next()
-            .transpose()
-            .unwrap()
-            .is_none());
+            .is_some());
         assert!(hashed_storages
             .seek_by_key_subkey(in_memory_overlap_storage, in_memory_overlap_slot)
             .unwrap()
@@ -4915,7 +4949,7 @@ mod tests {
         assert!(account_trie
             .seek_exact(StoredNibbles(deferred_masked_account_node))
             .unwrap()
-            .is_none());
+            .is_some());
         assert!(account_trie
             .seek_exact(StoredNibbles(in_memory_overlap_account_node))
             .unwrap()
@@ -4939,7 +4973,8 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert!(deferred_masked_entries.is_empty());
+        assert_eq!(deferred_masked_entries.len(), 1);
+        assert_eq!(deferred_masked_entries[0].1.nibbles.0, deferred_masked_storage_node);
 
         let in_memory_overlap_entries: Vec<_> = storage_trie
             .walk_dup(Some(in_memory_overlap_storage), None)
