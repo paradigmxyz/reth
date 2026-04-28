@@ -489,14 +489,14 @@ pub fn build_local_enr(
             }
             builder.udp6(addr.port());
         }
-        // Match prior behavior: advertise tcp4 when v4 is configured, else tcp6.
+        // Advertise tcp4 when v4 is configured, else tcp6.
         if v4.is_some() {
             builder.tcp4(tcp_socket.port());
         } else if v6.is_some() {
             builder.tcp6(tcp_socket.port());
         }
 
-        // Prefer v6 when both are configured (matches original `DualStack` behavior).
+        // Prefer v6 when both are configured
         v6.map(SocketAddr::V6)
             .or(v4.map(SocketAddr::V4))
             .unwrap_or_else(|| SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))
