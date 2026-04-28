@@ -32,7 +32,7 @@ impl HttpClient for Client {
         &self,
         url: U,
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin> {
-        let response = Self::get(self, url).send().await?;
+        let response = Self::get(self, url).send().await?.error_for_status()?;
 
         Ok(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
     }
@@ -53,7 +53,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     ///
-    /// The file type is auto-detected from the URL. Use
+    /// The file type is inferred from the URL as a heuristic. Use
     /// [`with_era_type`](Self::with_era_type) to override.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
         let era_type = EraFileType::from_url(url.as_str());
@@ -356,7 +356,12 @@ async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::{
+        io::{Read as _, Write as _},
+        net::TcpListener,
+        path::PathBuf,
+        thread,
+    };
     use test_case::test_case;
 
     impl EraClient<Client> {
@@ -390,5 +395,28 @@ mod tests {
         // with_era_type overrides to Era1
         let client = client.with_era_type(EraFileType::Era1);
         assert_eq!(client.era_type, EraFileType::Era1);
+    }
+
+    #[tokio::test]
+    async fn test_reqwest_http_client_rejects_error_status() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 9\r\n\r\nnot found")
+                .unwrap();
+        });
+
+        let client = Client::new();
+        let err = match <Client as HttpClient>::get(&client, url).await {
+            Ok(_) => panic!("error HTTP status should not return a response body stream"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("404 Not Found"));
+        server.join().unwrap();
     }
 }
