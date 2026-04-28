@@ -6,7 +6,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
-use reth_node_api::HeaderTy;
+use reth_node_api::{HeaderTy, TxTy};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
@@ -88,7 +88,7 @@ fn import_tables_with_range<N: ProviderNodeTypes>(
         )
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockOmmers, _>(
+        tx.import_table_with_range::<tables::BlockOmmers<HeaderTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,
@@ -110,7 +110,7 @@ fn import_tables_with_range<N: ProviderNodeTypes>(
     })??;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::Transactions, _>(
+        tx.import_table_with_range::<tables::Transactions<TxTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from_tx),
             to_tx,

@@ -1,7 +1,4 @@
-use crate::{
-    provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
-    SparseTrieUpdates,
-};
+use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
@@ -90,7 +87,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealableSparseTrie};
+    /// use reth_trie_sparse::RevealableSparseTrie;
     ///
     /// let trie = <RevealableSparseTrie>::blind();
     /// assert!(trie.is_blind());
@@ -202,39 +199,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         };
     }
 
-    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the update fails.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-        provider: impl TrieNodeProvider,
-    ) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.update_leaf(path, value, provider)?;
-        Ok(())
-    }
-
-    /// Removes a leaf node at the specified key path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the leaf cannot be removed
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn remove_leaf(
-        &mut self,
-        path: &Nibbles,
-        provider: impl TrieNodeProvider,
-    ) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.remove_leaf(path, provider)?;
-        Ok(())
-    }
-
     /// Shrinks the capacity of the sparse trie's node storage.
     /// Works for both revealed and blind tries with allocated storage.
     pub fn shrink_nodes_to(&mut self, size: usize) {
@@ -255,6 +219,32 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
             }
             _ => {}
         }
+    }
+}
+
+impl RevealableSparseTrie {
+    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the trie is still blind, or if the update fails.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
+        revealed.update_leaf(path, value)?;
+        Ok(())
+    }
+
+    /// Removes a leaf node at the specified key path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the trie is still blind, or if the leaf cannot be removed.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
+        revealed.remove_leaf(path)?;
+        Ok(())
     }
 }
 
@@ -447,7 +437,10 @@ impl SparseNode {
     /// Returns the memory size of this node in bytes.
     pub const fn memory_size(&self) -> usize {
         match self {
-            Self::Empty | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Empty => core::mem::size_of::<Self>(),
+            Self::Branch { .. } => {
+                core::mem::size_of::<Self>() + core::mem::size_of::<[B256; 16]>()
+            }
             Self::Leaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }

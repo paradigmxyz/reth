@@ -184,11 +184,18 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
+        let tree_config =
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
-        let engine_api_tree_state =
-            EngineApiTreeState::new(10, 10, header.num_hash(), EngineApiKind::Ethereum);
+        let engine_api_tree_state = EngineApiTreeState::new(
+            10,
+            10,
+            tree_config.invalid_header_hit_eviction_threshold(),
+            header.num_hash(),
+            EngineApiKind::Ethereum,
+        );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
         let (to_payload_service, _payload_command_rx) = unbounded_channel();
@@ -217,8 +224,7 @@ impl TestHarness {
             persistence_handle,
             PersistenceState { last_persisted_block: BlockNumHash::default(), rx: None },
             payload_builder,
-            // always assume enough parallelism for tests
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
+            tree_config,
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
@@ -682,7 +688,6 @@ async fn test_holesky_payload() {
                     sidecar: ExecutionPayloadSidecar::none(),
                 },
                 tx,
-                enqueued_at: std::time::Instant::now(),
             }
             .into(),
         ))

@@ -1,12 +1,14 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use alloy_rlp::{Decodable, RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(
@@ -61,6 +63,18 @@ pub struct PooledTransactions<T = PooledTransaction>(
     /// The transaction bodies, each of which should correspond to a requested hash.
     pub Vec<T>,
 );
+
+impl<T: Decodable + InMemorySize> PooledTransactions<T> {
+    /// Decodes the RLP list of transactions, stopping once the cumulative
+    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
+    /// Any remaining transactions in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
 
 impl<T: Encodable2718> PooledTransactions<T> {
     /// Returns an iterator over the transaction hashes in this response.

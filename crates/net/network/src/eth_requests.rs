@@ -18,7 +18,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -45,6 +45,11 @@ pub const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// `SOFT_RESPONSE_LIMIT`.
 pub const MAX_BODIES_SERVE: usize = 1024;
+
+/// Maximum number of block access lists to serve.
+///
+/// Used to limit lookups.
+pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
@@ -282,27 +287,6 @@ where
         let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
     }
 
-    /// Handles [`GetBlockAccessLists`] queries.
-    ///
-    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
-    /// <https://eips.ethereum.org/EIPS/eip-8159>
-    fn on_block_access_lists_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetBlockAccessLists,
-        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
-    ) {
-        // TODO: BAL serving is not fully implemented yet. Per EIP-8159, unavailable BALs are
-        // returned as empty BAL entries while preserving request order, so we currently return
-        // one RLP-encoded empty BAL (`0xc0`) per requested hash.
-        let access_lists = request
-            .0
-            .into_iter()
-            .map(|_| Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]))
-            .collect();
-        let _ = response.send(Ok(BlockAccessLists(access_lists)));
-    }
-
     #[inline]
     fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
     where
@@ -332,13 +316,57 @@ where
     }
 }
 
+impl<C, N> EthRequestHandler<C, N>
+where
+    N: NetworkPrimitives,
+    C: BalProvider,
+{
+    /// Handles [`GetBlockAccessLists`] queries.
+    ///
+    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
+    /// <https://eips.ethereum.org/EIPS/eip-8159>
+    fn on_block_access_lists_request(
+        &self,
+        _peer_id: PeerId,
+        mut request: GetBlockAccessLists,
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    ) {
+        request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+
+        let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
+        let access_lists = self
+            .client
+            .bal_store()
+            .get_by_hashes_with_limit(&request.0, limit)
+            .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
+        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+    }
+}
+
+/// Builds the error fallback response while still enforcing the BAL response soft limit.
+fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLimit) -> Vec<Bytes> {
+    let mut out = Vec::with_capacity(count);
+    let mut size = 0;
+    for _ in 0..count {
+        let bal = Bytes::from_static(&[0xc0]);
+        size += bal.len();
+        out.push(bal);
+
+        if limit.exceeds(size) {
+            break
+        }
+    }
+    out
+}
+
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {

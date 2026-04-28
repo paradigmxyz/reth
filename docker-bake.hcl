@@ -101,7 +101,7 @@ target "hive" {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
   }
-  tags   = ["reth:local"]
+  tags   = ["ghcr.io/paradigmxyz/reth:latest"]
   output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
 }
 

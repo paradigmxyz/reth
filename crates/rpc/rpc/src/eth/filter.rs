@@ -564,7 +564,10 @@ where
                 if let Some(t) = to &&
                     t > info.best_number
                 {
-                    return Err(EthFilterError::BlockRangeExceedsHead);
+                    return Err(EthFilterError::BlockRangeExceedsHead {
+                        requested: t,
+                        head: info.best_number,
+                    });
                 }
 
                 if let Some(f) = from &&
@@ -942,8 +945,13 @@ pub enum EthFilterError {
     #[error("invalid block range params")]
     InvalidBlockRangeParams,
     /// Block range extends beyond current head.
-    #[error("block range extends beyond current head block")]
-    BlockRangeExceedsHead,
+    #[error("block range extends beyond current head block: requested {requested}, head {head}")]
+    BlockRangeExceedsHead {
+        /// The requested `toBlock` number
+        requested: u64,
+        /// The current head block number
+        head: u64,
+    },
     /// Query scope is too broad.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
@@ -979,7 +987,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
-            EthFilterError::BlockRangeExceedsHead) => {
+            EthFilterError::BlockRangeExceedsHead { .. }) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
@@ -996,7 +1004,9 @@ impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
     fn from(err: logs_utils::FilterBlockRangeError) -> Self {
         match err {
             logs_utils::FilterBlockRangeError::InvalidBlockRange => Self::InvalidBlockRangeParams,
-            logs_utils::FilterBlockRangeError::BlockRangeExceedsHead => Self::BlockRangeExceedsHead,
+            logs_utils::FilterBlockRangeError::BlockRangeExceedsHead { requested, head } => {
+                Self::BlockRangeExceedsHead { requested, head }
+            }
         }
     }
 }

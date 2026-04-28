@@ -6,7 +6,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{DeferredTrieData, EthPrimitives, ExecutedBlock, LazyOverlay};
+use reth_chain_state::{EthPrimitives, ExecutedBlock, LazyOverlay};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -43,7 +43,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// This is optimistically prepared after the canonical head changes, so that
     /// the next payload building on the canonical head can use it immediately
     /// without recomputing.
-    pub(crate) cached_canonical_overlay: Option<PreparedCanonicalOverlay>,
+    pub(crate) cached_canonical_overlay: Option<PreparedCanonicalOverlay<N>>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -106,10 +106,10 @@ impl<N: NodePrimitives> TreeState<N> {
     /// This should be called after the canonical head changes to optimistically
     /// prepare the overlay for the next payload that will likely build on it.
     ///
-    /// Returns a clone of the [`LazyOverlay`] so the caller can spawn a background
-    /// task to trigger computation via [`LazyOverlay::get`]. This ensures the overlay
-    /// is actually computed before the next payload arrives.
-    pub(crate) fn prepare_canonical_overlay(&mut self) -> Option<LazyOverlay> {
+    /// Returns a clone of the prepared overlay so the caller can spawn a background
+    /// task to trigger computation via [`LazyOverlay::get`] for the cached anchor.
+    /// This ensures the overlay is actually computed before the next payload arrives.
+    pub(crate) fn prepare_canonical_overlay(&mut self) -> Option<PreparedCanonicalOverlay<N>> {
         let canonical_hash = self.current_canonical_head.hash;
 
         // Get blocks leading to the canonical head
@@ -119,25 +119,23 @@ impl<N: NodePrimitives> TreeState<N> {
             return None;
         };
 
-        // Extract deferred trie data handles from blocks (newest to oldest)
-        let handles: Vec<DeferredTrieData> = blocks.iter().map(|b| b.trie_data_handle()).collect();
-
-        let overlay = LazyOverlay::new(anchor_hash, handles);
-        self.cached_canonical_overlay = Some(PreparedCanonicalOverlay {
+        let num_blocks = blocks.len();
+        let prepared = PreparedCanonicalOverlay {
             parent_hash: canonical_hash,
-            overlay: overlay.clone(),
+            overlay: LazyOverlay::new(blocks),
             anchor_hash,
-        });
+        };
+        self.cached_canonical_overlay = Some(prepared.clone());
 
         debug!(
             target: "engine::tree",
             %canonical_hash,
             %anchor_hash,
-            num_blocks = blocks.len(),
+            num_blocks,
             "Prepared cached canonical overlay"
         );
 
-        Some(overlay)
+        Some(prepared)
     }
 
     /// Returns the cached overlay if it matches the requested parent hash and anchor.
@@ -148,7 +146,7 @@ impl<N: NodePrimitives> TreeState<N> {
         &self,
         parent_hash: B256,
         expected_anchor: B256,
-    ) -> Option<&PreparedCanonicalOverlay> {
+    ) -> Option<&PreparedCanonicalOverlay<N>> {
         self.cached_canonical_overlay.as_ref().filter(|cached| {
             cached.parent_hash == parent_hash && cached.anchor_hash == expected_anchor
         })
@@ -429,10 +427,10 @@ impl<N: NodePrimitives> TreeState<N> {
 /// the next payload (which typically builds on the canonical head) to reuse
 /// the pre-computed overlay immediately without re-traversing in-memory blocks.
 ///
-/// The overlay captures deferred trie data handles from all in-memory blocks
+/// The overlay captures executed blocks from all in-memory blocks
 /// between the canonical head and the persisted anchor. When a new payload
 /// arrives building on the canonical head, this cached overlay can be used
-/// directly instead of calling `blocks_by_hash` and collecting handles again.
+/// directly instead of calling `blocks_by_hash` again.
 ///
 /// # Invalidation
 ///
@@ -440,16 +438,16 @@ impl<N: NodePrimitives> TreeState<N> {
 /// - Persistence completes (anchor changes)
 /// - The canonical head changes to a different block
 #[derive(Debug, Clone)]
-pub struct PreparedCanonicalOverlay {
+pub struct PreparedCanonicalOverlay<N: NodePrimitives = EthPrimitives> {
     /// The block hash for which this overlay is prepared as a parent.
     ///
     /// When a payload arrives with this parent hash, the overlay can be reused.
     pub parent_hash: B256,
-    /// The pre-computed lazy overlay containing deferred trie data handles.
+    /// The pre-computed lazy overlay containing executed blocks for the canonical segment.
     ///
-    /// This is computed optimistically after `set_canonical_head` so subsequent
-    /// payloads don't need to re-collect the handles.
-    pub overlay: LazyOverlay,
+    /// This is computed optimistically after `set_canonical_head` so subsequent payloads don't
+    /// need to walk the in-memory chain again.
+    pub overlay: LazyOverlay<N>,
     /// The anchor hash (persisted ancestor) this overlay is based on.
     ///
     /// Used to verify the overlay is still valid (anchor hasn't changed due to persistence).

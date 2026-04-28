@@ -5,6 +5,12 @@ cd hivetests/
 
 sim="${1}"
 limit="${2}"
+fixture_variant="${3:-}"
+
+if [[ "${fixture_variant}" == "osaka" && "${sim}" == *"eels"* && "${limit}" == *"tests/amsterdam"* ]]; then
+    echo "osaka fixtures do not support amsterdam tests"
+    exit 1
+fi
 
 # Use lower parallelism for eels tests to avoid OOM-killing the runner
 parallelism=16

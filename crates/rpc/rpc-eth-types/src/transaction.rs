@@ -25,6 +25,8 @@ pub enum TransactionSource<T = TransactionSigned> {
         block_hash: B256,
         /// Number of the block.
         block_number: u64,
+        /// Timestamp of the block.
+        block_timestamp: u64,
         /// base fee of the block.
         base_fee: Option<u64>,
     },
@@ -48,14 +50,21 @@ impl<T: SignedTransaction> TransactionSource<T> {
     {
         match self {
             Self::Pool(tx) => resp_builder.fill_pending(tx),
-            Self::Block { transaction, index, block_hash, block_number, base_fee } => {
+            Self::Block {
+                transaction,
+                index,
+                block_hash,
+                block_number,
+                block_timestamp,
+                base_fee,
+            } => {
                 let tx_info = TransactionInfo {
                     hash: Some(transaction.trie_hash()),
                     index: Some(index),
                     block_hash: Some(block_hash),
                     block_number: Some(block_number),
+                    block_timestamp: Some(block_timestamp),
                     base_fee,
-                    ..Default::default()
                 };
 
                 resp_builder.fill(transaction, tx_info)
@@ -70,7 +79,14 @@ impl<T: SignedTransaction> TransactionSource<T> {
                 let hash = tx.trie_hash();
                 (tx, TransactionInfo { hash: Some(hash), ..Default::default() })
             }
-            Self::Block { transaction, index, block_hash, block_number, base_fee } => {
+            Self::Block {
+                transaction,
+                index,
+                block_hash,
+                block_number,
+                block_timestamp,
+                base_fee,
+            } => {
                 let hash = transaction.trie_hash();
                 (
                     transaction,
@@ -79,8 +95,8 @@ impl<T: SignedTransaction> TransactionSource<T> {
                         index: Some(index),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
+                        block_timestamp: Some(block_timestamp),
                         base_fee,
-                        ..Default::default()
                     },
                 )
             }

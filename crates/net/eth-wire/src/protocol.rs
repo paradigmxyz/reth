@@ -1,6 +1,6 @@
 //! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
-use crate::{Capability, EthMessageID, EthVersion};
+use crate::{Capability, EthMessageID, EthVersion, SnapVersion};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -30,6 +30,13 @@ impl Protocol {
         Self::new(cap, messages)
     }
 
+    /// Returns the corresponding snap capability for the given version.
+    pub const fn snap(version: SnapVersion) -> Self {
+        let cap = Capability::snap(version);
+        let messages = version.message_count();
+        Self::new(cap, messages)
+    }
+
     /// Returns the [`EthVersion::Eth66`] capability.
     pub const fn eth_66() -> Self {
         Self::eth(EthVersion::Eth66)
@@ -43,6 +50,16 @@ impl Protocol {
     /// Returns the [`EthVersion::Eth68`] capability.
     pub const fn eth_68() -> Self {
         Self::eth(EthVersion::Eth68)
+    }
+
+    /// Returns the `snap/1` capability.
+    pub const fn snap_1() -> Self {
+        Self::snap(SnapVersion::V1)
+    }
+
+    /// Returns the `snap/2` capability.
+    pub const fn snap_2() -> Self {
+        Self::snap(SnapVersion::V2)
     }
 
     /// Consumes the type and returns a tuple of the [Capability] and number of messages.
@@ -86,5 +103,7 @@ mod tests {
         assert_eq!(Protocol::eth(EthVersion::Eth69).messages(), 18);
         assert_eq!(Protocol::eth(EthVersion::Eth70).messages(), 18);
         assert_eq!(Protocol::eth(EthVersion::Eth71).messages(), 20);
+        assert_eq!(Protocol::snap(SnapVersion::V1).messages(), 8);
+        assert_eq!(Protocol::snap(SnapVersion::V2).messages(), 10);
     }
 }
