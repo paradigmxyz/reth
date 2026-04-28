@@ -28,7 +28,7 @@ reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-payload-validator.workspace = true
-reth-mantle-forks = { workspace = true, optional = true, features = ["std"] }
+reth-mantle-forks = { workspace = true, features = ["std"] }
 
 # op-reth
 reth-optimism-evm.workspace = true
@@ -56,6 +56,6 @@ sha2.workspace = true
 serde.workspace = true
 
 [features]
-mantle-debug = ["dep:reth-mantle-forks"]
+mantle-debug = []
 # Debug: export full state at specific block heights (e.g. when debugging fork/state root mismatch)
-state-export = ["dep:reth-mantle-forks", "reth-mantle-forks/state-export"]
+state-export = ["reth-mantle-forks/state-export"]

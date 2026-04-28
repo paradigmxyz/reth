@@ -3,7 +3,7 @@ use alloy_consensus::{BlockHeader, Transaction};
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
-use reth_mantle_forks::MantleHardforks;
+use reth_mantle_forks::{is_mantle_meta_tx, MantleHardforks};
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
@@ -183,6 +183,17 @@ where
         state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            );
+        }
+
+        // Reject Mantle MetaTx (disabled since MantleEverest hardfork).
+        // MetaTx was a gas sponsorship mechanism where the tx input starts with a
+        // 32-byte "MantleMetaTxPrefix". It is permanently disabled on all chains.
+        // Mirrors op-geth: core/types/meta_transaction.go — MetaTxCheck()
+        if is_mantle_meta_tx(transaction.input()) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),

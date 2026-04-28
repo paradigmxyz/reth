@@ -662,6 +662,15 @@ where
                 ));
             }
 
+            // Reject Mantle MetaTx (disabled since MantleEverest hardfork).
+            // Sequencer transactions come from op-node and bypass the txpool validator,
+            // so we must check here as well.
+            if reth_mantle_forks::is_mantle_meta_tx(sequencer_tx.value().input()) {
+                return Err(PayloadBuilderError::other(
+                    OpPayloadBuilderError::MetaTxRejected,
+                ));
+            }
+
             // Convert the transaction to a [RecoveredTx]. This is
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
