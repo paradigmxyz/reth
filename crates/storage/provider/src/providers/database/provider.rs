@@ -602,27 +602,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let persist_rest_range = plan.persist_rest_range();
         let persist_rest_blocks =
             persist_rest_range.as_ref().map(|range| &blocks[range.clone()]).unwrap_or(&[]);
-        let state_trie_blocks = plan
-            .steps
-            .iter()
-            .filter(|step| step.persists_state_trie())
-            .flat_map(|step| blocks[step.block_range.clone()].iter())
-            .map(|block| block.trie_data())
-            .collect::<Vec<_>>();
-
-        let mut state_trie_masking_ranges = plan
-            .steps
-            .iter()
-            .filter_map(|step| step.state_trie_masking_range.clone())
-            .filter(|range| !range.is_empty())
-            .collect::<Vec<_>>();
-        state_trie_masking_ranges.sort_unstable_by_key(|range| (range.start, range.end));
-        state_trie_masking_ranges.dedup_by(|left, right| left == right);
-        let state_trie_masking_blocks = state_trie_masking_ranges
-            .iter()
-            .flat_map(|range| blocks[range.clone()].iter())
-            .map(|block| block.trie_data())
-            .collect::<Vec<_>>();
 
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
@@ -773,68 +752,78 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            for (i, block) in persist_rest_blocks.iter().enumerate() {
-                let recovered_block = block.recovered_block();
+            let mut next_persist_rest_tx_num = 0;
+            for step in &plan.steps {
+                let step_blocks = &blocks[step.block_range.clone()];
 
-                let start = Instant::now();
-                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
-                timings.insert_block += start.elapsed();
+                if step.persist_rest {
+                    for block in step_blocks {
+                        let recovered_block = block.recovered_block();
 
-                if save_mode.with_state() {
-                    let execution_output = block.execution_outcome();
+                        let start = Instant::now();
+                        self.insert_block_mdbx_only(
+                            recovered_block,
+                            tx_nums[next_persist_rest_tx_num],
+                        )?;
+                        timings.insert_block += start.elapsed();
+                        next_persist_rest_tx_num += 1;
 
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
-                    let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        state_write_config,
-                    )?;
-                    timings.write_state += start.elapsed();
-                }
-            }
+                        if save_mode.with_state() {
+                            let execution_output = block.execution_outcome();
 
-            // Write all hashed state and trie updates in single batches.
-            // This reduces cursor open/close overhead from N calls to 1.
-            if save_mode.with_state() {
-                // Only blocks whose non-trie outputs are durably written in this call can mask
-                // trie writes. A fully in-memory suffix must not suppress the durable trie
-                // frontier because its changesets are not on disk yet.
-                let start = Instant::now();
-                if !state_trie_blocks.is_empty() {
-                    let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                        state_trie_blocks.iter().map(|data| data.hashed_state.as_ref()).collect(),
-                        state_trie_masking_blocks
-                            .iter()
-                            .map(|data| data.hashed_state.as_ref())
-                            .collect(),
-                    );
-                    if !merged_hashed_state.is_empty() {
-                        self.write_hashed_state(&merged_hashed_state)?;
+                            // Write state and changesets to the database.
+                            // Must be written after blocks because of the receipt lookup.
+                            // Skip receipts/account changesets if they're being written to static
+                            // files.
+                            let start = Instant::now();
+                            self.write_state(
+                                WriteStateInput::Single {
+                                    outcome: execution_output,
+                                    block: recovered_block.number(),
+                                },
+                                OriginalValuesKnown::No,
+                                state_write_config,
+                            )?;
+                            timings.write_state += start.elapsed();
+                        }
                     }
+                }
+
+                if !save_mode.with_state() {
+                    continue
+                }
+
+                let Some(masking_range) = step.state_trie_masking_range.as_ref() else { continue };
+
+                let step_trie_data =
+                    step_blocks.iter().map(|block| block.trie_data()).collect::<Vec<_>>();
+                let masking_trie_data = blocks[masking_range.clone()]
+                    .iter()
+                    .map(|block| block.trie_data())
+                    .collect::<Vec<_>>();
+
+                let start = Instant::now();
+                let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
+                    step_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                    masking_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                );
+                if !merged_hashed_state.is_empty() {
+                    self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                if !state_trie_blocks.is_empty() {
-                    let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                        state_trie_blocks.iter().map(|data| data.trie_updates.as_ref()).collect(),
-                        state_trie_masking_blocks
-                            .iter()
-                            .map(|data| data.trie_updates.as_ref())
-                            .collect(),
-                    );
-                    if !merged_trie.is_empty() {
-                        self.write_trie_updates_sorted(&merged_trie)?;
-                    }
+                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
+                    step_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                    masking_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                );
+                if !merged_trie.is_empty() {
+                    self.write_trie_updates_sorted(&merged_trie)?;
                 }
                 timings.write_trie_updates += start.elapsed();
             }
+
+            debug_assert_eq!(next_persist_rest_tx_num, tx_nums.len());
 
             // Full mode: update history indices
             if save_mode.with_state() && has_persist_rest_blocks {
