@@ -171,34 +171,52 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// This may consume and move forward the current entries when the overlay indicates a removed
     /// node.
     fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        enum NextEntryAction {
+            SkipMemory(Nibbles),
+            SkipMemoryAndDb(Nibbles),
+            ReturnMemory(Nibbles, BranchNodeCompact),
+            ReturnDb,
+        }
+
         loop {
-            match (self.in_memory_cursor.current().cloned(), &self.cursor_entry) {
+            let action = match (self.in_memory_cursor.current(), self.cursor_entry.as_ref()) {
                 (Some((mem_key, None)), _)
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) =>
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key < db_key) =>
                 {
                     // If overlay has a removed node but DB cursor is exhausted or ahead of the
                     // in-memory cursor then move ahead in-memory, as there might be further
                     // non-removed overlay nodes.
-                    self.in_memory_cursor.first_after(&mem_key);
+                    NextEntryAction::SkipMemory(*mem_key)
                 }
-                (Some((mem_key, None)), Some((db_key, _))) if &mem_key == db_key => {
+                (Some((mem_key, None)), Some((db_key, _))) if mem_key == db_key => {
                     // If overlay has a removed node which is returned from DB then move both
                     // cursors ahead to the next key.
-                    self.in_memory_cursor.first_after(&mem_key);
-                    self.cursor_next()?;
+                    NextEntryAction::SkipMemoryAndDb(*mem_key)
                 }
                 (Some((mem_key, Some(node))), _)
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) =>
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key <= db_key) =>
                 {
                     // If overlay returns a node prior to the DB's node, or the DB is exhausted,
                     // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
+                    NextEntryAction::ReturnMemory(*mem_key, node.clone())
                 }
                 // All other cases:
                 // - mem_key > db_key
                 // - overlay is exhausted
                 // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(self.cursor_entry.clone()),
+                _ => NextEntryAction::ReturnDb,
+            };
+
+            match action {
+                NextEntryAction::SkipMemory(mem_key) => {
+                    self.in_memory_cursor.first_after(&mem_key);
+                }
+                NextEntryAction::SkipMemoryAndDb(mem_key) => {
+                    self.in_memory_cursor.first_after(&mem_key);
+                    self.cursor_next()?;
+                }
+                NextEntryAction::ReturnMemory(mem_key, node) => return Ok(Some((mem_key, node))),
+                NextEntryAction::ReturnDb => return Ok(self.cursor_entry.clone()),
             }
         }
     }
@@ -215,9 +233,8 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.seeked = true;
 
         let entry = match (mem_entry, &self.cursor_entry) {
-            (Some((mem_key, entry_inner)), _) if *mem_key == key => {
-                entry_inner.clone().map(|node| (key, node))
-            }
+            (Some((mem_key, Some(node))), _) if *mem_key == key => Some((key, node.clone())),
+            (Some((mem_key, None)), _) if *mem_key == key => None,
             (_, Some((db_key, node))) if db_key == &key => Some((key, node.clone())),
             _ => None,
         };
