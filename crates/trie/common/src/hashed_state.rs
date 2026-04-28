@@ -691,36 +691,61 @@ impl HashedPostStateSorted {
         Self { accounts, storages }
     }
 
-    /// Merges the left-hand states and removes any top-level keys present on the right.
+    /// Merges the batch and removes any top-level keys present in the mask.
     ///
-    /// For duplicate keys on the left, later items take precedence over earlier ones. The order of
-    /// the right-hand side does not matter.
-    pub fn disjoint_by_keys<'a>(left: Vec<&'a Self>, right: Vec<&'a Self>) -> Self {
+    /// For duplicate keys in the batch, later items take precedence over earlier ones. The order
+    /// of the mask does not matter.
+    pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
         let accounts = kway_merge_disjoint_sorted(
-            left.iter().map(|item| item.accounts.len()).sum(),
-            left.iter().rev().map(|item| item.accounts.as_slice()),
-            right.iter().map(|item| item.accounts.as_slice()),
+            batch.iter().map(|item| item.accounts.len()).sum(),
+            batch.iter().rev().map(|item| item.accounts.as_slice()),
+            mask.iter().map(|item| item.accounts.as_slice()),
         );
 
+        struct StorageAcc<'a> {
+            wiped: bool,
+            sealed: bool,
+            slices: Vec<&'a [(B256, U256)]>,
+        }
+
         let mut storages = B256Map::with_capacity_and_hasher(
-            left.iter().map(|item| item.storages.len()).sum(),
+            batch.iter().map(|item| item.storages.len()).sum(),
             Default::default(),
         );
 
-        for item in left {
+        for item in batch.iter().rev() {
             for (hashed_address, storage) in &item.storages {
-                storages
-                    .entry(*hashed_address)
-                    .and_modify(|existing: &mut HashedStorageSorted| existing.extend_ref(storage))
-                    .or_insert_with(|| storage.clone());
+                let entry = storages.entry(*hashed_address).or_insert_with(|| StorageAcc {
+                    wiped: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                if entry.sealed {
+                    continue;
+                }
+
+                entry.slices.push(storage.storage_slots.as_slice());
+                if storage.wiped {
+                    entry.wiped = true;
+                    entry.sealed = true;
+                }
             }
         }
 
-        for item in right {
+        for item in mask {
             for hashed_address in item.storages.keys() {
                 storages.remove(hashed_address);
             }
         }
+
+        let storages = storages
+            .into_iter()
+            .map(|(hashed_address, entry)| {
+                let storage_slots = kway_merge_sorted(entry.slices);
+                (hashed_address, HashedStorageSorted { wiped: entry.wiped, storage_slots })
+            })
+            .collect();
 
         Self { accounts, storages }
     }
@@ -1569,7 +1594,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hashed_post_state_sorted_disjoint_by_keys() {
+    fn test_hashed_post_state_sorted_disjointed_merge_batch() {
         fn account(nonce: u64) -> Account {
             Account { nonce, balance: U256::ZERO, bytecode_hash: None }
         }
@@ -1625,7 +1650,7 @@ mod tests {
             B256Map::default(),
         );
 
-        let result = HashedPostStateSorted::disjoint_by_keys(
+        let result = HashedPostStateSorted::disjointed_merge_batch(
             vec![&older, &newer],
             vec![&remove_b, &remove_a],
         );
@@ -1643,7 +1668,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hashed_post_state_sorted_disjoint_by_keys_removes_overlapping_left_key() {
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         fn account(nonce: u64) -> Account {
             Account { nonce, balance: U256::ZERO, bytecode_hash: None }
         }
@@ -1676,7 +1701,8 @@ mod tests {
             )]),
         );
 
-        let result = HashedPostStateSorted::disjoint_by_keys(vec![&older, &newer], vec![&remove]);
+        let result =
+            HashedPostStateSorted::disjointed_merge_batch(vec![&older, &newer], vec![&remove]);
 
         assert!(result.accounts.is_empty());
         assert!(result.storages.is_empty());

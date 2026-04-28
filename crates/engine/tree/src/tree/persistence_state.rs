@@ -29,12 +29,12 @@ use tracing::trace;
 /// The state of the persistence task.
 #[derive(Debug)]
 pub struct PersistenceState {
-    /// Hash and number of the highest block whose non-trie outputs are persisted.
+    /// Hash and number of the highest block whose non-state/trie outputs are persisted.
     ///
     /// This tracks the highest canonical block with durable block/static-file/plain-state data.
-    pub(crate) non_trie_persisted_tip: BlockNumHash,
-    /// Hash and number of the highest block whose trie outputs are persisted.
-    pub(crate) trie_persisted_tip: BlockNumHash,
+    pub(crate) last_persisted_block: BlockNumHash,
+    /// Hash and number of the highest block whose state/trie outputs are persisted.
+    pub(crate) last_state_trie_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
@@ -77,18 +77,18 @@ impl PersistenceState {
     /// Sets state for a finished persistence task.
     pub(crate) fn finish(
         &mut self,
-        non_trie_persisted_tip: BlockNumHash,
-        trie_persisted_tip: BlockNumHash,
+        last_persisted_block: BlockNumHash,
+        last_state_trie_persisted_block: BlockNumHash,
     ) {
         trace!(
             target: "engine::tree",
-            non_trie_persisted_tip = %non_trie_persisted_tip.number,
-            trie_persisted_tip = %trie_persisted_tip.number,
+            last_persisted_block = %last_persisted_block.number,
+            last_state_trie_persisted_block = %last_state_trie_persisted_block.number,
             "updating persistence state"
         );
         self.rx = None;
-        self.non_trie_persisted_tip = non_trie_persisted_tip;
-        self.trie_persisted_tip = trie_persisted_tip;
+        self.last_persisted_block = last_persisted_block;
+        self.last_state_trie_persisted_block = last_state_trie_persisted_block;
     }
 }
 

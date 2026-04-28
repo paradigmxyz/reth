@@ -711,38 +711,64 @@ impl TrieUpdatesSorted {
         Self { account_nodes, storage_tries }
     }
 
-    /// Merges the left-hand updates and removes any top-level keys present on the right.
+    /// Merges the batch and removes any top-level keys present in the mask.
     ///
-    /// For duplicate keys on the left, later items take precedence over earlier ones. The order of
-    /// the right-hand side does not matter.
-    pub fn disjoint_by_keys<'a>(left: Vec<&'a Self>, right: Vec<&'a Self>) -> Self {
+    /// For duplicate keys in the batch, later items take precedence over earlier ones. The order
+    /// of the mask does not matter.
+    pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
         let account_nodes = kway_merge_disjoint_sorted(
-            left.iter().map(|item| item.account_nodes.len()).sum(),
-            left.iter().rev().map(|item| item.account_nodes.as_slice()),
-            right.iter().map(|item| item.account_nodes.as_slice()),
+            batch.iter().map(|item| item.account_nodes.len()).sum(),
+            batch.iter().rev().map(|item| item.account_nodes.as_slice()),
+            mask.iter().map(|item| item.account_nodes.as_slice()),
         );
 
+        struct StorageAcc<'a> {
+            is_deleted: bool,
+            sealed: bool,
+            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+        }
+
         let mut storage_tries = B256Map::with_capacity_and_hasher(
-            left.iter().map(|item| item.storage_tries.len()).sum(),
+            batch.iter().map(|item| item.storage_tries.len()).sum(),
             Default::default(),
         );
 
-        for item in left {
+        for item in batch.iter().rev() {
             for (hashed_address, storage_trie) in &item.storage_tries {
-                storage_tries
-                    .entry(*hashed_address)
-                    .and_modify(|existing: &mut StorageTrieUpdatesSorted| {
-                        existing.extend_ref(storage_trie)
-                    })
-                    .or_insert_with(|| storage_trie.clone());
+                let entry = storage_tries.entry(*hashed_address).or_insert_with(|| StorageAcc {
+                    is_deleted: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                if entry.sealed {
+                    continue;
+                }
+
+                entry.slices.push(storage_trie.storage_nodes.as_slice());
+                if storage_trie.is_deleted {
+                    entry.is_deleted = true;
+                    entry.sealed = true;
+                }
             }
         }
 
-        for item in right {
+        for item in mask {
             for hashed_address in item.storage_tries.keys() {
                 storage_tries.remove(hashed_address);
             }
         }
+
+        let storage_tries = storage_tries
+            .into_iter()
+            .map(|(hashed_address, entry)| {
+                let storage_nodes = kway_merge_sorted(entry.slices);
+                (
+                    hashed_address,
+                    StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes },
+                )
+            })
+            .collect();
 
         Self::new(account_nodes, storage_tries)
     }
@@ -1014,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trie_updates_sorted_disjoint_by_keys() {
+    fn test_trie_updates_sorted_disjointed_merge_batch() {
         let kept_node = Nibbles::from_nibbles_unchecked([0x01]);
         let removed_node = Nibbles::from_nibbles_unchecked([0x02]);
         let kept_storage = B256::from([3; 32]);
@@ -1063,8 +1089,10 @@ mod tests {
             B256Map::default(),
         );
 
-        let result =
-            TrieUpdatesSorted::disjoint_by_keys(vec![&older, &newer], vec![&remove_b, &remove_a]);
+        let result = TrieUpdatesSorted::disjointed_merge_batch(
+            vec![&older, &newer],
+            vec![&remove_b, &remove_a],
+        );
 
         assert_eq!(result.account_nodes, vec![(kept_node, None)]);
         assert_eq!(result.storage_tries.len(), 1);
@@ -1079,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trie_updates_sorted_disjoint_by_keys_removes_overlapping_left_key() {
+    fn test_trie_updates_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         let overlapping_node = Nibbles::from_nibbles_unchecked([0x03]);
         let overlapping_storage = B256::from([5; 32]);
         let slot = Nibbles::from_nibbles_unchecked([0x0c]);
@@ -1108,7 +1136,7 @@ mod tests {
             B256Map::from_iter([(overlapping_storage, StorageTrieUpdatesSorted::default())]),
         );
 
-        let result = TrieUpdatesSorted::disjoint_by_keys(vec![&older, &newer], vec![&remove]);
+        let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&older, &newer], vec![&remove]);
 
         assert!(result.account_nodes.is_empty());
         assert!(result.storage_tries.is_empty());

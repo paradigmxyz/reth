@@ -941,17 +941,17 @@ Engine:
 
           To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
-          [default: 10]
+          [default: 2]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
           This value must be greater than `--engine.persistence-threshold`.
 
-          [default: 20]
+          [default: 16]
 
       --engine.deferred-trie-blocks <DEFERRED_TRIE_BLOCKS>
-          Configure how many canonical blocks may persist non-trie outputs while deferring durable trie updates
+          Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
 
           [default: 0]
 

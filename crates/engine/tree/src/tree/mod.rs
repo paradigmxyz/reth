@@ -2,7 +2,7 @@ use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
-    persistence::{PersistenceHandle, SaveBlocksPlan},
+    persistence::PersistenceHandle,
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
@@ -30,9 +30,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksPlan,
+    SaveBlocksPlanStep, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -432,8 +432,8 @@ where
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
         let persistence_state = PersistenceState {
-            non_trie_persisted_tip: BlockNumHash::new(best_block_number, header.hash()),
-            trie_persisted_tip: BlockNumHash::new(best_block_number, header.hash()),
+            last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
+            last_state_trie_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
         };
 
@@ -489,7 +489,7 @@ where
         self.state
             .tree_state
             .canonical_block_number()
-            .saturating_sub(self.persistence_state.non_trie_persisted_tip.number)
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
     /// Returns `true` when the main loop should stop draining the tree input channel.
@@ -1351,8 +1351,8 @@ where
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
     fn remove_blocks(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, non_trie_persisted_tip=?self.persistence_state.non_trie_persisted_tip.number, "Removing blocks using persistence task");
-        if new_tip_num < self.persistence_state.non_trie_persisted_tip.number {
+        debug!(target: "engine::tree", ?new_tip_num, last_persisted_block=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+        if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
@@ -1368,22 +1368,19 @@ where
             return
         }
 
-        let non_trie_persisted_tip =
-            plan.non_trie_persisted_tip().expect("checked non-empty persisting blocks");
+        let last_block = plan.last_block().expect("checked non-empty persisting blocks");
 
         debug!(
             target: "engine::tree",
             count = plan.blocks.len(),
-            trie_catchup_blocks = plan.trie_catchup_block_count,
-            full_persist_blocks = plan.full_persist_block_count,
-            deferred_trie_blocks = plan.deferred_trie_block_count,
+            steps = ?plan.steps,
             blocks = ?plan.blocks.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
             "Persisting blocks"
         );
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(plan, tx);
 
-        self.persistence_state.start_save(non_trie_persisted_tip, rx);
+        self.persistence_state.start_save(last_block, rx);
     }
 
     /// Triggers new persistence actions if no persistence task is currently in progress.
@@ -1471,31 +1468,25 @@ where
     ) -> Result<(), AdvancePersistenceError> {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let PersistenceResult { non_trie_persisted_tip, trie_persisted_tip, commit_duration } =
-            result;
-        let Some(BlockNumHash {
-            hash: non_trie_persisted_tip_hash,
-            number: non_trie_persisted_tip_number,
-        }) = non_trie_persisted_tip
+        let PersistenceResult { last_block, last_state_trie_block, commit_duration } = result;
+        let Some(BlockNumHash { hash: last_block_hash, number: last_block_number }) = last_block
         else {
             // if this happened, then we persisted no blocks because we sent an empty vec of blocks
             warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
             return Ok(())
         };
 
-        let non_trie_persisted_tip =
-            BlockNumHash::new(non_trie_persisted_tip_number, non_trie_persisted_tip_hash);
-        let trie_persisted_tip =
-            self.trie_persisted_tip(non_trie_persisted_tip, trie_persisted_tip)?;
+        let last_block = BlockNumHash::new(last_block_number, last_block_hash);
+        let last_state_trie_persisted_block =
+            self.last_state_trie_persisted_block(last_block, last_state_trie_block)?;
 
-        debug!(target: "engine::tree", ?non_trie_persisted_tip_hash, ?non_trie_persisted_tip_number, trie_persisted_tip = trie_persisted_tip.number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-        self.persistence_state.finish(non_trie_persisted_tip, trie_persisted_tip);
+        debug!(target: "engine::tree", ?last_block_hash, ?last_block_number, last_state_trie_persisted_block = last_state_trie_persisted_block.number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_block, last_state_trie_persisted_block);
 
         // Evict trie changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
         // the finalized block if set.
-        let min_threshold =
-            non_trie_persisted_tip_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
+        let min_threshold = last_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
         let eviction_threshold =
             if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
                 // Use the minimum of finalized block and retention threshold to be conservative
@@ -1506,7 +1497,7 @@ where
             };
         debug!(
             target: "engine::tree",
-            non_trie_persisted = non_trie_persisted_tip_number,
+            last_persisted_block = last_block_number,
             finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
             eviction_threshold,
             "Evicting changesets below threshold"
@@ -1516,7 +1507,7 @@ where
         // Invalidate cached overlay since the anchor has changed
         self.state.tree_state.invalidate_cached_overlay();
 
-        self.on_new_persisted_block(trie_persisted_tip)?;
+        self.on_new_persisted_block(last_state_trie_persisted_block)?;
 
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
@@ -1527,34 +1518,37 @@ where
             });
         }
 
-        self.purge_timing_stats(non_trie_persisted_tip_number, commit_duration);
+        self.purge_timing_stats(last_block_number, commit_duration);
 
         Ok(())
     }
 
     /// Returns the highest block that can be dropped from memory after persistence completes.
-    fn trie_persisted_tip(
+    fn last_state_trie_persisted_block(
         &self,
-        non_trie_persisted_tip: BlockNumHash,
-        trie_persisted_tip: Option<u64>,
+        last_block: BlockNumHash,
+        last_state_trie_block: Option<u64>,
     ) -> ProviderResult<BlockNumHash> {
-        let Some(trie_persisted_tip) =
-            trie_persisted_tip.filter(|block_number| *block_number < non_trie_persisted_tip.number)
-        else {
-            return Ok(non_trie_persisted_tip)
-        };
+        let Some(last_state_trie_block) = last_state_trie_block else { return Ok(last_block) };
+        debug_assert!(
+            last_state_trie_block <= last_block.number,
+            "state/trie frontier cannot exceed the last persisted block"
+        );
+        if last_state_trie_block >= last_block.number {
+            return Ok(last_block)
+        }
 
         let hash = self
             .canonical_in_memory_state
-            .hash_by_number(trie_persisted_tip)
+            .hash_by_number(last_state_trie_block)
             .map(Ok)
             .unwrap_or_else(|| {
                 self.provider
-                    .block_hash(trie_persisted_tip)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(trie_persisted_tip.into()))
+                    .block_hash(last_state_trie_block)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(last_state_trie_block.into()))
             })?;
 
-        Ok(BlockNumHash::new(trie_persisted_tip, hash))
+        Ok(BlockNumHash::new(last_state_trie_block, hash))
     }
 
     /// Handles a message from the engine.
@@ -1841,7 +1835,7 @@ where
         } else {
             self.state.tree_state.remove_until(
                 backfill_num_hash,
-                self.persistence_state.non_trie_persisted_tip.hash,
+                self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
             );
         }
@@ -2063,7 +2057,7 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.non_trie_persisted_tip.number;
+        let min_block = self.persistence_state.last_persisted_block.number;
         self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
             self.config.persistence_threshold()
     }
@@ -2079,10 +2073,11 @@ where
 
         let mut blocks = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
-        let trie_persisted_tip_number = self.persistence_state.trie_persisted_tip.number;
-        let non_trie_persisted_tip_number = self.persistence_state.non_trie_persisted_tip.number;
+        let last_state_trie_persisted_block_number =
+            self.persistence_state.last_state_trie_persisted_block.number;
+        let last_persisted_block_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
-        let non_trie_target_number = match target {
+        let last_block_target_number = match target {
             PersistTarget::Threshold => {
                 canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
             }
@@ -2092,18 +2087,18 @@ where
         debug!(
             target: "engine::tree",
             ?current_hash,
-            ?trie_persisted_tip_number,
-            ?non_trie_persisted_tip_number,
+            ?last_state_trie_persisted_block_number,
+            ?last_persisted_block_number,
             ?canonical_head_number,
             target = ?target,
             "Returning save plan"
         );
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= trie_persisted_tip_number {
+            if block.recovered_block().number() <= last_state_trie_persisted_block_number {
                 break;
             }
 
-            if block.recovered_block().number() <= non_trie_target_number {
+            if block.recovered_block().number() <= last_block_target_number {
                 blocks.push(block.clone());
             }
 
@@ -2113,20 +2108,37 @@ where
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
 
-        let trie_catchup_block_count = non_trie_persisted_tip_number
-            .saturating_sub(trie_persisted_tip_number)
+        let trie_catchup_block_count = last_persisted_block_number
+            .saturating_sub(last_state_trie_persisted_block_number)
             .min(blocks.len() as u64) as usize;
-        let non_trie_block_count = blocks.len().saturating_sub(trie_catchup_block_count);
-        let deferred_trie_block_count =
-            non_trie_block_count.min(self.config.deferred_trie_blocks() as usize);
-        let full_persist_block_count = non_trie_block_count - deferred_trie_block_count;
+        let persist_rest_block_count = blocks.len().saturating_sub(trie_catchup_block_count);
+        let state_masking_block_count =
+            persist_rest_block_count.min(self.config.num_state_masking_blocks() as usize);
+        let full_persist_block_count = persist_rest_block_count - state_masking_block_count;
+        let full_persist_start = trie_catchup_block_count;
+        let state_masking_start = full_persist_start + full_persist_block_count;
+        let state_masking_range = state_masking_start..blocks.len();
+        let mut steps = Vec::new();
 
-        Ok(SaveBlocksPlan::new(
-            blocks,
-            trie_catchup_block_count,
-            full_persist_block_count,
-            deferred_trie_block_count,
-        ))
+        if trie_catchup_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(
+                0..trie_catchup_block_count,
+                Some(state_masking_range.clone()),
+                false,
+            ));
+        }
+        if full_persist_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(
+                full_persist_start..state_masking_start,
+                Some(state_masking_range.clone()),
+                true,
+            ));
+        }
+        if state_masking_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(state_masking_range, None, true));
+        }
+
+        Ok(SaveBlocksPlan::new(blocks, steps))
     }
 
     /// This clears the blocks from the in-memory tree state that no longer need to stay resident
@@ -2150,7 +2162,7 @@ where
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(in_memory_persisted_block, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks_until(
-            self.persistence_state.non_trie_persisted_tip,
+            self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
         );
         Ok(())
@@ -2620,7 +2632,7 @@ where
     /// happen if a reorg is happening while we are persisting a block.
     fn find_disk_reorg(&self) -> ProviderResult<Option<u64>> {
         let mut canonical = self.state.tree_state.current_canonical_head;
-        let mut persisted = self.persistence_state.non_trie_persisted_tip;
+        let mut persisted = self.persistence_state.last_persisted_block;
 
         let parent_num_hash = |num_hash: NumHash| -> ProviderResult<NumHash> {
             Ok(self
@@ -2951,7 +2963,7 @@ where
 
         // Only query DB if block could be persisted (number <= last persisted block).
         // New blocks from CL always have number > last persisted, so skip DB lookup for them.
-        if block_num_hash.number <= self.persistence_state.non_trie_persisted_tip.number {
+        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
@@ -3326,7 +3338,7 @@ where
 
         self.state.tree_state.remove_until(
             upper_bound,
-            self.persistence_state.non_trie_persisted_tip.hash,
+            self.persistence_state.last_persisted_block.hash,
             num,
         );
         Ok(())

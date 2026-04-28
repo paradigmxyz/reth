@@ -333,8 +333,8 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-backpressure-threshold", default_value_t = DefaultEngineValues::get_global().persistence_backpressure_threshold())]
     pub persistence_backpressure_threshold: u64,
 
-    /// Configure how many canonical blocks may persist non-trie outputs while deferring durable
-    /// trie updates.
+    /// Configure how many of the blocks being persisted should only mask state/trie writes instead
+    /// of durably persisting their state/trie updates in the current cycle.
     #[arg(long = "engine.deferred-trie-blocks", default_value_t = DefaultEngineValues::get_global().deferred_trie_blocks)]
     pub deferred_trie_blocks: u64,
 
@@ -567,49 +567,86 @@ pub struct EngineArgs {
 #[allow(deprecated)]
 impl Default for EngineArgs {
     fn default() -> Self {
-        let defaults = DefaultEngineValues::get_global().clone();
+        let DefaultEngineValues {
+            persistence_threshold,
+            persistence_backpressure_threshold,
+            deferred_trie_blocks,
+            memory_block_buffer_target,
+            invalid_header_hit_eviction_threshold,
+            legacy_state_root_task_enabled,
+            state_cache_disabled,
+            prewarming_disabled,
+            state_provider_metrics,
+            cross_block_cache_size,
+            state_root_task_compare_updates,
+            accept_execution_requests_hash,
+            multiproof_chunk_size,
+            reserved_cpu_cores,
+            precompile_cache_disabled,
+            state_root_fallback,
+            always_process_payload_attributes_on_canonical_head,
+            allow_unwind_canonical_header,
+            storage_worker_count,
+            account_worker_count,
+            prewarming_threads,
+            cache_metrics_disabled,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
+            disable_sparse_trie_cache_pruning,
+            state_root_task_timeout,
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
+        } = DefaultEngineValues::get_global().clone();
         Self {
-            persistence_threshold: defaults.persistence_threshold,
-            persistence_backpressure_threshold: defaults.persistence_backpressure_threshold(),
-            deferred_trie_blocks: defaults.deferred_trie_blocks,
-            memory_block_buffer_target: defaults.memory_block_buffer_target,
-            invalid_header_hit_eviction_threshold: defaults.invalid_header_hit_eviction_threshold,
-            legacy_state_root_task_enabled: defaults.legacy_state_root_task_enabled,
-            state_root_task_compare_updates: defaults.state_root_task_compare_updates,
+            persistence_threshold,
+            persistence_backpressure_threshold: persistence_backpressure_threshold.unwrap_or_else(
+                || {
+                    default_persistence_backpressure_threshold(
+                        persistence_threshold,
+                        memory_block_buffer_target,
+                    )
+                },
+            ),
+            deferred_trie_blocks,
+            memory_block_buffer_target,
+            invalid_header_hit_eviction_threshold,
+            legacy_state_root_task_enabled,
+            state_root_task_compare_updates,
             caching_and_prewarming_enabled: true,
-            state_cache_disabled: defaults.state_cache_disabled,
-            prewarming_disabled: defaults.prewarming_disabled,
+            state_cache_disabled,
+            prewarming_disabled,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
-            state_provider_metrics: defaults.state_provider_metrics,
-            cross_block_cache_size: defaults.cross_block_cache_size,
-            accept_execution_requests_hash: defaults.accept_execution_requests_hash,
-            multiproof_chunk_size: defaults.multiproof_chunk_size,
-            reserved_cpu_cores: defaults.reserved_cpu_cores,
+            state_provider_metrics,
+            cross_block_cache_size,
+            accept_execution_requests_hash,
+            multiproof_chunk_size,
+            reserved_cpu_cores,
             precompile_cache_enabled: true,
-            precompile_cache_disabled: defaults.precompile_cache_disabled,
-            state_root_fallback: defaults.state_root_fallback,
-            always_process_payload_attributes_on_canonical_head: defaults
-                .always_process_payload_attributes_on_canonical_head,
-            allow_unwind_canonical_header: defaults.allow_unwind_canonical_header,
-            storage_worker_count: defaults.storage_worker_count,
-            account_worker_count: defaults.account_worker_count,
-            prewarming_threads: defaults.prewarming_threads,
-            cache_metrics_disabled: defaults.cache_metrics_disabled,
-            sparse_trie_max_hot_slots: defaults.sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts: defaults.sparse_trie_max_hot_accounts,
-            slow_block_threshold: defaults.slow_block_threshold,
-            disable_sparse_trie_cache_pruning: defaults.disable_sparse_trie_cache_pruning,
-            state_root_task_timeout: defaults
-                .state_root_task_timeout
+            precompile_cache_disabled,
+            state_root_fallback,
+            always_process_payload_attributes_on_canonical_head,
+            allow_unwind_canonical_header,
+            storage_worker_count,
+            account_worker_count,
+            prewarming_threads,
+            cache_metrics_disabled,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
+            disable_sparse_trie_cache_pruning,
+            state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
-            share_execution_cache_with_payload_builder: defaults
-                .share_execution_cache_with_payload_builder,
-            share_sparse_trie_with_payload_builder: defaults.share_sparse_trie_with_payload_builder,
-            suppress_persistence_during_build: defaults.suppress_persistence_during_build,
-            bal_parallel_execution_disabled: defaults.bal_parallel_execution_disabled,
-            bal_parallel_state_root_disabled: defaults.bal_parallel_state_root_disabled,
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -626,6 +663,13 @@ impl EngineArgs {
             self.persistence_backpressure_threshold,
             self.persistence_threshold
         );
+        ensure!(
+            self.deferred_trie_blocks + self.memory_block_buffer_target < self.persistence_threshold,
+            "--engine.deferred-trie-blocks ({}) + --engine.memory-block-buffer-target ({}) must be less than --engine.persistence-threshold ({})",
+            self.deferred_trie_blocks,
+            self.memory_block_buffer_target,
+            self.persistence_threshold,
+        );
         Ok(())
     }
 
@@ -634,7 +678,7 @@ impl EngineArgs {
         let config = TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold)
-            .with_deferred_trie_blocks(self.deferred_trie_blocks)
+            .with_num_state_masking_blocks(self.deferred_trie_blocks)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -825,12 +869,17 @@ mod tests {
 
     #[test]
     fn test_parse_deferred_trie_blocks() {
-        let args =
-            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.deferred-trie-blocks", "7"])
-                .args;
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "8",
+            "--engine.deferred-trie-blocks",
+            "7",
+        ])
+        .args;
 
         assert_eq!(args.deferred_trie_blocks, 7);
-        assert_eq!(args.tree_config().deferred_trie_blocks(), 7);
+        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
     }
 
     #[test]
@@ -843,6 +892,21 @@ mod tests {
 
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.persistence-backpressure-threshold"));
+        assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_rejects_state_masking_window_at_or_above_threshold() {
+        let args = EngineArgs {
+            persistence_threshold: 4,
+            deferred_trie_blocks: 2,
+            memory_block_buffer_target: 2,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.deferred-trie-blocks"));
+        assert!(err.contains("engine.memory-block-buffer-target"));
         assert!(err.contains("engine.persistence-threshold"));
     }
 

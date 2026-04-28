@@ -374,7 +374,7 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
         PayloadAttributes::default()
     })
     .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
+        config.with_persistence_threshold(6).with_memory_block_buffer_target(5)
     })
     .build()
     .await?;

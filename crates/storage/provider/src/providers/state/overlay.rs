@@ -212,8 +212,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             .ok_or(ProviderError::BlockHashNotFound(self.anchor_hash))
     }
 
-    /// Returns the highest block whose trie state is durably available in the database.
-    fn get_db_trie_tip_block<Provider>(&self, provider: &Provider) -> ProviderResult<BlockNumHash>
+    /// Returns the highest blocks whose state/trie data and non-state/trie data are durably
+    /// available in the database.
+    fn get_db_tip_blocks<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<(BlockNumHash, BlockNumHash)>
     where
         Provider: StageCheckpointReader + BlockNumReader,
     {
@@ -224,25 +228,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             .finish_stage_checkpoint()
             .and_then(|finish| finish.partial_state_trie)
             .unwrap_or(checkpoint.block_number);
-        let hash = provider
+        let state_trie_tip_hash = provider
             .convert_number(block_number.into())?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(BlockNumHash::new(block_number, hash))
-    }
-
-    /// Returns the highest block whose non-trie state is durably available in the database.
-    fn get_db_finish_tip_block<Provider>(&self, provider: &Provider) -> ProviderResult<BlockNumHash>
-    where
-        Provider: StageCheckpointReader + BlockNumReader,
-    {
-        let checkpoint = provider.get_stage_checkpoint(StageId::Finish)?.ok_or_else(|| {
-            ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 }
-        })?;
-        let block_number = checkpoint.block_number;
-        let hash = provider
-            .convert_number(block_number.into())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(BlockNumHash::new(block_number, hash))
+        let finish_tip_number = checkpoint.block_number;
+        let finish_tip_hash = provider
+            .convert_number(finish_tip_number.into())?
+            .ok_or_else(|| ProviderError::HeaderNotFound(finish_tip_number.into()))?;
+        Ok((
+            BlockNumHash::new(block_number, state_trie_tip_hash),
+            BlockNumHash::new(finish_tip_number, finish_tip_hash),
+        ))
     }
 
     /// Returns whether or not it is required to collect reverts, and validates that there are
@@ -253,24 +249,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     fn reverts_required<Provider>(
         &self,
         provider: &Provider,
-        trie_tip_block: BlockNumHash,
+        state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
     ) -> ProviderResult<Option<RangeInclusive<BlockNumber>>>
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        // If the anchor is the current durable trie frontier then there won't be any reverts
+        // If the anchor is the current durable state/trie frontier then there won't be any
+        // reverts
         // necessary.
-        if trie_tip_block.hash == self.anchor_hash {
-            return Ok(None)
-        }
-
-        // If the durable trie frontier has moved forward into the `LazyOverlay` then we still
-        // don't need to revert, because the overlay can trim off the persisted prefix and keep the
-        // remaining in-memory suffix above that trie frontier.
-        if let Some(OverlaySource::Lazy(lazy_overlay)) = &self.overlay_source &&
-            lazy_overlay.has_anchor_hash(trie_tip_block.hash)
-        {
+        if state_trie_tip_block.hash == self.anchor_hash {
             return Ok(None)
         }
 
@@ -295,33 +283,28 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             });
         }
 
-        // The durable trie frontier is still required to serve the requested anchor directly.
-        // When the anchor lies in the deferred-trie window we need to undo the fully durable
-        // suffix from Finish back to the anchor before re-applying any in-memory suffix above it.
-        if anchor_number > trie_tip_block.number {
-            if anchor_number == finish_tip_block.number {
-                return Err(ProviderError::InsufficientChangesets {
-                    requested: anchor_number,
-                    available: lower_bound..=finish_tip_block.number.saturating_sub(1),
-                })
-            }
-            return Ok(Some(anchor_number + 1..=finish_tip_block.number))
+        if anchor_number > state_trie_tip_block.number {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: anchor_number,
+                available: lower_bound..=state_trie_tip_block.number,
+            })
         }
 
-        Ok(Some(anchor_number + 1..=trie_tip_block.number))
+        Ok(Some(anchor_number + 1..=finish_tip_block.number))
     }
 
-    /// Calculates a new [`Overlay`] given a transaction and the current trie frontier.
+    /// Calculates a new [`Overlay`] given a transaction and the current durable state/trie
+    /// frontier.
     #[instrument(
         level = "debug",
         target = "providers::state::overlay",
         skip_all,
-        fields(?trie_tip_block, anchor_hash = ?self.anchor_hash)
+        fields(?state_trie_tip_block, ?finish_tip_block, anchor_hash = ?self.anchor_hash)
     )]
     fn calculate_overlay<Provider>(
         &self,
         provider: &Provider,
-        trie_tip_block: BlockNumHash,
+        state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
     ) -> ProviderResult<Overlay>
     where
@@ -343,7 +326,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
         let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
-            self.reverts_required(provider, trie_tip_block, finish_tip_block)?
+            self.reverts_required(provider, state_trie_tip_block, finish_tip_block)?
         {
             debug!(
                 target: "providers::state::overlay",
@@ -412,9 +395,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             (trie_updates, hashed_state_updates)
         } else {
-            // If no reverts are needed then we can assume that the current durable trie frontier is
-            // the anchor hash or overlaps with the `LazyOverlay`. Use overlays directly.
-            let (trie_updates, hashed_state) = self.resolve_overlays(trie_tip_block.hash)?;
+            // If no reverts are needed then the requested anchor is exactly the durable
+            // state/trie frontier. Use overlays directly from that frontier.
+            let (trie_updates, hashed_state) = self.resolve_overlays(state_trie_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
@@ -449,9 +432,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let trie_tip_block = self.get_db_trie_tip_block(provider)?;
-        let finish_tip_block = self.get_db_finish_tip_block(provider)?;
-        self.calculate_overlay(provider, trie_tip_block, finish_tip_block)
+        let (state_trie_tip_block, finish_tip_block) = self.get_db_tip_blocks(provider)?;
+        self.calculate_overlay(provider, state_trie_tip_block, finish_tip_block)
     }
 }
 
@@ -465,7 +447,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `(trie_tip_hash, finish_tip_hash) -> Overlay`.
+    /// A cache which maps `(state_trie_tip_hash, finish_tip_hash) -> Overlay`.
     ///
     /// Under partial persistence the overlay depends on both the durable trie frontier and the
     /// fully durable Finish frontier, so both hashes are part of the cache key.
@@ -502,8 +484,8 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self
     }
 
-    /// Fetches an [`Overlay`] from the cache based on the current trie frontier. If there is no
-    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    /// Fetches an [`Overlay`] from the cache based on the current durable frontiers. If there is
+    /// no cached value then this calculates the [`Overlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
     where
@@ -515,18 +497,19 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let trie_tip_block = self.overlay_builder.get_db_trie_tip_block(provider)?;
-        let finish_tip_block = self.overlay_builder.get_db_finish_tip_block(provider)?;
+        let (state_trie_tip_block, finish_tip_block) =
+            self.overlay_builder.get_db_tip_blocks(provider)?;
 
-        let overlay = match self.overlay_cache.entry((trie_tip_block.hash, finish_tip_block.hash)) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
-                entry.insert(overlay.clone());
-                overlay
-            }
-        };
+        let overlay =
+            match self.overlay_cache.entry((state_trie_tip_block.hash, finish_tip_block.hash)) {
+                dashmap::Entry::Occupied(entry) => entry.get().clone(),
+                dashmap::Entry::Vacant(entry) => {
+                    self.overlay_builder.metrics.overlay_cache_misses.increment(1);
+                    let overlay = self.overlay_builder.build_overlay(provider)?;
+                    entry.insert(overlay.clone());
+                    overlay
+                }
+            };
 
         Ok(overlay)
     }
@@ -688,7 +671,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, BlockWriter, SaveBlocksMode};
+    use crate::{
+        test_utils::create_test_provider_factory, BlockWriter, SaveBlocksMode, SaveBlocksPlan,
+        SaveBlocksPlanStep,
+    };
     use alloy_primitives::{B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ComputedTrieData, ExecutedBlock};
     use reth_primitives_traits::Account;
@@ -696,6 +682,28 @@ mod tests {
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
     use std::sync::Arc;
+
+    fn full_save_plan(
+        blocks: impl IntoIterator<Item = ExecutedBlock<EthPrimitives>>,
+    ) -> SaveBlocksPlan<EthPrimitives> {
+        let blocks = blocks.into_iter().collect::<Vec<_>>();
+        let full_range = 0..blocks.len();
+        SaveBlocksPlan::new(
+            blocks,
+            vec![SaveBlocksPlanStep::new(
+                full_range.clone(),
+                Some(full_range.end..full_range.end),
+                true,
+            )],
+        )
+    }
+
+    fn partial_save_plan(
+        blocks: impl IntoIterator<Item = ExecutedBlock<EthPrimitives>>,
+        steps: Vec<SaveBlocksPlanStep>,
+    ) -> SaveBlocksPlan<EthPrimitives> {
+        SaveBlocksPlan::new(blocks.into_iter().collect(), steps)
+    }
 
     fn with_unique_state(
         block: &ExecutedBlock<EthPrimitives>,
@@ -731,20 +739,20 @@ mod tests {
             .map(|(index, block)| with_unique_state(&block, index as u8 + 1))
             .collect::<Vec<_>>();
 
-        let trie_tip = &blocks[1];
+        let state_trie_tip = &blocks[1];
         let finish_tip = &blocks[3];
         let lazy_overlay_blocks = vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone()];
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(blocks[0].recovered_block()).unwrap();
-        provider_rw.insert_block(trie_tip.recovered_block()).unwrap();
+        provider_rw.insert_block(state_trie_tip.recovered_block()).unwrap();
         provider_rw.insert_block(blocks[2].recovered_block()).unwrap();
         provider_rw.insert_block(finish_tip.recovered_block()).unwrap();
         provider_rw
             .save_stage_checkpoint(
                 StageId::Finish,
                 StageCheckpoint::new(finish_tip.block_number()).with_finish_stage_checkpoint(
-                    FinishCheckpoint { partial_state_trie: Some(trie_tip.block_number()) },
+                    FinishCheckpoint { partial_state_trie: Some(state_trie_tip.block_number()) },
                 ),
             )
             .unwrap();
@@ -752,7 +760,7 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let overlay = OverlayBuilder::<EthPrimitives>::new(
-            trie_tip.recovered_block().hash(),
+            state_trie_tip.recovered_block().hash(),
             ChangesetCache::new(),
         )
         .with_lazy_overlay(Some(LazyOverlay::new(lazy_overlay_blocks)))
@@ -763,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn build_overlay_allows_anchor_between_trie_frontier_and_finish() {
+    fn build_overlay_rejects_anchor_between_state_trie_frontier_and_finish() {
         let factory = create_test_provider_factory();
         let mut block_builder = TestBlockBuilder::eth().with_state();
 
@@ -772,33 +780,36 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis), 0, 1, 0, SaveBlocksMode::Full)
+            .save_blocks(
+                &full_save_plan(std::slice::from_ref(&genesis).to_vec()),
+                SaveBlocksMode::Full,
+            )
             .unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks, 0, 1, 2, SaveBlocksMode::Full).unwrap();
+        provider_rw
+            .save_blocks(
+                &partial_save_plan(
+                    blocks.clone(),
+                    vec![
+                        SaveBlocksPlanStep::new(0..1, Some(1..3), true),
+                        SaveBlocksPlanStep::new(1..3, None, true),
+                    ],
+                ),
+                SaveBlocksMode::Full,
+            )
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let trie_tip = blocks[0].recovered_block().hash();
         let anchor = blocks[1].recovered_block().hash();
-
-        let full_overlay = OverlayBuilder::<EthPrimitives>::new(trie_tip, ChangesetCache::new())
-            .with_lazy_overlay(Some(LazyOverlay::new(vec![blocks[2].clone(), blocks[1].clone()])))
-            .build_overlay(&provider)
-            .unwrap();
-
-        let deferred_overlay = OverlayBuilder::<EthPrimitives>::new(anchor, ChangesetCache::new())
+        let err = OverlayBuilder::<EthPrimitives>::new(anchor, ChangesetCache::new())
             .with_lazy_overlay(Some(LazyOverlay::new(vec![blocks[2].clone()])))
             .build_overlay(&provider)
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(
-            deferred_overlay.hashed_post_state.as_ref(),
-            full_overlay.hashed_post_state.as_ref()
-        );
-        assert_eq!(deferred_overlay.trie_updates.as_ref(), full_overlay.trie_updates.as_ref());
+        assert!(matches!(err, ProviderError::InsufficientChangesets { .. }));
     }
 
     #[test]
@@ -811,12 +822,26 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(std::slice::from_ref(&genesis), 0, 1, 0, SaveBlocksMode::Full)
+            .save_blocks(
+                &full_save_plan(std::slice::from_ref(&genesis).to_vec()),
+                SaveBlocksMode::Full,
+            )
             .unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&blocks, 0, 1, 2, SaveBlocksMode::Full).unwrap();
+        provider_rw
+            .save_blocks(
+                &partial_save_plan(
+                    blocks.clone(),
+                    vec![
+                        SaveBlocksPlanStep::new(0..1, Some(1..3), true),
+                        SaveBlocksPlanStep::new(1..3, None, true),
+                    ],
+                ),
+                SaveBlocksMode::Full,
+            )
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

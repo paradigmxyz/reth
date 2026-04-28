@@ -1,6 +1,5 @@
 use reth_stages_api::{
-    ExecInput, ExecOutput, FinishCheckpoint, Stage, StageCheckpoint, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 
 /// The finish stage.
@@ -21,11 +20,7 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(input.target())
-                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: None }),
-            done: true,
-        })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 
     fn unwind(
@@ -33,10 +28,7 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Ok(UnwindOutput {
-            checkpoint: StageCheckpoint::new(input.unwind_to)
-                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: None }),
-        })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 

@@ -51,6 +51,9 @@ pub use provider::{
     CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
 };
 
+mod save_blocks;
+pub use save_blocks::{SaveBlocksPlan, SaveBlocksPlanStep};
+
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
 
