@@ -18,7 +18,7 @@ pub use transaction::{OpPooledTransaction, OpPooledTx};
 mod error;
 pub mod interop;
 pub mod maintain;
-pub use error::InvalidCrossTx;
+pub use error::{InvalidCrossTx, MetaTxDisabled};
 pub mod estimated_da_size;
 
 use reth_transaction_pool::{CoinbaseTipOrdering, Pool, TransactionValidationTaskExecutor};

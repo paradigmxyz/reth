@@ -27,6 +27,7 @@ use reth_optimism_txpool::{
     interop::{is_valid_interop, MaybeInteropTransaction},
     OpPooledTx,
 };
+use reth_mantle_forks::is_mantle_meta_tx;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuildNextEnv, PayloadBuilderAttributes};
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
@@ -665,7 +666,11 @@ where
             // Reject Mantle MetaTx (disabled since MantleEverest hardfork).
             // Sequencer transactions come from op-node and bypass the txpool validator,
             // so we must check here as well.
-            if reth_mantle_forks::is_mantle_meta_tx(sequencer_tx.value().input()) {
+            if is_mantle_meta_tx(sequencer_tx.value().input()) {
+                warn!(
+                    target: "payload_builder",
+                    "rejected MetaTx in sequencer transaction (permanently disabled since MantleEverest)"
+                );
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::MetaTxRejected,
                 ));

@@ -573,4 +573,10 @@ mod tests {
         input[14] = 0xFF; // corrupt one byte of the prefix
         assert!(!is_mantle_meta_tx(&input));
     }
+
+    #[test]
+    fn is_meta_tx_all_zeros_not_flagged() {
+        // 33 zero bytes is long enough but lacks the ASCII suffix → not a MetaTx
+        assert!(!is_mantle_meta_tx(&[0u8; 33]));
+    }
 }

@@ -56,6 +56,5 @@ sha2.workspace = true
 serde.workspace = true
 
 [features]
-mantle-debug = []
 # Debug: export full state at specific block heights (e.g. when debugging fork/state root mismatch)
 state-export = ["reth-mantle-forks/state-export"]

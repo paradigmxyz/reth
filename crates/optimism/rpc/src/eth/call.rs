@@ -55,10 +55,11 @@ use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use alloy_evm::overrides::apply_state_overrides;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
-use alloy_rpc_types_eth::state::StateOverride;
+use alloy_rpc_types_eth::{state::StateOverride, TransactionRequest};
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
+use reth_mantle_forks::is_mantle_meta_tx;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_api::{
@@ -119,6 +120,8 @@ where
         // The basefee should be ignored for eth_estimateGas
         // Reference: geth api.go:985
         evm_env.cfg_env.disable_base_fee = true;
+
+        ensure_estimate_gas_input_supported(request.as_ref()).map_err(OpEthApiError::Eth)?;
 
         // Set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
@@ -383,6 +386,18 @@ where
     }
 }
 
+fn ensure_estimate_gas_input_supported(request: &TransactionRequest) -> Result<(), EthApiError> {
+    if request.input.input().is_some_and(|input| is_mantle_meta_tx(input)) {
+        return Err(EthApiError::other(jsonrpsee_types::error::ErrorObject::owned(
+            -32000,
+            "meta tx is disabled",
+            None::<()>,
+        )));
+    }
+
+    Ok(())
+}
+
 /// Executes the requests again after an out of gas error to check if the error is gas related
 #[inline]
 fn map_out_of_gas_err<Ev, DB>(
@@ -441,10 +456,28 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::ensure_estimate_gas_input_supported;
+    use alloy_rpc_types_eth::TransactionRequest;
+    use jsonrpsee_types::error::ErrorObject;
     use reth_chainspec::MIN_TRANSACTION_GAS;
+    use reth_mantle_forks::MANTLE_META_TX_PREFIX;
+    use reth_rpc_eth_types::EthApiError;
     use reth_rpc_server_types::constants::gas_oracle::{
         CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO,
     };
+
+    #[test]
+    fn test_estimate_gas_rejects_mantle_meta_tx_input() {
+        let mut input = MANTLE_META_TX_PREFIX.to_vec();
+        input.push(0xF8);
+
+        let request = TransactionRequest::default().input(input.into());
+        let err = ensure_estimate_gas_input_supported(request.as_ref()).unwrap_err();
+        let rpc_error: ErrorObject<'static> = EthApiError::from(err).into();
+
+        assert_eq!(rpc_error.code(), -32000);
+        assert_eq!(rpc_error.message(), "meta tx is disabled");
+    }
 
     #[test]
     fn test_mantle_returns_raw_estimate_no_buffer() {

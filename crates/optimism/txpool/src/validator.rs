@@ -1,4 +1,4 @@
-use crate::{supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
+use crate::{error::MetaTxDisabled, supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
 use alloy_consensus::{BlockHeader, Transaction};
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
@@ -18,6 +18,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+use tracing::trace;
 
 /// The interval for which we check transaction against supervisor, 1 hour.
 const TRANSACTION_VALIDITY_WINDOW_SECS: u64 = 3600;
@@ -194,9 +195,14 @@ where
         // 32-byte "MantleMetaTxPrefix". It is permanently disabled on all chains.
         // Mirrors op-geth: core/types/meta_transaction.go — MetaTxCheck()
         if is_mantle_meta_tx(transaction.input()) {
+            trace!(
+                target: "txpool",
+                tx_hash = %transaction.hash(),
+                "rejected MetaTx (permanently disabled since MantleEverest)"
+            );
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
+                InvalidPoolTransactionError::other(MetaTxDisabled),
             );
         }
 
