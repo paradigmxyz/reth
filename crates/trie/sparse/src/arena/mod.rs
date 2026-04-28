@@ -1275,7 +1275,11 @@ impl ArenaParallelSparseTrie {
 
             // Record trie updates for dirty branches only.
             // Skip the root node (empty logical path) as PST does.
-            if let Some(trie_updates) = updates.as_mut().filter(|_| was_dirty) {
+            if was_dirty {
+                let Some(trie_updates) = updates.as_mut() else {
+                    continue;
+                };
+
                 let mut logical_path = head_path;
                 logical_path.extend(&short_key);
 
