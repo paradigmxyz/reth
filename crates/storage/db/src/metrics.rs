@@ -3,7 +3,7 @@ use metrics::Histogram;
 use quanta::Instant;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHashMap;
-use std::time::Duration;
+use std::{array, sync::Arc, time::Duration};
 use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
@@ -17,6 +17,8 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 pub(crate) struct DatabaseEnvMetrics {
     /// Caches `OperationMetrics` handles for each table and operation tuple.
     operations: FxHashMap<(&'static str, Operation), OperationMetrics>,
+    /// Caches per-table operation metric handles for hot cursor paths.
+    table_operations: FxHashMap<&'static str, TableOperationMetrics>,
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -27,71 +29,16 @@ pub(crate) struct DatabaseEnvMetrics {
 }
 
 /// Per-table operation metric handles cached for hot cursor paths.
-#[derive(Debug, Clone)]
-pub(crate) struct TableOperationMetrics {
-    get: OperationMetrics,
-    put_upsert: OperationMetrics,
-    put_append: OperationMetrics,
-    delete: OperationMetrics,
-    cursor_upsert: OperationMetrics,
-    cursor_insert: OperationMetrics,
-    cursor_append: OperationMetrics,
-    cursor_append_dup: OperationMetrics,
-    cursor_delete_current: OperationMetrics,
-    cursor_delete_current_duplicates: OperationMetrics,
-}
-
-impl TableOperationMetrics {
-    fn new(env_metrics: &DatabaseEnvMetrics, table: &'static str) -> Self {
-        let metric = |operation| {
-            env_metrics
-                .operations
-                .get(&(table, operation))
-                .expect("operation metric handle not found")
-                .clone()
-        };
-
-        Self {
-            get: metric(Operation::Get),
-            put_upsert: metric(Operation::PutUpsert),
-            put_append: metric(Operation::PutAppend),
-            delete: metric(Operation::Delete),
-            cursor_upsert: metric(Operation::CursorUpsert),
-            cursor_insert: metric(Operation::CursorInsert),
-            cursor_append: metric(Operation::CursorAppend),
-            cursor_append_dup: metric(Operation::CursorAppendDup),
-            cursor_delete_current: metric(Operation::CursorDeleteCurrent),
-            cursor_delete_current_duplicates: metric(Operation::CursorDeleteCurrentDuplicates),
-        }
-    }
-
-    const fn metric(&self, operation: Operation) -> &OperationMetrics {
-        match operation {
-            Operation::Get => &self.get,
-            Operation::PutUpsert => &self.put_upsert,
-            Operation::PutAppend => &self.put_append,
-            Operation::Delete => &self.delete,
-            Operation::CursorUpsert => &self.cursor_upsert,
-            Operation::CursorInsert => &self.cursor_insert,
-            Operation::CursorAppend => &self.cursor_append,
-            Operation::CursorAppendDup => &self.cursor_append_dup,
-            Operation::CursorDeleteCurrent => &self.cursor_delete_current,
-            Operation::CursorDeleteCurrentDuplicates => &self.cursor_delete_current_duplicates,
-        }
-    }
-
-    /// Returns the cached metric handle for the given operation.
-    pub(crate) fn operation_metric(&self, operation: Operation) -> OperationMetrics {
-        self.metric(operation).clone()
-    }
-}
+pub(crate) type TableOperationMetrics = Arc<[OperationMetrics; Operation::COUNT]>;
 
 impl DatabaseEnvMetrics {
     pub(crate) fn new() -> Self {
         // Pre-populate metric handle maps with all possible combinations of labels
         // to avoid runtime locks on the map when recording metrics.
+        let operations = Self::generate_operation_handles();
         Self {
-            operations: Self::generate_operation_handles(),
+            table_operations: Self::generate_table_operation_handles(&operations),
+            operations,
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
@@ -116,6 +63,29 @@ impl DatabaseEnvMetrics {
             }
         }
         operations
+    }
+
+    /// Generate a map of pre-bound operation handles for each table.
+    fn generate_table_operation_handles(
+        operations: &FxHashMap<(&'static str, Operation), OperationMetrics>,
+    ) -> FxHashMap<&'static str, TableOperationMetrics> {
+        let mut table_operations =
+            FxHashMap::with_capacity_and_hasher(Tables::COUNT, Default::default());
+
+        for table in Tables::ALL {
+            let table_name = table.name();
+            let metrics = array::from_fn(|index| {
+                let operation = Operation::from_index(index);
+                operations
+                    .get(&(table_name, operation))
+                    .expect("operation metric handle not found")
+                    .clone()
+            });
+
+            table_operations.insert(table_name, Arc::new(metrics));
+        }
+
+        table_operations
     }
 
     /// Generate a map of all possible transaction modes to metric handles.
@@ -174,7 +144,7 @@ impl DatabaseEnvMetrics {
 
     /// Returns pre-bound operation metric handles for a single table.
     pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
-        TableOperationMetrics::new(self, table)
+        self.table_operations.get(table).expect("table operation metric handles not found").clone()
     }
 
     /// Record metrics for opening a database transaction.
@@ -284,6 +254,39 @@ pub(crate) enum Operation {
 }
 
 impl Operation {
+    /// Returns the index of the operation in the cached per-table operation array.
+    pub(crate) const fn index(&self) -> usize {
+        match self {
+            Self::Get => 0,
+            Self::PutUpsert => 1,
+            Self::PutAppend => 2,
+            Self::Delete => 3,
+            Self::CursorUpsert => 4,
+            Self::CursorInsert => 5,
+            Self::CursorAppend => 6,
+            Self::CursorAppendDup => 7,
+            Self::CursorDeleteCurrent => 8,
+            Self::CursorDeleteCurrentDuplicates => 9,
+        }
+    }
+
+    /// Returns the operation for the given index in the cached per-table operation array.
+    const fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::Get,
+            1 => Self::PutUpsert,
+            2 => Self::PutAppend,
+            3 => Self::Delete,
+            4 => Self::CursorUpsert,
+            5 => Self::CursorInsert,
+            6 => Self::CursorAppend,
+            7 => Self::CursorAppendDup,
+            8 => Self::CursorDeleteCurrent,
+            9 => Self::CursorDeleteCurrentDuplicates,
+            _ => panic!("invalid operation index"),
+        }
+    }
+
     /// Returns the operation as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {

@@ -54,7 +54,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if let Some(metrics) =
-            self.metrics.as_ref().map(|metrics| metrics.operation_metric(operation))
+            self.metrics.as_ref().map(|metrics| metrics[operation.index()].clone())
         {
             metrics.record(value_size, || f(self))
         } else {
