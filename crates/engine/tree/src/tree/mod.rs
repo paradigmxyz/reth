@@ -1511,9 +1511,9 @@ where
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get();
+                let _ = prepared.overlay.get(prepared.anchor_hash);
             });
         }
 

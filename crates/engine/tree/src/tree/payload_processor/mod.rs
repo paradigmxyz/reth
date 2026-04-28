@@ -970,7 +970,7 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::TransactionSigned;
+    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
@@ -1252,7 +1252,7 @@ mod tests {
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
             OverlayStateProviderFactory::new(
                 provider_factory,
-                OverlayBuilder::new(ChangesetCache::new()),
+                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
         );
