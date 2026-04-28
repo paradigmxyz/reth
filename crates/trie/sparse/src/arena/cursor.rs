@@ -174,9 +174,8 @@ impl ArenaCursor {
     /// Returns the absolute path of a child at `child_nibble` under the branch at the top of
     /// the stack. The result is `stack_head.path + branch.short_key + child_nibble`.
     pub(super) fn child_path(&self, arena: &NodeArena, child_nibble: u8) -> Nibbles {
-        let mut path = logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"));
-        path.push_unchecked(child_nibble);
-        path
+        let head = self.stack.last().expect("cursor is non-empty");
+        child_path_from(&head.path, &arena[head.index].branch_ref().short_key, child_nibble)
     }
 
     /// Returns the logical path of the parent branch entry (second from top of the stack).
@@ -314,9 +313,7 @@ impl ArenaCursor {
                     return SeekResult::EmptyRoot;
                 }
                 ArenaSparseNode::Leaf { key, .. } => {
-                    let mut leaf_full_path = head.path;
-                    leaf_full_path.extend(key);
-                    return if &leaf_full_path == full_path {
+                    return if path_matches_with_suffix(full_path, &head.path, key) {
                         SeekResult::RevealedLeaf
                     } else {
                         SeekResult::Diverged
@@ -329,17 +326,15 @@ impl ArenaCursor {
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
-
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
-            {
+            let Some(head_branch_logical_len) =
+                path_extends_with_suffix(full_path, &head.path, &head_branch.short_key)
+            else {
                 return SeekResult::Diverged;
-            }
+            };
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+            let child_nibble = full_path.get_unchecked(head_branch_logical_len);
             let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
             else {
                 return SeekResult::NoChild { child_nibble };
@@ -359,6 +354,33 @@ impl ArenaCursor {
     }
 }
 
+fn path_matches_with_suffix(full_path: &Nibbles, prefix: &Nibbles, suffix: &Nibbles) -> bool {
+    full_path.len() == prefix.len() + suffix.len() &&
+        full_path.starts_with(prefix) &&
+        suffix
+            .iter()
+            .enumerate()
+            .all(|(idx, nibble)| full_path.get_unchecked(prefix.len() + idx) == nibble)
+}
+
+fn path_extends_with_suffix(full_path: &Nibbles, prefix: &Nibbles, suffix: &Nibbles) -> Option<usize> {
+    let logical_len = prefix.len() + suffix.len();
+    (full_path.len() > logical_len &&
+        full_path.starts_with(prefix) &&
+        suffix
+            .iter()
+            .enumerate()
+            .all(|(idx, nibble)| full_path.get_unchecked(prefix.len() + idx) == nibble))
+    .then_some(logical_len)
+}
+
+fn child_path_from(prefix: &Nibbles, suffix: &Nibbles, child_nibble: u8) -> Nibbles {
+    let mut path = *prefix;
+    path.extend(suffix);
+    path.push_unchecked(child_nibble);
+    path
+}
+
 /// Returns the logical path of a branch stack entry. The logical path is
 /// `entry.path + branch.short_key`.
 fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibbles {
@@ -371,4 +393,51 @@ fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibb
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
 fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{path_extends_with_suffix, path_matches_with_suffix};
+    use reth_trie_common::Nibbles;
+
+    #[test]
+    fn path_matches_suffix_without_allocating_full_path() {
+        let prefix = Nibbles::from_nibbles([0x1, 0x2]);
+        let suffix = Nibbles::from_nibbles([0x3, 0x4]);
+
+        assert!(path_matches_with_suffix(
+            &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]),
+            &prefix,
+            &suffix,
+        ));
+        assert!(!path_matches_with_suffix(
+            &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]),
+            &prefix,
+            &suffix,
+        ));
+        assert!(!path_matches_with_suffix(
+            &Nibbles::from_nibbles([0x1, 0x2, 0x3]),
+            &prefix,
+            &suffix,
+        ));
+    }
+
+    #[test]
+    fn path_extends_suffix_requires_descendant_path() {
+        let prefix = Nibbles::from_nibbles([0x1]);
+        let suffix = Nibbles::from_nibbles([0x2, 0x3]);
+
+        assert_eq!(
+            path_extends_with_suffix(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &prefix, &suffix),
+            Some(3),
+        );
+        assert_eq!(
+            path_extends_with_suffix(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &prefix, &suffix),
+            None,
+        );
+        assert_eq!(
+            path_extends_with_suffix(&Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x5]), &prefix, &suffix),
+            None,
+        );
+    }
 }
