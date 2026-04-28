@@ -60,6 +60,20 @@ fn prefix_range(
     begin..end
 }
 
+/// Finds the sub-range of `sorted_keys[range]` whose entries start with `prefix`.
+fn prefix_range_in(
+    sorted_keys: &[Nibbles],
+    range: core::ops::Range<usize>,
+    prefix: &Nibbles,
+) -> core::ops::Range<usize> {
+    let begin = range.start + sorted_keys[range.start..range.end].partition_point(|p| p < prefix);
+    let mut end = begin;
+    while end < range.end && sorted_keys[end].starts_with(prefix) {
+        end += 1;
+    }
+    begin..end
+}
+
 /// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
 /// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
 const fn slotmap_slot_size<T>() -> usize {
@@ -242,17 +256,17 @@ impl ArenaSparseSubtrie {
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
         let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
-        // Queue: (new_idx, path TO the node — excluding its own short_key)
-        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        // Queue: (new_idx, path TO the node — excluding its own short_key, retained leaf window)
+        let mut queue: VecDeque<(Index, Nibbles, core::ops::Range<usize>)> = VecDeque::new();
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        queue.push_back((new_root, self.path));
+        queue.push_back((new_root, self.path, 0..retained_leaves.len()));
 
-        while let Some((new_idx, node_path)) = queue.pop_front() {
+        while let Some((new_idx, node_path, retained_range)) = queue.pop_front() {
             new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
@@ -276,6 +290,7 @@ impl ArenaSparseSubtrie {
                 })
                 .collect();
 
+            let mut retained_start = retained_range.start;
             for (child_pos, nibble, old_child_idx) in children {
                 // Child's path in the trie (edges to reach it, excluding its own short_key).
                 let mut child_path = branch_logical_path;
@@ -290,7 +305,14 @@ impl ArenaSparseSubtrie {
                 let mut child_prefix = child_path;
                 child_prefix.extend(child_short_key);
 
-                if has_prefix(retained_leaves, &child_prefix) {
+                let child_range = prefix_range_in(
+                    retained_leaves,
+                    retained_start..retained_range.end,
+                    &child_prefix,
+                );
+                retained_start = child_range.end;
+
+                if !child_range.is_empty() {
                     // Retained — move child to new arena.
                     let child_node = self.arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
@@ -298,7 +320,7 @@ impl ArenaSparseSubtrie {
                         unreachable!()
                     };
                     b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-                    queue.push_back((new_child_idx, child_path));
+                    queue.push_back((new_child_idx, child_path, child_range));
                 } else {
                     // Not retained — blind the child slot in the new arena.
                     let rlp_node = self.arena[old_child_idx]
@@ -326,12 +348,6 @@ impl ArenaSparseSubtrie {
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
         return pruned;
-
-        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
-        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
-            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
-            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
-        }
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
@@ -3123,6 +3139,26 @@ mod tests {
     use reth_trie_common::{Nibbles, ProofV2Target};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
+
+    #[test]
+    fn prefix_range_in_respects_parent_window() {
+        let keys = vec![
+            Nibbles::from_nibbles([0x1, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x1]),
+            Nibbles::from_nibbles([0x2, 0x0]),
+            Nibbles::from_nibbles([0x2, 0x1]),
+            Nibbles::from_nibbles([0x3, 0x0]),
+        ];
+
+        let full = super::prefix_range_in(&keys, 0..keys.len(), &Nibbles::from_nibbles([0x2]));
+        assert_eq!(full, 2..4);
+
+        let narrowed = super::prefix_range_in(&keys, 2..4, &Nibbles::from_nibbles([0x2, 0x1]));
+        assert_eq!(narrowed, 3..4);
+
+        let empty = super::prefix_range_in(&keys, 2..4, &Nibbles::from_nibbles([0x3]));
+        assert_eq!(empty, 4..4);
+    }
 
     /// Test harness for proptest-based arena sparse trie testing.
     ///
