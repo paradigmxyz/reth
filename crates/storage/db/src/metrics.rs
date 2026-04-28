@@ -15,10 +15,8 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 /// Otherwise, metric recording will no-op.
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
-    /// Caches `OperationMetrics` handles for each table and operation tuple.
-    operations: FxHashMap<(&'static str, Operation), OperationMetrics>,
-    /// Caches per-table operation metric handles for hot cursor paths.
-    table_operations: FxHashMap<&'static str, TableOperationMetrics>,
+    /// Caches per-table operation metric handles for all database operation metrics.
+    operations: FxHashMap<&'static str, TableOperationMetrics>,
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -35,57 +33,31 @@ impl DatabaseEnvMetrics {
     pub(crate) fn new() -> Self {
         // Pre-populate metric handle maps with all possible combinations of labels
         // to avoid runtime locks on the map when recording metrics.
-        let operations = Self::generate_operation_handles();
         Self {
-            table_operations: Self::generate_table_operation_handles(&operations),
-            operations,
+            operations: Self::generate_operation_handles(),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
     }
 
-    /// Generate a map of all possible operation handles for each table and operation tuple.
-    /// Used for tracking all operation metrics.
-    fn generate_operation_handles() -> FxHashMap<(&'static str, Operation), OperationMetrics> {
-        let mut operations = FxHashMap::with_capacity_and_hasher(
-            Tables::COUNT * Operation::COUNT,
-            Default::default(),
-        );
-        for table in Tables::ALL {
-            for operation in Operation::iter() {
-                operations.insert(
-                    (table.name(), operation),
-                    OperationMetrics::new_with_labels(&[
-                        (Labels::Table.as_str(), table.name()),
-                        (Labels::Operation.as_str(), operation.as_str()),
-                    ]),
-                );
-            }
-        }
-        operations
-    }
-
     /// Generate a map of pre-bound operation handles for each table.
-    fn generate_table_operation_handles(
-        operations: &FxHashMap<(&'static str, Operation), OperationMetrics>,
-    ) -> FxHashMap<&'static str, TableOperationMetrics> {
-        let mut table_operations =
-            FxHashMap::with_capacity_and_hasher(Tables::COUNT, Default::default());
+    fn generate_operation_handles() -> FxHashMap<&'static str, TableOperationMetrics> {
+        let mut operations = FxHashMap::with_capacity_and_hasher(Tables::COUNT, Default::default());
 
         for table in Tables::ALL {
             let table_name = table.name();
             let metrics = array::from_fn(|index| {
                 let operation = Operation::from_index(index);
-                operations
-                    .get(&(table_name, operation))
-                    .expect("operation metric handle not found")
-                    .clone()
+                OperationMetrics::new_with_labels(&[
+                    (Labels::Table.as_str(), table_name),
+                    (Labels::Operation.as_str(), operation.as_str()),
+                ])
             });
 
-            table_operations.insert(table_name, Arc::new(metrics));
+            operations.insert(table_name, Arc::new(metrics));
         }
 
-        table_operations
+        operations
     }
 
     /// Generate a map of all possible transaction modes to metric handles.
@@ -135,8 +107,8 @@ impl DatabaseEnvMetrics {
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
-        if let Some(metrics) = self.operations.get(&(table, operation)) {
-            metrics.record(value_size, f)
+        if let Some(metrics) = self.operations.get(table) {
+            metrics[operation.index()].record(value_size, f)
         } else {
             f()
         }
@@ -144,7 +116,7 @@ impl DatabaseEnvMetrics {
 
     /// Returns pre-bound operation metric handles for a single table.
     pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
-        self.table_operations.get(table).expect("table operation metric handles not found").clone()
+        self.operations.get(table).expect("table operation metric handles not found").clone()
     }
 
     /// Record metrics for opening a database transaction.
