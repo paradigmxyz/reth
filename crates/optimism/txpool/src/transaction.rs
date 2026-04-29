@@ -310,8 +310,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{MetaTxDisabled, OpPooledTransaction, OpTransactionValidator};
-    use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559};
+    use crate::{MetaTxDisabled, OpPooledTransaction, OpTransactionValidator, UnprotectedTxDisabled};
+    use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559, TxLegacy};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
     use op_alloy_consensus::TxDeposit;
@@ -427,5 +427,107 @@ mod tests {
             _ => panic!("Expected invalid transaction"),
         };
         assert_eq!(err.to_string(), "transaction type not supported");
+    }
+
+    /// Helper: create a legacy (type 0) pooled transaction.
+    ///
+    /// - `chain_id = Some(id)` → EIP-155 signed (replay protected)
+    /// - `chain_id = None`     → non-EIP-155 / unprotected (v=27/28)
+    fn pooled_legacy_tx(chain_id: Option<u64>) -> OpPooledTransaction {
+        let signer = Address::ZERO;
+        let tx: OpTransactionSigned = TxLegacy {
+            chain_id,
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 21_000,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::ZERO,
+            input: Bytes::default(),
+        }
+        .into_signed(Signature::new(U256::ZERO, U256::ZERO, false))
+        .into();
+        let signed_recovered = Recovered::new_unchecked(tx, signer);
+        let len = signed_recovered.encode_2718_len();
+        OpPooledTransaction::new(signed_recovered, len)
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_unprotected_legacy_tx() {
+        // Non-EIP-155 legacy transaction (chain_id = None, equivalent to v=27/28)
+        // should be rejected, matching op-geth's default AllowUnprotectedTxs=false behavior.
+        let client = MockEthProvider::default().with_chain_spec(OP_MAINNET.clone());
+        let validator = EthTransactionValidatorBuilder::new(client)
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let outcome = validator
+            .validate_one(TransactionOrigin::External, pooled_legacy_tx(None))
+            .await;
+
+        let err = match outcome {
+            TransactionValidationOutcome::Invalid(_, err) => err,
+            _ => panic!("Expected unprotected legacy tx to be rejected"),
+        };
+        let unprotected_err = err
+            .downcast_other_ref::<UnprotectedTxDisabled>()
+            .expect("expected UnprotectedTxDisabled txpool error");
+
+        assert_eq!(err.to_string(), "only replay-protected (EIP-155) transactions allowed");
+        assert!(unprotected_err.is_bad_transaction());
+    }
+
+    #[tokio::test]
+    async fn validate_does_not_reject_eip155_legacy_tx() {
+        // EIP-155 legacy transaction (chain_id = Some(10), matching OP mainnet chain ID)
+        // should NOT be rejected by the unprotected-tx check.
+        // It will fail later in stateful validation (balance/nonce), but the
+        // UnprotectedTxDisabled error must not appear.
+        let client = MockEthProvider::default().with_chain_spec(OP_MAINNET.clone());
+        let validator = EthTransactionValidatorBuilder::new(client)
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let outcome = validator
+            .validate_one(TransactionOrigin::External, pooled_legacy_tx(Some(10)))
+            .await;
+
+        // Should not be rejected as UnprotectedTxDisabled
+        if let TransactionValidationOutcome::Invalid(_, ref err) = outcome {
+            assert!(
+                !err.is_other::<UnprotectedTxDisabled>(),
+                "EIP-155 legacy tx should not be rejected as unprotected: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_eip1559_not_affected_by_unprotected_check() {
+        // EIP-1559 (type 2) transactions always have chain_id and should not be
+        // affected by the unprotected legacy tx check.
+        let client = MockEthProvider::default().with_chain_spec(OP_MAINNET.clone());
+        let validator = EthTransactionValidatorBuilder::new(client)
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let outcome = validator
+            .validate_one(
+                TransactionOrigin::External,
+                pooled_eip1559_with_input(Bytes::default()),
+            )
+            .await;
+
+        // Should not be rejected as UnprotectedTxDisabled
+        if let TransactionValidationOutcome::Invalid(_, ref err) = outcome {
+            assert!(
+                !err.is_other::<UnprotectedTxDisabled>(),
+                "EIP-1559 tx should not be rejected as unprotected: {err}"
+            );
+        }
     }
 }

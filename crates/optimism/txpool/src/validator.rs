@@ -1,5 +1,5 @@
 use crate::{error::MetaTxDisabled, supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::{constants::LEGACY_TX_TYPE_ID, BlockHeader, Transaction};
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
@@ -187,6 +187,31 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
+            );
+        }
+
+        // Reject unprotected (non-EIP-155) legacy transactions.
+        //
+        // Legacy transactions signed without replay protection (v=27/28) carry no chain ID
+        // in the signature and can be replayed on any chain.
+        //
+        // op-geth rejects these by default at the RPC layer (`AllowUnprotectedTxs=false`
+        // in `internal/ethapi/api.go:SubmitTransaction`). We enforce the same rule here
+        // at the txpool validation layer to cover both RPC and P2P ingestion paths.
+        //
+        // EIP-155 signed txs (chain_id = Some(_)) and all typed txs (EIP-2930/1559/7702)
+        // are unaffected — they always carry a chain ID.
+        if transaction.ty() == LEGACY_TX_TYPE_ID && transaction.chain_id().is_none() {
+            trace!(
+                target: "txpool",
+                tx_hash = %transaction.hash(),
+                "rejected unprotected (non-EIP-155) legacy transaction"
+            );
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::other(
+                    crate::error::UnprotectedTxDisabled,
+                ),
             );
         }
 
