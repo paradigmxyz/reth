@@ -8031,7 +8031,6 @@ dependencies = [
  "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
- "reth-network",
  "reth-network-api",
  "reth-network-p2p",
  "reth-network-peers",

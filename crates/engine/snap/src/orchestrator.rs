@@ -2,12 +2,13 @@
 
 use crate::{
     bal::{bal_to_state_diff, merge_account_diff},
-    download::{
-        clear_hashed_state, download_state, read_hashed_account, write_bytecodes,
-        write_hashed_accounts, write_hashed_storages, write_snap_stage_checkpoints,
-        DownloadStateOutcome,
-    },
+    download::{download_state, DownloadStateOutcome},
+    finalize::write_snap_stage_checkpoints,
     pivot::PivotTracker,
+    storage::{
+        clear_hashed_state, read_hashed_account, write_bytecodes, write_hashed_accounts,
+        write_hashed_storages,
+    },
     SnapSyncError, SnapSyncEvent, SnapSyncOutcome, PIVOT_OFFSET,
 };
 use alloy_consensus::BlockHeader;

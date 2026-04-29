@@ -60,6 +60,7 @@ mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
+mod snap;
 mod trie_updates;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -755,15 +756,7 @@ where
         let num_hash = payload.num_hash();
 
         // Forward to snap sync orchestrator if active
-        if let Some(events_tx) = &self.snap_events_tx {
-            let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewBlock {
-                number: payload.block_number(),
-                hash: payload.block_hash(),
-                state_root: payload.state_root(),
-                parent_hash: payload.parent_hash(),
-                bal: payload.block_access_list().cloned(),
-            });
-        }
+        self.forward_new_block_to_snap(&payload);
 
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
@@ -1163,11 +1156,7 @@ where
         self.record_forkchoice_metrics();
 
         // Forward head to snap sync orchestrator if active
-        if let Some(events_tx) = &self.snap_events_tx {
-            let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewHead {
-                head_hash: state.head_block_hash,
-            });
-        }
+        self.forward_head_to_snap(state.head_block_hash);
 
         // Pre-validation of forkchoice state
         if let Some(early_result) = self.validate_forkchoice_state(state)? {
@@ -1606,11 +1595,7 @@ where
 
                     // Replay latest known head if we can resolve it
                     if let Some(state) = self.state.forkchoice_state_tracker.sync_target_state() {
-                        if let Some(events_tx) = &self.snap_events_tx {
-                            let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewHead {
-                                head_hash: state.head_block_hash,
-                            });
-                        }
+                        self.forward_head_to_snap(state.head_block_hash);
                     }
                 }
                 FromOrchestrator::SnapSyncFinished(outcome) => {
@@ -1978,62 +1963,6 @@ where
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
         self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
-    }
-
-    /// Handles snap sync completion.
-    fn on_snap_sync_finished(
-        &mut self,
-        outcome: reth_engine_snap::SnapSyncOutcome,
-    ) -> Result<(), InsertBlockFatalError> {
-        debug!(target: "engine::tree", synced_to = outcome.synced_to, %outcome.block_hash, "snap sync finished");
-        self.backfill_sync_state = BackfillSyncState::Idle;
-        self.snap_events_tx = None;
-        self.fresh_node = false;
-
-        let backfill_height = outcome.synced_to;
-        let backfill_hash = outcome.block_hash;
-
-        // Remove all blocks below the snap sync height
-        self.state.buffer.remove_old_blocks(backfill_height);
-        self.purge_timing_stats(backfill_height, None);
-        self.canonical_in_memory_state.clear_state();
-
-        // Update canonical head — try DB first, fall back to outcome data
-        if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
-            self.state.tree_state.set_canonical_head(new_head.num_hash());
-            self.persistence_state.finish(new_head.hash(), new_head.number());
-            self.canonical_in_memory_state.set_canonical_head(new_head);
-        } else {
-            let num_hash = BlockNumHash { hash: backfill_hash, number: backfill_height };
-            self.state.tree_state.set_canonical_head(num_hash);
-            self.persistence_state.finish(backfill_hash, backfill_height);
-        }
-
-        // Remove executed blocks below the snap sync height
-        let backfill_num_hash = self
-            .provider
-            .block_hash(backfill_height)?
-            .map(|hash| BlockNumHash { hash, number: backfill_height })
-            .unwrap_or(BlockNumHash { hash: backfill_hash, number: backfill_height });
-        self.state.tree_state.remove_until(
-            backfill_num_hash,
-            self.persistence_state.last_persisted_block.hash,
-            Some(backfill_num_hash),
-        );
-
-        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
-        self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
-
-        // Trigger a pipeline run for MerkleExecute + Finish.
-        // The orchestrator already set all other stage checkpoints to the snap target,
-        // so only MerkleExecute (builds AccountsTrie/StoragesTrie from hashed leaves)
-        // and Finish will run.
-        self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
-            backfill_hash.into(),
-        )));
-        self.backfill_sync_state = BackfillSyncState::Pending;
-
-        Ok(())
     }
 
     /// Attempts to make the given target canonical.
@@ -2920,14 +2849,7 @@ where
         if !self.backfill_sync_state.is_idle() {
             // During snap sync, forward downloaded blocks to the orchestrator
             // for header persistence and BAL resolution
-            if let Some(events_tx) = &self.snap_events_tx {
-                let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::DownloadedBlock {
-                    number: block.number(),
-                    hash: block.hash(),
-                    state_root: block.header().state_root(),
-                    parent_hash: block.header().parent_hash(),
-                });
-            }
+            self.forward_downloaded_block_to_snap(&block);
             return Ok(None)
         }
 

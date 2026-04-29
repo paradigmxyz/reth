@@ -35,7 +35,7 @@ pub mod setup_import;
 mod network;
 
 /// Snap sync utilities for E2E tests.
-pub mod snap;
+
 
 /// Helper for rpc operations
 mod rpc;

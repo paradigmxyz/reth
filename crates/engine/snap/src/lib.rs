@@ -6,8 +6,10 @@
 
 pub mod bal;
 pub mod download;
+pub mod finalize;
 pub mod orchestrator;
 pub mod pivot;
+pub mod storage;
 
 use alloy_primitives::{Bytes, B256};
 

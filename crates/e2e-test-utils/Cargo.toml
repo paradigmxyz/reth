@@ -15,7 +15,6 @@ reth-chainspec.workspace = true
 reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
-reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
 reth-storage-api = { workspace = true, features = ["db-api"] }

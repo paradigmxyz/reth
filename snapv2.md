@@ -230,44 +230,39 @@ Resume-from-midpoint is a future optimization (would require persisting download
 
 ## Implementation Status
 
-### Completed
+### What Works End-to-End
 
-**Network plumbing:**
-- `FetchClient` implements `SnapClient` + `BlockAccessListsClient` + `HeadersClient`
-- Snap capability negotiation in RLPx handshake
-- `GetBlockAccessLists`/`BlockAccessLists` wire messages (eth/71)
-- `SnapRequestHandler` serving `GetAccountRange`/`GetStorageRanges`/`GetByteCodes` via MDBX cursors
-- `EthRequestHandler` has `bal_store` field for BAL serving (via `BalStoreHandle`)
+The full snap/2 sync pipeline is functional:
 
-**BAL infrastructure:**
-- `BalCache` buffers BALs from `new_payload` in memory (`crates/rpc/rpc-engine-api/src/bal_cache.rs`)
-- `BalStore` trait for retrieval by hash or range (`crates/storage/storage-api/src/bal.rs`)
+1. **Fresh node detection** — engine detects `best_block_number == 0` and emits `BackfillAction::StartSnapSync`
+2. **Phase A (HeaderStage)** — downloads headers 1..pivot via `ReverseHeadersDownloader` + `HeaderStage`, writes to static files
+3. **Phase B (SnapSyncOrchestrator)** — bulk state download at pivot root, BAL catch-up for blocks pivot+1..head
+4. **Stale pivot recovery** — when the serving peer's lookback no longer covers the pivot root, the orchestrator advances the pivot and resumes download
+5. **Static file segment advancement** — after snap sync, Transactions/TransactionSenders/Receipts/ChangeSets segments are advanced to the snap target block so persistence doesn't fail
+6. **Stage checkpoint writing** — Bodies/SenderRecovery/Execution/Hashing/History stages set to snap target; MerkleExecute + Finish left at 0
+7. **MerkleExecute verification** — pipeline runs MerkleExecute to rebuild the trie from hashed leaves, verifying state root against headers
+8. **Post-snap live sync** — engine transitions to normal block processing, downloads blocks after the snap target, and persists them
 
-**Snap serving:**
-- `ProviderSnapState` wraps `BlockchainProvider` to serve snap requests
-- `current_state_root()` reads `StageId::Execution` checkpoint from MDBX — this is written atomically with hashed state by the persistence task (`save_blocks` → `update_pipeline_stages` in the same MDBX commit), so it exactly tracks which block's hashed state is in `HashedAccounts`
-- Note: `best_block_number()` races ahead (in-memory canonical tip), `last_block_number()` tracks static files — neither matches MDBX hashed state
-- MDBX cursor iteration for account/storage/bytecode data
-- Limitation: the engine keeps ~2 blocks in memory before batch-persisting, so the serving node's stage checkpoint lags ~2 blocks behind the canonical tip. A frozen-head scenario (no new blocks arriving) means those last ~2 blocks never get flushed. Future fix: serve from BlockchainProvider (MDBX + in-memory overlay) instead of raw MDBX cursors
+### Passing E2E Tests
 
-**Engine-driven snap sync crate (`crates/engine/snap/`):**
-- `lib.rs` — `SnapSyncEvent`, `SnapSyncOutcome`, `SnapSyncError` types
-- `bal.rs` — BAL diff logic: `bal_to_state_diff`, `merge_account_diff`
-- `download.rs` — Account/storage/bytecode download loops with MDBX write helpers
-- `pivot.rs` — Pivot tracking, BAL buffering, `advance_pivot`, `get_bal_bytes`
-- `orchestrator.rs` — `SnapSyncOrchestrator` main async loop (bootstrap → download → catch-up → verify)
-- 14 unit tests passing
+- **`can_snap_sync_catch_up`** — Node A builds 20 blocks, advances 15 more while Node B snap syncs. Tests full pipeline: snap download → BAL catch-up → MerkleExecute → live sync to block 35. ~50s in debug.
+- **`can_snap_sync_stale_pivot`** — Node A builds 180 blocks so the initial pivot (block 4) falls outside the 128-block serving lookback. Tests stale pivot recovery: orchestrator advances pivot 4 → 14 → 24 → ... until it reaches a servable root, then completes sync. ~225s in debug.
+- **`can_snap_sync_frozen_head`** — `#[ignore]`, requires serving in-memory state (frozen head = persistence never flushes last ~2 blocks)
 
-**Engine tree integration (partial, being reworked):**
-- `BackfillAction::StartSnapSync(B256)` carries target hash from FCU
-- `CombinedBackfillSync` wraps `PipelineSync` + `SnapSyncController`
-- `SnapSyncController` spawns orchestrator (needs rework for two-phase design)
-- Engine tree forwards `NewHead`/`NewBlock` events to orchestrator via mpsc channel
-- `on_snap_sync_finished` handles completion and canonical head update
+### Completed Tasks
 
-**E2E tests (`crates/ethereum/node/tests/e2e/p2p.rs`):**
-- `can_snap_sync_frozen_head` — `#[ignore]`, requires serving in-memory state (frozen head = persistence never flushes last ~2 blocks)
-- `can_snap_sync_catch_up` — live catch-up test: Node A keeps producing blocks while Node B snap syncs. Snap download + BAL healing + state root verification passes. Post-snap transition to normal pipeline not yet wired.
+| Task | Description | Status |
+|---|---|---|
+| Initial pivot tracking | Orchestrator saves `initial_pivot` and uses it for BAL healing range | ✅ Done |
+| Stage checkpoints | All non-trie stages set to snap target after Phase B | ✅ Done |
+| Static file advancement | Transactions/Senders/Receipts/ChangeSets segments advanced via `ensure_at_block` | ✅ Done |
+| Pipeline trigger | `on_snap_sync_finished` triggers backfill pipeline for MerkleExecute + Finish | ✅ Done |
+| HeaderStage (Phase A) | `SnapSyncController` runs `HeaderStage` for headers 1..pivot | ✅ Done |
+| Two-phase architecture | Phase A in `SnapSyncController`, Phase B in `SnapSyncOrchestrator` | ✅ Done |
+| Engine block forwarding | `on_new_payload` / `on_downloaded_block` forward events to orchestrator | ✅ Done |
+| BAL data flow fix | V4 payload construction forced when BAL present; slot_number fix | ✅ Done |
+| Skip move_to_static_files | Pipeline skips static file move for storage v2 nodes | ✅ Done |
+| Stale pivot E2E test | `can_snap_sync_stale_pivot` exercises full recovery path | ✅ Done |
 
 ### Current Key Files
 
@@ -280,61 +275,43 @@ Resume-from-midpoint is a future optimization (would require persisting download
 | Snap serving | `crates/node/builder/src/snap_provider.rs`, `crates/net/network/src/snap_requests.rs` |
 | BAL serving | `crates/net/network/src/eth_requests.rs` (EthRequestHandler.bal_store) |
 | Snap sync crate | `crates/engine/snap/src/{lib,orchestrator,bal,download,pivot}.rs` |
-| Backfill trait | `crates/engine/tree/src/backfill.rs` |
+| Backfill / SnapSyncController | `crates/engine/tree/src/backfill.rs` |
 | Engine tree | `crates/engine/tree/src/tree/mod.rs` |
 | Engine launch | `crates/engine/tree/src/launch.rs` |
-| Block downloader | `crates/engine/tree/src/download.rs` |
 | E2E tests | `crates/ethereum/node/tests/e2e/p2p.rs` |
 
-### Implementation Plan
+### Refactoring Plan
 
-**Task 1: Track initial pivot in orchestrator** *(small, ready)*
+The implementation was iterated across many sessions, accumulating structural debt. The algorithms are correct; the issues are **module boundaries** and **generic complexity**.
 
-`orchestrator.rs` — save `initial_pivot_block` before the download loop. BAL healing range must be `initial_pivot + 1 ..= final_block` (not `tracker.pivot_block() + 1`). The bulk download starts at initial pivot's root; when pivot advances mid-download, the state in MDBX is mixed (early accounts at initial pivot, later accounts at advanced pivot). BALs set absolute values, so applying all blocks from initial_pivot+1 in order heals everything correctly.
+**P0 — Delete dead code**
+- Remove `crates/e2e-test-utils/src/snap.rs` (`DbSnapStateProvider` — unused)
 
-**Task 2: Persist downloaded headers via PersistenceTask** *(medium)*
+**P1 — Fix `backfill.rs` shape** (biggest code quality issue)
+- Split into `backfill/mod.rs`, `backfill/pipeline.rs`, `backfill/controller.rs`
+- Introduce `SnapBackfill` trait to erase generics (eliminates 3x repeated 15-line where clauses)
+- Move `SnapSyncController` to `crates/engine/snap/src/service.rs` (snap domain logic, not tree logic)
 
-Block downloader provides headers for blocks ≥ pivot. These must be persisted to static files / MDBX. Send them to the PersistenceTask (a headers-only save variant, distinct from full `save_blocks`). Phase A (HeaderStage) handles 1..pivot; this handles pivot..head.
+**P2 — Extract snap integration from `tree/mod.rs`**
+- Create `crates/engine/tree/src/tree/snap.rs`
+- Move `fresh_node` detection, `snap_events_tx` handling, event forwarding, `on_snap_sync_finished`
+- Collapse fields into `SnapTreeState` struct
 
-**Task 3: Set stage checkpoints after snap sync** *(medium)*
+**P3 — Split `download.rs` by concern**
+- `download.rs` — network download loops only
+- `storage.rs` — MDBX write helpers (clear/read/write hashed state)
+- `finalize.rs` — stage checkpoints + static file advancement
 
-After BAL healing completes (in orchestrator or `on_snap_sync_finished`), write stage checkpoints:
-- **Execution, AccountHashing, StorageHashing** → snap target (hashed leaves fully populated)
-- **Bodies, SenderRecovery, AccountHistory, StorageHistory** → snap target (skip, don't care)
-- **Headers** → already done by Phase A + Task 2
-- **MerkleExecute** → leave at 0 (must run to build trie from leaves)
-- **Finish** → leave at 0
+**P4 — Consider moving `BalCache`** (lower priority)
+- `bal_cache.rs` implements `BalStore` (shared infra), lives in `rpc-engine-api` (RPC-specific)
+- Move to `crates/storage/provider/` if dependency graph allows
+- Defer if awkward — `BalStoreHandle` abstraction already limits damage
 
-**Task 4: Trigger backfill pipeline after snap sync** *(medium)*
+### Known Limitations
 
-`on_snap_sync_finished` kicks off a normal pipeline run. Pipeline sees all stages done except MerkleExecute + Finish. MerkleExecute builds `AccountsTrie`/`StoragesTrie` from the hashed leaves that BAL healing populated. Finish completes. Node transitions to live block processing.
-
-**Task 5: E2E test with pivot advancement** *(small, ready)*
-
-Update `can_snap_sync_catch_up` test: add delays so the chain keeps advancing during download, forcing the initial pivot to differ from the final block. Verify BAL healing bridges the gap correctly.
-
-**Task 6: HeaderStage integration (Phase A)** *(medium)*
-
-Rework `SnapSyncController` in `backfill.rs` to run a two-phase process:
-1. Resolve target block from peers via `HeadersClient::get_header(target_hash)`
-2. Pick pivot = target_number − PIVOT_OFFSET
-3. Build `ReverseHeadersDownloader` from existing `HeadersClient` + `NoopConsensus`
-4. Run `HeaderStage` (download headers 1..pivot → static files + HeaderNumbers + checkpoint)
-5. Then spawn `SnapSyncOrchestrator` for state download
-
-**Task 7: Engine block forwarding during snap sync** *(small)*
-
-During snap sync (backfill active), `on_downloaded_block` forwards blocks to the orchestrator instead of dropping them. Engine's existing download chain continues to work — blocks arrive for unknown hashes from FCU.
-
-**Task 8: Clean up legacy pipeline snap sync** *(small)*
-
-- Delete `crates/stages/stages/src/stages/snap_sync/` (mod.rs + bal.rs)
-- Delete `SnapSyncStages` from `crates/stages/stages/src/sets.rs`
-- Delete `build_snap_pipeline()` from `crates/node/builder/src/setup.rs`
-
-**Task 9: Wire BalCache to EthRequestHandler** *(small)*
-
-The `BalCache` (populated by EngineApi on `new_payload`) needs to be shared with `EthRequestHandler` so BALs can be served to peers. Currently defaults to `NoopBalStore`.
+- **Frozen-head serving** — engine keeps ~2 blocks in memory before batch-persisting, so snap serving lags. If no new blocks arrive, the last ~2 blocks never flush. Fix: serve from BlockchainProvider (MDBX + in-memory overlay).
+- **No crash resume** — if node crashes mid-snap-sync, it restarts from scratch. Future: persist download progress.
+- **No reorg handling during snap sync** — if a reorg occurs past the pivot during download, behavior is undefined. Future: detect via NewHead events and re-evaluate pivot.
 
 ### Future Work
 
