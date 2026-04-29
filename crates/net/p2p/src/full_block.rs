@@ -547,23 +547,12 @@ where
     fn take_response(
         &mut self,
     ) -> Option<(Vec<SealedBlock<Client::Block>>, Option<BlockAccessLists>)> {
-        if self.block_result.is_some() && self.access_lists.is_done() {
-            let blocks = self.block_result.take().expect("blocks checked as ready");
-            let access_lists = match std::mem::replace(
-                &mut self.access_lists,
-                OptionalBlockAccessListsState::Ready(None),
-            ) {
-                OptionalBlockAccessListsState::Ready(access_lists) => access_lists,
-                OptionalBlockAccessListsState::WaitingForBlocks |
-                OptionalBlockAccessListsState::Pending(_) => {
-                    unreachable!("access lists checked as done")
-                }
-            };
+        let OptionalBlockAccessListsState::Ready(access_lists) = &mut self.access_lists else {
+            return None
+        };
 
-            return Some((blocks, access_lists))
-        }
-
-        None
+        let blocks = self.block_result.take()?;
+        Some((blocks, access_lists.take()))
     }
 }
 
@@ -603,12 +592,6 @@ enum OptionalBlockAccessListsState<Req> {
     Pending(Req),
     /// `None` means the block range is available but optional BAL data is not.
     Ready(Option<BlockAccessLists>),
-}
-
-impl<Req> OptionalBlockAccessListsState<Req> {
-    const fn is_done(&self) -> bool {
-        matches!(self, Self::Ready(_))
-    }
 }
 
 impl<Client> Debug for FetchFullBlockFuture<Client>
