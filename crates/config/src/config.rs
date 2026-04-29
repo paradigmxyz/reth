@@ -542,13 +542,7 @@ pub struct PruneConfig {
     pub segments: PruneModes,
     /// Minimum distance from the tip required for pruning. Controls the safety margin for
     /// reorgs and manual unwinds. Defaults to [`MINIMUM_UNWIND_SAFE_DISTANCE`].
-    #[cfg_attr(feature = "serde", serde(default = "default_minimum_pruning_distance"))]
     pub minimum_pruning_distance: u64,
-}
-
-/// Returns the default minimum pruning distance.
-const fn default_minimum_pruning_distance() -> u64 {
-    MINIMUM_UNWIND_SAFE_DISTANCE
 }
 
 impl Default for PruneConfig {
