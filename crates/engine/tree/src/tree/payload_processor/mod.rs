@@ -272,7 +272,7 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = env.decoded_bal.is_none();
+        let install_state_hook = env.decoded_bal.is_none() || self.disable_bal_parallel_state_root;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -505,12 +505,12 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
+            let disable_bal_parallel_state_root = self.disable_bal_parallel_state_root;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
                 } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
+                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_state_root)
                 {
                     PrewarmMode::BlockAccessList(decoded_bal)
                 } else {
