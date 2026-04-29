@@ -123,6 +123,7 @@ where
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
+    #[allow(unused)]
     disable_bal_parallel_execution: bool,
     /// Whether to disable BAL-driven parallel state root computation.
     disable_bal_parallel_state_root: bool,
