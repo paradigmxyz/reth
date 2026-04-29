@@ -34,8 +34,12 @@ use reth_trie_sparse::{
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
-/// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
-const MAX_PENDING_UPDATES: usize = 100;
+/// Maximum number of pending/prewarm updates that we accumulate in memory before actually
+/// applying them to the trie.
+///
+/// A larger batch amortizes the repeated sort-and-drain work in `process_new_updates`, while still
+/// staying in the same ballpark as a typical high-activity payload's account/storage fanout.
+const MAX_PENDING_UPDATES: usize = 256;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
