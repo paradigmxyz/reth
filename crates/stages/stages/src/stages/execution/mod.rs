@@ -4,7 +4,7 @@ use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
-use reth_consensus::FullConsensus;
+use reth_consensus::{validate_block_access_list_gas, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
@@ -357,7 +357,19 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result, None) {
+            let bal = executor.take_bal().unwrap_or_default();
+            if block.header().block_access_list_hash().is_some() &&
+                let Err(err) = validate_block_access_list_gas(Some(&bal), block.gas_limit())
+            {
+                return Err(StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Validation(err),
+                })
+            }
+
+            if let Err(err) =
+                self.consensus.validate_block_post_execution(&block, &result, None, Some(bal))
+            {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),

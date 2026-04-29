@@ -488,11 +488,8 @@ where
         }));
     }
 
-    let block_access_list: Option<Bytes> = if let Some(block_access_list) = block_access_list {
-        Some(alloy_rlp::encode(&block_access_list).into())
-    } else {
-        None
-    };
+    let block_access_list: Option<Bytes> =
+        block_access_list.map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
     let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);

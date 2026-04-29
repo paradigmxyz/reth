@@ -7765,6 +7765,7 @@ name = "reth-consensus"
 version = "2.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-primitives",
  "auto_impl",
  "reth-execution-types",

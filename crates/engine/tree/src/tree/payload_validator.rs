@@ -50,7 +50,7 @@ use crate::tree::{
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
-    compute_block_access_list_hash, total_bal_items, BlockAccessList, ITEM_COST,
+    BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
@@ -62,7 +62,9 @@ use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptR
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
-use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
+use reth_consensus::{
+    validate_block_access_list_gas, ConsensusError, FullConsensus, ReceiptRootBloom,
+};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -649,8 +651,8 @@ where
                 &mut ctx,
                 transaction_root,
                 receipt_root_bloom,
-                built_bal.as_ref(),
                 hashed_state,
+                built_bal
             ),
             block
         );
@@ -915,25 +917,24 @@ where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        T: PayloadTypes<
+            BuiltPayload: BuiltPayload<Primitives = N>,
+            ExecutionData: ExecutionPayload,
+        >,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        // EIP-7928 pre-check: reject blocks whose declared BAL exceeds the gas-limit budget
-        // (each BAL item costs ITEM_COST gas).
-        let has_bal = if let Some(bal_result) = input.block_access_list() {
-            let bal = bal_result.map_err(BlockExecutionError::other)?;
-            if total_bal_items(&bal) > input.gas_limit() / ITEM_COST as u64 {
-                return Err(InsertBlockErrorKind::Consensus(
-                    ConsensusError::BlockAccessListCostMoreThanGasLimit,
-                ));
-            }
-            true
-        } else {
-            false
-        };
+        if let Some(bal_opt) = input.block_access_list() {
+            let bal = bal_opt.map_err(BlockExecutionError::other)?;
+            validate_block_access_list_gas(Some(&bal), input.gas_limit())
+                .map_err(|e| {
+                    debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
+                    InsertBlockErrorKind::Consensus(e)
+                })?
+        }
 
+        let has_bal = input.block_access_list().is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -997,6 +998,7 @@ where
             handle.iter_transactions(),
             &receipt_tx,
             &executed_tx_index,
+            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -1011,9 +1013,10 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        // Capture the BAL produced by the BAL builder before consuming the bundle. Only set
-        // when the State was constructed with `with_bal_builder_if(true)` above.
-        let built_bal = db.take_built_alloy_bal();
+        // Extract the built bal if payload has bal
+        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+
+        tracing::info!("Built Bal is {:?}", built_bal);
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
@@ -1034,18 +1037,20 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<E, Tx, InnerTx, Err>(
+    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
+        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt>,
+        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
         Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
+        DB: revm::Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
         let mut senders = Vec::with_capacity(transaction_count);
@@ -1055,6 +1060,11 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        if has_bal {
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -1100,7 +1110,12 @@ where
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
             }
+            // Bump BAL index after each transaction (EIP-7928)
+            if has_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
+            }
         }
+
         drop(exec_span);
 
         Ok((executor, senders))
@@ -1382,8 +1397,8 @@ where
         ctx: &mut TreeCtx<'_, N>,
         transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        built_bal: Option<&BlockAccessList>,
         hashed_state: LazyHashedPostState,
+        built_bal: Option<BlockAccessList>,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1410,29 +1425,18 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) =
-            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
-        {
+
+        if let Err(err) = self.consensus.validate_block_post_execution(
+            block,
+            output,
+            receipt_root_bloom,
+            built_bal,
+        ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
         }
         drop(_enter);
-
-        // EIP-7928: validate the produced BAL matches the hash committed in the header.
-        // Only checked when the header carries a BAL hash (post-Amsterdam) and the executor
-        // tracked execution into a BAL.
-        if let Some(header_bal_hash) = block.header().block_access_list_hash() {
-            let computed_hash =
-                built_bal.map(|bal| compute_block_access_list_hash(bal)).unwrap_or_default();
-            if computed_hash != header_bal_hash {
-                self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-                return Err(ConsensusError::BlockAccessListHashMismatch(
-                    GotExpected { got: computed_hash, expected: header_bal_hash }.into(),
-                )
-                .into())
-            }
-        }
 
         // Wait for the background keccak256 hashing task to complete. This blocks until
         // all changed addresses and storage slots have been hashed.
