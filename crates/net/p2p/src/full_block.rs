@@ -3,7 +3,7 @@ use crate::{
     block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::{BodiesClient, SingleBodyRequest},
     download::DownloadClient,
-    error::{PeerRequestResult, RequestError},
+    error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
     priority::Priority,
     BlockClient,
@@ -515,19 +515,6 @@ where
         self.access_lists = OptionalBlockAccessListsState::Ready(Some(access_lists));
     }
 
-    fn on_access_lists_error(&mut self, err: RequestError) {
-        debug!(
-            target: "downloaders",
-            %err,
-            start_hash = ?self.start_hash(),
-            "Access list range download failed",
-        );
-
-        // Optional BAL lookup is best-effort: missing eth/71 support or request failures should not
-        // block returning the downloaded block range.
-        self.access_lists = OptionalBlockAccessListsState::Ready(None);
-    }
-
     /// Starts and polls the optional BAL request once, if it is ready to make progress.
     fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
         self.start_access_lists_request_if_possible();
@@ -541,7 +528,18 @@ where
         match poll {
             Poll::Pending => {}
             Poll::Ready(Ok(access_lists)) => self.on_access_lists_response(access_lists),
-            Poll::Ready(Err(err)) => self.on_access_lists_error(err),
+            Poll::Ready(Err(err)) => {
+                debug!(
+                    target: "downloaders",
+                    %err,
+                    start_hash = ?self.start_hash(),
+                    "Access list range download failed",
+                );
+
+                // Optional BAL lookup is best-effort: missing eth/71 support or request failures
+                // should not block returning the downloaded block range.
+                self.access_lists = OptionalBlockAccessListsState::Ready(None);
+            }
         }
     }
 
