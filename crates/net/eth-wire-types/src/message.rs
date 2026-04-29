@@ -190,45 +190,21 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::BlockRangeUpdate => {
                 if version < EthVersion::Eth69 {
-                    // Not valid for this version — treat as a raw sub-protocol message
-                    // (e.g. snap) rather than an error, because sub-protocol messages are
-                    // assigned IDs starting at `message_count(version)`.
-                    let raw_payload = Bytes::copy_from_slice(buf);
-                    buf.advance(raw_payload.len());
-                    EthMessage::Other(RawCapabilityMessage::new(
-                        message_type.to_u8() as usize,
-                        raw_payload.into(),
-                    ))
-                } else {
-                    EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
+                    return Err(MessageError::Invalid(version, EthMessageID::BlockRangeUpdate))
                 }
+                EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
             }
             EthMessageID::GetBlockAccessLists => {
                 if version < EthVersion::Eth71 {
-                    // Not valid for this version — treat as a raw sub-protocol message
-                    // (e.g. snap) rather than an error, because sub-protocol messages are
-                    // assigned IDs starting at `message_count(version)`.
-                    let raw_payload = Bytes::copy_from_slice(buf);
-                    buf.advance(raw_payload.len());
-                    EthMessage::Other(RawCapabilityMessage::new(
-                        message_type.to_u8() as usize,
-                        raw_payload.into(),
-                    ))
-                } else {
-                    EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
+                    return Err(MessageError::Invalid(version, EthMessageID::GetBlockAccessLists))
                 }
+                EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
             }
             EthMessageID::BlockAccessLists => {
                 if version < EthVersion::Eth71 {
-                    let raw_payload = Bytes::copy_from_slice(buf);
-                    buf.advance(raw_payload.len());
-                    EthMessage::Other(RawCapabilityMessage::new(
-                        message_type.to_u8() as usize,
-                        raw_payload.into(),
-                    ))
-                } else {
-                    EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
+                    return Err(MessageError::Invalid(version, EthMessageID::BlockAccessLists))
                 }
+                EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -853,11 +829,11 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
-        EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        message::RequestPair, BlockAccessLists, BlockRangeUpdate, EthMessage, EthMessageID,
+        EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetNodeData, NodeData,
+        ProtocolMessage, RawCapabilityMessage,
     };
-    use alloy_primitives::hex;
+    use alloy_primitives::{hex, B256};
     use alloy_rlp::{Decodable, Encodable, Error};
     use reth_ethereum_primitives::BlockBody;
 
@@ -898,6 +874,25 @@ mod tests {
 
     #[test]
     fn test_bal_message_version_gating() {
+        let block_range_update =
+            EthMessage::<EthNetworkPrimitives>::BlockRangeUpdate(BlockRangeUpdate {
+                earliest: 1,
+                latest: 2,
+                latest_hash: B256::random(),
+            });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::BlockRangeUpdate,
+            message: block_range_update,
+        });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &buf[..],
+        );
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth68, EthMessageID::BlockRangeUpdate))
+        ));
+
         let get_block_access_lists =
             EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(RequestPair {
                 request_id: 1337,
@@ -911,9 +906,10 @@ mod tests {
             EthVersion::Eth70,
             &mut &buf[..],
         );
-        // Version-invalid IDs above the current version's message count are treated as raw
-        // sub-protocol messages (e.g. snap) rather than errors.
-        assert!(matches!(msg, Ok(ProtocolMessage { message: EthMessage::Other(_), .. })));
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::GetBlockAccessLists))
+        ));
 
         let block_access_lists =
             EthMessage::<EthNetworkPrimitives>::BlockAccessLists(RequestPair {
@@ -928,7 +924,10 @@ mod tests {
             EthVersion::Eth70,
             &mut &buf[..],
         );
-        assert!(matches!(msg, Ok(ProtocolMessage { message: EthMessage::Other(_), .. })));
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::BlockAccessLists))
+        ));
     }
 
     #[test]

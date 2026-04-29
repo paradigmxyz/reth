@@ -20,16 +20,11 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 /// A block that has been received from the engine but not yet applied.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(crate) struct BufferedBlock {
-    /// Block hash.
-    pub hash: B256,
+struct BufferedBlock {
     /// State root from the block header.
-    pub state_root: B256,
-    /// Parent hash.
-    pub parent_hash: B256,
+    state_root: B256,
     /// RLP-encoded BAL bytes, if present.
-    pub bal: Option<Bytes>,
+    bal: Option<Bytes>,
 }
 
 /// A verified BAL and its decoded account changes.
@@ -105,13 +100,11 @@ impl PivotTracker {
     /// Processes a single event, buffering it into the tracker's state.
     pub(crate) fn buffer_event(&mut self, event: SnapSyncEvent) {
         match event {
-            SnapSyncEvent::NewBlock { number, hash, state_root, parent_hash, bal } => {
-                self.buffered_blocks
-                    .insert(number, BufferedBlock { hash, state_root, parent_hash, bal });
+            SnapSyncEvent::NewBlock { number, state_root, bal, .. } => {
+                self.buffered_blocks.insert(number, BufferedBlock { state_root, bal });
             }
-            SnapSyncEvent::DownloadedBlock { number, hash, state_root, parent_hash } => {
-                self.buffered_blocks
-                    .insert(number, BufferedBlock { hash, state_root, parent_hash, bal: None });
+            SnapSyncEvent::DownloadedBlock { number, state_root, .. } => {
+                self.buffered_blocks.insert(number, BufferedBlock { state_root, bal: None });
             }
             SnapSyncEvent::NewHead { head_hash } => {
                 // Hash-only: we don't update known_head number here.

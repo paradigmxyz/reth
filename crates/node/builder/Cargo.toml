@@ -122,6 +122,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
+    "reth-engine-snap/test-utils",
 ]
 trie-debug = [
     "reth-engine-tree/trie-debug",

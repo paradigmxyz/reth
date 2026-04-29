@@ -10,16 +10,17 @@ use crate::{
     storage::{increment_b256, write_bytecodes, write_hashed_accounts, write_hashed_storages},
     SnapSyncError, SNAP_RESPONSE_BYTES_LIMIT,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use reth_db_api::transaction::DbTxMut;
 use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, SlimAccount,
+    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, TrieAccount,
 };
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
 use reth_primitives_traits::Account;
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
 use reth_storage_api::{DBProvider, StateWriter};
-use std::collections::HashSet;
+use reth_trie::{verify_unordered_proof, Nibbles};
+use std::collections::{HashMap, HashSet};
 use tracing::info;
 
 /// Maximum number of account hashes per storage range request.
@@ -113,19 +114,34 @@ where
         let mut account_batch = Vec::with_capacity(msg.accounts.len());
         let mut batch_account_hashes = Vec::with_capacity(msg.accounts.len());
         let mut batch_code_hashes = HashSet::new();
+        let mut batch_storage_roots = HashMap::with_capacity(msg.accounts.len());
+        let mut decoded_accounts = Vec::with_capacity(msg.accounts.len());
+        let mut previous_hash = None;
 
         for account_data in &msg.accounts {
-            let account = alloy_rlp::decode_exact::<SlimAccount>(&account_data.body)
-                .map(Account::from)
-                .map_err(|e| SnapSyncError::RlpDecode(format!("snap account decode: {e}")))?;
+            if account_data.hash < cursor ||
+                previous_hash.is_some_and(|previous| account_data.hash <= previous)
+            {
+                return Err(SnapSyncError::Network(
+                    "snap account range returned non-monotonic account hashes".into(),
+                ));
+            }
+
+            let trie_account = account_data.account;
+            let account = Account::from(trie_account);
 
             if let Some(code_hash) = account.bytecode_hash {
                 batch_code_hashes.insert(code_hash);
             }
 
+            previous_hash = Some(account_data.hash);
+            batch_storage_roots.insert(account_data.hash, trie_account.storage_root);
+            decoded_accounts.push((account_data.hash, trie_account));
             batch_account_hashes.push(account_data.hash);
             account_batch.push((account_data.hash, account));
         }
+
+        verify_account_range_proof(root_hash, cursor, &decoded_accounts, &msg.proof)?;
 
         info!(
             target: "engine::snap_sync",
@@ -144,6 +160,7 @@ where
             factory,
             root_hash,
             &batch_account_hashes,
+            &batch_storage_roots,
             &mut request_id,
         )
         .await?
@@ -184,6 +201,7 @@ async fn fetch_storage_for_accounts<C, F>(
     factory: &F,
     root_hash: B256,
     account_hashes: &[B256],
+    storage_roots: &HashMap<B256, B256>,
     request_id: &mut u64,
 ) -> Result<bool, SnapSyncError>
 where
@@ -222,8 +240,10 @@ where
         if returned_count == 0 && idx == 0 {
             return Ok(true);
         }
+        if returned_count == 0 {
+            return Err(SnapSyncError::Network("snap storage range returned no progress".into()));
+        }
 
-        // Write all returned slots.
         let mut entries = Vec::new();
         for (i, slots) in msg.slots.iter().enumerate() {
             if i >= chunk.len() {
@@ -237,6 +257,19 @@ where
                 entries.push((account_hash, slot.hash, value));
             }
         }
+
+        if !msg.proof.is_empty() && returned_count > 0 {
+            let proof_account = chunk[returned_count - 1];
+            let proof_slots = &msg.slots[returned_count - 1];
+            verify_storage_range_proof(
+                proof_account,
+                storage_roots,
+                B256::ZERO,
+                proof_slots,
+                &msg.proof,
+            )?;
+        }
+
         if !entries.is_empty() {
             write_hashed_storages(factory, &entries)?;
         }
@@ -254,11 +287,14 @@ where
                     factory,
                     root_hash,
                     incomplete_account,
+                    storage_roots,
                     resume_from,
                     request_id,
                 )
                 .await?;
             }
+            idx += returned_count;
+        } else if returned_count < chunk.len() {
             idx += returned_count;
         } else {
             idx = end;
@@ -274,6 +310,7 @@ async fn fetch_storage_continuation<C, F>(
     factory: &F,
     root_hash: B256,
     account_hash: B256,
+    storage_roots: &HashMap<B256, B256>,
     mut starting_hash: B256,
     request_id: &mut u64,
 ) -> Result<(), SnapSyncError>
@@ -307,6 +344,16 @@ where
             break;
         }
 
+        if !msg.proof.is_empty() {
+            verify_storage_range_proof(
+                account_hash,
+                storage_roots,
+                starting_hash,
+                &slots,
+                &msg.proof,
+            )?;
+        }
+
         let mut entries = Vec::new();
         for slot in &slots {
             let value = slot
@@ -324,6 +371,83 @@ where
     }
 
     Ok(())
+}
+
+fn verify_account_range_proof(
+    root_hash: B256,
+    starting_hash: B256,
+    accounts: &[(B256, TrieAccount)],
+    proof: &[Bytes],
+) -> Result<(), SnapSyncError> {
+    let Some((first_hash, first_account)) = accounts.first().copied() else {
+        return Ok(());
+    };
+
+    let expected_start = (first_hash == starting_hash).then(|| account_trie_value(first_account));
+    verify_trie_value(root_hash, starting_hash, expected_start, proof, "account range start")?;
+
+    let (last_hash, last_account) =
+        accounts.last().copied().expect("first account exists, so last account exists");
+    verify_trie_value(
+        root_hash,
+        last_hash,
+        Some(account_trie_value(last_account)),
+        proof,
+        "account range end",
+    )
+}
+
+fn verify_storage_range_proof(
+    account_hash: B256,
+    storage_roots: &HashMap<B256, B256>,
+    starting_hash: B256,
+    slots: &[reth_eth_wire_types::snap::StorageData],
+    proof: &[Bytes],
+) -> Result<(), SnapSyncError> {
+    let Some(storage_root) = storage_roots.get(&account_hash).copied() else {
+        return Err(SnapSyncError::Network(format!(
+            "snap storage proof for unknown account {account_hash}"
+        )));
+    };
+
+    let Some(first_slot) = slots.first() else {
+        return verify_trie_value(storage_root, starting_hash, None, proof, "empty storage range");
+    };
+
+    let expected_start = if first_slot.hash == starting_hash {
+        let value = first_slot
+            .decode_value()
+            .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
+        (!value.is_zero()).then(|| alloy_rlp::encode_fixed_size(&value).as_ref().to_vec())
+    } else {
+        None
+    };
+    verify_trie_value(storage_root, starting_hash, expected_start, proof, "storage range start")?;
+
+    let last_slot = slots.last().expect("first slot exists, so last slot exists");
+    let value = last_slot
+        .decode_value()
+        .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
+
+    let expected =
+        (!value.is_zero()).then(|| alloy_rlp::encode_fixed_size(&value).as_ref().to_vec());
+    verify_trie_value(storage_root, last_slot.hash, expected, proof, "storage range end")
+}
+
+fn verify_trie_value(
+    root: B256,
+    key: B256,
+    expected: Option<Vec<u8>>,
+    proof: &[Bytes],
+    context: &'static str,
+) -> Result<(), SnapSyncError> {
+    let nibbles = Nibbles::unpack(key);
+    verify_unordered_proof(root, nibbles, expected, proof)
+        .map_err(|e| SnapSyncError::Network(format!("invalid snap {context} proof: {e}")))
+}
+
+fn account_trie_value(account: TrieAccount) -> Vec<u8> {
+    alloy_rlp::encode(account)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

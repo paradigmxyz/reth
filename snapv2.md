@@ -294,19 +294,20 @@ The script runs both active snap sync E2E tests:
 | Hashed state write path | Snap batch shapes are converted into `HashedPostStateSorted` and written through `StateWriter::write_hashed_state`; bytecode batches use `StateWriter::write_bytecodes` |
 | Combined backfill bounds | `CombinedBackfillSync` now depends on the snap crate's `SnapSyncControl` adapter, so client/provider bounds stay out of the combined sync impls |
 | Test entrypoint | `run_snap_test.sh` now runs both active snap sync E2E tests |
+| Snap account/storage proofs | Provider-backed serving now emits boundary proof nodes for account ranges and partial storage ranges; the downloader verifies the requested start boundary and returned end boundary before writing data |
+| Served account storage roots | `AccountRange` bodies now carry storage roots computed from the same historical hashed-state overlay used to serve the account and storage leaves |
 
 ### Remaining Debt
 
 - **No crash resume.** If the node crashes mid-snap-sync, it should wipe partial hashed state and restart. Resume-from-midpoint would require persisting range cursor, pivot, and downloaded bytecode/account progress.
 - **No reorg handling during snap sync.** If a reorg crosses the pivot, the current implementation does not collect old-fork BALs and re-fetch affected ranges as EIP-8189 describes.
 - **Frozen-head serving is still limited.** Provider-backed serving reconstructs recently persisted state with changesets; it does not yet serve the final unflushed in-memory blocks.
-- **Snap proofs are not validated yet.** Bulk account/storage download currently trusts peer responses, and provider-backed serving returns empty proof vectors. `GetAccountRange` / `GetStorageRanges` boundary proof verification needs to be implemented before this should be considered production-safe against arbitrary peers.
-- **Served account storage roots are placeholders.** Provider-backed account range serving currently fills `SlimAccount.storage_root` with `EMPTY_ROOT_HASH`; production snap serving needs to derive per-account storage roots from the historical storage view and include matching boundary proofs.
+- **Snap range proof validation is still minimal.** Account and partial-storage responses now carry boundary proofs, and the downloader verifies the requested start boundary plus returned end boundary. This still stops short of a full `VerifyRangeProof`-style completeness check for every returned range, so hostile peers can be rejected for bad boundary data but the range verifier should still be tightened before treating this as production-hardening complete.
 - **BAL cache placement remains debatable.** `BalStoreHandle` abstracts the store, but some implementation still lives near Engine API/RPC concerns. Moving shared BAL cache implementation into storage/provider may be cleaner later.
 
 ### Future Work
 
-- **Proof validation and trie population:** `GetAccountRange`/`GetStorageRanges` responses include Merkle boundary proofs. Verify them during download, reject invalid peers, and optionally insert verified proof nodes into `AccountsTrie`/`StoragesTrie` to reduce MerkleExecute work.
+- **Full range proof validation and trie population:** replace the current boundary checks with a complete account/storage range verifier, reject invalid peers, and optionally insert verified proof nodes into `AccountsTrie`/`StoragesTrie` to reduce MerkleExecute work.
 - **Historical root serving cache:** Cache `HashedPostStateSorted` overlays per served pivot so repeated account/storage range requests do not rebuild reverse diffs.
 - **Peer reliability tracking for BALs:** Peers returning `0x80` for available BALs should be deprioritized separately from ordinary empty snap state responses.
 - **Reorg handling during snap sync:** Implement the EIP-8189 old-fork/new-fork BAL procedure, and restart if required orphaned BALs are unavailable.

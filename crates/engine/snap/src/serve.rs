@@ -5,23 +5,29 @@
 //! persisted and deterministic.
 
 use alloy_consensus::{BlockHeader, EMPTY_ROOT_HASH};
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use reth_db_api::transaction::DbTx;
 use reth_eth_wire_types::{
-    snap::{AccountData, SlimAccount, StorageData},
+    snap::{AccountData, StorageData},
     BlockAccessLists,
 };
 use reth_network_p2p::snap::server::SnapStateProvider;
+use reth_provider::LatestStateProviderRef;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BalProvider, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    HeaderProvider, StageCheckpointReader, StorageChangeSetReader,
+    BalProvider, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
+    DatabaseProviderFactory, HeaderProvider, StageCheckpointReader, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory},
-    HashedPostStateSorted,
+    prefix_set::PrefixSetMut,
+    proof::{Proof, StorageProof},
+    HashedPostStateSorted, HashedStorageSorted, MultiProofTargets, Nibbles,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Maximum accounts to return per snap request.
@@ -105,7 +111,9 @@ where
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + BlockNumReader,
+        + BlockHashReader
+        + BlockNumReader
+        + StorageSettingsCache,
     <P::Provider as DBProvider>::Tx: DbTx,
 {
     fn database_provider_with_reverts(
@@ -139,7 +147,8 @@ where
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + BlockNumReader,
+        + BlockNumReader
+        + StorageSettingsCache,
     <P::Provider as DBProvider>::Tx: DbTx,
 {
     fn account_range(
@@ -162,33 +171,44 @@ where
 
         let Ok(mut cursor) = cursor_factory.hashed_account_cursor() else { return empty };
 
-        let mut accounts = Vec::new();
+        let mut raw_accounts = Vec::new();
         let mut total_bytes: u64 = 0;
 
         if let Ok(Some((hash, account))) = cursor.seek(starting_hash) &&
             hash < limit_hash
         {
-            let body =
-                Bytes::from(alloy_rlp::encode(SlimAccount::from_account(account, EMPTY_ROOT_HASH)));
-            total_bytes += body.len() as u64 + 32;
-            accounts.push(AccountData { hash, body });
+            let body_len = alloy_rlp::encode(account.into_trie_account(EMPTY_ROOT_HASH)).len();
+            total_bytes += body_len as u64 + 32;
+            raw_accounts.push((hash, account));
         }
 
-        while accounts.len() < MAX_ACCOUNTS_SERVE && total_bytes < response_bytes {
+        while raw_accounts.len() < MAX_ACCOUNTS_SERVE && total_bytes < response_bytes {
             match cursor.next() {
                 Ok(Some((hash, account))) if hash < limit_hash => {
-                    let body = Bytes::from(alloy_rlp::encode(SlimAccount::from_account(
-                        account,
-                        EMPTY_ROOT_HASH,
-                    )));
-                    total_bytes += body.len() as u64 + 32;
-                    accounts.push(AccountData { hash, body });
+                    let body_len =
+                        alloy_rlp::encode(account.into_trie_account(EMPTY_ROOT_HASH)).len();
+                    total_bytes += body_len as u64 + 32;
+                    raw_accounts.push((hash, account));
                 }
                 _ => break,
             }
         }
 
-        (accounts, Vec::new())
+        let Some((storage_roots, proof)) =
+            account_range_proof(&provider, &revert_state, starting_hash, &raw_accounts)
+        else {
+            return empty;
+        };
+
+        let accounts = raw_accounts
+            .into_iter()
+            .map(|(hash, account)| {
+                let storage_root = storage_roots.get(&hash).copied().unwrap_or(EMPTY_ROOT_HASH);
+                AccountData { hash, account: account.into_trie_account(storage_root) }
+            })
+            .collect();
+
+        (accounts, proof)
     }
 
     fn storage_ranges(
@@ -212,8 +232,13 @@ where
 
         let mut all_slots = Vec::new();
         let mut total_bytes: u64 = 0;
+        let mut partial_range = None;
 
         for (i, account_hash) in account_hashes.iter().enumerate() {
+            if total_bytes >= response_bytes {
+                break;
+            }
+
             let mut slots = Vec::new();
             let start = if i == 0 { starting_hash } else { B256::ZERO };
 
@@ -245,58 +270,191 @@ where
                 }
             }
 
+            if total_bytes >= response_bytes &&
+                storage_has_more_slots(&mut cursor, limit_hash).unwrap_or(false)
+            {
+                partial_range = Some((*account_hash, start, slots.last().map(|slot| slot.hash)));
+            }
+
             all_slots.push(slots);
-            if total_bytes >= response_bytes {
+            if partial_range.is_some() {
                 break;
             }
         }
 
-        (all_slots, Vec::new())
+        let proof = partial_range
+            .and_then(|(account_hash, start, last_hash)| {
+                storage_range_proof(&provider, &revert_state, account_hash, start, last_hash)
+            })
+            .unwrap_or_default();
+
+        (all_slots, proof)
     }
 
     fn bytecodes(&self, hashes: Vec<B256>, response_bytes: u64) -> Vec<Bytes> {
         let Ok(provider) = self.provider.database_provider_ro() else {
             return Vec::new();
         };
-        let tx = provider.tx_ref();
 
-        let mut codes = Vec::new();
-        let mut total_bytes: u64 = 0;
-
+        let mut out = Vec::new();
+        let mut total: u64 = 0;
+        let state = LatestStateProviderRef::new(&provider);
         for hash in hashes {
-            if let Ok(Some(bytecode)) = tx.get::<reth_db_api::tables::Bytecodes>(hash) {
-                let raw = Bytes::from(bytecode.bytes().to_vec());
-                total_bytes += raw.len() as u64;
-                codes.push(raw);
-                if total_bytes >= response_bytes {
-                    break;
-                }
-            } else {
-                codes.push(Bytes::new());
+            if total >= response_bytes {
+                break;
+            }
+            if let Ok(Some(code)) = state.bytecode_by_hash(&hash) {
+                let bytes = Bytes::from(code.bytes().to_vec());
+                total += bytes.len() as u64;
+                out.push(bytes);
             }
         }
-
-        codes
+        out
     }
 
     fn block_access_lists(&self, block_hashes: Vec<B256>, response_bytes: u64) -> BlockAccessLists {
-        let results = match self.provider.bal_store().get_by_hashes(&block_hashes) {
-            Ok(results) => results,
-            Err(_) => return BlockAccessLists(Vec::new()),
-        };
-
-        let mut total_bytes = 0u64;
-        let mut out = Vec::new();
-        for bal in results {
-            let bal = bal.unwrap_or_else(|| Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]));
-            total_bytes += bal.len() as u64;
-            out.push(bal);
-
-            if total_bytes >= response_bytes {
-                break;
-            }
-        }
-
-        BlockAccessLists(out)
+        serve_block_access_lists(&self.provider, block_hashes, response_bytes)
     }
+}
+
+fn account_range_proof<Provider>(
+    provider: &Provider,
+    revert_state: &HashedPostStateSorted,
+    starting_hash: B256,
+    accounts: &[(B256, reth_primitives_traits::Account)],
+) -> Option<(B256Map<B256>, Vec<Bytes>)>
+where
+    Provider: DBProvider + StorageSettingsCache,
+    Provider::Tx: DbTx,
+{
+    if accounts.is_empty() {
+        return Some((B256Map::default(), Vec::new()));
+    }
+
+    reth_trie_db::with_adapter!(provider, |A| {
+        let mut targets = MultiProofTargets::accounts([starting_hash]);
+        targets.extend(MultiProofTargets::accounts(accounts.iter().map(|(hash, _)| *hash)));
+
+        let multiproof = Proof::new(
+            DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                revert_state,
+            ),
+        )
+        .with_prefix_sets_mut(revert_state.construct_prefix_sets())
+        .multiproof(targets)
+        .ok()?;
+
+        let storage_roots =
+            multiproof.storages.iter().map(|(hash, proof)| (*hash, proof.root)).collect();
+        let proof = multiproof
+            .account_subtree
+            .into_nodes_sorted()
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect();
+
+        Some((storage_roots, proof))
+    })
+}
+
+fn storage_range_proof<Provider>(
+    provider: &Provider,
+    revert_state: &HashedPostStateSorted,
+    account_hash: B256,
+    starting_hash: B256,
+    last_hash: Option<B256>,
+) -> Option<Vec<Bytes>>
+where
+    Provider: DBProvider + StorageSettingsCache,
+    Provider::Tx: DbTx,
+{
+    reth_trie_db::with_adapter!(provider, |A| {
+        let targets = last_hash.map_or_else(
+            || alloy_primitives::map::B256Set::from_iter([starting_hash]),
+            |last_hash| alloy_primitives::map::B256Set::from_iter([starting_hash, last_hash]),
+        );
+
+        let multiproof = StorageProof::new_hashed(
+            DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                revert_state,
+            ),
+            account_hash,
+        )
+        .with_prefix_set_mut(storage_prefix_set_mut(revert_state, account_hash))
+        .storage_multiproof(targets)
+        .ok()?;
+
+        Some(multiproof.subtree.into_nodes_sorted().into_iter().map(|(_, node)| node).collect())
+    })
+}
+
+fn storage_prefix_set_mut(
+    revert_state: &HashedPostStateSorted,
+    account_hash: B256,
+) -> PrefixSetMut {
+    match revert_state.account_storages().get(&account_hash) {
+        Some(storage) => storage_prefix_set_from_sorted(storage),
+        None => PrefixSetMut::default(),
+    }
+}
+
+fn storage_prefix_set_from_sorted(storage: &HashedStorageSorted) -> PrefixSetMut {
+    if storage.wiped {
+        return PrefixSetMut::all();
+    }
+
+    let mut prefix_set = PrefixSetMut::with_capacity(storage.storage_slots.len());
+    prefix_set.extend_keys(storage.storage_slots.iter().map(|(slot, _)| Nibbles::unpack(slot)));
+    prefix_set
+}
+
+fn storage_has_more_slots<C>(
+    cursor: &mut C,
+    limit_hash: B256,
+) -> Result<bool, reth_db_api::DatabaseError>
+where
+    C: HashedCursor<Value = alloy_primitives::U256>,
+{
+    while let Some((key, value)) = cursor.next()? {
+        if key >= limit_hash {
+            return Ok(false);
+        }
+        if !value.is_zero() {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn serve_block_access_lists<P>(
+    provider: &P,
+    block_hashes: Vec<B256>,
+    response_bytes: u64,
+) -> BlockAccessLists
+where
+    P: BalProvider,
+{
+    let results = match provider.bal_store().get_by_hashes(&block_hashes) {
+        Ok(results) => results,
+        Err(_) => return BlockAccessLists(Vec::new()),
+    };
+
+    let mut total_bytes = 0u64;
+    let mut out = Vec::new();
+    for bal in results {
+        let bal = bal.unwrap_or_else(|| Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]));
+        total_bytes += bal.len() as u64;
+        out.push(bal);
+
+        if total_bytes >= response_bytes {
+            break;
+        }
+    }
+
+    BlockAccessLists(out)
 }

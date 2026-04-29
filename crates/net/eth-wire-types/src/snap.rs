@@ -7,11 +7,10 @@
 
 use crate::BlockAccessLists;
 use alloc::vec::Vec;
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{BufMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
+pub use alloy_trie::TrieAccount;
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives_traits::Account;
 
 /// Supported SNAP protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -115,50 +114,50 @@ pub struct GetAccountRangeMessage {
 }
 
 /// Account data in the response.
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
 pub struct AccountData {
     /// Hash of the account address (trie path)
     pub hash: B256,
-    /// Account body in slim format
-    pub body: Bytes,
+    /// Account trie value.
+    pub account: TrieAccount,
 }
 
-/// Snap account body encoded as `[nonce, balance, storage_root, code_hash]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
-pub struct SlimAccount {
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-    /// Storage trie root.
-    pub storage_root: B256,
-    /// Account bytecode hash.
-    pub code_hash: B256,
-}
+impl Encodable for AccountData {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.as_wire().encode(out);
+    }
 
-impl SlimAccount {
-    /// Creates a snap slim account from reth's account representation and a storage root.
-    pub fn from_account(account: Account, storage_root: B256) -> Self {
-        Self {
-            nonce: account.nonce,
-            balance: account.balance,
-            storage_root,
-            code_hash: account.get_bytecode_hash(),
-        }
+    fn length(&self) -> usize {
+        self.as_wire().length()
     }
 }
 
-impl From<SlimAccount> for Account {
-    fn from(value: SlimAccount) -> Self {
-        Self {
-            nonce: value.nonce,
-            balance: value.balance,
-            bytecode_hash: (value.code_hash != KECCAK_EMPTY).then_some(value.code_hash),
-        }
+impl Decodable for AccountData {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        AccountDataWire::decode(buf).and_then(TryInto::try_into)
+    }
+}
+
+impl AccountData {
+    fn as_wire(&self) -> AccountDataWire {
+        AccountDataWire { hash: self.hash, body: alloy_rlp::encode(self.account).into() }
+    }
+}
+
+#[derive(RlpEncodable, RlpDecodable)]
+struct AccountDataWire {
+    hash: B256,
+    body: Bytes,
+}
+
+impl TryFrom<AccountDataWire> for AccountData {
+    type Error = alloy_rlp::Error;
+
+    fn try_from(value: AccountDataWire) -> Result<Self, Self::Error> {
+        let account = alloy_rlp::decode_exact::<TrieAccount>(&value.body)?;
+        Ok(Self { hash: value.hash, account })
     }
 }
 
@@ -483,7 +482,12 @@ mod tests {
             request_id: 42,
             accounts: vec![AccountData {
                 hash: b256_from_u64(123),
-                body: Bytes::from(vec![1, 2, 3]),
+                account: TrieAccount {
+                    nonce: 7,
+                    balance: U256::from(42),
+                    storage_root: b256_from_u64(456),
+                    code_hash: b256_from_u64(789),
+                },
             }],
             proof: vec![Bytes::from(vec![4, 5, 6])],
         }));
@@ -554,34 +558,6 @@ mod tests {
                 assert_eq!(e.to_string(), "Unknown message ID");
             }
         }
-    }
-
-    #[test]
-    fn slim_account_roundtrip_preserves_wire_fields() {
-        let account =
-            Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(b256_from_u64(123)) };
-        let storage_root = b256_from_u64(456);
-
-        let slim = SlimAccount::from_account(account, storage_root);
-        let encoded = alloy_rlp::encode(slim);
-        let decoded = alloy_rlp::decode_exact::<SlimAccount>(&encoded).unwrap();
-
-        assert_eq!(decoded, slim);
-        assert_eq!(decoded.storage_root, storage_root);
-        assert_eq!(Account::from(decoded), account);
-    }
-
-    #[test]
-    fn slim_account_empty_code_hash_maps_to_no_bytecode() {
-        let slim = SlimAccount {
-            nonce: 1,
-            balance: U256::from(2),
-            storage_root: b256_from_u64(3),
-            code_hash: KECCAK_EMPTY,
-        };
-
-        let account = Account::from(slim);
-        assert_eq!(account.bytecode_hash, None);
     }
 
     #[test]

@@ -5,12 +5,12 @@ use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, B256Set},
+    map::{hash_map, B256Map, B256Set, HashMap},
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
-    nodes::TrieNode,
+    nodes::{RlpNode, TrieNode},
     proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
@@ -1003,9 +1003,128 @@ pub mod triehash {
     }
 }
 
+/// Verifies a proof whose nodes are provided as an unordered node set.
+///
+/// Some multiproof producers return each retained trie node once, without preserving the
+/// root-to-leaf ordering expected by [`verify_proof`]. This reconstructs the single path for
+/// `key` by following child references from `root`, then delegates value verification to Alloy.
+pub fn verify_unordered_proof(
+    root: B256,
+    key: Nibbles,
+    expected_value: Option<Vec<u8>>,
+    proof: &[Bytes],
+) -> Result<(), ProofVerificationError> {
+    if proof.is_empty() || proof.len() == 1 && proof[0].as_ref() == [EMPTY_STRING_CODE] {
+        return verify_proof(root, key, expected_value, proof);
+    }
+
+    let proof_by_reference = proof
+        .iter()
+        .map(|node| (RlpNode::from_rlp(node).as_slice().to_vec(), node))
+        .collect::<HashMap<_, _>>();
+
+    let mut expected = RlpNode::word_rlp(&root);
+    let mut walked = Nibbles::new();
+    let mut ordered = Vec::new();
+
+    loop {
+        let Some(node) = proof_by_reference.get(expected.as_slice()) else {
+            return Err(ProofVerificationError::ValueMismatch {
+                path: walked,
+                got: None,
+                expected: Some(Bytes::copy_from_slice(expected.as_slice())),
+            });
+        };
+
+        ordered.push((*node).clone());
+        let decoded = TrieNode::decode(&mut &node[..])?;
+
+        match next_proof_reference(decoded, &mut walked, &key)? {
+            Some(next) if next.is_hash() => expected = next,
+            Some(next) => {
+                let mut inline = next;
+                loop {
+                    let decoded = TrieNode::decode(&mut inline.as_slice())?;
+                    match next_proof_reference(decoded, &mut walked, &key)? {
+                        Some(next) if next.is_hash() => {
+                            expected = next;
+                            break;
+                        }
+                        Some(next) => inline = next,
+                        None => return verify_proof(root, key, expected_value, &ordered),
+                    }
+                }
+            }
+            None => return verify_proof(root, key, expected_value, &ordered),
+        }
+    }
+}
+
+fn next_proof_reference(
+    node: TrieNode,
+    walked: &mut Nibbles,
+    key: &Nibbles,
+) -> Result<Option<RlpNode>, ProofVerificationError> {
+    match node {
+        TrieNode::EmptyRoot => Err(ProofVerificationError::UnexpectedEmptyRoot),
+        TrieNode::Leaf(leaf) => {
+            walked.extend(&leaf.key);
+            Ok(None)
+        }
+        TrieNode::Extension(extension) => {
+            if walked.len() > key.len() {
+                return Ok(None);
+            }
+            let remaining = key.slice(walked.len()..);
+            if !remaining.starts_with(&extension.key) {
+                return Ok(None);
+            }
+            walked.extend(&extension.key);
+            Ok(Some(extension.child))
+        }
+        TrieNode::Branch(branch) => {
+            let Some(nibble) = key.get(walked.len()) else {
+                return Ok(None);
+            };
+            walked.push(nibble);
+            Ok(branch
+                .as_ref()
+                .children()
+                .find(|(index, _)| *index == nibble)
+                .and_then(|(_, child)| child.cloned()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_trie::{proof::ProofRetainer, HashBuilder};
+
+    #[test]
+    fn verify_unordered_proof_accepts_multiproof_node_set() {
+        let key_a = Nibbles::unpack(B256::with_last_byte(1));
+        let key_b = Nibbles::unpack(B256::with_last_byte(2));
+        let value_a = vec![0xaa; 64];
+        let value_b = vec![0xbb; 64];
+
+        let mut builder =
+            HashBuilder::default().with_proof_retainer(ProofRetainer::new(vec![key_a, key_b]));
+        builder.add_leaf(key_a, &value_a);
+        builder.add_leaf(key_b, &value_b);
+
+        let root = builder.root();
+        let mut proof = builder
+            .take_proof_nodes()
+            .into_nodes_sorted()
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        proof.reverse();
+
+        verify_unordered_proof(root, key_a, Some(value_a), &proof).unwrap();
+        verify_unordered_proof(root, key_b, Some(value_b), &proof).unwrap();
+    }
 
     #[test]
     fn test_multiproof_extend_account_proofs() {

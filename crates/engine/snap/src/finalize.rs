@@ -66,14 +66,3 @@ where
     provider.commit().map_err(db_err)?;
     Ok(())
 }
-
-/// Finalizes snap sync by writing stage checkpoints and advancing static file segments.
-#[allow(dead_code)]
-pub(crate) fn finalize_snap_sync<F>(factory: &F, target_block: u64) -> Result<(), SnapSyncError>
-where
-    F: DatabaseProviderFactory,
-    F::ProviderRW: DBProvider + StaticFileProviderFactory,
-    <F::ProviderRW as DBProvider>::Tx: DbTxMut,
-{
-    write_snap_stage_checkpoints(factory, target_block)
-}

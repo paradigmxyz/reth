@@ -136,6 +136,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
     "reth-execution-cache/test-utils",
+    "reth-engine-snap/test-utils",
 ]
 trie-debug = [
     "reth-trie-sparse/trie-debug",

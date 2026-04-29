@@ -25,6 +25,7 @@ alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["map"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-consensus.workspace = true
+alloy-trie.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
@@ -62,6 +63,7 @@ std = [
     "alloy-rlp/std",
     "bytes/std",
     "derive_more/std",
+    "alloy-trie/std",
     "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
     "serde?/std",
@@ -80,6 +82,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "alloy-trie/arbitrary",
     "reth-primitives-traits/arbitrary",
 ]
 serde = [
@@ -88,6 +91,7 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
+    "alloy-trie/serde",
     "bytes/serde",
     "rand/serde",
     "reth-primitives-traits/serde",
