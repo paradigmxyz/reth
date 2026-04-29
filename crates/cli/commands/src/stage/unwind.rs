@@ -70,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let mut pipeline =
             self.build_pipeline(config, provider_factory, components.evm_config().clone())?;
 
-        // Backfill legacy storage.v1 data into static files before unwinding.
+        // Move all applicable data from database to static files.
         pipeline.move_to_static_files()?;
 
         pipeline.unwind(target, None)?;
