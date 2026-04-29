@@ -473,11 +473,6 @@ where
     Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>
         + BlockAccessListsClient,
 {
-    /// Returns the start hash for the request.
-    pub const fn start_hash(&self) -> B256 {
-        self.blocks.start_hash()
-    }
-
     fn start_access_lists_request_if_possible(&mut self) {
         if !matches!(self.access_lists, OptionalBlockAccessListsState::WaitingForBlocks) {
             return
@@ -500,7 +495,7 @@ where
         if received > expected {
             debug!(
                 target: "downloaders",
-                start_hash = ?self.start_hash(),
+                start_hash = ?self.blocks.start_hash(),
                 expected,
                 received,
                 "Received wrong access list range response",
@@ -532,7 +527,7 @@ where
                 debug!(
                     target: "downloaders",
                     %err,
-                    start_hash = ?self.start_hash(),
+                    start_hash = ?self.blocks.start_hash(),
                     "Access list range download failed",
                 );
 
