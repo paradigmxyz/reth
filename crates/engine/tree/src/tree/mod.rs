@@ -1272,6 +1272,7 @@ where
                 false
             };
 
+            // TODO: use proper error type when https://github.com/alloy-rs/alloy/pull/3935 is merged
             if too_deep_reorg {
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
             }
