@@ -2269,8 +2269,11 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
     let finalized_block = &blocks[1];
     let head_block = &blocks[2];
 
-    test_harness =
-        test_harness.with_blocks(vec![genesis.clone(), finalized_block.clone(), head_block.clone()]);
+    test_harness = test_harness.with_blocks(vec![
+        genesis.clone(),
+        finalized_block.clone(),
+        head_block.clone(),
+    ]);
 
     let finalized_num_hash = finalized_block.recovered_block().num_hash();
     let head_num_hash = head_block.recovered_block().num_hash();

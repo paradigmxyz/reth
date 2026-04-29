@@ -19,7 +19,8 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
+    ForkchoiceStateTracker, ForkchoiceStatus, NewPayloadTimings, OnForkChoiceUpdated,
+    SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -1945,9 +1946,7 @@ where
             return;
         }
 
-        self.state
-            .forkchoice_state_tracker
-            .set_latest(sync_target_state, ForkchoiceStatus::Valid);
+        self.state.forkchoice_state_tracker.set_latest(sync_target_state, ForkchoiceStatus::Valid);
     }
 
     /// Convenience function to handle an optional tree event.
