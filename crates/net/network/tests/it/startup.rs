@@ -4,7 +4,7 @@ use std::{
 };
 
 use reth_chainspec::MAINNET;
-use reth_discv4::{Discv4Config, NatResolver, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{Discv4Config, NatResolver, DEFAULT_DISCOVERY_ADDR};
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
@@ -73,27 +73,31 @@ async fn test_discovery_addr_in_use() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_discv5_and_discv4_same_socket_fails() {
+async fn test_discv5_and_discv4_same_socket_ok() {
+    // Pick a free port for the shared UDP discovery socket and TCP RLPx listener.
+    let test_port: u16 = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind to a port")
+        .local_addr()
+        .unwrap()
+        .port();
+
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
-        .listener_port(DEFAULT_DISCOVERY_PORT)
+        .listener_port(test_port)
+        .discovery_port(test_port)
         .discovery_v5(
-            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT).into())
-                .discv5_config(
-                    discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
-                        DEFAULT_DISCOVERY_ADDR,
-                        DEFAULT_DISCOVERY_PORT,
-                    ))
-                    .build(),
-                ),
+            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, test_port).into()).discv5_config(
+                discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
+                    DEFAULT_DISCOVERY_ADDR,
+                    test_port,
+                ))
+                .build(),
+            ),
         )
         .disable_dns_discovery()
         .build(NoopProvider::default());
-    let addr = config.listener_addr;
-    let result = NetworkManager::new(config).await;
-    let err = result.err().unwrap();
-
-    assert!(is_addr_in_use_kind(&err, ServiceKind::Listener(addr)), "{err:?}")
+    let _network = NetworkManager::new(config).await.expect("shared port discovery should start");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -323,13 +323,18 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
 else
   # Standard mode: warmup + new-payload-fcu
-  # Warmup
-  $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
-    --rpc-url "$BENCH_RPC_URL" \
-    --engine-rpc-url http://127.0.0.1:8551 \
-    --jwt-secret "$DATADIR/jwt.hex" \
-    --advance "${BENCH_WARMUP_BLOCKS:-50}" \
-    "${EXTRA_BENCH_ARGS[@]}" 2>&1 | sed -u "s/^/[bench] /"
+  WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    # Warm up the node before measuring the benchmark window.
+    $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
+      --rpc-url "$BENCH_RPC_URL" \
+      --engine-rpc-url http://127.0.0.1:8551 \
+      --jwt-secret "$DATADIR/jwt.hex" \
+      --advance "$WARMUP" \
+      "${EXTRA_BENCH_ARGS[@]}" 2>&1 | sed -u "s/^/[bench] /"
+  else
+    echo "Skipping warmup (0 blocks)..."
+  fi
 
   # Start tracy-capture after warmup so profile only covers the benchmark
   if [ "${BENCH_TRACY:-off}" != "off" ]; then

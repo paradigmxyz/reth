@@ -7,7 +7,7 @@ use rand::Rng;
 use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::Block;
 use reth_network::{
-    eth_requests::SOFT_RESPONSE_LIMIT,
+    eth_requests::{MAX_BLOCK_ACCESS_LISTS_SERVE, SOFT_RESPONSE_LIMIT},
     test_utils::{NetworkEventStream, PeerConfig, Testnet, TestnetHandle},
     BlockDownloaderProvider, NetworkEventListenerProvider,
 };
@@ -605,6 +605,26 @@ async fn test_eth71_get_block_access_lists_empty_request() {
     let response = request_block_access_lists(&net, Vec::new()).await;
 
     assert_eq!(response, BlockAccessLists(Vec::new()));
+}
+
+// Ensures BAL responses are capped at MAX_BLOCK_ACCESS_LISTS_SERVE entries.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_get_block_access_lists_caps_count() {
+    reth_tracing::init_test_tracing();
+    let (net, bal_store) = spawn_eth71_bal_testnet().await;
+
+    // Request more hashes than the count cap.
+    let request_count = MAX_BLOCK_ACCESS_LISTS_SERVE + 100;
+    let hashes: Vec<B256> = (0..request_count).map(|_| B256::random()).collect();
+
+    // Insert one BAL so the store isn't entirely empty (not strictly needed,
+    // but keeps the test path closer to real usage).
+    let bal = Bytes::from_static(&[0xc1, 0x01]);
+    bal_store.insert(hashes[0], 1, bal).unwrap();
+
+    let response = request_block_access_lists(&net, hashes).await;
+
+    assert_eq!(response.0.len(), MAX_BLOCK_ACCESS_LISTS_SERVE);
 }
 
 // Ensures the fetch client can request BALs through an eth/71 peer.

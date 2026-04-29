@@ -885,6 +885,19 @@ pub struct BlockRangeUpdate {
     pub latest_hash: B256,
 }
 
+impl InMemorySize for NewPooledTransactionHashes {
+    fn size(&self) -> usize {
+        match self {
+            Self::Eth66(msg) => msg.0.len() * core::mem::size_of::<B256>(),
+            Self::Eth68(msg) => {
+                msg.types.len() * core::mem::size_of::<u8>() +
+                    msg.sizes.len() * core::mem::size_of::<usize>() +
+                    msg.hashes.len() * core::mem::size_of::<B256>()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

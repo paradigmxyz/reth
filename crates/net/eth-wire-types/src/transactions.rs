@@ -39,6 +39,12 @@ where
     }
 }
 
+impl InMemorySize for GetPooledTransactions {
+    fn size(&self) -> usize {
+        self.0.len() * core::mem::size_of::<B256>()
+    }
+}
+
 /// The response to [`GetPooledTransactions`], containing the transaction bodies associated with
 /// the requested hashes.
 ///

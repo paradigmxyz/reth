@@ -31,7 +31,9 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
         },
         TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig,
@@ -76,6 +78,8 @@ pub struct DefaultNetworkArgs {
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Default max capacity of cache of hashes for transactions pending fetch.
     pub max_capacity_cache_txns_pending_fetch: u32,
+    /// Default memory limit (in bytes) for the network manager → transactions manager channel.
+    pub tx_channel_memory_limit_bytes: usize,
     /// Default transaction propagation policy.
     pub tx_propagation_policy: TransactionPropagationKind,
     /// Default transaction ingress policy.
@@ -169,6 +173,13 @@ impl DefaultNetworkArgs {
         self
     }
 
+    /// Set the default memory limit (in bytes) for the network manager → transactions
+    /// manager channel.
+    pub const fn with_tx_channel_memory_limit_bytes(mut self, v: usize) -> Self {
+        self.tx_channel_memory_limit_bytes = v;
+        self
+    }
+
     /// Set the default transaction propagation policy.
     pub const fn with_tx_propagation_policy(mut self, v: TransactionPropagationKind) -> Self {
         self.tx_propagation_policy = v;
@@ -210,6 +221,7 @@ impl Default for DefaultNetworkArgs {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
@@ -348,6 +360,15 @@ pub struct NetworkArgs {
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_capacity_cache_txns_pending_fetch, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 
+    /// Memory limit (in bytes) for the channel that buffers transaction events flowing
+    /// from the network manager to the transactions manager.
+    ///
+    /// When the budget is exhausted, new events are dropped (see metric
+    /// `total_dropped_tx_events_at_full_capacity`). Acts as a backstop against unbounded
+    /// memory growth under sustained P2P transaction flooding.
+    #[arg(long = "tx-channel-memory-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().tx_channel_memory_limit_bytes, verbatim_doc_comment)]
+    pub tx_channel_memory_limit_bytes: usize,
+
     /// Name of network interface used to communicate with peers.
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
@@ -485,6 +506,7 @@ impl NetworkArgs {
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
+            tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
         }
     }
 
@@ -660,6 +682,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             max_capacity_cache_txns_pending_fetch,
+            tx_channel_memory_limit_bytes,
             tx_propagation_policy,
             tx_ingress_policy,
             propagation_mode,
@@ -689,6 +712,7 @@ impl Default for NetworkArgs {
             max_pending_pool_imports,
             max_seen_tx_history,
             max_capacity_cache_txns_pending_fetch,
+            tx_channel_memory_limit_bytes,
             net_if: None,
             tx_propagation_policy,
             tx_ingress_policy,

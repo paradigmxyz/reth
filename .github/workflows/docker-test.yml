@@ -13,6 +13,8 @@ on:
         default: "artifacts"
         description: "Name for the uploaded artifact"
 
+permissions: {}
+
 jobs:
   build:
     timeout-minutes: 45
@@ -21,7 +23,9 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - run: mkdir -p artifacts
 
       - name: Get git info
@@ -32,8 +36,12 @@ jobs:
 
       - name: Detect fork
         id: fork
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$REPO" ]; then
             echo "is_fork=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_fork=false" >> "$GITHUB_OUTPUT"
@@ -42,11 +50,11 @@ jobs:
       # Depot build (upstream only)
       - name: Set up Depot CLI
         if: steps.fork.outputs.is_fork == 'false'
-        uses: depot/setup-action@v1
+        uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1.7.1
 
       - name: Build reth image (Depot)
         if: steps.fork.outputs.is_fork == 'false'
-        uses: depot/bake-action@v1
+        uses: depot/bake-action@1d58c2668346981089b088b7ef36755b206b20e9 # v1.13.0
         env:
           DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
           VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
@@ -60,11 +68,11 @@ jobs:
       # Docker build (forks)
       - name: Set up Docker Buildx
         if: steps.fork.outputs.is_fork == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Build reth image (Docker)
         if: steps.fork.outputs.is_fork == 'true'
-        uses: docker/bake-action@v6
+        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7 # v7.0.0
         env:
           VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
           VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
@@ -76,7 +84,7 @@ jobs:
             *.dockerfile=Dockerfile
 
       - name: Upload reth image
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ${{ inputs.artifact_name }}
           path: ./artifacts
