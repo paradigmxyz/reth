@@ -12,6 +12,51 @@ use reth_primitives_traits::{
     receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
 };
 
+struct BlockAccessListLogCounts {
+    accounts: usize,
+    storage_changes: usize,
+    storage_reads: usize,
+    balance_changes: usize,
+    nonce_changes: usize,
+    code_changes: usize,
+}
+
+impl BlockAccessListLogCounts {
+    fn new(block_access_list: &BlockAccessList) -> Self {
+        let mut counts = Self {
+            accounts: block_access_list.len(),
+            storage_changes: 0,
+            storage_reads: 0,
+            balance_changes: 0,
+            nonce_changes: 0,
+            code_changes: 0,
+        };
+
+        for account in block_access_list {
+            counts.storage_changes += account.storage_changes.len();
+            counts.storage_reads += account.storage_reads.len();
+            counts.balance_changes += account.balance_changes.len();
+            counts.nonce_changes += account.nonce_changes.len();
+            counts.code_changes += account.code_changes.len();
+        }
+
+        counts
+    }
+}
+
+impl core::fmt::Debug for BlockAccessListLogCounts {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BlockAccessListLogCounts")
+            .field("accounts", &self.accounts)
+            .field("storage_changes", &self.storage_changes)
+            .field("storage_reads", &self.storage_reads)
+            .field("balance_changes", &self.balance_changes)
+            .field("nonce_changes", &self.nonce_changes)
+            .field("code_changes", &self.code_changes)
+            .finish()
+    }
+}
+
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
@@ -92,6 +137,20 @@ where
         let block_access_list_hash =
             compute_block_access_list_hash(block_access_list.as_ref().unwrap_or(&default_bal));
         if block_access_list_hash != block_bal_hash {
+            let generated_bal = block_access_list.as_ref().unwrap_or(&default_bal);
+            let generated_bal_first_accounts =
+                generated_bal.iter().take(16).map(|account| account.address).collect::<Vec<_>>();
+            tracing::info!(
+                target: "consensus::validation",
+                block_hash = %block.hash(),
+                block_number = block.header().number(),
+                generated_bal_hash = %block_access_list_hash,
+                header_bal_hash = %block_bal_hash,
+                generated_bal_counts = ?BlockAccessListLogCounts::new(generated_bal),
+                ?generated_bal_first_accounts,
+                generated_bal = ?generated_bal,
+                "Mismatched block access list hash after execution"
+            );
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 (block_access_list_hash, block_bal_hash).into(),
             ))

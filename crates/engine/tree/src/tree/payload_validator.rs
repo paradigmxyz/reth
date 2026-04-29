@@ -50,7 +50,7 @@ use crate::tree::{
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
-    BlockAccessList,
+    compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
@@ -104,6 +104,51 @@ use std::{
     time::Duration,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
+
+struct BlockAccessListLogCounts {
+    accounts: usize,
+    storage_changes: usize,
+    storage_reads: usize,
+    balance_changes: usize,
+    nonce_changes: usize,
+    code_changes: usize,
+}
+
+impl BlockAccessListLogCounts {
+    fn new(block_access_list: &BlockAccessList) -> Self {
+        let mut counts = Self {
+            accounts: block_access_list.len(),
+            storage_changes: 0,
+            storage_reads: 0,
+            balance_changes: 0,
+            nonce_changes: 0,
+            code_changes: 0,
+        };
+
+        for account in block_access_list {
+            counts.storage_changes += account.storage_changes.len();
+            counts.storage_reads += account.storage_reads.len();
+            counts.balance_changes += account.balance_changes.len();
+            counts.nonce_changes += account.nonce_changes.len();
+            counts.code_changes += account.code_changes.len();
+        }
+
+        counts
+    }
+}
+
+impl core::fmt::Debug for BlockAccessListLogCounts {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BlockAccessListLogCounts")
+            .field("accounts", &self.accounts)
+            .field("storage_changes", &self.storage_changes)
+            .field("storage_reads", &self.storage_reads)
+            .field("balance_changes", &self.balance_changes)
+            .field("nonce_changes", &self.nonce_changes)
+            .field("code_changes", &self.code_changes)
+            .finish()
+    }
+}
 
 /// Output of block or payload validation.
 pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
@@ -498,6 +543,25 @@ where
             .try_decoded_access_list()
             .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }))
         .map(Arc::new);
+        if let Some(decoded_bal) = decoded_bal.as_ref() {
+            let submitted_bal = decoded_bal.as_bal();
+            info!(
+                target: "engine::tree::payload_validator",
+                block = ?input.num_hash(),
+                parent_hash = %input.parent_hash(),
+                submitted_bal_hash = %decoded_bal.hash(),
+                submitted_bal_rlp_len = decoded_bal.as_raw().len(),
+                submitted_bal_accounts = submitted_bal.account_count(),
+                submitted_bal_total_items = submitted_bal.total_bal_items(),
+                submitted_bal_storage_changes = submitted_bal.total_storage_changes(),
+                submitted_bal_storage_reads = submitted_bal.total_storage_reads(),
+                submitted_bal_balance_changes = submitted_bal.total_balance_changes(),
+                submitted_bal_nonce_changes = submitted_bal.total_nonce_changes(),
+                submitted_bal_code_changes = submitted_bal.total_code_changes(),
+                submitted_bal = ?submitted_bal,
+                "Decoded submitted payload block access list"
+            );
+        }
 
         let env = ExecutionEnv {
             evm_env,
@@ -924,6 +988,9 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
+        let block_hash = env.hash;
+        let parent_hash = env.parent_hash;
+        let submitted_bal_hash = env.decoded_bal.as_ref().map(|bal| bal.hash());
 
         if let Some(bal_opt) = input.block_access_list() {
             let bal = bal_opt.map_err(BlockExecutionError::other)?;
@@ -1016,7 +1083,33 @@ where
         // Extract the built bal if payload has bal
         let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
 
-        tracing::info!("Built Bal is {:?}", built_bal);
+        if has_bal {
+            match &built_bal {
+                Some(built_bal) => {
+                    let generated_bal_rlp = alloy_rlp::encode(built_bal);
+                    info!(
+                        target: "engine::tree::payload_validator",
+                        block_hash = %block_hash,
+                        parent_hash = %parent_hash,
+                        ?submitted_bal_hash,
+                        generated_bal_hash = %compute_block_access_list_hash(built_bal),
+                        generated_bal_rlp_len = generated_bal_rlp.len(),
+                        generated_bal_counts = ?BlockAccessListLogCounts::new(built_bal),
+                        generated_bal = ?built_bal,
+                        "Built block access list from execution"
+                    );
+                }
+                None => {
+                    info!(
+                        target: "engine::tree::payload_validator",
+                        block_hash = %block_hash,
+                        parent_hash = %parent_hash,
+                        ?submitted_bal_hash,
+                        "Payload contained a block access list but execution did not build one"
+                    );
+                }
+            }
+        }
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
