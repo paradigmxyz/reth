@@ -14,6 +14,9 @@ Reth v1.11 introduces an experimental hot/cold storage architecture behind the `
 It routes history indices and transaction hash lookups to RocksDB, writes changesets to static files,
 and drops the legacy plain state tables — resulting in significantly lower disk usage.
 
+The pipeline's `move_to_static_files` step is a legacy `storage.v1` backfill path. `storage.v2`
+nodes write directly to their final storage backends, so that migration step is skipped.
+
 ## Disk savings
 
 Measured at block `24,396,823` on Ethereum mainnet:

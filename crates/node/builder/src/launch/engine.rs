@@ -161,7 +161,8 @@ impl EngineNodeLauncher {
             ctx.era_import_source(),
         )?;
 
-        // The new engine writes directly to static files. This ensures that they're up to the tip.
+        // For legacy storage.v1 nodes this backfills MDBX data into static files. Storage.v2
+        // writes directly to the final backends, so this is a no-op there.
         pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();

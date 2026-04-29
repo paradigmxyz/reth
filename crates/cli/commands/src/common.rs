@@ -245,7 +245,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     StaticFileProducer::new(factory.clone(), config.prune.segments.clone()),
                 );
 
-            // Move all applicable data from database to static files.
+            // Backfill legacy storage.v1 data into static files before unwinding.
             pipeline.move_to_static_files()?;
             pipeline.unwind(unwind_target.unwind_target().expect("should exist"), None)?;
         }
