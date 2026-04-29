@@ -1084,7 +1084,7 @@ Engine:
           When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
       --engine.disable-bal-parallel-execution
-          Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled, using today's sequential execution path even when a BAL is available
+          Disable BAL (Block Access List, EIP-7928) based parallel execution
 
       --engine.disable-bal-parallel-state-root
           Disable BAL-driven parallel state root computation. This is only valid together with `--engine.disable-bal-parallel-execution`
