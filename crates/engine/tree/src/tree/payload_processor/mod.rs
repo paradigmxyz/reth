@@ -123,7 +123,6 @@ where
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
-    #[allow(unused)]
     disable_bal_parallel_execution: bool,
     /// Whether to disable BAL-driven parallel state root computation.
     disable_bal_parallel_state_root: bool,
@@ -265,6 +264,7 @@ where
             self.spawn_tx_iterator(transactions, env.transaction_count);
 
         let span = Span::current();
+        let use_bal_prewarm = self.should_use_bal_prewarm(&env);
 
         let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
         let state_root_handle = self.spawn_state_root(
@@ -273,9 +273,7 @@ where
             halve_workers,
             config,
         );
-        // If no BALs are present or we have them explicitly disabled, we use sparse trie task and
-        // need to send the updates to it via state hook
-        let install_state_hook = env.decoded_bal.is_none() || self.disable_bal_parallel_state_root;
+        let install_state_hook = !use_bal_prewarm;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -290,6 +288,18 @@ where
             transactions: execution_rx,
             _span: span,
         }
+    }
+
+    /// Returns whether this payload will use BAL-based prewarming.
+    ///
+    /// BAL presence alone is not enough: the engine falls back to tx-based prewarming when BAL
+    /// execution is disabled, prewarming is disabled, or the block is too small. Those fallback
+    /// paths still rely on the execution state hook to emit `FinishedStateUpdates`.
+    fn should_use_bal_prewarm(&self, env: &ExecutionEnv<Evm>) -> bool {
+        env.decoded_bal.is_some() &&
+            !self.disable_transaction_prewarming &&
+            env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD &&
+            !self.disable_bal_parallel_execution
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -477,8 +487,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
+        let use_bal_prewarm = self.should_use_bal_prewarm(&env);
+        let skip_prewarm = !use_bal_prewarm &&
+            (self.disable_transaction_prewarming ||
+                env.transaction_count < SMALL_BLOCK_TX_THRESHOLD);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -508,13 +520,10 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_state_root = self.disable_bal_parallel_state_root;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
-                } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_state_root)
-                {
+                } else if let Some(decoded_bal) = maybe_decoded_bal.filter(|_| use_bal_prewarm) {
                     PrewarmMode::BlockAccessList(decoded_bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
