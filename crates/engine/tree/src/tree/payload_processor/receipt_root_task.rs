@@ -66,6 +66,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
     pub fn run(self, receipts_len: usize) {
+        const RECEIPT_BURST_SIZE: usize = 32;
+
         let _span = debug_span!(
             target: "engine::tree::payload_processor",
             "receipt_root",
@@ -78,7 +80,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut encode_buf = Vec::new();
         let mut received_count = 0usize;
 
-        for indexed_receipt in self.receipt_rx {
+        let mut process_receipt = |indexed_receipt: IndexedReceipt<R>| {
             let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
 
             encode_buf.clear();
@@ -100,6 +102,14 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                         "Receipt root task received invalid receipt index, skipping"
                     );
                 }
+            }
+        };
+
+        while let Ok(indexed_receipt) = self.receipt_rx.recv() {
+            process_receipt(indexed_receipt);
+
+            for indexed_receipt in self.receipt_rx.try_iter().take(RECEIPT_BURST_SIZE - 1) {
+                process_receipt(indexed_receipt);
             }
         }
 

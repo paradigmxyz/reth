@@ -138,6 +138,8 @@ pub struct OrderedTrieRootEncodedBuilder {
     next_insert_i: usize,
     /// Buffer for pending items, indexed by execution index.
     pending: Vec<Option<Vec<u8>>>,
+    /// Precomputed flush order and trie leaf keys for each insertion slot.
+    flush_keys: Vec<(usize, Option<Nibbles>)>,
     /// The underlying hash builder.
     hb: HashBuilder,
 }
@@ -145,11 +147,19 @@ pub struct OrderedTrieRootEncodedBuilder {
 impl OrderedTrieRootEncodedBuilder {
     /// Creates a new builder for `len` pre-encoded items.
     pub fn new(len: usize) -> Self {
+        let mut flush_keys = Vec::with_capacity(len);
+        for insert_idx in 0..len {
+            let exec_index = adjust_index_for_rlp(insert_idx, len);
+            let index_buffer = alloy_rlp::encode_fixed_size(&exec_index);
+            flush_keys.push((exec_index, Some(Nibbles::unpack(&index_buffer))));
+        }
+
         Self {
             len,
             received: 0,
             next_insert_i: 0,
             pending: alloc::vec![None; len],
+            flush_keys,
             hb: HashBuilder::default(),
         }
     }
@@ -201,14 +211,17 @@ impl OrderedTrieRootEncodedBuilder {
     /// Attempts to flush pending items to the hash builder.
     fn flush(&mut self) {
         while self.next_insert_i < self.len {
-            let exec_index_needed = adjust_index_for_rlp(self.next_insert_i, self.len);
+            let (exec_index_needed, leaf_key) =
+                &mut self.flush_keys[self.next_insert_i];
 
-            let Some(value) = self.pending[exec_index_needed].take() else {
+            let Some(value) = self.pending[*exec_index_needed].take() else {
                 break;
             };
 
-            let index_buffer = alloy_rlp::encode_fixed_size(&exec_index_needed);
-            self.hb.add_leaf(Nibbles::unpack(&index_buffer), &value);
+            self.hb.add_leaf(
+                leaf_key.take().expect("flush key must be present until the slot is consumed"),
+                &value,
+            );
 
             self.next_insert_i += 1;
         }
