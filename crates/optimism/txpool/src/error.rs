@@ -26,7 +26,7 @@ impl PoolTransactionError for InvalidCrossTx {
     }
 }
 
-/// Mantle MetaTx has been permanently disabled since the MantleEverest hardfork.
+/// Mantle `MetaTx` has been permanently disabled since the `MantleEverest` hardfork.
 /// Mirrors op-geth: `ErrMetaTxDisabled` in `core/types/meta_transaction.go`.
 #[derive(thiserror::Error, Debug)]
 #[error("meta tx is disabled")]

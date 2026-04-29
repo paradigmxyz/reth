@@ -310,18 +310,89 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{OpPooledTransaction, OpTransactionValidator};
-    use alloy_consensus::transaction::Recovered;
+    use crate::{MetaTxDisabled, OpPooledTransaction, OpTransactionValidator};
+    use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{TxKind, U256};
+    use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
     use op_alloy_consensus::TxDeposit;
-    use reth_optimism_chainspec::OP_MAINNET;
+    use reth_mantle_forks::MANTLE_META_TX_PREFIX;
+    use reth_optimism_chainspec::{MANTLE_MAINNET, OP_MAINNET};
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
-        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
-        TransactionValidationOutcome,
+        blobstore::InMemoryBlobStore, error::PoolTransactionError,
+        validate::EthTransactionValidatorBuilder, TransactionOrigin, TransactionValidationOutcome,
     };
+
+    fn pooled_eip1559_with_input(input: Bytes) -> OpPooledTransaction {
+        let signer = Address::ZERO;
+        let tx: OpTransactionSigned = TxEip1559 {
+            chain_id: 5000,
+            nonce: 0,
+            gas_limit: 21_000,
+            max_fee_per_gas: 1,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::ZERO,
+            input,
+            ..Default::default()
+        }
+        .into_signed(Signature::new(U256::ZERO, U256::ZERO, false))
+        .into();
+        let signed_recovered = Recovered::new_unchecked(tx, signer);
+        let len = signed_recovered.encode_2718_len();
+
+        OpPooledTransaction::new(signed_recovered, len)
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_mantle_meta_tx_as_bad_transaction() {
+        let client = MockEthProvider::default().with_chain_spec(MANTLE_MAINNET.clone());
+        let validator = EthTransactionValidatorBuilder::new(client)
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let mut input = MANTLE_META_TX_PREFIX.to_vec();
+        input.push(0xF8);
+        let outcome = validator
+            .validate_one(TransactionOrigin::External, pooled_eip1559_with_input(input.into()))
+            .await;
+
+        let err = match outcome {
+            TransactionValidationOutcome::Invalid(_, err) => err,
+            _ => panic!("Expected invalid MetaTx"),
+        };
+        let meta_tx_err = err
+            .downcast_other_ref::<MetaTxDisabled>()
+            .expect("expected MetaTxDisabled txpool error");
+
+        assert_eq!(err.to_string(), "meta tx is disabled");
+        assert!(meta_tx_err.is_bad_transaction());
+    }
+
+    #[tokio::test]
+    async fn validate_does_not_reject_exact_meta_tx_prefix_without_payload() {
+        let client = MockEthProvider::default().with_chain_spec(MANTLE_MAINNET.clone());
+        let validator = EthTransactionValidatorBuilder::new(client)
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let outcome = validator
+            .validate_one(
+                TransactionOrigin::External,
+                pooled_eip1559_with_input(MANTLE_META_TX_PREFIX.to_vec().into()),
+            )
+            .await;
+
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(!err.is_other::<MetaTxDisabled>());
+        }
+    }
+
     #[tokio::test]
     async fn validate_optimism_transaction() {
         let client = MockEthProvider::default().with_chain_spec(OP_MAINNET.clone());

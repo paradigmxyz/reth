@@ -15,9 +15,3 @@ doc-valid-idents = [
     "MessagePack",
 ]
 allow-dbg-in-tests = true
-# SAFETY: Do NOT enable collapsible_match. This lint converts if-inside-match
-# into match guards, which silently changes semantics: when a guard fails, Rust
-# falls through to the next arm instead of staying in the matched arm. This
-# caused a P0 bug (PR #31) where EIP-1559 transactions were rejected because
-# the guard `!self.eip1559` failed and fell through to a catch-all reject arm.
-allow-collapsible-match = false

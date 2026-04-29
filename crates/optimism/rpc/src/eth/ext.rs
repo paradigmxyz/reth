@@ -1,7 +1,8 @@
 //! Eth API extension.
 
+use super::transaction::ensure_transaction_input_supported;
 use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, StorageKey, B256, U256};
 use alloy_rpc_types_eth::erc4337::{AccountStorage, TransactionConditional};
@@ -116,17 +117,18 @@ where
         bytes: Bytes,
         condition: TransactionConditional,
     ) -> RpcResult<B256> {
-        // calculate and validate cost
-        let cost = condition.cost();
-        if cost > MAX_CONDITIONAL_EXECUTION_COST {
-            return Err(TxConditionalErr::ConditionalCostExceeded.into());
-        }
-
         let recovered_tx = recover_raw_transaction(&bytes).map_err(|_| {
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
         let mut tx = <Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
+        ensure_transaction_input_supported(tx.input()).map_err(OpEthApiError::Eth)?;
+
+        // calculate and validate cost
+        let cost = condition.cost();
+        if cost > MAX_CONDITIONAL_EXECUTION_COST {
+            return Err(TxConditionalErr::ConditionalCostExceeded.into());
+        }
 
         // get current header
         let header_not_found = || {
@@ -197,5 +199,70 @@ impl<Pool, Provider> OpEthExtApiInner<Pool, Provider> {
     #[inline]
     const fn provider(&self) -> &Provider {
         &self.provider
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{SignableTransaction, TxEip1559};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_primitives::{Address, Signature, TxKind};
+    use alloy_rpc_types_eth::erc4337::AccountStorage;
+    use reth_mantle_forks::MANTLE_META_TX_PREFIX;
+    use reth_optimism_txpool::OpPooledTransaction;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    fn raw_eip1559_with_input(input: Bytes) -> Bytes {
+        TxEip1559 {
+            chain_id: 5000,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: 1,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::ZERO),
+            input,
+            ..Default::default()
+        }
+        .into_signed(Signature::test_signature())
+        .encoded_2718()
+        .into()
+    }
+
+    fn mantle_meta_tx_raw() -> Bytes {
+        let mut input = MANTLE_META_TX_PREFIX.to_vec();
+        input.push(0xF8);
+        raw_eip1559_with_input(input.into())
+    }
+
+    fn over_budget_condition() -> TransactionConditional {
+        let mut condition = TransactionConditional::default();
+        for i in 0..=MAX_CONDITIONAL_EXECUTION_COST {
+            let mut address = [0u8; 20];
+            address[12..].copy_from_slice(&i.to_be_bytes());
+            condition
+                .known_accounts
+                .insert(Address::from(address), AccountStorage::RootHash(Default::default()));
+        }
+        condition
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_conditional_rejects_mantle_meta_tx_before_condition_validation() {
+        let api: OpEthExtApi<NoopTransactionPool<OpPooledTransaction>, NoopProvider> =
+            OpEthExtApi::new(
+                None,
+                NoopTransactionPool::<OpPooledTransaction>::new(),
+                NoopProvider::default(),
+            );
+
+        let err = api
+            .send_raw_transaction_conditional(mantle_meta_tx_raw(), over_budget_condition())
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), -32000);
+        assert_eq!(err.message(), "meta tx is disabled");
     }
 }

@@ -25,7 +25,7 @@ use reth_evm::{
     precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor,
     ExecutableTxIterator, ExecutionCtxFor, TransactionEnv,
 };
-use reth_mantle_forks::MantleHardforks;
+use reth_mantle_forks::{is_mantle_meta_tx, MantleHardforks};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -53,6 +53,22 @@ mod mantle;
 pub(crate) use mantle::MantleEvmEnvInput;
 
 pub use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvm, OpEvmFactory};
+
+#[derive(Debug, thiserror::Error)]
+#[error("meta tx is disabled")]
+struct MetaTxDisabled;
+
+fn ensure_payload_transaction_input_supported<T: SignedTransaction>(tx: &T) -> Result<(), AnyError> {
+    if is_mantle_meta_tx(tx.input()) {
+        tracing::warn!(
+            target: "consensus::engine",
+            "rejected MetaTx in execution payload transaction"
+        );
+        return Err(AnyError::new(MetaTxDisabled));
+    }
+
+    Ok(())
+}
 
 /// Optimism-related EVM configuration.
 #[derive(Debug)]
@@ -230,6 +246,7 @@ where
         Ok(payload.payload.transactions().clone().into_iter().map(|encoded| {
             let tx = TxTy::<Self::Primitives>::decode_2718_exact(encoded.as_ref())
                 .map_err(AnyError::new)?;
+            ensure_payload_transaction_input_supported(&tx)?;
             let signer = tx.try_recover().map_err(AnyError::new)?;
             Ok::<_, AnyError>(WithEncoded::new(encoded, tx.with_signer(signer)))
         }))
@@ -239,18 +256,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, Receipt};
+    use alloy_consensus::{Header, Receipt, SignableTransaction, TxEip1559};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256, U256};
+    use alloy_primitives::{bytes, map::HashMap, Address, Bytes, LogData, Signature, TxKind, B256, U256};
     use op_revm::OpSpecId;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
+    use reth_mantle_forks::MANTLE_META_TX_PREFIX;
     use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET};
-    use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
+    use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use revm::{
         context::CfgEnv,
@@ -264,6 +282,54 @@ mod tests {
 
     fn test_evm_config() -> OpEvmConfig {
         OpEvmConfig::optimism(BASE_MAINNET.clone())
+    }
+
+    fn op_eip1559_with_input(input: Bytes) -> OpTransactionSigned {
+        TxEip1559 {
+            chain_id: BASE_MAINNET.chain().id(),
+            nonce: 0,
+            gas_limit: 21_000,
+            max_fee_per_gas: 1,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::ZERO),
+            input,
+            ..Default::default()
+        }
+        .into_signed(Signature::test_signature())
+        .into()
+    }
+
+    #[test]
+    fn payload_transaction_input_rejects_mantle_meta_tx() {
+        let mut input = MANTLE_META_TX_PREFIX.to_vec();
+        input.push(0xF8);
+        let tx = op_eip1559_with_input(input.into());
+
+        let err = ensure_payload_transaction_input_supported(&tx).unwrap_err();
+
+        assert_eq!(err.to_string(), "meta tx is disabled");
+    }
+
+    #[test]
+    fn payload_transaction_input_allows_non_meta_tx_boundaries() {
+        assert!(ensure_payload_transaction_input_supported(&op_eip1559_with_input(
+            Bytes::default()
+        ))
+        .is_ok());
+
+        assert!(ensure_payload_transaction_input_supported(&op_eip1559_with_input(
+            MANTLE_META_TX_PREFIX.to_vec().into()
+        ))
+        .is_ok());
+
+        let mut wrong_prefix = MANTLE_META_TX_PREFIX;
+        wrong_prefix[31] ^= 0x01;
+        let mut wrong_input = wrong_prefix.to_vec();
+        wrong_input.push(0xF8);
+        assert!(ensure_payload_transaction_input_supported(&op_eip1559_with_input(
+            wrong_input.into()
+        ))
+        .is_ok());
     }
 
     #[test]

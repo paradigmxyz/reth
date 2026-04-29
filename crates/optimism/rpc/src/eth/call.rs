@@ -59,7 +59,6 @@ use alloy_rpc_types_eth::{state::StateOverride, TransactionRequest};
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
-use reth_mantle_forks::is_mantle_meta_tx;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_api::{
@@ -387,12 +386,8 @@ where
 }
 
 fn ensure_estimate_gas_input_supported(request: &TransactionRequest) -> Result<(), EthApiError> {
-    if request.input.input().is_some_and(|input| is_mantle_meta_tx(input)) {
-        return Err(EthApiError::other(jsonrpsee_types::error::ErrorObject::owned(
-            -32000,
-            "meta tx is disabled",
-            None::<()>,
-        )));
+    if let Some(input) = request.input.input() {
+        super::transaction::ensure_transaction_input_supported(input)?;
     }
 
     Ok(())
@@ -461,7 +456,6 @@ mod tests {
     use jsonrpsee_types::error::ErrorObject;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_mantle_forks::MANTLE_META_TX_PREFIX;
-    use reth_rpc_eth_types::EthApiError;
     use reth_rpc_server_types::constants::gas_oracle::{
         CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO,
     };
@@ -473,10 +467,26 @@ mod tests {
 
         let request = TransactionRequest::default().input(input.into());
         let err = ensure_estimate_gas_input_supported(request.as_ref()).unwrap_err();
-        let rpc_error: ErrorObject<'static> = EthApiError::from(err).into();
+        let rpc_error: ErrorObject<'static> = err.into();
 
         assert_eq!(rpc_error.code(), -32000);
         assert_eq!(rpc_error.message(), "meta tx is disabled");
+    }
+
+    #[test]
+    fn test_estimate_gas_allows_non_meta_tx_input_boundaries() {
+        assert!(ensure_estimate_gas_input_supported(TransactionRequest::default().as_ref()).is_ok());
+
+        let exact_prefix =
+            TransactionRequest::default().input(MANTLE_META_TX_PREFIX.to_vec().into());
+        assert!(ensure_estimate_gas_input_supported(exact_prefix.as_ref()).is_ok());
+
+        let mut wrong_prefix = MANTLE_META_TX_PREFIX;
+        wrong_prefix[31] ^= 0x01;
+        let mut wrong_input = wrong_prefix.to_vec();
+        wrong_input.push(0xF8);
+        let wrong_prefix_request = TransactionRequest::default().input(wrong_input.into());
+        assert!(ensure_estimate_gas_input_supported(wrong_prefix_request.as_ref()).is_ok());
     }
 
     #[test]

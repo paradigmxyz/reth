@@ -58,32 +58,32 @@ pub const MANTLE_MAINNET_CHAIN_ID: u64 = 5000;
 /// Mantle Sepolia testnet chain ID
 pub const MANTLE_SEPOLIA_CHAIN_ID: u64 = 5003;
 
-/// 32-byte prefix that identifies a Mantle MetaTx.
+/// 32-byte prefix that identifies a Mantle `MetaTx`.
 ///
 /// The prefix is the ASCII string `"MantleMetaTxPrefix"` (18 bytes) right-aligned
 /// in a 32-byte field (14 leading zero bytes).
 ///
-/// MetaTx was a Mantle-specific gas sponsorship mechanism where a relayer wraps an
+/// `MetaTx` was a Mantle-specific gas sponsorship mechanism where a relayer wraps an
 /// inner transaction with a sponsor signature. The outer EIP-1559 transaction carries
 /// this prefix in its `input` field, followed by the RLP-encoded inner transaction.
 ///
-/// **MetaTx has been permanently disabled since the MantleEverest hardfork
+/// **`MetaTx` has been permanently disabled since the `MantleEverest` hardfork
 /// (mainnet: 2025-03-19, sepolia: 2025-01-16).** All Mantle chains now reject
 /// transactions whose input starts with this prefix.
 ///
 /// Reference: `op-geth/core/types/meta_transaction.go` — `MetaTxPrefix`
 pub const MANTLE_META_TX_PREFIX: [u8; 32] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 8 zero bytes
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,             // 6 zero bytes
-    0x4D, 0x61, 0x6E, 0x74, 0x6C, 0x65,             // "Mantle"
-    0x4D, 0x65, 0x74, 0x61, 0x54, 0x78,             // "MetaTx"
-    0x50, 0x72, 0x65, 0x66, 0x69, 0x78,             // "Prefix"
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 6 zero bytes
+    0x4D, 0x61, 0x6E, 0x74, 0x6C, 0x65, // "Mantle"
+    0x4D, 0x65, 0x74, 0x61, 0x54, 0x78, // "MetaTx"
+    0x50, 0x72, 0x65, 0x66, 0x69, 0x78, // "Prefix"
 ];
 
 /// Returns `true` if `input` starts with the [`MANTLE_META_TX_PREFIX`].
 ///
-/// MetaTx transactions are legacy Mantle gas-sponsorship transactions that have been
-/// permanently disabled since the MantleEverest hardfork. Any transaction whose
+/// `MetaTx` transactions are legacy Mantle gas-sponsorship transactions that have been
+/// permanently disabled since the `MantleEverest` hardfork. Any transaction whose
 /// calldata begins with this 32-byte prefix must be rejected.
 #[inline]
 pub fn is_mantle_meta_tx(input: &[u8]) -> bool {

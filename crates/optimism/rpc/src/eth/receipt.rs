@@ -513,11 +513,10 @@ impl OpReceiptBuilder {
 mod test {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Block, BlockBody, Eip658Value, TxEip7702};
-    use alloy_op_hardforks::{OP_MAINNET_ISTHMUS_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP};
     use alloy_primitives::{hex, Address, Bytes, LogData, Signature, B256, U256};
     use op_alloy_consensus::OpTypedTransaction;
     use op_alloy_network::eip2718::Decodable2718;
-    use reth_mantle_forks::MantleChainHardforks;
+    use reth_mantle_forks::{MantleChainHardforks, MANTLE_MAINNET_ARSIA_TIMESTAMP};
     use reth_optimism_chainspec::{BASE_MAINNET, OP_MAINNET};
     use reth_optimism_forks::OpHardforks;
     use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -1067,7 +1066,7 @@ mod test {
 
         let mantle_hardforks = MantleChainHardforks::mantle_mainnet();
 
-        let receipt = OpReceiptFieldsBuilder::new(OP_MAINNET_JOVIAN_TIMESTAMP, u64::MAX)
+        let receipt = OpReceiptFieldsBuilder::new(MANTLE_MAINNET_ARSIA_TIMESTAMP, u64::MAX)
             .l1_block_info(&mantle_hardforks, &tx, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
@@ -1114,7 +1113,7 @@ mod test {
                 gas_used: 100,
                 next_log_index: 0,
                 meta: TransactionMeta {
-                    timestamp: OP_MAINNET_JOVIAN_TIMESTAMP,
+                    timestamp: MANTLE_MAINNET_ARSIA_TIMESTAMP,
                     ..Default::default()
                 },
             },
@@ -1130,7 +1129,7 @@ mod test {
     }
 
     #[test]
-    fn blob_gas_used_not_included_in_receipt_post_isthmus() {
+    fn blob_gas_used_not_included_in_receipt_pre_jovian() {
         const DA_FOOTPRINT_GAS_SCALAR: u16 = 100;
         let tx = TxEip7702 {
             chain_id: 1u64,
@@ -1168,7 +1167,7 @@ mod test {
                 gas_used: 100,
                 next_log_index: 0,
                 meta: TransactionMeta {
-                    timestamp: OP_MAINNET_ISTHMUS_TIMESTAMP,
+                    timestamp: MANTLE_MAINNET_ARSIA_TIMESTAMP - 1,
                     ..Default::default()
                 },
             },
