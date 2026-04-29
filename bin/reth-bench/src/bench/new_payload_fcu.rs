@@ -611,19 +611,20 @@ fn build_block_request(
 
     let rpc_block = block.clone().into_inner();
 
-    Ok(TestingBuildBlockRequestV1 {
-        parent_block_hash,
-        payload_attributes: PayloadAttributes {
-            timestamp: block.header.timestamp,
-            prev_randao: block.header.mix_hash.unwrap_or_default(),
-            suggested_fee_recipient: block.header.beneficiary,
-            withdrawals: rpc_block.withdrawals.map(|withdrawals| withdrawals.into_inner()),
-            parent_beacon_block_root: block.header.parent_beacon_block_root,
-            slot_number: block.header.slot_number,
-        },
-        transactions,
-        extra_data: Some(block.header.extra_data.clone()),
-    })
+    let mut request = TestingBuildBlockRequestV1::default();
+    request.parent_block_hash = parent_block_hash;
+    request.payload_attributes = PayloadAttributes {
+        timestamp: block.header.timestamp,
+        prev_randao: block.header.mix_hash.unwrap_or_default(),
+        suggested_fee_recipient: block.header.beneficiary,
+        withdrawals: rpc_block.withdrawals.map(|withdrawals| withdrawals.into_inner()),
+        parent_beacon_block_root: block.header.parent_beacon_block_root,
+        slot_number: block.header.slot_number,
+    };
+    request.transactions = transactions;
+    request.extra_data = Some(block.header.extra_data.clone());
+
+    Ok(request)
 }
 
 fn parse_reorg_depth(value: &str) -> Result<usize, String> {

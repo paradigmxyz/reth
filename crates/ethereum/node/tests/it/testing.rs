@@ -59,12 +59,11 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
                 slot_number: None,
             };
 
-            let request = TestingBuildBlockRequestV1 {
-                parent_block_hash,
-                payload_attributes,
-                transactions: vec![],
-                extra_data: None,
-            };
+            let mut request = TestingBuildBlockRequestV1::default();
+            request.parent_block_hash = parent_block_hash;
+            request.payload_attributes = payload_attributes;
+            request.transactions = vec![];
+            request.extra_data = None;
 
             tokio::spawn(async move {
                 let res: eyre::Result<ExecutionPayloadEnvelopeV4> =

@@ -224,12 +224,11 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         slot_number: None,
     };
 
-    let request = TestingBuildBlockRequestV1 {
-        parent_block_hash: genesis_hash,
-        payload_attributes,
-        transactions: vec![raw_tx],
-        extra_data: None,
-    };
+    let mut request = TestingBuildBlockRequestV1::default();
+    request.parent_block_hash = genesis_hash;
+    request.payload_attributes = payload_attributes;
+    request.transactions = vec![raw_tx];
+    request.extra_data = None;
 
     let envelope = node.testing_build_block_v1(request).await?;
 
