@@ -2048,6 +2048,13 @@ impl<'a> RocksDBBatch<'a> {
                 delete_shard(self, key)?;
                 deleted = true;
             } else {
+                // Shards are sorted, so if the first surviving block is already above the prune
+                // boundary we can keep the whole shard without rebuilding its IntegerList.
+                if block_list.iter().next().is_some_and(|block| block > to_block) {
+                    last_remaining = Some((key, block_list));
+                    continue;
+                }
+
                 let original_len = block_list.len();
                 let filtered =
                     BlockNumberList::new_pre_sorted(block_list.iter().filter(|&b| b > to_block));
@@ -4289,6 +4296,44 @@ mod tests {
 
         let shards3 = provider.account_history_shards(addr3).unwrap();
         assert_eq!(shards3[0].1.iter().collect::<Vec<_>>(), vec![40]);
+    }
+
+    #[test]
+    fn test_prune_account_history_batch_preserves_untouched_tail_shard() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x11; 20]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, 30),
+                &BlockNumberList::new_pre_sorted([10, 20, 30]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &BlockNumberList::new_pre_sorted([40, 50]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_account_history_batch(&[(address, 15)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 1);
+        assert_eq!(outcomes.deleted, 0);
+        assert_eq!(outcomes.unchanged, 0);
+
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].0.highest_block_number, 30);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), vec![20, 30]);
+        assert_eq!(shards[1].0.highest_block_number, u64::MAX);
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![40, 50]);
     }
 
     #[test]
