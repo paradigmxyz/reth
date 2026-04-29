@@ -737,23 +737,23 @@ where
                 is_multi_block_range &&
                 all_logs.len() > max_logs_per_response
             {
-                let (retry_from_block, retry_to_block) = if num_hash.number == from_block {
-                    (from_block, from_block)
+                let retry_to_block = if num_hash.number == from_block {
+                    from_block
                 } else {
-                    (from_block, num_hash.number - 1)
+                    num_hash.number - 1
                 };
 
                 debug!(
                     target: "rpc::eth::filter",
                     logs_found = all_logs.len(),
                     max_logs_per_response,
-                    from_block = retry_from_block,
+                    from_block,
                     to_block = retry_to_block,
                     "Query exceeded max logs per response limit"
                 );
                 return Err(EthFilterError::QueryExceedsMaxResults {
                     max_logs: max_logs_per_response,
-                    from_block: retry_from_block,
+                    from_block,
                     to_block: retry_to_block,
                 });
             }
