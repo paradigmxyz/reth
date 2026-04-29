@@ -24,6 +24,7 @@ reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
+reth-engine-snap.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
 reth-evm.workspace = true
@@ -54,7 +55,6 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-tokio-util.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
-reth-trie = { workspace = true }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-basic-payload-builder.workspace = true
 reth-node-ethstats.workspace = true
@@ -62,7 +62,6 @@ reth-node-ethstats.workspace = true
 ## ethereum
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 alloy-provider.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-eips = { workspace = true, features = ["kzg"] }

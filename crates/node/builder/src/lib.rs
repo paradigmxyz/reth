@@ -47,9 +47,6 @@ pub mod setup;
 pub mod aliases;
 pub use aliases::*;
 
-/// Snap protocol state provider for serving state via MDBX cursors.
-pub mod snap_provider;
-
 /// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;
 

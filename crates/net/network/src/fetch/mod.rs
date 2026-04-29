@@ -12,8 +12,8 @@ use reth_eth_wire::{
     GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
 };
 use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
-    SnapProtocolMessage,
+    GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+    GetStorageRangesMessage, SnapProtocolMessage, SnapVersion,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -351,10 +351,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 self.inflight_snap_requests.insert(peer_id, inflight);
                 BlockRequest::Snap(SnapProtocolMessage::GetByteCodes(request))
             }
-            DownloadRequest::GetTrieNodes { request, response, .. } => {
+            DownloadRequest::GetSnapBlockAccessLists { request, response, .. } => {
                 let inflight = Request { request: (), response };
                 self.inflight_snap_requests.insert(peer_id, inflight);
-                BlockRequest::Snap(SnapProtocolMessage::GetTrieNodes(request))
+                BlockRequest::Snap(SnapProtocolMessage::GetBlockAccessLists(request))
             }
         }
     }
@@ -572,6 +572,7 @@ impl Peer {
     fn satisfies(&self, requirement: &BestPeerRequirements) -> bool {
         match requirement {
             BestPeerRequirements::EthVersion(ver) => self.capabilities.supports_eth_at_least(ver),
+            BestPeerRequirements::SnapVersion(ver) => self.capabilities.supports_snap_version(*ver),
             BestPeerRequirements::None |
             BestPeerRequirements::FullBlock |
             BestPeerRequirements::FullBlockRange(_) => true,
@@ -628,7 +629,9 @@ impl Peer {
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
             // Version-based filtering happens in `next_best_peer`, so by the time we get here
             // both peers already satisfy the version requirement.
-            BestPeerRequirements::None | BestPeerRequirements::EthVersion(_) => false,
+            BestPeerRequirements::None |
+            BestPeerRequirements::EthVersion(_) |
+            BestPeerRequirements::SnapVersion(_) => false,
         }
     }
 }
@@ -732,9 +735,9 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
         priority: Priority,
     },
-    /// Request trie nodes via snap protocol
-    GetTrieNodes {
-        request: GetTrieNodesMessage,
+    /// Request block access lists via snap/2 protocol
+    GetSnapBlockAccessLists {
+        request: GetBlockAccessListsMessage,
         response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
         priority: Priority,
     },
@@ -753,7 +756,7 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetAccountRange { .. } |
             Self::GetStorageRanges { .. } |
             Self::GetByteCodes { .. } |
-            Self::GetTrieNodes { .. } => PeerState::GetSnap,
+            Self::GetSnapBlockAccessLists { .. } => PeerState::GetSnap,
         }
     }
 
@@ -767,7 +770,7 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetAccountRange { priority, .. } |
             Self::GetStorageRanges { priority, .. } |
             Self::GetByteCodes { priority, .. } |
-            Self::GetTrieNodes { priority, .. } => priority,
+            Self::GetSnapBlockAccessLists { priority, .. } => priority,
         }
     }
 
@@ -791,18 +794,20 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetAccountRange { response, .. } => response.send(Err(err)).ok(),
             Self::GetStorageRanges { response, .. } => response.send(Err(err)).ok(),
             Self::GetByteCodes { response, .. } => response.send(Err(err)).ok(),
-            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
+            Self::GetSnapBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
     /// Returns the best peer requirements for this request.
     fn best_peer_requirements(&self) -> BestPeerRequirements {
         match self {
-            Self::GetBlockHeaders { .. } |
+            Self::GetBlockHeaders { .. } => BestPeerRequirements::None,
             Self::GetAccountRange { .. } |
             Self::GetStorageRanges { .. } |
             Self::GetByteCodes { .. } |
-            Self::GetTrieNodes { .. } => BestPeerRequirements::None,
+            Self::GetSnapBlockAccessLists { .. } => {
+                BestPeerRequirements::SnapVersion(SnapVersion::V2)
+            }
             Self::GetBlockAccessLists { .. } => BestPeerRequirements::EthVersion(EthVersion::Eth71),
             Self::GetBlockBodies { range_hint, .. } => {
                 if let Some(range) = range_hint {
@@ -848,6 +853,8 @@ enum BestPeerRequirements {
     FullBlock,
     /// Peer must support at least this eth protocol version.
     EthVersion(EthVersion),
+    /// Peer must advertise this snap protocol version.
+    SnapVersion(SnapVersion),
 }
 
 #[cfg(test)]

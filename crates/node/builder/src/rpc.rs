@@ -43,8 +43,8 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_storage_api::BalProvider;
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_storage_api::BalProvider;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{

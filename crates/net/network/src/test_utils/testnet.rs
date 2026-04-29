@@ -472,8 +472,7 @@ where
         let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
-        let request_handler =
-            EthRequestHandler::new(self.client.clone(), peers, rx);
+        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
         self.request_handler = Some(request_handler);
     }
 

@@ -36,7 +36,6 @@ mod network;
 
 /// Snap sync utilities for E2E tests.
 
-
 /// Helper for rpc operations
 mod rpc;
 

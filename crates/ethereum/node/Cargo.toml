@@ -58,6 +58,7 @@ reth-config.workspace = true
 reth-db.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-exex.workspace = true
+reth-engine-snap = { workspace = true, features = ["test-utils"] }
 reth-node-core.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-prune-types.workspace = true

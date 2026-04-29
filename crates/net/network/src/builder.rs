@@ -78,7 +78,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
 
     /// Creates a new [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler) and wires
     /// it to the network. Returns the handler which the caller must spawn.
-    pub fn snap_request_handler<S: crate::snap_requests::SnapStateProvider>(
+    pub fn snap_request_handler<S: reth_network_p2p::snap::server::SnapStateProvider>(
         &mut self,
         snap_provider: S,
     ) -> crate::snap_requests::SnapRequestHandler<S> {

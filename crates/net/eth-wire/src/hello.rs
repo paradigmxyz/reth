@@ -198,14 +198,17 @@ impl HelloMessageBuilder {
     /// Unset fields will be set to their default values:
     /// - `protocol_version`: [`ProtocolVersion::V5`]
     /// - `client_version`: [`RETH_CLIENT_VERSION`]
-    /// - `capabilities`: All [`EthVersion`]
+    /// - `capabilities`: All [`EthVersion`] and snap/2
     pub fn build(self) -> HelloMessageWithProtocols {
         let Self { protocol_version, client_version, protocols, port, id } = self;
         HelloMessageWithProtocols {
             protocol_version: protocol_version.unwrap_or_default(),
             client_version: client_version.unwrap_or_else(|| RETH_CLIENT_VERSION.to_string()),
             protocols: protocols.unwrap_or_else(|| {
-                EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect()
+                let mut protocols =
+                    EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect::<Vec<_>>();
+                protocols.push(Protocol::snap_2());
+                protocols
             }),
             port: port.unwrap_or(DEFAULT_TCP_PORT),
             id,
@@ -274,6 +277,9 @@ mod tests {
             .iter()
             .any(|p| p.cap.name == "eth" && p.cap.version == EthVersion::Eth69 as usize);
         assert!(has_eth69, "Default protocols should include Eth69");
+
+        let has_snap2 = hello.protocols.iter().any(|p| p.cap == Capability::snap_2());
+        assert!(has_snap2, "Default protocols should include snap/2");
     }
 
     #[test]

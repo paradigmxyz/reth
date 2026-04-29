@@ -58,9 +58,9 @@ pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
+mod snap;
 #[cfg(test)]
 mod tests;
-mod snap;
 mod trie_updates;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -315,11 +315,8 @@ where
     building_payload: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
-    /// Sender for forwarding engine events to the snap sync orchestrator.
-    /// `Some` when snap sync is active.
-    snap_events_tx: Option<tokio::sync::mpsc::UnboundedSender<reth_engine_snap::SnapSyncEvent>>,
-    /// Whether this is a fresh node (no blocks), eligible for snap sync.
-    fresh_node: bool,
+    /// Snap sync state and event forwarding.
+    snap: snap::SnapTreeState,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -347,8 +344,7 @@ where
             .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("runtime", &self.runtime)
-            .field("snap_events_tx", &self.snap_events_tx.is_some())
-            .field("fresh_node", &self.fresh_node)
+            .field("snap", &self.snap)
             .finish()
     }
 }
@@ -414,8 +410,7 @@ where
             execution_timing_stats: HashMap::new(),
             building_payload: false,
             runtime,
-            snap_events_tx: None,
-            fresh_node: false,
+            snap: snap::SnapTreeState::new(false),
         }
     }
 
@@ -474,7 +469,7 @@ where
             changeset_cache,
             runtime,
         );
-        task.fresh_node = fresh_node;
+        task.snap.set_fresh_node(fresh_node);
 
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
@@ -1354,7 +1349,7 @@ where
         state: ForkchoiceState,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         // For fresh nodes, trigger snap sync instead of downloading missing blocks
-        if self.fresh_node && self.backfill_sync_state.is_idle() {
+        if self.snap.is_fresh_node() && self.backfill_sync_state.is_idle() {
             debug!(target: "engine::tree", "Fresh node detected, triggering snap sync");
             return Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
                 PayloadStatusEnum::Syncing,
@@ -1591,7 +1586,7 @@ where
                 FromOrchestrator::SnapSyncStarted(events_tx) => {
                     debug!(target: "engine::tree", "received snap sync started event");
                     self.backfill_sync_state = BackfillSyncState::Active;
-                    self.snap_events_tx = Some(events_tx);
+                    self.snap.start(events_tx);
 
                     // Replay latest known head if we can resolve it
                     if let Some(state) = self.state.forkchoice_state_tracker.sync_target_state() {
@@ -2846,7 +2841,7 @@ where
             return Ok(None)
         }
 
-        if !self.backfill_sync_state.is_idle() {
+        if self.snap.is_active() {
             // During snap sync, forward downloaded blocks to the orchestrator
             // for header persistence and BAL resolution
             self.forward_downloaded_block_to_snap(&block);

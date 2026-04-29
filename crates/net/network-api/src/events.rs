@@ -3,13 +3,13 @@
 use reth_eth_wire_types::{
     message::RequestPair,
     snap::{
-        GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
-        SnapProtocolMessage,
+        GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+        GetStorageRangesMessage, SnapProtocolMessage,
     },
     BlockAccessLists, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
     EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
-    PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
+    PooledTransactions, Receipts, Receipts69, Receipts70, SnapVersion, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::{
@@ -296,13 +296,13 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for bytecodes.
         response: oneshot::Sender<RequestResult<SnapResponse>>,
     },
-    /// Requests trie nodes from the peer (snap protocol).
+    /// Requests block access lists from the peer (snap/2 protocol).
     ///
     /// The response should be sent through the channel.
-    GetTrieNodes {
-        /// The request for trie nodes.
-        request: GetTrieNodesMessage,
-        /// The channel to send the response for trie nodes.
+    GetSnapBlockAccessLists {
+        /// The snap/2 request for block access lists.
+        request: GetBlockAccessListsMessage,
+        /// The channel to send the response for block access lists.
         response: oneshot::Sender<RequestResult<SnapResponse>>,
     },
 }
@@ -329,7 +329,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetAccountRange { response, .. } |
             Self::GetStorageRanges { response, .. } |
             Self::GetByteCodes { response, .. } |
-            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
+            Self::GetSnapBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -349,8 +349,20 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetAccountRange { .. } |
                 Self::GetStorageRanges { .. } |
                 Self::GetByteCodes { .. } |
-                Self::GetTrieNodes { .. }
+                Self::GetSnapBlockAccessLists { .. }
         )
+    }
+
+    /// Returns the required snap protocol version for snap requests.
+    #[inline]
+    pub const fn required_snap_version(&self) -> Option<SnapVersion> {
+        match self {
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetSnapBlockAccessLists { .. } => Some(SnapVersion::V2),
+            _ => None,
+        }
     }
 
     /// Creates the [`SnapProtocolMessage`] for snap request types.
@@ -384,11 +396,10 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
                     response_bytes: request.response_bytes,
                 })
             }
-            Self::GetTrieNodes { request, .. } => {
-                SnapProtocolMessage::GetTrieNodes(GetTrieNodesMessage {
+            Self::GetSnapBlockAccessLists { request, .. } => {
+                SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
                     request_id,
-                    root_hash: request.root_hash,
-                    paths: request.paths.clone(),
+                    block_hashes: request.block_hashes.clone(),
                     response_bytes: request.response_bytes,
                 })
             }
@@ -429,7 +440,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetAccountRange { .. } |
             Self::GetStorageRanges { .. } |
             Self::GetByteCodes { .. } |
-            Self::GetTrieNodes { .. } => {
+            Self::GetSnapBlockAccessLists { .. } => {
                 unreachable!("snap requests use create_snap_request_message")
             }
         }

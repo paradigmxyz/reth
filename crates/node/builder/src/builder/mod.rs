@@ -34,7 +34,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
-    BalProvider, ChainSpecProvider, FullProvider,
+    ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
@@ -917,9 +917,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
             .request_handler(self.provider().clone());
 
-        let snap = net_builder.snap_request_handler(crate::snap_provider::ProviderSnapState::new(
-            self.provider().clone(),
-        ));
+        let snap = net_builder.snap_request_handler(
+            reth_engine_snap::serve::ProviderSnapState::new(self.provider().clone()),
+        );
 
         let (handle, network, txpool, eth) = net_builder.split_with_handle();
 

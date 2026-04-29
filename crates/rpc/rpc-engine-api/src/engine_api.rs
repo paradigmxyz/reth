@@ -2,7 +2,6 @@ use crate::{
     bal_cache::BalCache, capabilities::EngineCapabilities, metrics::EngineApiMetrics,
     EngineApiError, EngineApiResult,
 };
-use reth_storage_api::BalStoreHandle;
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
@@ -30,7 +29,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{BalStoreHandle, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -509,7 +508,8 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::BuiltPayload> {
-        let payload = self.inner
+        let payload = self
+            .inner
             .payload_store
             .resolve(payload_id)
             .await

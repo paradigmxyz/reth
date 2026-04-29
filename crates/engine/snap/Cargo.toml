@@ -13,12 +13,18 @@ workspace = true
 [dependencies]
 # reth
 reth-db-api.workspace = true
+reth-config.workspace = true
+reth-consensus.workspace = true
+reth-downloaders.workspace = true
 reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-stages.workspace = true
+reth-stages-api.workspace = true
 reth-stages-types.workspace = true
 reth-storage-api.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 
@@ -30,9 +36,10 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # async
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 
 # misc
+futures.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
@@ -41,3 +48,4 @@ alloy-primitives = { workspace = true, features = ["rand"] }
 
 [features]
 default = []
+test-utils = []

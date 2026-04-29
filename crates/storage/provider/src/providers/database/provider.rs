@@ -900,18 +900,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         Ok(())
     }
-
-    /// Writes bytecodes to MDBX.
-    fn write_bytecodes(
-        &self,
-        bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
-    ) -> ProviderResult<()> {
-        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in bytecodes {
-            bytecodes_cursor.upsert(hash, &bytecode)?;
-        }
-        Ok(())
-    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
@@ -2718,6 +2706,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
+    fn write_bytecodes(
+        &self,
+        bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
+    ) -> ProviderResult<()> {
+        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
+        for (hash, bytecode) in bytecodes {
+            bytecodes_cursor.upsert(hash, &bytecode)?;
+        }
+        Ok(())
+    }
+
     /// Remove the last N blocks of state.
     ///
     /// The latest state will be unwound
@@ -3938,7 +3937,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
-        U256,
+        Bytes, U256,
     };
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
@@ -3953,6 +3952,20 @@ mod tests {
     use revm_database::BundleState;
     use revm_state::AccountInfo;
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn write_bytecodes_writes_to_db() {
+        let factory = create_test_provider_factory();
+        let code_hash = B256::with_last_byte(1);
+        let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_bytecodes([(code_hash, bytecode.clone())]).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.tx_ref().get::<tables::Bytecodes>(code_hash).unwrap(), Some(bytecode));
+    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {

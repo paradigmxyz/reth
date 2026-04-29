@@ -220,7 +220,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Creates a [`SnapRequestHandler`](crate::snap_requests::SnapRequestHandler) and wires it to
     /// the network manager, returning the handler to be spawned by the caller.
-    pub fn snap_request_handler<S: crate::snap_requests::SnapStateProvider>(
+    pub fn snap_request_handler<S: reth_network_p2p::snap::server::SnapStateProvider>(
         &mut self,
         snap_provider: S,
     ) -> crate::snap_requests::SnapRequestHandler<S> {
@@ -628,13 +628,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 })
             }
-            PeerRequest::GetTrieNodes { request, response } => {
-                self.delegate_snap_request(IncomingSnapRequest::GetTrieNodes {
+            PeerRequest::GetSnapBlockAccessLists { request, response } => self
+                .delegate_snap_request(IncomingSnapRequest::GetBlockAccessLists {
                     peer_id,
                     request,
                     response,
-                })
-            }
+                }),
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,

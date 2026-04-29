@@ -1,16 +1,15 @@
-//! MDBX read/write helpers for hashed state, bytecodes, and RLP decoding utilities.
+//! MDBX read/write helpers for hashed state and bytecodes.
 
 use crate::SnapSyncError;
-use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::Decodable;
+use alloy_primitives::{map::B256Map, Bytes, B256, U256};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives_traits::{Account, Bytecode, StorageEntry};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::DatabaseProviderFactory;
-use reth_storage_api::DBProvider;
+use reth_storage_api::{DBProvider, StateWriter};
+use reth_trie::{HashedPostStateSorted, HashedStorageSorted};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // MDBX write helpers
@@ -30,6 +29,7 @@ where
         tx.clear::<tables::HashedStorages>().map_err(db_err)?;
         tx.clear::<tables::AccountsTrie>().map_err(db_err)?;
         tx.clear::<tables::StoragesTrie>().map_err(db_err)?;
+        tx.clear::<tables::Bytecodes>().map_err(db_err)?;
     }
     provider.commit().map_err(db_err)?;
     Ok(())
@@ -57,18 +57,18 @@ pub(crate) fn write_hashed_accounts<F>(
 ) -> Result<(), SnapSyncError>
 where
     F: DatabaseProviderFactory,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
-    let provider = factory.database_provider_rw().map_err(db_err)?;
-    {
-        let tx = provider.tx_ref();
-        for (hash, account) in accounts {
-            tx.put::<tables::HashedAccounts>(*hash, *account).map_err(db_err)?;
-        }
+    let mut accounts_by_hash = B256Map::default();
+    for (hash, account) in accounts {
+        accounts_by_hash.insert(*hash, Some(*account));
     }
-    provider.commit().map_err(db_err)?;
-    Ok(())
+
+    let mut accounts: Vec<_> = accounts_by_hash.into_iter().collect();
+    accounts.sort_by_key(|(hash, _)| *hash);
+
+    write_hashed_state(factory, HashedPostStateSorted::new(accounts, B256Map::default()))
 }
 
 /// Writes a batch of hashed storage entries.
@@ -78,17 +78,37 @@ pub(crate) fn write_hashed_storages<F>(
 ) -> Result<(), SnapSyncError>
 where
     F: DatabaseProviderFactory,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
+    <F::ProviderRW as DBProvider>::Tx: DbTxMut,
+{
+    let mut slots_by_account: B256Map<B256Map<U256>> = B256Map::default();
+    for &(account_hash, slot_hash, value) in entries {
+        slots_by_account.entry(account_hash).or_default().insert(slot_hash, value);
+    }
+
+    let storages = slots_by_account
+        .into_iter()
+        .map(|(account_hash, slots)| {
+            let mut storage_slots: Vec<_> = slots.into_iter().collect();
+            storage_slots.sort_by_key(|(slot_hash, _)| *slot_hash);
+            (account_hash, HashedStorageSorted { storage_slots, wiped: false })
+        })
+        .collect();
+
+    write_hashed_state(factory, HashedPostStateSorted::new(Vec::new(), storages))
+}
+
+fn write_hashed_state<F>(
+    factory: &F,
+    hashed_state: HashedPostStateSorted,
+) -> Result<(), SnapSyncError>
+where
+    F: DatabaseProviderFactory,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     let provider = factory.database_provider_rw().map_err(db_err)?;
-    {
-        let tx = provider.tx_ref();
-        for &(account_hash, slot_hash, value) in entries {
-            tx.put::<tables::HashedStorages>(account_hash, StorageEntry { key: slot_hash, value })
-                .map_err(db_err)?;
-        }
-    }
+    provider.write_hashed_state(&hashed_state).map_err(db_err)?;
     provider.commit().map_err(db_err)?;
     Ok(())
 }
@@ -97,54 +117,20 @@ where
 pub(crate) fn write_bytecodes<F>(factory: &F, codes: &[(B256, Bytes)]) -> Result<(), SnapSyncError>
 where
     F: DatabaseProviderFactory,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     let provider = factory.database_provider_rw().map_err(db_err)?;
-    {
-        let tx = provider.tx_ref();
-        for (hash, code) in codes {
-            if !code.is_empty() {
-                tx.put::<tables::Bytecodes>(*hash, Bytecode::new_raw(code.clone()))
-                    .map_err(db_err)?;
-            }
-        }
-    }
+    provider
+        .write_bytecodes(
+            codes
+                .iter()
+                .filter(|(_, code)| !code.is_empty())
+                .map(|(hash, code)| (*hash, Bytecode::new_raw(code.clone()))),
+        )
+        .map_err(db_err)?;
     provider.commit().map_err(db_err)?;
     Ok(())
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// RLP decoding helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-/// Decode a slim-format account from RLP bytes.
-pub(crate) fn decode_slim_account(data: &[u8]) -> Result<Account, SnapSyncError> {
-    let mut buf = data;
-    let header = alloy_rlp::Header::decode(&mut buf)
-        .map_err(|e| SnapSyncError::RlpDecode(format!("RLP error: {e}")))?;
-    if !header.list {
-        return Err(SnapSyncError::RlpDecode("expected RLP list for slim account".into()));
-    }
-
-    let nonce =
-        u64::decode(&mut buf).map_err(|e| SnapSyncError::RlpDecode(format!("RLP error: {e}")))?;
-    let balance =
-        U256::decode(&mut buf).map_err(|e| SnapSyncError::RlpDecode(format!("RLP error: {e}")))?;
-    let _storage_root =
-        B256::decode(&mut buf).map_err(|e| SnapSyncError::RlpDecode(format!("RLP error: {e}")))?;
-    let code_hash =
-        B256::decode(&mut buf).map_err(|e| SnapSyncError::RlpDecode(format!("RLP error: {e}")))?;
-
-    let bytecode_hash = if code_hash == KECCAK_EMPTY { None } else { Some(code_hash) };
-
-    Ok(Account { nonce, balance, bytecode_hash })
-}
-
-/// Decode a storage value from RLP bytes (RLP-encoded [`U256`]).
-pub(crate) fn decode_storage_value(data: &[u8]) -> Result<U256, SnapSyncError> {
-    let mut buf = data;
-    U256::decode(&mut buf).map_err(|e| SnapSyncError::RlpDecode(format!("RLP error: {e}")))
 }
 
 /// Increment a [`B256`] by 1 for pagination.
@@ -194,67 +180,5 @@ mod tests {
         let hash = B256::from([0xff; 32]);
         let next = increment_b256(hash);
         assert_eq!(next, B256::ZERO);
-    }
-
-    #[test]
-    fn test_decode_slim_account_basic() {
-        use alloy_rlp::Encodable;
-
-        let nonce: u64 = 1;
-        let balance = U256::from(100);
-        let storage_root = B256::ZERO;
-        let code_hash = KECCAK_EMPTY;
-
-        let mut payload = Vec::new();
-        nonce.encode(&mut payload);
-        balance.encode(&mut payload);
-        storage_root.encode(&mut payload);
-        code_hash.encode(&mut payload);
-
-        let mut buf = Vec::new();
-        alloy_rlp::Header { list: true, payload_length: payload.len() }.encode(&mut buf);
-        buf.extend_from_slice(&payload);
-
-        let account = decode_slim_account(&buf).unwrap();
-        assert_eq!(account.nonce, 1);
-        assert_eq!(account.balance, U256::from(100));
-        assert_eq!(account.bytecode_hash, None);
-    }
-
-    #[test]
-    fn test_decode_slim_account_with_code() {
-        use alloy_rlp::Encodable;
-
-        let nonce: u64 = 5;
-        let balance = U256::from(1000);
-        let storage_root = B256::ZERO;
-        let code_hash = B256::from([0xab; 32]);
-
-        let mut payload = Vec::new();
-        nonce.encode(&mut payload);
-        balance.encode(&mut payload);
-        storage_root.encode(&mut payload);
-        code_hash.encode(&mut payload);
-
-        let mut buf = Vec::new();
-        alloy_rlp::Header { list: true, payload_length: payload.len() }.encode(&mut buf);
-        buf.extend_from_slice(&payload);
-
-        let account = decode_slim_account(&buf).unwrap();
-        assert_eq!(account.nonce, 5);
-        assert_eq!(account.balance, U256::from(1000));
-        assert_eq!(account.bytecode_hash, Some(code_hash));
-    }
-
-    #[test]
-    fn test_decode_storage_value() {
-        use alloy_rlp::Encodable;
-
-        let value = U256::from(42);
-        let mut buf = Vec::new();
-        value.encode(&mut buf);
-
-        let decoded = decode_storage_value(&buf).unwrap();
-        assert_eq!(decoded, U256::from(42));
     }
 }

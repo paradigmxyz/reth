@@ -5,10 +5,12 @@
 //! chain advancement in real-time via events forwarded from the engine.
 
 pub mod bal;
+pub mod controller;
 pub mod download;
 pub mod finalize;
 pub mod orchestrator;
 pub mod pivot;
+pub mod serve;
 pub mod storage;
 
 use alloy_primitives::{Bytes, B256};
@@ -19,6 +21,9 @@ use alloy_primitives::{Bytes, B256};
 /// HEAD−N, so this must be large enough that the target block's hashed state
 /// is always fully persisted to MDBX (the engine keeps ~2 blocks in memory).
 pub const PIVOT_OFFSET: u64 = 16;
+
+/// Soft response size limit for snap protocol requests (2 MiB).
+pub const SNAP_RESPONSE_BYTES_LIMIT: u64 = 2 * 1024 * 1024;
 
 /// Events sent from the engine tree to the snap sync orchestrator.
 #[derive(Debug, Clone)]

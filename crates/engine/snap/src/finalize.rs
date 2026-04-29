@@ -2,7 +2,10 @@
 
 use crate::{storage::db_err, SnapSyncError};
 use reth_db_api::{tables, transaction::DbTxMut};
-use reth_provider::DatabaseProviderFactory;
+use reth_provider::{
+    DatabaseProviderFactory, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+};
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::DBProvider;
 
 /// Writes stage checkpoints for all stages that snap sync satisfies.
@@ -15,12 +18,9 @@ pub(crate) fn write_snap_stage_checkpoints<F>(
 ) -> Result<(), SnapSyncError>
 where
     F: DatabaseProviderFactory,
-    F::ProviderRW: DBProvider + reth_provider::StaticFileProviderFactory,
+    F::ProviderRW: DBProvider + StaticFileProviderFactory,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
-    use reth_provider::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
-    use reth_stages_types::{StageCheckpoint, StageId};
-
     let checkpoint = StageCheckpoint::new(target_block);
     let stages = [
         StageId::Bodies,
@@ -72,7 +72,7 @@ where
 pub(crate) fn finalize_snap_sync<F>(factory: &F, target_block: u64) -> Result<(), SnapSyncError>
 where
     F: DatabaseProviderFactory,
-    F::ProviderRW: DBProvider + reth_provider::StaticFileProviderFactory,
+    F::ProviderRW: DBProvider + StaticFileProviderFactory,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     write_snap_stage_checkpoints(factory, target_block)

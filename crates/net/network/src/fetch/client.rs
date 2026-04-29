@@ -5,7 +5,8 @@ use alloy_primitives::B256;
 use futures::{future, future::Either};
 use reth_eth_wire::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
+    GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+    GetStorageRangesMessage,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -193,19 +194,15 @@ impl<N: NetworkPrimitives> SnapClient for FetchClient<N> {
         }
     }
 
-    fn get_trie_nodes(&self, request: GetTrieNodesMessage) -> Self::Output {
-        self.get_trie_nodes_with_priority(request, Priority::Normal)
-    }
-
-    fn get_trie_nodes_with_priority(
+    fn get_snap_block_access_lists_with_priority(
         &self,
-        request: GetTrieNodesMessage,
+        request: GetBlockAccessListsMessage,
         priority: Priority,
     ) -> Self::Output {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx
-            .send(DownloadRequest::GetTrieNodes { request, response, priority })
+            .send(DownloadRequest::GetSnapBlockAccessLists { request, response, priority })
             .is_ok()
         {
             Box::pin(FlattenedResponse::from(rx))

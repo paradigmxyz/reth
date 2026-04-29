@@ -247,7 +247,7 @@ where
 {
     /// Create a new eth and snap protocol stream
     const fn new(eth_version: EthVersion) -> Self {
-        Self::new_with_snap_version(eth_version, SnapVersion::V1)
+        Self::new_with_snap_version(eth_version, SnapVersion::V2)
     }
 
     /// Create a new eth and snap protocol stream with an explicit snap version.
@@ -257,7 +257,7 @@ where
 
     /// Create a new eth and snap protocol stream with a custom max message size.
     const fn with_max_message_size(eth_version: EthVersion, max_message_size: usize) -> Self {
-        Self::with_max_message_size_and_snap_version(eth_version, SnapVersion::V1, max_message_size)
+        Self::with_max_message_size_and_snap_version(eth_version, SnapVersion::V2, max_message_size)
     }
 
     /// Create a new eth and snap protocol stream with a custom max message size and snap version.
@@ -327,7 +327,11 @@ where
             let adjusted_message_id = message_id - EthMessageID::message_count(self.eth_version);
             let mut buf = &bytes[1..];
 
-            match SnapProtocolMessage::decode(adjusted_message_id, &mut buf) {
+            match SnapProtocolMessage::decode_with_version(
+                self.snap_version,
+                adjusted_message_id,
+                &mut buf,
+            ) {
                 Ok(snap_msg) => Ok(EthSnapMessage::Snap(snap_msg)),
                 Err(err) => Err(EthSnapStreamError::Rlp(err)),
             }

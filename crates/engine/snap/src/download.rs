@@ -7,25 +7,20 @@
 //! regardless of total state size.
 
 use crate::{
-    storage::{
-        decode_slim_account, decode_storage_value, increment_b256, write_bytecodes,
-        write_hashed_accounts, write_hashed_storages,
-    },
-    SnapSyncError,
+    storage::{increment_b256, write_bytecodes, write_hashed_accounts, write_hashed_storages},
+    SnapSyncError, SNAP_RESPONSE_BYTES_LIMIT,
 };
 use alloy_primitives::B256;
 use reth_db_api::transaction::DbTxMut;
 use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage,
+    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, SlimAccount,
 };
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
+use reth_primitives_traits::Account;
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
-use reth_storage_api::DBProvider;
+use reth_storage_api::{DBProvider, StateWriter};
 use std::collections::HashSet;
 use tracing::info;
-
-/// Soft response size limit per snap request (2 MiB).
-const RESPONSE_BYTES_LIMIT: u64 = 2 * 1024 * 1024;
 
 /// Maximum number of account hashes per storage range request.
 const STORAGE_BATCH_SIZE: usize = 20;
@@ -75,7 +70,7 @@ where
     C: SnapClient + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
     F::Provider: DBProvider + HeaderProvider,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     let mut request_id: u64 = 0;
@@ -94,7 +89,7 @@ where
             root_hash,
             starting_hash: cursor,
             limit_hash: MAX_HASH,
-            response_bytes: RESPONSE_BYTES_LIMIT,
+            response_bytes: SNAP_RESPONSE_BYTES_LIMIT,
         };
 
         let response = client.get_account_range(request).await.map_err(|e| {
@@ -120,7 +115,9 @@ where
         let mut batch_code_hashes = HashSet::new();
 
         for account_data in &msg.accounts {
-            let account = decode_slim_account(&account_data.body)?;
+            let account = alloy_rlp::decode_exact::<SlimAccount>(&account_data.body)
+                .map(Account::from)
+                .map_err(|e| SnapSyncError::RlpDecode(format!("snap account decode: {e}")))?;
 
             if let Some(code_hash) = account.bytecode_hash {
                 batch_code_hashes.insert(code_hash);
@@ -192,7 +189,7 @@ async fn fetch_storage_for_accounts<C, F>(
 where
     C: SnapClient + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     let mut idx = 0;
@@ -208,7 +205,7 @@ where
             account_hashes: chunk.to_vec(),
             starting_hash: B256::ZERO,
             limit_hash: MAX_HASH,
-            response_bytes: RESPONSE_BYTES_LIMIT,
+            response_bytes: SNAP_RESPONSE_BYTES_LIMIT,
         };
 
         let response = client.get_storage_ranges(request).await.map_err(|e| {
@@ -234,7 +231,9 @@ where
             }
             let account_hash = chunk[i];
             for slot in slots {
-                let value = decode_storage_value(&slot.data)?;
+                let value = slot
+                    .decode_value()
+                    .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
                 entries.push((account_hash, slot.hash, value));
             }
         }
@@ -281,7 +280,7 @@ async fn fetch_storage_continuation<C, F>(
 where
     C: SnapClient + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     loop {
@@ -292,7 +291,7 @@ where
             account_hashes: vec![account_hash],
             starting_hash,
             limit_hash: MAX_HASH,
-            response_bytes: RESPONSE_BYTES_LIMIT,
+            response_bytes: SNAP_RESPONSE_BYTES_LIMIT,
         };
 
         let response = client.get_storage_ranges(request).await.map_err(|e| {
@@ -310,7 +309,9 @@ where
 
         let mut entries = Vec::new();
         for slot in &slots {
-            let value = decode_storage_value(&slot.data)?;
+            let value = slot
+                .decode_value()
+                .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
             entries.push((account_hash, slot.hash, value));
         }
         write_hashed_storages(factory, &entries)?;
@@ -342,7 +343,7 @@ async fn fetch_bytecodes<C, F>(
 where
     C: SnapClient + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + StateWriter,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     let hashes: Vec<B256> = code_hashes.iter().copied().collect();
@@ -351,7 +352,7 @@ where
         let request = GetByteCodesMessage {
             request_id: *request_id,
             hashes: chunk.to_vec(),
-            response_bytes: RESPONSE_BYTES_LIMIT,
+            response_bytes: SNAP_RESPONSE_BYTES_LIMIT,
         };
 
         let response = client

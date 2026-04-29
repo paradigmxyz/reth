@@ -14,10 +14,8 @@ workspace = true
 # reth
 reth-chain-state = { workspace = true, features = ["rayon"] }
 reth-chainspec = { workspace = true, optional = true }
-reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db.workspace = true
-reth-downloaders.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-engine-snap.workspace = true
 reth-execution-cache.workspace = true
@@ -32,9 +30,8 @@ reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm = { workspace = true, features = ["optional-balance-check"] }
-reth-stages.workspace = true
+reth-stages = { workspace = true, optional = true }
 reth-stages-api.workspace = true
-reth-storage-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
@@ -123,6 +120,7 @@ test-utils = [
     "reth-prune-types",
     "reth-prune-types?/test-utils",
     "reth-revm/test-utils",
+    "reth-stages",
     "reth-stages-api/test-utils",
     "reth-stages/test-utils",
     "reth-static-file",

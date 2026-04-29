@@ -103,8 +103,7 @@ impl PayloadTypes for EthPayloadTypes {
         if let Some(bal) = payload.block_access_list() {
             let block = payload.block();
             let raw_block = block.clone().into_block();
-            let sidecar =
-                alloy_rpc_types_engine::ExecutionPayloadSidecar::from_block(&raw_block);
+            let sidecar = alloy_rpc_types_engine::ExecutionPayloadSidecar::from_block(&raw_block);
             let v4 = alloy_rpc_types_engine::ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block.hash(),
                 &raw_block,

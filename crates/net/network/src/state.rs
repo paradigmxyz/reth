@@ -448,8 +448,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         SnapProtocolMessage::GetByteCodes(req) => {
                             PeerRequest::GetByteCodes { request: req, response }
                         }
-                        SnapProtocolMessage::GetTrieNodes(req) => {
-                            PeerRequest::GetTrieNodes { request: req, response }
+                        SnapProtocolMessage::GetBlockAccessLists(req) => {
+                            PeerRequest::GetSnapBlockAccessLists { request: req, response }
                         }
                         _ => unreachable!("only request variants are used"),
                     };

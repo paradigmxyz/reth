@@ -12,19 +12,13 @@ use crate::{
     SnapSyncError, SnapSyncEvent, SnapSyncOutcome, PIVOT_OFFSET,
 };
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::AccountChanges;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use alloy_rlp::Decodable;
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_network_p2p::{
-    block_access_lists::client::BlockAccessListsClient,
-    headers::client::HeadersClient,
-    snap::client::SnapClient,
-};
+use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_primitives_traits::SealedHeader;
-use reth_provider::{BlockHashReader, DatabaseProviderFactory, HeaderProvider};
-use reth_storage_api::{DBProvider, StorageSettingsCache};
+use reth_provider::{DatabaseProviderFactory, HeaderProvider};
+use reth_storage_api::{DBProvider, StateWriter, StorageSettingsCache};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Engine-driven snap sync orchestrator.
@@ -44,10 +38,10 @@ pub struct SnapSyncOrchestrator<C, F> {
 
 impl<C, F> SnapSyncOrchestrator<C, F>
 where
-    C: SnapClient + BlockAccessListsClient + HeadersClient + Clone + Send + Sync + 'static,
+    C: SnapClient + HeadersClient + Clone + Send + Sync + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-    F::Provider: DBProvider + HeaderProvider + BlockHashReader + StorageSettingsCache,
-    F::ProviderRW: DBProvider + reth_provider::StaticFileProviderFactory,
+    F::Provider: DBProvider + HeaderProvider + StorageSettingsCache,
+    F::ProviderRW: DBProvider + StateWriter + reth_provider::StaticFileProviderFactory,
     <F::Provider as DBProvider>::Tx: DbTx,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
@@ -79,9 +73,7 @@ where
                         .client
                         .get_header(BlockHashOrNumber::Hash(head_hash))
                         .await
-                        .map_err(|e| {
-                            SnapSyncError::Network(format!("header fetch failed: {e}"))
-                        })?
+                        .map_err(|e| SnapSyncError::Network(format!("header fetch failed: {e}")))?
                         .into_data()
                         .ok_or_else(|| {
                             SnapSyncError::Network(format!(
@@ -126,8 +118,8 @@ where
 
         let pivot_root = {
             let from_buffer = pre_buffered_blocks.iter().find_map(|e| match e {
-                SnapSyncEvent::NewBlock { number, state_root, .. }
-                | SnapSyncEvent::DownloadedBlock { number, state_root, .. }
+                SnapSyncEvent::NewBlock { number, state_root, .. } |
+                SnapSyncEvent::DownloadedBlock { number, state_root, .. }
                     if *number == pivot_block =>
                 {
                     Some(*state_root)
@@ -239,15 +231,9 @@ where
 
         if final_block > initial_pivot {
             for block_num in (initial_pivot + 1)..=final_block {
-                let bal_bytes =
-                    tracker.get_bal_bytes(&self.client, &self.factory, block_num).await?;
+                let bal = tracker.get_verified_bal(&self.client, &self.factory, block_num).await?;
 
-                let account_changes: Vec<AccountChanges> =
-                    Vec::<AccountChanges>::decode(&mut bal_bytes.as_ref()).map_err(|e| {
-                        SnapSyncError::RlpDecode(format!("BAL decode at block {block_num}: {e}"))
-                    })?;
-
-                let diff = bal_to_state_diff(&account_changes);
+                let diff = bal_to_state_diff(&bal.account_changes);
 
                 let mut merged = Vec::with_capacity(diff.accounts.len());
                 for acct_diff in &diff.accounts {
@@ -262,8 +248,8 @@ where
                 tracing::info!(
                     target: "engine::snap_sync",
                     block = block_num,
-                    bal_bytes_len = bal_bytes.len(),
-                    account_changes_count = account_changes.len(),
+                    bal_bytes_len = bal.bytes.len(),
+                    account_changes_count = bal.account_changes.len(),
                     diff_accounts = diff.accounts.len(),
                     diff_storage = diff.storage.len(),
                     diff_bytecodes = diff.bytecodes.len(),
@@ -286,9 +272,6 @@ where
             "Snap sync complete — MerkleExecute stage will verify state root"
         );
 
-        Ok(SnapSyncOutcome {
-            synced_to: final_block,
-            block_hash: tracker.known_head_hash(),
-        })
+        Ok(SnapSyncOutcome { synced_to: final_block, block_hash: tracker.known_head_hash() })
     }
 }

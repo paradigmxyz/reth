@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, B256};
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
 use revm_database::{
@@ -114,6 +115,12 @@ pub trait StateWriter {
 
     /// Writes the hashed state changes to the database
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
+
+    /// Writes bytecodes to the database.
+    fn write_bytecodes(
+        &self,
+        bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
+    ) -> ProviderResult<()>;
 
     /// Remove the block range of state above the given block. The state of the passed block is not
     /// removed.

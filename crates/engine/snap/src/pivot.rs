@@ -1,15 +1,19 @@
 //! Pivot tracking, advancement, and BAL buffering.
 
-use crate::{SnapSyncError, SnapSyncEvent};
+use crate::{SnapSyncError, SnapSyncEvent, SNAP_RESPONSE_BYTES_LIMIT};
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Bytes, B256};
+use alloy_rlp::Decodable;
 use reth_db_api::transaction::DbTx;
+use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
 use reth_network_p2p::{
-    block_access_lists::client::BlockAccessListsClient, headers::client::HeadersClient,
+    headers::client::HeadersClient,
+    snap::client::{SnapClient, SnapResponse},
 };
 use reth_primitives_traits::SealedHeader;
-use reth_provider::{BlockHashReader, DatabaseProviderFactory, HeaderProvider};
+use reth_provider::{DatabaseProviderFactory, HeaderProvider};
 use reth_storage_api::DBProvider;
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -26,6 +30,14 @@ pub(crate) struct BufferedBlock {
     pub parent_hash: B256,
     /// RLP-encoded BAL bytes, if present.
     pub bal: Option<Bytes>,
+}
+
+/// A verified BAL and its decoded account changes.
+pub(crate) struct VerifiedBal {
+    /// Original RLP-encoded BAL bytes.
+    pub bytes: Bytes,
+    /// Decoded account changes.
+    pub account_changes: Vec<AccountChanges>,
 }
 
 /// Tracks the current pivot block and buffers incoming BALs from the engine.
@@ -153,56 +165,113 @@ impl PivotTracker {
         Ok(true)
     }
 
-    /// Gets BAL bytes for a block, checking the buffer first then fetching from peers.
-    pub(crate) async fn get_bal_bytes<C, F>(
+    /// Gets and verifies a block BAL, checking the buffer first then fetching from peers.
+    pub(crate) async fn get_verified_bal<C, F>(
         &self,
         client: &C,
         factory: &F,
         block_num: u64,
-    ) -> Result<Bytes, SnapSyncError>
+    ) -> Result<VerifiedBal, SnapSyncError>
     where
-        C: BlockAccessListsClient + HeadersClient + 'static,
+        C: SnapClient + HeadersClient + 'static,
         F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-        F::Provider: DBProvider + HeaderProvider + BlockHashReader,
+        F::Provider: DBProvider + HeaderProvider,
         <F::Provider as DBProvider>::Tx: DbTx,
     {
-        if let Some(block) = self.buffered_blocks.get(&block_num) {
-            if let Some(ref bal) = block.bal {
-                return Ok(bal.clone());
-            }
-        }
+        let (block_hash, expected_hash) =
+            self.resolve_header_hash(client, factory, block_num).await?;
 
-        // Resolve block hash: try local DB, fall back to fetching header from peers
-        let block_hash = {
-            let local = factory
-                .database_provider_ro()
-                .ok()
-                .and_then(|p| p.block_hash(block_num).ok().flatten());
-            match local {
-                Some(hash) => hash,
-                None => {
-                    let header = client
-                        .get_header(BlockHashOrNumber::Number(block_num))
-                        .await
-                        .map_err(|e| {
-                            SnapSyncError::Network(format!(
-                                "header fetch for block {block_num}: {e}"
-                            ))
-                        })?
-                        .into_data()
-                        .ok_or(SnapSyncError::MissingBlockHash(block_num))?;
-                    SealedHeader::seal_slow(header).hash()
+        let bal = if let Some(block) = self.buffered_blocks.get(&block_num) {
+            block.bal.clone()
+        } else {
+            None
+        };
+
+        let bal = match bal {
+            Some(bal) => bal,
+            None => {
+                let response = client
+                    .get_snap_block_access_lists(GetBlockAccessListsMessage {
+                        request_id: 0,
+                        block_hashes: vec![block_hash],
+                        response_bytes: SNAP_RESPONSE_BYTES_LIMIT,
+                    })
+                    .await
+                    .map_err(|e| {
+                        SnapSyncError::Network(format!(
+                            "snap/2 BAL fetch for block {block_num}: {e}"
+                        ))
+                    })?;
+                let SnapResponse::BlockAccessLists(message) = response.into_data() else {
+                    return Err(SnapSyncError::Network(format!(
+                        "peer returned non-BAL snap response for block {block_num}"
+                    )));
+                };
+
+                let bal = message
+                    .block_access_lists
+                    .0
+                    .into_iter()
+                    .next()
+                    .ok_or(SnapSyncError::MissingBal(block_num))?;
+                if bal.as_ref() == [alloy_rlp::EMPTY_STRING_CODE] {
+                    return Err(SnapSyncError::MissingBal(block_num));
                 }
+                bal
             }
         };
 
-        let response = client
-            .get_block_access_lists(vec![block_hash])
-            .await
-            .map_err(|e| SnapSyncError::Network(format!("BAL fetch for block {block_num}: {e}")))?;
-        let bals = response.into_data();
+        let account_changes: Vec<AccountChanges> = Vec::<AccountChanges>::decode(&mut bal.as_ref())
+            .map_err(|e| {
+                SnapSyncError::RlpDecode(format!("BAL decode at block {block_num}: {e}"))
+            })?;
+        let got = compute_block_access_list_hash(&account_changes);
+        if got != expected_hash {
+            return Err(SnapSyncError::BalVerification {
+                block: block_num,
+                expected: expected_hash,
+                got,
+            });
+        }
 
-        bals.0.into_iter().next().ok_or(SnapSyncError::MissingBal(block_num))
+        Ok(VerifiedBal { bytes: bal, account_changes })
+    }
+
+    async fn resolve_header_hash<C, F>(
+        &self,
+        client: &C,
+        factory: &F,
+        block_num: u64,
+    ) -> Result<(B256, B256), SnapSyncError>
+    where
+        C: HeadersClient + 'static,
+        F: DatabaseProviderFactory,
+        F::Provider: DBProvider + HeaderProvider,
+        <F::Provider as DBProvider>::Tx: DbTx,
+    {
+        let local = factory
+            .database_provider_ro()
+            .ok()
+            .and_then(|p| p.header_by_number(block_num).ok().flatten());
+
+        match local {
+            Some(header) => {
+                let expected = header.block_access_list_hash().unwrap_or_default();
+                Ok((SealedHeader::seal_slow(header).hash(), expected))
+            }
+            None => {
+                let header = client
+                    .get_header(BlockHashOrNumber::Number(block_num))
+                    .await
+                    .map_err(|e| {
+                        SnapSyncError::Network(format!("header fetch for block {block_num}: {e}"))
+                    })?
+                    .into_data()
+                    .ok_or(SnapSyncError::MissingHeader(block_num))?;
+                let expected = header.block_access_list_hash().unwrap_or_default();
+                Ok((SealedHeader::seal_slow(header).hash(), expected))
+            }
+        }
     }
 
     /// Resolves the state root for a block number from the buffer, local DB, or peers.

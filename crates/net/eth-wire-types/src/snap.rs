@@ -3,23 +3,23 @@
 //! facilitating the exchange of Ethereum state snapshots between peers
 //! Reference: [Ethereum Snapshot Protocol](https://github.com/ethereum/devp2p/blob/master/caps/snap.md#protocol-messages)
 //!
-//! This module currently includes snap/1 plus preparatory snap/2 message definitions.
+//! This module currently includes the snap/2 message definitions used by this branch.
 
 use crate::BlockAccessLists;
 use alloc::vec::Vec;
-use alloy_primitives::{Bytes, B256};
+use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::Account;
 
 /// Supported SNAP protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum SnapVersion {
-    /// The original snapshot protocol.
-    #[default]
-    V1 = 1,
     /// BAL-based healing as proposed by EIP-8189.
+    #[default]
     V2 = 2,
 }
 
@@ -27,7 +27,6 @@ impl SnapVersion {
     /// Returns the number of messages supported by this version.
     pub const fn message_count(self) -> u8 {
         match self {
-            Self::V1 => 8,
             Self::V2 => 10,
         }
     }
@@ -54,22 +53,47 @@ pub enum SnapMessageId {
     GetByteCodes = 0x04,
     /// Response for the number of requested contract codes.
     ByteCodes = 0x05,
-    /// Request of the number of state (either account or storage) Merkle trie nodes by path.
-    ///
-    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
-    GetTrieNodes = 0x06,
-    /// Response for the number of requested state trie nodes.
-    ///
-    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
-    TrieNodes = 0x07,
     /// Request BALs for a list of block hashes.
-    ///
-    /// Only valid for `snap/2`.
     GetBlockAccessLists = 0x08,
     /// Response containing BALs for the requested block hashes.
-    ///
-    /// Only valid for `snap/2`.
     BlockAccessLists = 0x09,
+}
+
+impl SnapMessageId {
+    /// Returns true if this message id is valid for snap/2.
+    pub const fn is_valid_for_version(self, version: SnapVersion) -> bool {
+        match version {
+            SnapVersion::V2 => matches!(
+                self,
+                Self::GetAccountRange |
+                    Self::AccountRange |
+                    Self::GetStorageRanges |
+                    Self::StorageRanges |
+                    Self::GetByteCodes |
+                    Self::ByteCodes |
+                    Self::GetBlockAccessLists |
+                    Self::BlockAccessLists
+            ),
+        }
+    }
+}
+
+impl TryFrom<u8> for SnapMessageId {
+    type Error = alloy_rlp::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Self::GetAccountRange),
+            0x01 => Ok(Self::AccountRange),
+            0x02 => Ok(Self::GetStorageRanges),
+            0x03 => Ok(Self::StorageRanges),
+            0x04 => Ok(Self::GetByteCodes),
+            0x05 => Ok(Self::ByteCodes),
+            0x08 => Ok(Self::GetBlockAccessLists),
+            0x09 => Ok(Self::BlockAccessLists),
+            _ => Err(alloy_rlp::Error::Custom("Unknown message ID")),
+        }
+    }
 }
 
 /// Request for a range of accounts from the state trie.
@@ -99,6 +123,43 @@ pub struct AccountData {
     pub hash: B256,
     /// Account body in slim format
     pub body: Bytes,
+}
+
+/// Snap account body encoded as `[nonce, balance, storage_root, code_hash]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct SlimAccount {
+    /// Account nonce.
+    pub nonce: u64,
+    /// Account balance.
+    pub balance: U256,
+    /// Storage trie root.
+    pub storage_root: B256,
+    /// Account bytecode hash.
+    pub code_hash: B256,
+}
+
+impl SlimAccount {
+    /// Creates a snap slim account from reth's account representation and a storage root.
+    pub fn from_account(account: Account, storage_root: B256) -> Self {
+        Self {
+            nonce: account.nonce,
+            balance: account.balance,
+            storage_root,
+            code_hash: account.get_bytecode_hash(),
+        }
+    }
+}
+
+impl From<SlimAccount> for Account {
+    fn from(value: SlimAccount) -> Self {
+        Self {
+            nonce: value.nonce,
+            balance: value.balance,
+            bytecode_hash: (value.code_hash != KECCAK_EMPTY).then_some(value.code_hash),
+        }
+    }
 }
 
 /// Response containing a number of consecutive accounts and the Merkle proofs for the entire range.
@@ -146,6 +207,25 @@ pub struct StorageData {
     pub data: Bytes,
 }
 
+impl StorageData {
+    /// Creates storage data from a decoded storage value.
+    pub fn from_value(hash: B256, value: U256) -> Self {
+        let mut data = Vec::new();
+        value.encode(&mut data);
+        Self { hash, data: data.into() }
+    }
+
+    /// Decodes this slot's RLP-encoded storage value.
+    pub fn decode_value(&self) -> alloy_rlp::Result<U256> {
+        let mut buf = self.data.as_ref();
+        let value = U256::decode(&mut buf)?;
+        if !buf.is_empty() {
+            return Err(alloy_rlp::Error::Custom("trailing bytes after storage value"))
+        }
+        Ok(value)
+    }
+}
+
 /// Response containing a number of consecutive storage slots for the requested account
 /// and optionally the merkle proofs for the last range (boundary proofs) if it only partially
 /// covers the storage trie.
@@ -188,45 +268,6 @@ pub struct ByteCodesMessage {
     pub codes: Vec<Bytes>,
 }
 
-/// Path in the trie for an account and its storage
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
-pub struct TriePath {
-    /// Path in the account trie
-    pub account_path: Bytes,
-    /// Paths in the storage trie
-    pub slot_paths: Vec<Bytes>,
-}
-
-/// Request a number of state (either account or storage) Merkle trie nodes by path
-// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#gettrienodes-0x06
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
-pub struct GetTrieNodesMessage {
-    /// Request ID to match up responses with
-    pub request_id: u64,
-    /// Root hash of the account trie to serve
-    pub root_hash: B256,
-    /// Trie paths to retrieve the nodes for, grouped by account
-    pub paths: Vec<TriePath>,
-    /// Soft limit at which to stop returning data (in bytes)
-    pub response_bytes: u64,
-}
-
-/// Response containing a number of requested state trie nodes
-// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#trienodes-0x07
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
-pub struct TrieNodesMessage {
-    /// ID of the request this is a response for
-    pub request_id: u64,
-    /// The requested trie nodes in order
-    pub nodes: Vec<Bytes>,
-}
-
 /// Request BALs for the given block hashes.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -266,21 +307,9 @@ pub enum SnapProtocolMessage {
     GetByteCodes(GetByteCodesMessage),
     /// Response with contract codes - see [`ByteCodesMessage`]
     ByteCodes(ByteCodesMessage),
-    /// Request for trie nodes - see [`GetTrieNodesMessage`]
-    ///
-    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
-    GetTrieNodes(GetTrieNodesMessage),
-    /// Response with trie nodes - see [`TrieNodesMessage`]
-    ///
-    /// Only valid for `snap/1`. Replaced by BAL-based healing in `snap/2`.
-    TrieNodes(TrieNodesMessage),
     /// Request for block access lists - see [`GetBlockAccessListsMessage`]
-    ///
-    /// Only valid for `snap/2`.
     GetBlockAccessLists(GetBlockAccessListsMessage),
     /// Response with block access lists - see [`BlockAccessListsMessage`]
-    ///
-    /// Only valid for `snap/2`.
     BlockAccessLists(BlockAccessListsMessage),
 }
 
@@ -296,8 +325,6 @@ impl SnapProtocolMessage {
             Self::StorageRanges(_) => SnapMessageId::StorageRanges,
             Self::GetByteCodes(_) => SnapMessageId::GetByteCodes,
             Self::ByteCodes(_) => SnapMessageId::ByteCodes,
-            Self::GetTrieNodes(_) => SnapMessageId::GetTrieNodes,
-            Self::TrieNodes(_) => SnapMessageId::TrieNodes,
             Self::GetBlockAccessLists(_) => SnapMessageId::GetBlockAccessLists,
             Self::BlockAccessLists(_) => SnapMessageId::BlockAccessLists,
         }
@@ -317,8 +344,6 @@ impl SnapProtocolMessage {
             Self::StorageRanges(msg) => msg.encode(&mut buf),
             Self::GetByteCodes(msg) => msg.encode(&mut buf),
             Self::ByteCodes(msg) => msg.encode(&mut buf),
-            Self::GetTrieNodes(msg) => msg.encode(&mut buf),
-            Self::TrieNodes(msg) => msg.encode(&mut buf),
             Self::GetBlockAccessLists(msg) => msg.encode(&mut buf),
             Self::BlockAccessLists(msg) => msg.encode(&mut buf),
         }
@@ -328,6 +353,26 @@ impl SnapProtocolMessage {
 
     /// Decodes a SNAP protocol message from its message ID and RLP-encoded body.
     pub fn decode(message_id: u8, buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        Self::decode_unchecked(message_id, buf)
+    }
+
+    /// Decodes a SNAP protocol message for the negotiated snap protocol version.
+    pub fn decode_with_version(
+        version: SnapVersion,
+        message_id: u8,
+        buf: &mut &[u8],
+    ) -> Result<Self, alloy_rlp::Error> {
+        let id = SnapMessageId::try_from(message_id)?;
+        if !id.is_valid_for_version(version) {
+            return Err(alloy_rlp::Error::Custom("Invalid message ID for snap version"));
+        }
+
+        Self::decode_unchecked(message_id, buf)
+    }
+
+    fn decode_unchecked(message_id: u8, buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        let _ = SnapMessageId::try_from(message_id)?;
+
         // Decoding protocol message variants based on message ID
         macro_rules! decode_snap_message_variant {
             ($message_id:expr, $buf:expr, $id:expr, $variant:ident, $msg_type:ty) => {
@@ -383,20 +428,6 @@ impl SnapProtocolMessage {
         decode_snap_message_variant!(
             message_id,
             buf,
-            SnapMessageId::GetTrieNodes,
-            GetTrieNodes,
-            GetTrieNodesMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::TrieNodes,
-            TrieNodes,
-            TrieNodesMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
             SnapMessageId::GetBlockAccessLists,
             GetBlockAccessLists,
             GetBlockAccessListsMessage
@@ -438,7 +469,6 @@ mod tests {
 
     #[test]
     fn test_all_message_roundtrips() {
-        assert_eq!(SnapVersion::V1.message_count(), 8);
         assert_eq!(SnapVersion::V2.message_count(), 10);
 
         test_roundtrip(SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
@@ -487,21 +517,6 @@ mod tests {
             codes: vec![Bytes::from(vec![1, 2, 3])],
         }));
 
-        test_roundtrip(SnapProtocolMessage::GetTrieNodes(GetTrieNodesMessage {
-            request_id: 42,
-            root_hash: b256_from_u64(123),
-            paths: vec![TriePath {
-                account_path: Bytes::from(vec![1, 2, 3]),
-                slot_paths: vec![Bytes::from(vec![4, 5, 6])],
-            }],
-            response_bytes: 1024,
-        }));
-
-        test_roundtrip(SnapProtocolMessage::TrieNodes(TrieNodesMessage {
-            request_id: 42,
-            nodes: vec![Bytes::from(vec![1, 2, 3])],
-        }));
-
         test_roundtrip(SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
             request_id: 42,
             block_hashes: vec![b256_from_u64(123), b256_from_u64(456)],
@@ -530,5 +545,48 @@ mod tests {
         if let Err(e) = result {
             assert_eq!(e.to_string(), "Unknown message ID");
         }
+
+        for removed_id in [0x06, 0x07] {
+            let mut buf = data.as_ref();
+            let result = SnapProtocolMessage::decode(removed_id, &mut buf);
+            assert!(result.is_err());
+            if let Err(e) = result {
+                assert_eq!(e.to_string(), "Unknown message ID");
+            }
+        }
+    }
+
+    #[test]
+    fn slim_account_roundtrip_preserves_wire_fields() {
+        let account =
+            Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(b256_from_u64(123)) };
+        let storage_root = b256_from_u64(456);
+
+        let slim = SlimAccount::from_account(account, storage_root);
+        let encoded = alloy_rlp::encode(slim);
+        let decoded = alloy_rlp::decode_exact::<SlimAccount>(&encoded).unwrap();
+
+        assert_eq!(decoded, slim);
+        assert_eq!(decoded.storage_root, storage_root);
+        assert_eq!(Account::from(decoded), account);
+    }
+
+    #[test]
+    fn slim_account_empty_code_hash_maps_to_no_bytecode() {
+        let slim = SlimAccount {
+            nonce: 1,
+            balance: U256::from(2),
+            storage_root: b256_from_u64(3),
+            code_hash: KECCAK_EMPTY,
+        };
+
+        let account = Account::from(slim);
+        assert_eq!(account.bytecode_hash, None);
+    }
+
+    #[test]
+    fn storage_data_decodes_value() {
+        let storage = StorageData::from_value(b256_from_u64(1), U256::from(99));
+        assert_eq!(storage.decode_value().unwrap(), U256::from(99));
     }
 }

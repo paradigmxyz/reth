@@ -5,7 +5,7 @@
 //! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`.
 
 use crate::{
-    backfill::CombinedBackfillSync,
+    backfill::EngineBackfillSync,
     chain::ChainOrchestrator,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
@@ -71,7 +71,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
         S,
         BasicBlockDownloader<Client, <N::Primitives as NodePrimitives>::Block>,
     >,
-    CombinedBackfillSync<N, Client, ProviderFactory<N>>,
+    EngineBackfillSync<N, Client>,
 >
 where
     N: ProviderNodeTypes,
@@ -111,7 +111,7 @@ where
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
     let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
-    let backfill_sync = CombinedBackfillSync::new(
+    let backfill_sync = EngineBackfillSync::new(
         pipeline,
         pipeline_task_spawner,
         snap_client,

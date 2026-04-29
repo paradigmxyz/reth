@@ -287,7 +287,6 @@ where
         let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
     }
 
-
     #[inline]
     fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
     where
@@ -341,7 +340,7 @@ where
             .get_by_hashes_with_limit(&request.0, limit)
             .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
         let found = access_lists.iter().filter(|b| b.as_ref() != [0xc0]).count();
-        tracing::info!(target: "net::eth", requested=request.0.len(), found, hashes=?request.0, "BAL request received");
+        tracing::debug!(target: "net::eth", requested=request.0.len(), found, "BAL request received");
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }

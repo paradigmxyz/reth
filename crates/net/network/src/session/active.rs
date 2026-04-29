@@ -377,10 +377,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let raw_id = raw_msg.id as u8;
                 if raw_id >= eth_msg_count {
                     let snap_id = raw_id - eth_msg_count;
-                    if let Ok(snap_msg) = reth_eth_wire_types::snap::SnapProtocolMessage::decode(
-                        snap_id,
-                        &mut raw_msg.payload.as_ref(),
-                    ) {
+                    if let Some(snap_version) = self.negotiated_snap_version() &&
+                        let Ok(snap_msg) =
+                            reth_eth_wire_types::snap::SnapProtocolMessage::decode_with_version(
+                                snap_version,
+                                snap_id,
+                                &mut raw_msg.payload.as_ref(),
+                            )
+                    {
                         return self.on_incoming_snap_response(snap_msg);
                     }
                 }
@@ -405,7 +409,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 (msg.request_id, SnapResponse::StorageRanges(msg))
             }
             SnapProtocolMessage::ByteCodes(msg) => (msg.request_id, SnapResponse::ByteCodes(msg)),
-            SnapProtocolMessage::TrieNodes(msg) => (msg.request_id, SnapResponse::TrieNodes(msg)),
+            SnapProtocolMessage::BlockAccessLists(msg) => {
+                (msg.request_id, SnapResponse::BlockAccessLists(msg))
+            }
             // Incoming snap *requests* from the remote peer are handled separately
             _ => {
                 let peer_req = self.create_snap_incoming_request(snap_msg);
@@ -419,7 +425,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     PeerRequest::GetAccountRange { response, .. } |
                     PeerRequest::GetStorageRanges { response, .. } |
                     PeerRequest::GetByteCodes { response, .. } |
-                    PeerRequest::GetTrieNodes { response, .. },
+                    PeerRequest::GetSnapBlockAccessLists { response, .. },
                 ) => {
                     trace!(peer_id=?self.remote_peer_id, ?request_id, "received snap response from peer");
                     let _ = response.send(Ok(snap_response));
@@ -455,8 +461,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             SnapProtocolMessage::GetAccountRange(msg) => msg.request_id,
             SnapProtocolMessage::GetStorageRanges(msg) => msg.request_id,
             SnapProtocolMessage::GetByteCodes(msg) => msg.request_id,
-            SnapProtocolMessage::GetTrieNodes(msg) => msg.request_id,
-            _ => unreachable!("only request variants reach here"),
+            SnapProtocolMessage::GetBlockAccessLists(msg) => msg.request_id,
+            _ => unreachable!("only snap/2 request variants reach here"),
         };
 
         let received = ReceivedRequest {
@@ -476,17 +482,17 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             SnapProtocolMessage::GetByteCodes(req) => {
                 PeerRequest::GetByteCodes { request: req, response: tx }
             }
-            SnapProtocolMessage::GetTrieNodes(req) => {
-                PeerRequest::GetTrieNodes { request: req, response: tx }
+            SnapProtocolMessage::GetBlockAccessLists(req) => {
+                PeerRequest::GetSnapBlockAccessLists { request: req, response: tx }
             }
-            _ => unreachable!("only request variants reach here"),
+            _ => unreachable!("only snap/2 request variants reach here"),
         }
     }
 
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let version = self.conn.version();
-        if !Self::is_request_supported_for_version(&request, version) {
+        if !Self::is_request_supported_for_peer(&request, version, &self.remote_capabilities) {
             debug!(
                 target: "net",
                 ?request,
@@ -531,6 +537,25 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     #[inline]
     fn is_request_supported_for_version(request: &PeerRequest<N>, version: EthVersion) -> bool {
         request.is_supported_by_eth_version(version)
+    }
+
+    #[inline]
+    fn is_request_supported_for_peer(
+        request: &PeerRequest<N>,
+        version: EthVersion,
+        capabilities: &Capabilities,
+    ) -> bool {
+        Self::is_request_supported_for_version(request, version) &&
+            request
+                .required_snap_version()
+                .is_none_or(|snap_version| capabilities.supports_snap_version(snap_version))
+    }
+
+    #[inline]
+    fn negotiated_snap_version(&self) -> Option<reth_eth_wire_types::snap::SnapVersion> {
+        self.remote_capabilities
+            .supports_snap_v2()
+            .then_some(reth_eth_wire_types::snap::SnapVersion::V2)
     }
 
     /// Handle a message received from the internal network
@@ -590,8 +615,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     reth_network_p2p::snap::client::SnapResponse::ByteCodes(msg) => {
                         reth_eth_wire_types::snap::SnapProtocolMessage::ByteCodes(msg)
                     }
-                    reth_network_p2p::snap::client::SnapResponse::TrieNodes(msg) => {
-                        reth_eth_wire_types::snap::SnapProtocolMessage::TrieNodes(msg)
+                    reth_network_p2p::snap::client::SnapResponse::BlockAccessLists(msg) => {
+                        reth_eth_wire_types::snap::SnapProtocolMessage::BlockAccessLists(msg)
                     }
                 };
                 let encoded = snap_msg.encode();

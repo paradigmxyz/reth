@@ -1149,10 +1149,10 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     // Before trying status handshake, set up the version to negotiated shared version
     status.set_eth_version(eth_version);
 
-    let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
-        // if the shared caps are 1, we know both support the eth version
-        // if the hello handshake was successful we can try status handshake
-
+    let (conn, their_status) = if extra_handlers.is_empty() {
+        // Without dedicated extra handlers, keep the session on the eth stream. The underlying
+        // p2p stream still preserves relative capability IDs, so snap messages can be handled by
+        // the session as raw eth `Other` messages.
         // perform the eth protocol handshake
         match handshake
             .handshake(&mut p2p_stream, status, fork_filter.clone(), HANDSHAKE_TIMEOUT)

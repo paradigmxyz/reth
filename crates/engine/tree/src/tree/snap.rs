@@ -13,12 +13,57 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::*;
 
 use super::{
     error::InsertBlockFatalError, payload_validator::EngineValidator, EngineApiEvent,
     EngineApiTreeHandler, WaitForCaches,
 };
+
+/// Snap sync state owned by the engine tree.
+#[derive(Debug, Default)]
+pub(super) struct SnapTreeState {
+    events_tx: Option<UnboundedSender<reth_engine_snap::SnapSyncEvent>>,
+    fresh_node: bool,
+}
+
+impl SnapTreeState {
+    /// Creates snap tree state for the given node freshness.
+    pub(super) const fn new(fresh_node: bool) -> Self {
+        Self { events_tx: None, fresh_node }
+    }
+
+    /// Returns true if this node started with no persisted blocks.
+    pub(super) const fn is_fresh_node(&self) -> bool {
+        self.fresh_node
+    }
+
+    /// Updates the fresh-node flag.
+    pub(super) const fn set_fresh_node(&mut self, fresh_node: bool) {
+        self.fresh_node = fresh_node;
+    }
+
+    /// Returns true if snap sync is currently receiving engine events.
+    pub(super) const fn is_active(&self) -> bool {
+        self.events_tx.is_some()
+    }
+
+    /// Starts forwarding engine events to snap sync.
+    pub(super) fn start(&mut self, events_tx: UnboundedSender<reth_engine_snap::SnapSyncEvent>) {
+        self.events_tx = Some(events_tx);
+    }
+
+    /// Marks snap sync as finished.
+    pub(super) fn finish(&mut self) {
+        self.events_tx = None;
+        self.fresh_node = false;
+    }
+
+    fn events_tx(&self) -> Option<&UnboundedSender<reth_engine_snap::SnapSyncEvent>> {
+        self.events_tx.as_ref()
+    }
+}
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where
@@ -42,7 +87,7 @@ where
 {
     /// Forwards a new block event to the snap sync orchestrator, if active.
     pub(super) fn forward_new_block_to_snap(&self, payload: &T::ExecutionData) {
-        if let Some(events_tx) = &self.snap_events_tx {
+        if let Some(events_tx) = self.snap.events_tx() {
             let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewBlock {
                 number: payload.block_number(),
                 hash: payload.block_hash(),
@@ -55,14 +100,14 @@ where
 
     /// Forwards a new head event to the snap sync orchestrator, if active.
     pub(super) fn forward_head_to_snap(&self, head_hash: B256) {
-        if let Some(events_tx) = &self.snap_events_tx {
+        if let Some(events_tx) = self.snap.events_tx() {
             let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::NewHead { head_hash });
         }
     }
 
     /// Forwards a downloaded block event to the snap sync orchestrator, if active.
     pub(super) fn forward_downloaded_block_to_snap(&self, block: &SealedBlock<N::Block>) {
-        if let Some(events_tx) = &self.snap_events_tx {
+        if let Some(events_tx) = self.snap.events_tx() {
             let _ = events_tx.send(reth_engine_snap::SnapSyncEvent::DownloadedBlock {
                 number: block.number(),
                 hash: block.hash(),
@@ -79,8 +124,7 @@ where
     ) -> Result<(), InsertBlockFatalError> {
         debug!(target: "engine::tree", synced_to = outcome.synced_to, %outcome.block_hash, "snap sync finished");
         self.backfill_sync_state = BackfillSyncState::Idle;
-        self.snap_events_tx = None;
-        self.fresh_node = false;
+        self.snap.finish();
 
         let backfill_height = outcome.synced_to;
         let backfill_hash = outcome.block_hash;
