@@ -417,3 +417,60 @@ async fn can_snap_sync_catch_up() -> eyre::Result<()> {
 
     Ok(())
 }
+
+/// Tests that the snap sync orchestrator recovers when the pivot root becomes
+/// stale. Node A advances far enough (>128 blocks past the pivot) that the snap
+/// server's lookback window no longer covers the original pivot root, forcing the
+/// orchestrator to re-resolve the head and advance the pivot.
+#[tokio::test]
+async fn can_snap_sync_stale_pivot() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let seed: [u8; 32] = rand::rng().random();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {seed:?}");
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine_with_connection::<EthereumNode>(
+        2,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+        false,
+    )
+    .await?;
+
+    let mut node_b = nodes.pop().unwrap();
+    let mut node_a = nodes.pop().unwrap();
+
+    // Build 180 blocks so the original pivot root (block 4 = 20 - PIVOT_OFFSET)
+    // falls outside ProviderSnapState's 128-block serving lookback window.
+    // At tip 180, lookback starts at block 52, so pivot 4 is stale.
+    advance_with_random_transactions(&mut node_a, 180, &mut rng, true).await?;
+    let old_target = node_a.block_hash(20);
+
+    // Connect Node B to Node A and trigger snap sync targeting block 20.
+    // Orchestrator picks pivot = 20 - 16 = 4, whose root is stale.
+    node_b.connect(&mut node_a).await;
+    node_b.update_forkchoice(old_target, old_target).await?;
+
+    // Advance Node A a bit more while snap sync is running.
+    advance_with_random_transactions(&mut node_a, 10, &mut rng, true).await?;
+
+    let final_hash = node_a.block_hash(190);
+
+    // Node B should recover from the stale pivot, re-resolve head, and sync.
+    node_b.sync_to(final_hash).await?;
+
+    Ok(())
+}

@@ -46,7 +46,7 @@ where
     C: SnapClient + BlockAccessListsClient + HeadersClient + Clone + Send + Sync + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
     F::Provider: DBProvider + HeaderProvider + BlockHashReader + StorageSettingsCache,
-    F::ProviderRW: DBProvider,
+    F::ProviderRW: DBProvider + reth_provider::StaticFileProviderFactory,
     <F::Provider as DBProvider>::Tx: DbTx,
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
