@@ -224,12 +224,12 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         slot_number: None,
     };
 
-    let request = TestingBuildBlockRequestV1 {
-        parent_block_hash: genesis_hash,
-        payload_attributes,
-        transactions: vec![raw_tx],
-        extra_data: None,
-    };
+    let request: TestingBuildBlockRequestV1 = serde_json::from_value(serde_json::json!({
+        "parentBlockHash": genesis_hash,
+        "payloadAttributes": payload_attributes,
+        "transactions": vec![raw_tx],
+        "extraData": Option::<alloy_primitives::Bytes>::None,
+    }))?;
 
     let envelope = node.testing_build_block_v1(request).await?;
 

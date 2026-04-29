@@ -16,7 +16,7 @@ use crate::{
 };
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_provider::{
     ext::DebugApi,
     network::{AnyNetwork, AnyRpcBlock},
@@ -600,7 +600,7 @@ fn build_block_request(
             Ok(Some(tx.encoded_2718().into()))
         })
         .filter_map(|tx| tx.transpose())
-        .collect::<eyre::Result<Vec<_>>>()?;
+        .collect::<eyre::Result<Vec<Bytes>>>()?;
 
     // `testing_buildBlockV1` only takes raw transaction bytes, so we exclude blob transactions
     // from the synthetic fork blocks rather than trying to reconstruct their sidecars.
@@ -611,9 +611,9 @@ fn build_block_request(
 
     let rpc_block = block.clone().into_inner();
 
-    Ok(TestingBuildBlockRequestV1 {
-        parent_block_hash,
-        payload_attributes: PayloadAttributes {
+    Ok(serde_json::from_value(serde_json::json!({
+        "parentBlockHash": parent_block_hash,
+        "payloadAttributes": PayloadAttributes {
             timestamp: block.header.timestamp,
             prev_randao: block.header.mix_hash.unwrap_or_default(),
             suggested_fee_recipient: block.header.beneficiary,
@@ -621,9 +621,9 @@ fn build_block_request(
             parent_beacon_block_root: block.header.parent_beacon_block_root,
             slot_number: block.header.slot_number,
         },
-        transactions,
-        extra_data: Some(block.header.extra_data.clone()),
-    })
+        "transactions": transactions,
+        "extraData": Some(block.header.extra_data.clone()),
+    }))?)
 }
 
 fn parse_reorg_depth(value: &str) -> Result<usize, String> {

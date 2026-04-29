@@ -59,12 +59,12 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
                 slot_number: None,
             };
 
-            let request = TestingBuildBlockRequestV1 {
-                parent_block_hash,
-                payload_attributes,
-                transactions: vec![],
-                extra_data: None,
-            };
+            let request: TestingBuildBlockRequestV1 = serde_json::from_value(serde_json::json!({
+                "parentBlockHash": parent_block_hash,
+                "payloadAttributes": payload_attributes,
+                "transactions": Vec::<alloy_primitives::Bytes>::new(),
+                "extraData": Option::<alloy_primitives::Bytes>::None,
+            }))?;
 
             tokio::spawn(async move {
                 let res: eyre::Result<ExecutionPayloadEnvelopeV4> =
