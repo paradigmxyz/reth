@@ -478,11 +478,6 @@ where
         self.blocks.start_hash()
     }
 
-    /// Returns the block count for the request.
-    pub const fn count(&self) -> u64 {
-        self.blocks.count()
-    }
-
     fn start_access_lists_request_if_possible(&mut self) {
         if !matches!(self.access_lists, OptionalBlockAccessListsState::WaitingForBlocks) {
             return
