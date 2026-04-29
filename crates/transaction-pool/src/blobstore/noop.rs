@@ -1,10 +1,9 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError};
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{B128, B256};
-use reth_engine_primitives::BlobCellsAndProofsV1;
 use std::sync::Arc;
 
 /// A blobstore implementation that does nothing

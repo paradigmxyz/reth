@@ -4,7 +4,7 @@
 //! the consensus client.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::RequestsOrHash,
     BlockId, BlockNumberOrTag,
 };
@@ -20,7 +20,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
-use reth_engine_primitives::{BlobCellsAndProofsV1, EngineTypes};
+use reth_engine_primitives::EngineTypes;
 use serde_json::Value;
 
 /// Helper trait for the engine api server.

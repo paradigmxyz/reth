@@ -1,14 +1,10 @@
-use crate::blobstore::{
-    match_versioned_hashes_cells, BlobCellMask, BlobStore, BlobStoreCleanupStat, BlobStoreError,
-    BlobStoreSize,
-};
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
-    eip7594::BlobTransactionSidecarVariant,
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
 };
 use alloy_primitives::{map::B256Map, B128, B256};
 use parking_lot::RwLock;
-use reth_engine_primitives::BlobCellsAndProofsV1;
 use std::sync::Arc;
 
 /// An in-memory blob store.
@@ -65,8 +61,9 @@ impl InMemoryBlobStore {
         let blob_sidecars = self.inner.store.read().values().cloned().collect::<Vec<_>>();
         for blob_sidecar in blob_sidecars {
             if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in
-                    match_versioned_hashes_cells(blob_sidecar, versioned_hashes, cell_mask)?
+                for (hash_idx, match_result) in blob_sidecar
+                    .match_versioned_hashes_cells(versioned_hashes, cell_mask)
+                    .map_err(|err| BlobStoreError::Other(Box::new(err)))?
                 {
                     let slot = &mut result[hash_idx];
                     if slot.is_none() {

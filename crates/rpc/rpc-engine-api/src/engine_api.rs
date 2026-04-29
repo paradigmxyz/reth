@@ -3,7 +3,7 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
@@ -18,9 +18,7 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{
-    BlobCellsAndProofsV1, ConsensusEngineHandle, EngineApiValidator, EngineTypes,
-};
+use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{

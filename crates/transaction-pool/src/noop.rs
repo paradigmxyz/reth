@@ -16,11 +16,10 @@ use crate::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
-use reth_engine_primitives::BlobCellsAndProofsV1;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use std::{marker::PhantomData, sync::Arc};

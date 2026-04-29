@@ -32,9 +32,6 @@ pub use reth_payload_primitives::ExecutionPayload;
 mod error;
 pub use error::*;
 
-mod blob;
-pub use blob::BlobCellsAndProofsV1;
-
 mod forkchoice;
 pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 

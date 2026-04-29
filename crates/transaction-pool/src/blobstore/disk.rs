@@ -1,18 +1,14 @@
 //! A simple diskstore for blobs
 
-use crate::blobstore::{
-    match_versioned_hashes_cells, BlobCellMask, BlobStore, BlobStoreCleanupStat, BlobStoreError,
-    BlobStoreSize,
-};
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
-    eip7594::BlobTransactionSidecarVariant,
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
 use alloy_primitives::{map::B256Set, TxHash, B128, B256};
 use parking_lot::{Mutex, RwLock};
-use reth_engine_primitives::BlobCellsAndProofsV1;
 use schnellru::{ByLength, LruMap};
 use std::{fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
@@ -157,8 +153,9 @@ impl DiskFileBlobStore {
             .collect::<Vec<_>>();
         for blob_sidecar in cached_blob_sidecars {
             if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in
-                    match_versioned_hashes_cells(blob_sidecar, versioned_hashes, cell_mask)?
+                for (hash_idx, match_result) in blob_sidecar
+                    .match_versioned_hashes_cells(versioned_hashes, cell_mask)
+                    .map_err(|err| BlobStoreError::Other(Box::new(err)))?
                 {
                     let slot = &mut result[hash_idx];
                     if slot.is_none() {
@@ -190,8 +187,9 @@ impl DiskFileBlobStore {
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
             for (_, blob_sidecar) in blobs_from_disk {
                 if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                    for (hash_idx, match_result) in
-                        match_versioned_hashes_cells(blob_sidecar, versioned_hashes, cell_mask)?
+                    for (hash_idx, match_result) in blob_sidecar
+                        .match_versioned_hashes_cells(versioned_hashes, cell_mask)
+                        .map_err(|err| BlobStoreError::Other(Box::new(err)))?
                     {
                         if result[hash_idx].is_none() {
                             result[hash_idx] = Some(match_result);

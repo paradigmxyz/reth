@@ -303,13 +303,12 @@ pub use crate::{
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_engine_primitives::BlobCellsAndProofsV1;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
