@@ -1196,6 +1196,7 @@ mod tests {
         access_lists: Arc<Mutex<HashMap<B256, Bytes>>>,
         access_list_requests: Arc<AtomicUsize>,
         access_list_soft_limit: Arc<AtomicUsize>,
+        extra_access_list_entries: Arc<AtomicUsize>,
         unsupported_access_lists: Arc<AtomicBool>,
         bad_messages: Arc<AtomicUsize>,
         empty_first_response: Arc<AtomicBool>,
@@ -1208,6 +1209,7 @@ mod tests {
                 access_lists: Arc::new(Mutex::new(HashMap::default())),
                 access_list_requests: Arc::new(AtomicUsize::new(0)),
                 access_list_soft_limit: Arc::new(AtomicUsize::new(usize::MAX)),
+                extra_access_list_entries: Arc::new(AtomicUsize::new(0)),
                 unsupported_access_lists: Arc::new(AtomicBool::new(false)),
                 bad_messages: Arc::new(AtomicUsize::new(0)),
                 empty_first_response: Arc::new(AtomicBool::new(false)),
@@ -1223,6 +1225,10 @@ mod tests {
 
         fn set_access_list_soft_limit(&self, limit: usize) {
             self.access_list_soft_limit.store(limit, Ordering::SeqCst);
+        }
+
+        fn set_extra_access_list_entries(&self, count: usize) {
+            self.extra_access_list_entries.store(count, Ordering::SeqCst);
         }
 
         fn set_access_lists_unsupported(&self, unsupported: bool) {
@@ -1311,7 +1317,7 @@ mod tests {
                 )))
             }
 
-            let access_lists = hashes
+            let mut access_lists: Vec<_> = hashes
                 .into_iter()
                 .take(self.access_list_soft_limit.load(Ordering::SeqCst))
                 .map(|hash| {
@@ -1322,6 +1328,9 @@ mod tests {
                         .unwrap_or_else(|| Bytes::from_static(&[EMPTY_LIST_CODE]))
                 })
                 .collect();
+            for _ in 0..self.extra_access_list_entries.load(Ordering::SeqCst) {
+                access_lists.push(Bytes::from_static(&[EMPTY_LIST_CODE]));
+            }
 
             futures::future::ready(Ok(WithPeerId::new(
                 PeerId::random(),
@@ -1549,6 +1558,29 @@ mod tests {
         assert_eq!(blocks.len(), 3);
         assert!(received_access_lists.is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_access_lists_rejects_long_response() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.set_extra_access_list_entries(1);
+        let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let bad_messages = Arc::clone(&client.bad_messages);
+        let client = FullBlockClient::test_client(client);
+
+        let (blocks, received_access_lists) = timeout(
+            Duration::from_secs(1),
+            client.get_full_block_range_with_optional_access_lists(header.hash(), 3),
+        )
+        .await
+        .expect("range request should complete without access lists");
+
+        assert_eq!(blocks.len(), 3);
+        assert!(received_access_lists.is_none());
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
