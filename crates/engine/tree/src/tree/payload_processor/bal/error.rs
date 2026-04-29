@@ -36,17 +36,6 @@ pub enum RejectReason {
         tx_index: u64,
     },
 
-    /// The phantom-reads feasibility invariant failed:
-    /// `G_remaining < R_remaining * ITEM_COST` after some tx completed.
-    ///
-    /// See <https://ethresear.ch/t/early-rejection-of-adversarial-bals/23995>.
-    FeasibilityCheckFailed {
-        /// Block gas remaining at the time of the check.
-        gas_remaining: u64,
-        /// Declared storage reads not yet observed in any worker's execution.
-        reads_remaining: u64,
-    },
-
     /// The canonical `bal_builder`'s entries for a tx disagree with the received BAL for the same
     /// tx index. Caught per-tx immediately after `commit_transaction`.
     FragmentMismatch {

@@ -10,7 +10,6 @@
 //!
 //! - **A (structural hash)**: `check_bal_hash(received_bal, header_bal_hash)` at entry.
 //! - **B (item-count gate)**: `check_item_count(received_bal, block_gas_limit)` at entry.
-//! - **D (feasibility)**: after each tx commits, via [`FeasibilityTracker`].
 //! - **F (final hash)**: rebuilt composed BAL hashed against the header's commitment after
 //!   post-execution.
 //!
@@ -18,7 +17,6 @@
 //! lightweight fragment compare isn't yet designed.
 
 use super::{
-    feasibility::FeasibilityTracker,
     validation::{check_bal_hash, check_item_count},
     RejectReason,
 };
@@ -69,7 +67,7 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
 /// Errors surfaced by [`execute_block_bal`].
 #[derive(Debug)]
 pub enum BalExecutionError {
-    /// BAL-specific rejection — structural, feasibility, or final-hash mismatch.
+    /// BAL-specific rejection — structural or final-hash mismatch.
     Reject(RejectReason),
     /// Worker or canonical EVM failure (including revm `BalError` for undeclared accesses,
     /// surfaced opaquely until upstream revm carries address/slot metadata).
@@ -217,7 +215,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
 
             canonical_executor.apply_pre_execution_changes()?;
 
-            let mut feasibility = FeasibilityTracker::new(bal, block_gas_limit);
             let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
             let abort = Arc::new(AtomicBool::new(false));
             let tx_count = txs.len() as u64;
@@ -261,7 +258,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                         }
                     };
                     gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
-                    feasibility.record_and_check(worker_result.result())?;
                     gas_tracker.record_result(worker_result.result());
                     canonical_executor.evm_mut().db_mut().bump_bal_index();
                     commit_worker_result(&mut canonical_executor, worker_result);
