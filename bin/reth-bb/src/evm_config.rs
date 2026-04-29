@@ -8,7 +8,7 @@
 pub(crate) use reth_engine_primitives::BigBlockData;
 
 use crate::{
-    evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan},
+    evm::{BbBlockExecutorFactory, BbEvmPlan},
     BigBlockMap,
 };
 use alloy_consensus::Header;

@@ -47,7 +47,6 @@ alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 revm.workspace = true
-revm-database-interface.workspace = true
 revm-primitives.workspace = true
 revm-state.workspace = true
 
@@ -97,6 +96,8 @@ reth-tracing.workspace = true
 reth-node-ethereum.workspace = true
 reth-e2e-test-utils.workspace = true
 
+revm-database-interface.workspace = true
+
 assert_matches.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
@@ -132,6 +133,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-tasks/test-utils",
     "reth-execution-cache/test-utils",
+    "reth-evm-ethereum/test-utils",
 ]
 trie-debug = [
     "reth-trie-sparse/trie-debug",

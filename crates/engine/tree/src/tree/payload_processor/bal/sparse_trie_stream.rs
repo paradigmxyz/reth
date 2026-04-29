@@ -1,50 +1,88 @@
 //! Streams BAL-derived final per-account state to the sparse-trie task.
 //!
-//! Reads account info from the pre-block [`BlockPreState`] snapshot. Does not query the
-//! database. Composes the post-block account from BAL deltas (balance, nonce, code) and the
-//! snapshot's pre-block fields. Sends one `HashedStateUpdate` per account, then closes the
-//! stream with `FinishedStateUpdates`.
+//! This is the provider-backed BAL state-root path used by parallel BAL execution. It mirrors
+//! the serial BAL prewarm stream: storage updates come directly from BAL deltas, while
+//! unchanged account fields are read from the parent-state provider through the shared
+//! execution cache.
 
-use super::pre_state::BlockPreState;
-use crate::tree::payload_processor::multiproof::StateRootMessage;
+use crate::tree::{
+    payload_processor::multiproof::StateRootMessage, CachedStateMetrics, CachedStateProvider,
+    SavedCache, StateProviderBuilder,
+};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eip7928::{bal::DecodedBal, AccountChanges};
 use alloy_primitives::{keccak256, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use rayon::prelude::*;
-use reth_primitives_traits::Account;
+use reth_errors::ProviderResult;
+use reth_primitives_traits::{Account, NodePrimitives};
+use reth_provider::{
+    AccountReader, BlockReader, StateProviderBox, StateProviderFactory, StateReader,
+};
 use reth_tasks::pool::WorkerPool;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-/// Spawns the streaming task on `pool`. Iterates the BAL in parallel, sends one
-/// `StateRootMessage::HashedStateUpdate` per changed account, then sends
-/// `FinishedStateUpdates`. Returns a receiver that fires once the task is done.
-pub fn spawn_stream_bal_to_sparse_trie(
+type ThreadCachedProvider = CachedStateProvider<StateProviderBox, true>;
+
+/// Spawns the streaming task on `pool`.
+///
+/// Iterates the BAL in parallel, sends one `StateRootMessage::HashedStateUpdate` per changed
+/// account, then sends `FinishedStateUpdates`. Provider/cache errors are returned through the
+/// oneshot receiver so validation can fail before using an incomplete sparse-trie result.
+pub fn spawn_stream_bal_to_sparse_trie<N, P>(
     pool: &WorkerPool,
-    snapshot: Arc<BlockPreState>,
+    provider_builder: StateProviderBuilder<N, P>,
+    saved_cache: SavedCache,
+    cache_metrics: CachedStateMetrics,
     decoded_bal: Arc<DecodedBal>,
     to_sparse_trie_task: CrossbeamSender<StateRootMessage>,
-) -> oneshot::Receiver<()> {
+) -> oneshot::Receiver<ProviderResult<()>>
+where
+    N: NodePrimitives + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+{
     let (tx, rx) = oneshot::channel();
     pool.spawn(move || {
-        decoded_bal.as_bal().par_iter().for_each(|account_changes| {
-            stream_bal_account(&snapshot, account_changes, &to_sparse_trie_task);
-        });
+        let result = decoded_bal
+            .as_bal()
+            .par_iter()
+            .map_init(
+                || init_thread_provider(&provider_builder, &saved_cache, &cache_metrics),
+                |provider_result, account_changes| {
+                    let provider = provider_result.as_ref().map_err(Clone::clone)?;
+                    stream_bal_account(provider, account_changes, &to_sparse_trie_task)
+                },
+            )
+            .collect::<ProviderResult<()>>();
+
         let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
-        let _ = tx.send(());
+        let _ = tx.send(result);
     });
     rx
 }
 
+fn init_thread_provider<N, P>(
+    builder: &StateProviderBuilder<N, P>,
+    saved_cache: &SavedCache,
+    cache_metrics: &CachedStateMetrics,
+) -> ProviderResult<ThreadCachedProvider>
+where
+    N: NodePrimitives,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+{
+    let built = builder.build()?;
+    Ok(CachedStateProvider::new_prewarm(built, saved_cache.cache().clone(), cache_metrics.clone()))
+}
+
 /// Streams a single BAL account's post-block state. Sends a storage update if
 /// `storage_changes` is non-empty. Sends an account update if any of balance, nonce, code, or
-/// storage changed. Sends nothing for pure-read accounts (only `storage_reads` declared).
+/// storage changed. Sends nothing for pure-read accounts.
 fn stream_bal_account(
-    snapshot: &BlockPreState,
+    account_reader: &impl AccountReader,
     account_changes: &AccountChanges,
     to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
-) {
+) -> ProviderResult<()> {
     let address = account_changes.address;
     let mut hashed_address = None;
 
@@ -79,12 +117,10 @@ fn stream_bal_account(
         code_hash.is_none() &&
         account_changes.storage_changes.is_empty()
     {
-        return;
+        return Ok(());
     }
 
-    // Pre-block account from snapshot. Missing entry means the account did not exist pre-block
-    // (a CREATE target), and balance/nonce default to zero, code defaults to KECCAK_EMPTY.
-    let existing_account = snapshot.accounts.get(&address).copied().flatten();
+    let existing_account = account_reader.basic_account(&address)?;
 
     let account = Account {
         balance: balance
@@ -100,6 +136,7 @@ fn stream_bal_account(
     hashed_state.accounts.insert(hashed_address, Some(account));
 
     let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -108,6 +145,19 @@ mod tests {
     use alloy_eip7928::{BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange};
     use alloy_primitives::{Address, Bytes};
     use crossbeam_channel::unbounded;
+    use reth_errors::ProviderResult;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct TestAccountReader {
+        accounts: HashMap<Address, Option<Account>>,
+    }
+
+    impl AccountReader for TestAccountReader {
+        fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+            Ok(self.accounts.get(address).copied().flatten())
+        }
+    }
 
     fn addr(byte: u8) -> Address {
         let mut a = [0u8; 20];
@@ -115,11 +165,6 @@ mod tests {
         Address::from(a)
     }
 
-    fn empty_snapshot() -> BlockPreState {
-        BlockPreState::default()
-    }
-
-    /// Drains all messages from the channel into a vector for inspection.
     fn drain(rx: &crossbeam_channel::Receiver<StateRootMessage>) -> Vec<StateRootMessage> {
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
@@ -130,22 +175,20 @@ mod tests {
 
     #[test]
     fn pure_read_account_sends_nothing() {
-        // Only storage_reads, no changes of any kind. Function must skip.
         let (tx, rx) = unbounded();
         let account_changes = AccountChanges::new(addr(1)).with_storage_read(U256::from(7));
 
-        stream_bal_account(&empty_snapshot(), &account_changes, &tx);
+        stream_bal_account(&TestAccountReader::default(), &account_changes, &tx).unwrap();
         assert!(drain(&rx).is_empty());
     }
 
     #[test]
     fn balance_only_change_sends_account_update() {
-        // BAL has balance change, no storage. One account update, no storage update.
         let (tx, rx) = unbounded();
         let account_changes = AccountChanges::new(addr(1))
             .with_balance_change(BalanceChange::new(1, U256::from(100)));
 
-        stream_bal_account(&empty_snapshot(), &account_changes, &tx);
+        stream_bal_account(&TestAccountReader::default(), &account_changes, &tx).unwrap();
 
         let msgs = drain(&rx);
         assert_eq!(msgs.len(), 1, "expected exactly one update");
@@ -163,11 +206,9 @@ mod tests {
 
     #[test]
     fn storage_change_sends_storage_and_account_updates() {
-        // BAL has storage change. Two updates expected: storage and account (with current
-        // balance/nonce/code from snapshot).
         let (tx, rx) = unbounded();
-        let mut snapshot = empty_snapshot();
-        snapshot.accounts.insert(
+        let mut reader = TestAccountReader::default();
+        reader.accounts.insert(
             addr(1),
             Some(Account { balance: U256::from(50), nonce: 3, bytecode_hash: None }),
         );
@@ -176,7 +217,7 @@ mod tests {
             vec![StorageChange::new(1, U256::from(99))],
         ));
 
-        stream_bal_account(&snapshot, &account_changes, &tx);
+        stream_bal_account(&reader, &account_changes, &tx).unwrap();
 
         let msgs = drain(&rx);
         assert_eq!(msgs.len(), 2, "expected one storage and one account update");
@@ -196,7 +237,6 @@ mod tests {
             if !state.accounts.is_empty() {
                 got_account = true;
                 let account = state.accounts.values().next().unwrap().as_ref().unwrap();
-                // Account fields fall back to snapshot values when unchanged.
                 assert_eq!(account.balance, U256::from(50));
                 assert_eq!(account.nonce, 3);
             }
@@ -213,7 +253,7 @@ mod tests {
         let account_changes =
             AccountChanges::new(addr(1)).with_code_change(CodeChange::new(1, new_code));
 
-        stream_bal_account(&empty_snapshot(), &account_changes, &tx);
+        stream_bal_account(&TestAccountReader::default(), &account_changes, &tx).unwrap();
 
         let msgs = drain(&rx);
         assert_eq!(msgs.len(), 1);
@@ -230,7 +270,7 @@ mod tests {
         let account_changes =
             AccountChanges::new(addr(1)).with_code_change(CodeChange::new(1, Bytes::new()));
 
-        stream_bal_account(&empty_snapshot(), &account_changes, &tx);
+        stream_bal_account(&TestAccountReader::default(), &account_changes, &tx).unwrap();
 
         let msgs = drain(&rx);
         let StateRootMessage::HashedStateUpdate(state) = &msgs[0] else {
@@ -241,14 +281,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_snapshot_account_uses_zero_defaults() {
-        // Account not in snapshot (CREATE target). balance/nonce default to 0, code to
-        // KECCAK_EMPTY.
+    fn missing_provider_account_uses_zero_defaults() {
         let (tx, rx) = unbounded();
         let account_changes =
             AccountChanges::new(addr(1)).with_nonce_change(NonceChange::new(1, 1));
 
-        stream_bal_account(&empty_snapshot(), &account_changes, &tx);
+        stream_bal_account(&TestAccountReader::default(), &account_changes, &tx).unwrap();
 
         let msgs = drain(&rx);
         let StateRootMessage::HashedStateUpdate(state) = &msgs[0] else {

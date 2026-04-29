@@ -1,11 +1,10 @@
 //! BAL-path block execution — workers produce per-tx results in parallel and the canonical
 //! executor commits them in order while building the composed BAL.
 //!
-//! A single BAL-derived [`SnapshotDatabase`] backs both worker and canonical execution.
-//! `revm::State` carries all in-block writes in memory, so the underlying database only needs
-//! to answer pre-block reads. Using the same snapshot base on both sides keeps the EVM
-//! `Self::Result` type identical, so worker outputs flow directly into
-//! `commit_transaction` without any result reinterpretation.
+//! Workers and canonical execution use separate `revm::State`s over the same parent-state
+//! provider source. Workers layer revm's BAL state over that provider so declared in-block
+//! reads resolve at the worker's `bal_index`; the canonical executor commits worker outputs
+//! in order while rebuilding the composed BAL.
 //!
 //! ### Checks performed
 //!
@@ -20,8 +19,6 @@
 
 use super::{
     feasibility::FeasibilityTracker,
-    pre_state::BlockPreState,
-    snapshot_db::SnapshotDatabase,
     validation::{check_bal_hash, check_item_count},
     RejectReason,
 };
@@ -34,8 +31,9 @@ use alloy_evm::{
     Evm,
 };
 use alloy_primitives::B256;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
 use reth_primitives_traits::{BlockTy, SealedBlock};
+use reth_provider::ProviderError;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use revm::{
     context::result::ResultAndState,
@@ -76,6 +74,8 @@ pub enum BalExecutionError {
     /// Worker or canonical EVM failure (including revm `BalError` for undeclared accesses,
     /// surfaced opaquely until upstream revm carries address/slot metadata).
     Evm(BlockExecutionError),
+    /// Provider setup failed before EVM execution could start.
+    Provider(ProviderError),
     /// The received BAL could not be converted from alloy-format to revm-format.
     BalConversion(String),
 }
@@ -92,11 +92,18 @@ impl From<BlockExecutionError> for BalExecutionError {
     }
 }
 
+impl From<ProviderError> for BalExecutionError {
+    fn from(e: ProviderError) -> Self {
+        Self::Provider(e)
+    }
+}
+
 impl core::fmt::Display for BalExecutionError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Reject(r) => write!(f, "BAL rejection: {r:?}"),
             Self::Evm(e) => write!(f, "evm execution failed: {e}"),
+            Self::Provider(e) => write!(f, "provider setup failed: {e}"),
             Self::BalConversion(s) => write!(f, "alloy→revm BAL conversion failed: {s}"),
         }
     }
@@ -120,9 +127,9 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
 
     /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
     #[expect(clippy::too_many_arguments)]
-    pub fn execute_block<Tx>(
+    pub fn execute_block<Tx, DB, MakeDb>(
         &self,
-        snapshot: Arc<BlockPreState>,
+        make_db: MakeDb,
         received_bal: Arc<DecodedBal>,
         block: &SealedBlock<BlockTy<Evm::Primitives>>,
         txs: Vec<Tx>,
@@ -131,10 +138,12 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
     ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
     where
         Tx: ExecutableTxFor<Evm> + Send,
+        DB: Database + Send,
+        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
         self.execute_block_in_pool(
             self.runtime.bal_streaming_pool(),
-            snapshot,
+            make_db,
             received_bal,
             block,
             txs,
@@ -145,10 +154,10 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
 
     /// Executes one block on the BAL path using the provided worker pool.
     #[expect(clippy::too_many_arguments)]
-    pub fn execute_block_in_pool<Tx>(
+    pub fn execute_block_in_pool<Tx, DB, MakeDb>(
         &self,
         worker_pool: &WorkerPool,
-        snapshot: Arc<BlockPreState>,
+        make_db: MakeDb,
         received_bal: Arc<DecodedBal>,
         block: &SealedBlock<BlockTy<Evm::Primitives>>,
         txs: Vec<Tx>,
@@ -157,6 +166,8 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
     ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
     where
         Tx: ExecutableTxFor<Evm> + Send,
+        DB: Database + Send,
+        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
         check_bal_hash(&received_bal, header_bal_hash)?;
         let bal = received_bal.as_bal();
@@ -168,7 +179,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         );
 
         let mut canonical_state = State::builder()
-            .with_database(SnapshotDatabase::new(Arc::clone(&snapshot)))
+            .with_database(make_db()?)
             .with_bundle_update()
             .with_bal_builder()
             .build();
@@ -210,6 +221,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
             let abort = Arc::new(AtomicBool::new(false));
             let tx_count = txs.len() as u64;
+            let make_db = &make_db;
 
             worker_pool.in_place_scope(|scope| -> Result<(), BalExecutionError> {
                 let mut result_rxs = Vec::with_capacity(tx_count as usize);
@@ -217,12 +229,11 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                 for (i, tx) in txs.into_iter().enumerate() {
                     let tx_index = i as u64 + 1;
                     let abort = Arc::clone(&abort);
-                    let snapshot = Arc::clone(&snapshot);
                     let received_bal_revm = Arc::clone(&received_bal_revm);
                     let evm_config = worker_evm_config.clone();
                     let result_rx = spawn_worker(scope, abort, move || {
                         let mut worker_state = State::builder()
-                            .with_database(SnapshotDatabase::new(snapshot))
+                            .with_database(make_db()?)
                             .with_bal(received_bal_revm)
                             .with_bundle_update()
                             .build();
@@ -351,13 +362,13 @@ fn commit_worker_result<E>(executor: &mut E, worker_result: E::Result)
 where
     E: BlockExecutor,
 {
-    executor.commit_transaction(worker_result);
+    let _ = executor.commit_transaction(worker_result);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::payload_processor::bal::RequiredReads;
+    use crate::tree::payload_processor::bal::{BlockPreState, RequiredReads, SnapshotDatabase};
     use alloy_consensus::{constants::KECCAK_EMPTY, Header};
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
@@ -462,11 +473,11 @@ mod tests {
         let wrong_hash = B256::repeat_byte(0xff);
         let block = empty_amsterdam_block(wrong_hash);
 
-        let result = executor.execute_block::<Recovered<TransactionSigned>>(
-            snapshot,
+        let result = executor.execute_block(
+            snapshot_db(snapshot),
             to_arc_decoded(received_bal),
             &block,
-            Vec::new(),
+            Vec::<Recovered<TransactionSigned>>::new(),
             wrong_hash,
             30_000_000,
         );
@@ -498,11 +509,11 @@ mod tests {
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
         let block = empty_amsterdam_block(bal_hash);
 
-        let result = executor.execute_block::<Recovered<TransactionSigned>>(
-            snapshot,
+        let result = executor.execute_block(
+            snapshot_db(snapshot),
             to_arc_decoded(received_bal),
             &block,
-            Vec::new(),
+            Vec::<Recovered<TransactionSigned>>::new(),
             bal_hash,
             10_000,
         );
@@ -557,11 +568,11 @@ mod tests {
         let block = empty_amsterdam_block(bal_hash);
         let snapshot = snapshot_for_bal(system_contracts_db(), &received_bal, block.number);
 
-        let result = executor.execute_block::<Recovered<TransactionSigned>>(
-            snapshot,
+        let result = executor.execute_block(
+            snapshot_db(snapshot),
             to_arc_decoded(received_bal),
             &block,
-            Vec::new(),
+            Vec::<Recovered<TransactionSigned>>::new(),
             bal_hash,
             30_000_000,
         );
@@ -629,6 +640,12 @@ mod tests {
         }
 
         Arc::new(pre)
+    }
+
+    fn snapshot_db(
+        snapshot: Arc<BlockPreState>,
+    ) -> impl Fn() -> Result<SnapshotDatabase, BalExecutionError> + Sync {
+        move || Ok(SnapshotDatabase::new(Arc::clone(&snapshot)))
     }
 
     /// Runs the canonical path on a block with real txs (no hash check) and returns the
@@ -768,7 +785,7 @@ mod tests {
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let result = executor.execute_block(
-            snapshot,
+            snapshot_db(snapshot),
             to_arc_decoded(reference_bal),
             &block,
             vec![recovered1, recovered2],
@@ -868,7 +885,7 @@ mod tests {
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let bal_out = executor
             .execute_block(
-                snapshot,
+                snapshot_db(snapshot),
                 to_arc_decoded(reference_bal),
                 &block,
                 txs,
@@ -1023,11 +1040,11 @@ mod tests {
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let result = executor.execute_block(
-            snapshot,
+            snapshot_db(snapshot),
             to_arc_decoded(reference_bal),
             &low_gas_block,
             vec![tx1, tx2],
-            Some(bal_hash),
+            bal_hash,
             block_gas_limit,
         );
 
@@ -1172,29 +1189,29 @@ mod tests {
     }
 
     #[test]
-    fn empty_bal_now_fails_before_final_hash_without_snapshot_entries() {
-        // With the BAL-derived snapshot backing canonical execution too, an empty BAL produces
-        // an empty snapshot. Pre-execution system calls then fail on their first undeclared
-        // access instead of reaching the final rebuilt-BAL hash comparison.
+    fn empty_snapshot_db_fails_before_final_hash() {
+        // Test harnesses can still supply a strict snapshot DB. With an empty snapshot,
+        // pre-execution system calls fail on their first missing read instead of reaching
+        // the final rebuilt-BAL hash comparison.
         let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
         let snapshot = Arc::new(BlockPreState::default());
         let received_bal: BlockAccessList = Vec::new();
         let empty_bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
         let block = empty_amsterdam_block(empty_bal_hash);
 
-        let result = executor.execute_block::<Recovered<TransactionSigned>>(
-            snapshot,
+        let result = executor.execute_block(
+            snapshot_db(snapshot),
             to_arc_decoded(received_bal),
             &block,
-            Vec::new(),
+            Vec::<Recovered<TransactionSigned>>::new(),
             empty_bal_hash,
             30_000_000,
         );
 
         match result {
             Err(BalExecutionError::Evm(_)) => {}
-            Err(e) => panic!("expected snapshot-backed execution failure, got error {e:?}"),
-            Ok(_) => panic!("expected snapshot-backed execution failure, got Ok"),
+            Err(e) => panic!("expected strict DB execution failure, got error {e:?}"),
+            Ok(_) => panic!("expected strict DB execution failure, got Ok"),
         }
     }
 }

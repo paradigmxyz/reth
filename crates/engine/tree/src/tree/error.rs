@@ -132,6 +132,7 @@ impl From<BalExecutionError> for InsertBlockErrorKind {
             // Worker EVM errors flow through the standard execution-error path so existing
             // metrics and routing apply.
             BalExecutionError::Evm(inner) => Self::Execution(inner),
+            BalExecutionError::Provider(inner) => Self::Provider(inner),
             other => Self::InvalidBlockAccessList(other),
         }
     }
