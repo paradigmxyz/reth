@@ -1029,6 +1029,28 @@ where
     Ok(Vec::new())
 }
 
+fn advance_sorted_cursor<T, C>(
+    cursor: &mut C,
+    current_key: &mut Option<T::Key>,
+    target: &T::Key,
+) -> Result<(), reth_db_api::DatabaseError>
+where
+    T: Table,
+    T::Key: Clone + Ord,
+    C: DbCursorRO<T>,
+{
+    if current_key.as_ref().is_none_or(|key| key > target) {
+        *current_key = cursor.seek(target.clone())?.map(|(key, _)| key);
+        return Ok(());
+    }
+
+    while current_key.as_ref().is_some_and(|key| key < target) {
+        *current_key = cursor.next()?.map(|(key, _)| key);
+    }
+
+    Ok(())
+}
+
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
     #[expect(clippy::too_many_arguments)]
@@ -2682,11 +2704,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        let mut current_hashed_account = None;
         for (hashed_address, account) in hashed_state.accounts() {
+            advance_sorted_cursor::<tables::HashedAccounts, _>(
+                &mut hashed_accounts_cursor,
+                &mut current_hashed_account,
+                hashed_address,
+            )?;
+
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                current_hashed_account = Some(*hashed_address);
+            } else if current_hashed_account.as_ref() == Some(hashed_address) {
                 hashed_accounts_cursor.delete_current()?;
+                current_hashed_account = None;
             }
         }
 
@@ -3080,20 +3111,29 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        let mut current_account_node = None;
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = A::AccountKey::from(*key);
+            advance_sorted_cursor::<A::AccountTrieTable, _>(
+                &mut account_trie_cursor,
+                &mut current_account_node,
+                &nibbles,
+            )?;
+
             match updated_node {
                 Some(node) => {
                     if !key.is_empty() {
                         *num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node)?;
+                        account_trie_cursor.upsert(nibbles.clone(), node)?;
+                        current_account_node = Some(nibbles);
                     }
                 }
                 None => {
                     *num_entries += 1;
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                    if current_account_node.as_ref() == Some(&nibbles) {
                         account_trie_cursor.delete_current()?;
+                        current_account_node = None;
                     }
                 }
             }
@@ -3207,13 +3247,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         changesets: impl IntoIterator<Item = (Address, Option<Account>)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
+        let mut current_hashed_account = None;
         let hashed_accounts =
             changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
+            advance_sorted_cursor::<tables::HashedAccounts, _>(
+                &mut hashed_accounts_cursor,
+                &mut current_hashed_account,
+                hashed_address,
+            )?;
+
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                current_hashed_account = Some(*hashed_address);
+            } else if current_hashed_account.as_ref() == Some(hashed_address) {
                 hashed_accounts_cursor.delete_current()?;
+                current_hashed_account = None;
             }
         }
         Ok(hashed_accounts)
