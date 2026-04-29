@@ -831,7 +831,7 @@ where
                 // set the actual request if it hasn't been started yet
                 if !self.has_bodies_request_started() {
                     // request the bodies for the downloaded headers
-                    self.request.bodies = Some(self.client.get_block_bodies(hashes.clone()));
+                    self.request.bodies = Some(self.client.get_block_bodies(hashes));
                 }
 
                 // set the headers response
