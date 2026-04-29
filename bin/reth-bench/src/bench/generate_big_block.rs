@@ -21,6 +21,7 @@ use alloy_rpc_types_engine::{
 };
 use clap::Parser;
 use eyre::Context;
+use futures::{stream, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
@@ -267,6 +268,15 @@ pub struct Command {
     /// the flattened BAL on the stored payload.
     #[arg(long, default_value_t = false)]
     bal: bool,
+
+    /// Maximum number of in-flight RPC fetches to keep buffered ahead of the merger.
+    ///
+    /// Each entry is one full per-block fetch (block + receipts, plus BAL when `--bal` is
+    /// set). Larger values absorb RPC latency at the cost of more concurrent connections
+    /// and memory; the buffer persists across `--num-big-blocks` so prefetching continues
+    /// across big-block boundaries.
+    #[arg(long, value_name = "PREFETCH_BUFFER", default_value_t = 32)]
+    prefetch_buffer: usize,
 }
 
 impl Command {
@@ -319,13 +329,27 @@ impl Command {
         }
         let mut prev_big_block_header: Option<PrevBigBlockHeader> = None;
 
-        // Track the next block to fetch across big blocks so they don't overlap.
+        // Persistent prefetch stream: keeps `prefetch_buffer` per-block fetches in flight
+        // ahead of the merger across all big blocks. Each item is a fully materialized
+        // `FetchedBlock` (or `None` once the chain tip is reached on this fetch).
+        let prefetch_buffer = self.prefetch_buffer.max(1);
+        let bal_enabled = self.bal;
+        let block_stream = stream::iter(self.from_block..)
+            .map(|block_number| {
+                let provider = provider.clone();
+                async move { fetch_one_block(provider, block_number, bal_enabled).await }
+            })
+            .buffered(prefetch_buffer);
+        let mut block_stream = Box::pin(block_stream);
+
+        // Track the next block number we expect from the stream (purely for logging /
+        // big-block range bookkeeping; the stream produces blocks in `from_block..` order).
         let mut next_block = self.from_block;
 
         for big_block_idx in 0..self.num_big_blocks {
             let range_start = next_block;
 
-            // Fetch consecutive blocks until the gas target is reached.
+            // Drain the prefetch stream until the gas target is reached for this big block.
             let mut blocks = Vec::new();
             let mut block_receipts: Vec<Vec<Receipt>> = Vec::new();
             let mut block_access_lists: Vec<Option<BlockAccessList>> = Vec::new();
@@ -334,16 +358,11 @@ impl Command {
             let mut reached_chain_tip = false;
             while accumulated_block_gas < self.target_gas {
                 let block_number = next_block;
-                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Fetching block");
+                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Awaiting prefetched block");
 
-                let fetch_result = tokio::try_join!(
-                    provider.get_block_by_number(block_number.into()).full(),
-                    provider.get_block_receipts(block_number.into()),
-                );
-
-                let (rpc_block, receipts) = match fetch_result {
-                    Ok((Some(block), Some(receipts))) => (block, receipts),
-                    Ok((None, _) | (_, None)) => {
+                let fetched = match block_stream.next().await {
+                    Some(Ok(Some(fetched))) => fetched,
+                    Some(Ok(None)) => {
                         warn!(
                             target: "reth-bench",
                             block_number,
@@ -352,52 +371,16 @@ impl Command {
                         reached_chain_tip = true;
                         break;
                     }
-                    Err(e) => return Err(e.into()),
+                    Some(Err(e)) => return Err(e),
+                    // The block-number stream is open-ended; this only fires if the
+                    // upstream `iter(from..)` is somehow exhausted.
+                    None => {
+                        reached_chain_tip = true;
+                        break;
+                    }
                 };
-
-                let block_access_list = if self.bal {
-                    Some(fetch_block_access_list(&provider, block_number).await.wrap_err_with(
-                        || format!("Failed to fetch BAL for block {block_number}"),
-                    )?)
-                } else {
-                    None
-                };
-
-                // Convert RPC receipts to consensus receipts
-                let consensus_receipts: Vec<Receipt> = receipts
-                    .iter()
-                    .map(|r| {
-                        let inner = &r.inner.inner.inner;
-                        let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
-                        Receipt {
-                            tx_type,
-                            success: inner.receipt.status.coerce_status(),
-                            cumulative_gas_used: inner.receipt.cumulative_gas_used,
-                            logs: inner
-                                .receipt
-                                .logs
-                                .iter()
-                                .map(|log| alloy_primitives::Log {
-                                    address: log.inner.address,
-                                    data: log.inner.data.clone(),
-                                })
-                                .collect(),
-                        }
-                    })
-                    .collect();
-
-                // Convert to consensus block
-                let block = rpc_block
-                    .into_inner()
-                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
-                        tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
-                    })?
-                    .into_consensus();
-
-                // Convert to ExecutionData
-                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-                let execution_data = ExecutionData { payload, sidecar };
+                let FetchedBlock { execution_data, consensus_receipts, block_access_list } =
+                    fetched;
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
                 let block_blob_gas =
@@ -669,6 +652,79 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// One fully-materialized block fetched by the prefetcher.
+struct FetchedBlock {
+    /// Execution payload with sidecar derived from the RPC block.
+    execution_data: ExecutionData,
+    /// Consensus-format receipts (`cumulative_gas_used` is still per-block, callers offset
+    /// it when merging).
+    consensus_receipts: Vec<Receipt>,
+    /// `eth_getBlockAccessListByBlockNumber` result when `--bal` is enabled.
+    block_access_list: Option<BlockAccessList>,
+}
+
+/// Fetches one block + receipts (and optionally its BAL) from the RPC. Returns `Ok(None)`
+/// when the block doesn't exist yet (chain-tip reached).
+async fn fetch_one_block(
+    provider: RootProvider<AnyNetwork>,
+    block_number: u64,
+    bal_enabled: bool,
+) -> eyre::Result<Option<FetchedBlock>> {
+    let (rpc_block, receipts) = tokio::try_join!(
+        provider.get_block_by_number(block_number.into()).full(),
+        provider.get_block_receipts(block_number.into()),
+    )?;
+    let (rpc_block, receipts) = match (rpc_block, receipts) {
+        (Some(b), Some(r)) => (b, r),
+        _ => return Ok(None),
+    };
+
+    let block_access_list = if bal_enabled {
+        Some(
+            fetch_block_access_list(&provider, block_number)
+                .await
+                .wrap_err_with(|| format!("Failed to fetch BAL for block {block_number}"))?,
+        )
+    } else {
+        None
+    };
+
+    let consensus_receipts: Vec<Receipt> = receipts
+        .iter()
+        .map(|r| {
+            let inner = &r.inner.inner.inner;
+            let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
+            Receipt {
+                tx_type,
+                success: inner.receipt.status.coerce_status(),
+                cumulative_gas_used: inner.receipt.cumulative_gas_used,
+                logs: inner
+                    .receipt
+                    .logs
+                    .iter()
+                    .map(|log| alloy_primitives::Log {
+                        address: log.inner.address,
+                        data: log.inner.data.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    let block = rpc_block
+        .into_inner()
+        .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+        .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+            tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+        })?
+        .into_consensus();
+
+    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+    let execution_data = ExecutionData { payload, sidecar };
+
+    Ok(Some(FetchedBlock { execution_data, consensus_receipts, block_access_list }))
 }
 
 fn merge_block_access_list(
