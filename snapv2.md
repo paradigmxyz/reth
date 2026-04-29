@@ -236,13 +236,89 @@ The branch now has a true `snap/2` shape instead of only preparatory BAL types:
 
 1. **Capability negotiation** — default hello protocols advertise `snap/2`. Snap request scheduling requires peers to advertise the matching snap version, and incoming snap payloads are decoded with the negotiated version.
 2. **Snap/2 wire decoding** — `snap/2` accepts messages 0x00-0x05 plus `GetBlockAccessLists` / `BlockAccessLists` at 0x08 / 0x09. The legacy snap/1 trie-node request/response types are not part of the branch API.
-3. **Snap leaf payload types** — the snap wire crate owns `SlimAccount` for account bodies and storage value helpers on `StorageData`; engine snap no longer carries standalone account/storage RLP encode/decode helpers.
+3. **Snap leaf payload types** — `AccountData` carries `TrieAccount` internally and owns the snap slim account body codec at the wire boundary; storage value helpers live on `StorageData`; engine snap no longer carries standalone account/storage RLP encode/decode helpers.
 4. **Snap/2 BAL exchange** — `SnapClient` exposes `get_snap_block_access_lists`, `PeerRequest` has a separate `GetSnapBlockAccessLists` variant, and `SnapRequestHandler` serves BALs through the snap request path.
 5. **Snap-owned serving logic** — provider-backed snap serving lives in `reth-engine-snap::serve::ProviderSnapState`; the network crate owns only the generic `SnapStateProvider` trait and request handler wiring.
 6. **Snap-owned lifecycle logic** — Phase A / Phase B orchestration lives in `reth-engine-snap::controller::SnapSyncController`; `engine-tree` only starts/polls the controller and forwards events.
 7. **Tree snap state isolation** — `EngineApiTreeHandler` stores snap-specific state in `SnapTreeState` under `tree/snap.rs` rather than carrying loose `fresh_node` / `snap_events_tx` fields.
 8. **BAL verification** — BAL catch-up fetches missing BALs through snap/2, decodes them with alloy RLP, computes the EIP-7928 BAL hash, and compares it with the header's `block_access_list_hash` before applying state changes.
 9. **Hashed state hardening** — snap clears `HashedAccounts`, `HashedStorages`, `AccountsTrie`, `StoragesTrie`, and `Bytecodes`; hashed account/storage writes are adapted into `HashedPostStateSorted` and applied through the provider `StateWriter`, and bytecodes are written through `StateWriter::write_bytecodes`, so snap no longer writes those storage tables directly.
+
+## Snap/1 Shared-Message Compliance Plan
+
+EIP-8189 keeps snap/1 messages `0x00..0x05` unchanged. This branch now implements the shared account, storage, and bytecode range rules needed by snap/2, including snap slim account bodies and range proof verification.
+
+### 1. Snap Account Body Encoding — implemented
+
+- Replace full `TrieAccount` account bodies on the snap wire with the snap slim account body codec.
+- Encode `storage_root == EMPTY_ROOT_HASH` as RLP empty list and `code_hash == KECCAK_EMPTY` as RLP empty list, matching snap/1's account body format.
+- Keep typed conversions to/from `TrieAccount` so trie proof verification and hashed DB writes still use the canonical account representation internally.
+- Add roundtrip tests that assert empty storage/code fields use the slim encoding and decode back to canonical `TrieAccount` values.
+
+### 2. Account Range Serving Rules — implemented
+
+- If the serving node has the requested `rootHash`, always return a proof for `startingHash` unless the response is the entire account trie.
+- If no accounts exist in `[startingHash, limitHash)`, return the first account after `limitHash` when one exists, as required by snap/1.
+- Keep `responseBytes` as a soft cap, but ensure a non-empty servable range returns at least one account.
+- Preserve hash monotonicity in responses and include proof nodes for the requested origin plus the last returned account.
+
+### 3. Account Range Verification — implemented
+
+- Verify that returned account hashes are strictly increasing and start at or after the requested origin.
+- Verify proof-bearing responses with the internal snap range verifier, so the proof must establish that returned leaves are complete between the requested origin and right boundary, not just individually valid.
+- Treat empty account responses as stale only when the serving peer lacks the requested root, not as successful end-of-state unless the proof establishes the end.
+- Feed account ranges into the verifier with canonical trie account RLP values, while keeping the snap slim account body codec only at the wire boundary.
+- Reject skipped-middle account ranges with adversarial proof tests.
+
+### 4. Storage Range Serving Rules — implemented
+
+- If the serving node lacks the requested state root or any requested account hash, return an empty reply.
+- For multi-account storage requests, return full storage ranges for each account until the response limit is hit; only the last included account may be partial, and only then attach a proof.
+- For single-account continuation requests, honor `startingHash` / `limitHash`, attach a proof whenever the returned range is partial, and allow proof-free responses only when the entire requested storage range is returned.
+- Preserve storage slot hash ordering and skip zero-valued slots.
+
+### 5. Storage Range Verification — implemented
+
+- Verify every storage response is ordered and maps one-to-one to the requested account hashes.
+- When a proof is present, verify the full partial range with the internal snap range verifier and RLP-encoded storage slot values.
+- When no proof is present, recompute the full storage root for that account before trusting a complete storage range, or otherwise require a proof.
+- Reject partial-looking storage responses without proofs instead of silently writing them.
+- Continue recomputing full storage roots for proof-free complete storage ranges.
+- Ensure continuation chunks are accumulated and verified before any truncated account storage is written.
+
+### 6. Bytecode Response Matching — implemented
+
+- Snap/1 bytecode responses skip unavailable hashes, so the downloader must not zip response index to request index.
+- Validate each returned bytecode by `keccak256(code)` and match it to one of the requested hashes.
+- Require returned bytecodes to be a request-order subsequence while still allowing unavailable hashes to be skipped.
+- Empty bytecode responses should mean "none of these codes are available" for that request, not automatically "stale root".
+
+### 7. Tests And Validation — passing locally
+
+- Add unit tests for slim account encoding, account range edge cases, storage partial/full proof behavior, and bytecode hash matching.
+- Keep `run_snap_test.sh` running both active snap e2e tests: `can_snap_sync_catch_up` and `can_snap_sync_stale_pivot`.
+- After each protocol-significant change, run the focused crate tests plus `./run_snap_test.sh`.
+
+Latest validation:
+
+- `cargo test -p reth-eth-wire-types snap_account`
+- `cargo test -p reth-engine-snap proof`
+- `cargo test -p reth-engine-snap download::tests`
+- `cargo check -p reth-engine-snap`
+- `git diff --check`
+- `zepter`
+- `make lint-toml`
+- `./run_snap_test.sh`
+
+### 8. Range Proof Hardening — implemented
+
+The old endpoint checks proved that the requested origin and returned right boundary were individually valid, but that was not enough to prove there were no omitted leaves between them. The downloader now uses the private `crates/engine/snap/src/proof.rs` module:
+
+- `verify_range_proof(root, origin, leaves, proof)` is generic over `(hashed_key, encoded_value)`, so account and storage ranges share the same verifier.
+- The verifier reconstructs the trie frontier from returned leaves plus proof subtrees outside the proven range, then compares the reconstructed root with the expected account/storage root.
+- Account ranges feed canonical `TrieAccount` RLP values into the verifier.
+- Storage ranges feed canonical RLP-encoded `U256` slot values into the verifier.
+- Tests cover complete boundary multiproofs, proof-free full trie responses, omitted interior leaves, empty tail proofs, and empty ranges that hide a right-side leaf.
 
 ### Passing E2E Tests
 
@@ -271,6 +347,7 @@ The script runs both active snap sync E2E tests:
 | Snap request routing | `crates/net/network-api/src/events.rs`, `crates/net/network/src/{fetch,state,manager}.rs` |
 | Session-level snap/2 encode/decode | `crates/net/network/src/session/active.rs` |
 | Provider-backed snap serving | `crates/engine/snap/src/serve.rs` |
+| Snap range proof verification | `crates/engine/snap/src/proof.rs` |
 | Snap sync controller | `crates/engine/snap/src/controller.rs` |
 | Snap orchestrator | `crates/engine/snap/src/orchestrator.rs` |
 | BAL pivot/catch-up logic | `crates/engine/snap/src/pivot.rs`, `crates/engine/snap/src/bal.rs` |
@@ -294,7 +371,7 @@ The script runs both active snap sync E2E tests:
 | Hashed state write path | Snap batch shapes are converted into `HashedPostStateSorted` and written through `StateWriter::write_hashed_state`; bytecode batches use `StateWriter::write_bytecodes` |
 | Combined backfill bounds | `CombinedBackfillSync` now depends on the snap crate's `SnapSyncControl` adapter, so client/provider bounds stay out of the combined sync impls |
 | Test entrypoint | `run_snap_test.sh` now runs both active snap sync E2E tests |
-| Snap account/storage proofs | Provider-backed serving now emits boundary proof nodes for account ranges and partial storage ranges; the downloader verifies the requested start boundary and returned end boundary before writing data |
+| Snap account/storage proofs | Provider-backed serving now emits boundary proof nodes for account ranges and partial storage ranges; the downloader reconstructs the proven range frontier and rejects omitted interior leaves before writing data |
 | Served account storage roots | `AccountRange` bodies now carry storage roots computed from the same historical hashed-state overlay used to serve the account and storage leaves |
 
 ### Remaining Debt
@@ -302,12 +379,11 @@ The script runs both active snap sync E2E tests:
 - **No crash resume.** If the node crashes mid-snap-sync, it should wipe partial hashed state and restart. Resume-from-midpoint would require persisting range cursor, pivot, and downloaded bytecode/account progress.
 - **No reorg handling during snap sync.** If a reorg crosses the pivot, the current implementation does not collect old-fork BALs and re-fetch affected ranges as EIP-8189 describes.
 - **Frozen-head serving is still limited.** Provider-backed serving reconstructs recently persisted state with changesets; it does not yet serve the final unflushed in-memory blocks.
-- **Snap range proof validation is still minimal.** Account and partial-storage responses now carry boundary proofs, and the downloader verifies the requested start boundary plus returned end boundary. This still stops short of a full `VerifyRangeProof`-style completeness check for every returned range, so hostile peers can be rejected for bad boundary data but the range verifier should still be tightened before treating this as production-hardening complete.
 - **BAL cache placement remains debatable.** `BalStoreHandle` abstracts the store, but some implementation still lives near Engine API/RPC concerns. Moving shared BAL cache implementation into storage/provider may be cleaner later.
 
 ### Future Work
 
-- **Full range proof validation and trie population:** replace the current boundary checks with a complete account/storage range verifier, reject invalid peers, and optionally insert verified proof nodes into `AccountsTrie`/`StoragesTrie` to reduce MerkleExecute work.
+- **Trie population from verified proofs:** optionally insert verified proof nodes into `AccountsTrie`/`StoragesTrie` to reduce MerkleExecute work.
 - **Historical root serving cache:** Cache `HashedPostStateSorted` overlays per served pivot so repeated account/storage range requests do not rebuild reverse diffs.
 - **Peer reliability tracking for BALs:** Peers returning `0x80` for available BALs should be deprioritized separately from ordinary empty snap state responses.
 - **Reorg handling during snap sync:** Implement the EIP-8189 old-fork/new-fork BAL procedure, and restart if required orphaned BALs are unavailable.

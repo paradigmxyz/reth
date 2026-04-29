@@ -13,6 +13,8 @@ pub mod pivot;
 pub mod serve;
 pub mod storage;
 
+mod proof;
+
 use alloy_primitives::{Bytes, B256};
 
 /// How many blocks behind HEAD to place the snap sync pivot.

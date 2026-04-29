@@ -7,9 +7,12 @@
 
 use crate::BlockAccessLists;
 use alloc::vec::Vec;
-use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::{BufMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_primitives::{bytes::Buf, Bytes, B256, U256};
+use alloy_rlp::{
+    BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable, EMPTY_LIST_CODE,
+};
 pub use alloy_trie::TrieAccount;
+use alloy_trie::{EMPTY_ROOT_HASH, KECCAK_EMPTY};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// Supported SNAP protocol versions.
@@ -141,8 +144,13 @@ impl Decodable for AccountData {
 }
 
 impl AccountData {
+    /// Returns the encoded byte length of this account's snap slim body.
+    pub fn account_body_len(account: TrieAccount) -> usize {
+        snap_account_payload_length(&account).length_with_payload()
+    }
+
     fn as_wire(&self) -> AccountDataWire {
-        AccountDataWire { hash: self.hash, body: alloy_rlp::encode(self.account).into() }
+        AccountDataWire { hash: self.hash, body: encode_account_body(self.account).into() }
     }
 }
 
@@ -156,8 +164,71 @@ impl TryFrom<AccountDataWire> for AccountData {
     type Error = alloy_rlp::Error;
 
     fn try_from(value: AccountDataWire) -> Result<Self, Self::Error> {
-        let account = alloy_rlp::decode_exact::<TrieAccount>(&value.body)?;
+        let account = decode_account_body(&value.body)?;
         Ok(Self { hash: value.hash, account })
+    }
+}
+
+fn encode_account_body(account: TrieAccount) -> Vec<u8> {
+    let mut out = Vec::with_capacity(AccountData::account_body_len(account));
+    snap_account_payload_length(&account).encode(&mut out);
+    account.nonce.encode(&mut out);
+    account.balance.encode(&mut out);
+    encode_slim_hash(account.storage_root, EMPTY_ROOT_HASH, &mut out);
+    encode_slim_hash(account.code_hash, KECCAK_EMPTY, &mut out);
+    out
+}
+
+fn decode_account_body(mut buf: &[u8]) -> alloy_rlp::Result<TrieAccount> {
+    let header = Header::decode(&mut buf)?;
+    if !header.list {
+        return Err(alloy_rlp::Error::UnexpectedString)
+    }
+
+    let initial_len = buf.len();
+    let nonce = u64::decode(&mut buf)?;
+    let balance = U256::decode(&mut buf)?;
+    let storage_root = decode_slim_hash(&mut buf, EMPTY_ROOT_HASH)?;
+    let code_hash = decode_slim_hash(&mut buf, KECCAK_EMPTY)?;
+    let consumed = initial_len - buf.len();
+    if consumed != header.payload_length || !buf.is_empty() {
+        return Err(alloy_rlp::Error::UnexpectedLength)
+    }
+
+    Ok(TrieAccount { nonce, balance, storage_root, code_hash })
+}
+
+fn snap_account_payload_length(account: &TrieAccount) -> Header {
+    let payload_length = account.nonce.length() +
+        account.balance.length() +
+        slim_hash_length(account.storage_root, EMPTY_ROOT_HASH) +
+        slim_hash_length(account.code_hash, KECCAK_EMPTY);
+
+    Header { list: true, payload_length }
+}
+
+fn slim_hash_length(hash: B256, empty_hash: B256) -> usize {
+    if hash == empty_hash {
+        1
+    } else {
+        hash.length()
+    }
+}
+
+fn encode_slim_hash(hash: B256, empty_hash: B256, out: &mut dyn BufMut) {
+    if hash == empty_hash {
+        out.put_u8(EMPTY_LIST_CODE);
+    } else {
+        hash.encode(out);
+    }
+}
+
+fn decode_slim_hash(buf: &mut &[u8], empty_hash: B256) -> alloy_rlp::Result<B256> {
+    if buf.first().copied() == Some(EMPTY_LIST_CODE) {
+        buf.advance(1);
+        Ok(empty_hash)
+    } else {
+        B256::decode(buf)
     }
 }
 
@@ -564,5 +635,46 @@ mod tests {
     fn storage_data_decodes_value() {
         let storage = StorageData::from_value(b256_from_u64(1), U256::from(99));
         assert_eq!(storage.decode_value().unwrap(), U256::from(99));
+    }
+
+    #[test]
+    fn snap_account_uses_empty_list_sentinels() {
+        let account = TrieAccount {
+            nonce: 1,
+            balance: U256::from(2),
+            storage_root: alloy_trie::EMPTY_ROOT_HASH,
+            code_hash: alloy_trie::KECCAK_EMPTY,
+        };
+
+        let encoded = encode_account_body(account);
+        assert_eq!(
+            encoded,
+            vec![0xc4, 0x01, 0x02, alloy_rlp::EMPTY_LIST_CODE, alloy_rlp::EMPTY_LIST_CODE]
+        );
+
+        assert_eq!(decode_account_body(&encoded).unwrap(), account);
+    }
+
+    #[test]
+    fn account_data_encodes_snap_account_body() {
+        let data = AccountData {
+            hash: b256_from_u64(1),
+            account: TrieAccount {
+                nonce: 1,
+                balance: U256::from(2),
+                storage_root: alloy_trie::EMPTY_ROOT_HASH,
+                code_hash: alloy_trie::KECCAK_EMPTY,
+            },
+        };
+
+        let encoded = alloy_rlp::encode(data.clone());
+        let decoded = alloy_rlp::decode_exact::<AccountData>(&encoded).unwrap();
+        assert_eq!(decoded, data);
+
+        let wire = AccountDataWire::decode(&mut &encoded[..]).unwrap();
+        assert_eq!(
+            wire.body.as_ref(),
+            &[0xc4, 0x01, 0x02, alloy_rlp::EMPTY_LIST_CODE, alloy_rlp::EMPTY_LIST_CODE]
+        );
     }
 }

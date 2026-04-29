@@ -45,6 +45,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
+alloy-trie.workspace = true
 
 [features]
 default = []

@@ -7,19 +7,20 @@
 //! regardless of total state size.
 
 use crate::{
+    proof::verify_range_proof,
     storage::{increment_b256, write_bytecodes, write_hashed_accounts, write_hashed_storages},
     SnapSyncError, SNAP_RESPONSE_BYTES_LIMIT,
 };
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{keccak256, Bytes, B256, U256};
 use reth_db_api::transaction::DbTxMut;
 use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, TrieAccount,
+    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, StorageData, TrieAccount,
 };
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
 use reth_primitives_traits::Account;
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
 use reth_storage_api::{DBProvider, StateWriter};
-use reth_trie::{verify_unordered_proof, Nibbles};
+use reth_trie::root::storage_root;
 use std::collections::{HashMap, HashSet};
 use tracing::info;
 
@@ -31,6 +32,8 @@ const BYTECODE_BATCH_SIZE: usize = 50;
 
 /// Maximum hash value used as the range upper bound.
 const MAX_HASH: B256 = B256::new([0xff; 32]);
+
+type DecodedStorageSlots = Vec<(B256, U256)>;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Streaming state download
@@ -102,10 +105,10 @@ where
         };
 
         if msg.accounts.is_empty() {
-            if cursor == starting_hash {
-                // Very first request for this root returned empty → stale.
+            if msg.proof.is_empty() {
                 return Ok(DownloadStateOutcome::Stale { resume_from: cursor });
             }
+            verify_account_range_proof(root_hash, cursor, &[], &msg.proof)?;
             return Ok(DownloadStateOutcome::Done);
         }
 
@@ -170,9 +173,7 @@ where
 
         // ── Fetch + write bytecodes for this batch ───────────────────────
 
-        if fetch_bytecodes(client, factory, &batch_code_hashes, &mut request_id).await? {
-            return Ok(DownloadStateOutcome::Stale { resume_from: batch_start });
-        }
+        fetch_bytecodes(client, factory, &batch_code_hashes, &mut request_id).await?;
 
         // ── Advance cursor ───────────────────────────────────────────────
 
@@ -234,7 +235,13 @@ where
             _ => return Err(SnapSyncError::Network("unexpected snap response type".into())),
         };
 
-        let returned_count = msg.slots.len().min(chunk.len());
+        if msg.slots.len() > chunk.len() {
+            return Err(SnapSyncError::Network(
+                "snap storage range returned more slot lists than requested".into(),
+            ));
+        }
+
+        let returned_count = msg.slots.len();
 
         // Empty response for the very first sub-chunk → stale root.
         if returned_count == 0 && idx == 0 {
@@ -244,55 +251,58 @@ where
             return Err(SnapSyncError::Network("snap storage range returned no progress".into()));
         }
 
+        let has_proof = !msg.proof.is_empty();
+        let proof_index = has_proof.then_some(returned_count - 1);
         let mut entries = Vec::new();
         for (i, slots) in msg.slots.iter().enumerate() {
-            if i >= chunk.len() {
-                break;
-            }
             let account_hash = chunk[i];
-            for slot in slots {
-                let value = slot
-                    .decode_value()
-                    .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
-                entries.push((account_hash, slot.hash, value));
-            }
-        }
+            validate_storage_slots(account_hash, B256::ZERO, MAX_HASH, slots)?;
 
-        if !msg.proof.is_empty() && returned_count > 0 {
-            let proof_account = chunk[returned_count - 1];
-            let proof_slots = &msg.slots[returned_count - 1];
-            verify_storage_range_proof(
-                proof_account,
-                storage_roots,
-                B256::ZERO,
-                proof_slots,
-                &msg.proof,
-            )?;
+            let account_slots = if Some(i) == proof_index {
+                verify_storage_range_proof(
+                    account_hash,
+                    storage_roots,
+                    B256::ZERO,
+                    slots,
+                    &msg.proof,
+                )?;
+
+                if slots.is_empty() {
+                    verify_full_storage_range(account_hash, storage_roots, slots)?
+                } else {
+                    let resume_from =
+                        increment_b256(slots.last().expect("slots is not empty").hash);
+                    match fetch_storage_continuation(
+                        client,
+                        root_hash,
+                        account_hash,
+                        storage_roots,
+                        resume_from,
+                        request_id,
+                        slots.clone(),
+                    )
+                    .await?
+                    {
+                        StorageContinuationOutcome::Complete(slots) => slots,
+                        StorageContinuationOutcome::Stale => return Ok(true),
+                    }
+                }
+            } else {
+                verify_full_storage_range(account_hash, storage_roots, slots)?
+            };
+
+            entries.extend(
+                account_slots
+                    .into_iter()
+                    .map(|(slot_hash, value)| (account_hash, slot_hash, value)),
+            );
         }
 
         if !entries.is_empty() {
             write_hashed_storages(factory, &entries)?;
         }
 
-        // If a proof is attached, the last account was truncated by the
-        // response size limit — issue continuation requests for it.
-        let has_proof = !msg.proof.is_empty();
-        if has_proof && returned_count > 0 {
-            let incomplete_account = chunk[returned_count - 1];
-            let last_slots = &msg.slots[returned_count - 1];
-            if let Some(last_slot) = last_slots.last() {
-                let resume_from = increment_b256(last_slot.hash);
-                fetch_storage_continuation(
-                    client,
-                    factory,
-                    root_hash,
-                    incomplete_account,
-                    storage_roots,
-                    resume_from,
-                    request_id,
-                )
-                .await?;
-            }
+        if has_proof {
             idx += returned_count;
         } else if returned_count < chunk.len() {
             idx += returned_count;
@@ -304,21 +314,26 @@ where
     Ok(false)
 }
 
+/// Continuation result for a single-account storage range.
+enum StorageContinuationOutcome {
+    /// The account storage is complete and verified against its root.
+    Complete(DecodedStorageSlots),
+    /// The serving peer no longer has the requested root or account.
+    Stale,
+}
+
 /// Continuation loop for a single account whose storage was truncated.
-async fn fetch_storage_continuation<C, F>(
+async fn fetch_storage_continuation<C>(
     client: &C,
-    factory: &F,
     root_hash: B256,
     account_hash: B256,
     storage_roots: &HashMap<B256, B256>,
     mut starting_hash: B256,
     request_id: &mut u64,
-) -> Result<(), SnapSyncError>
+    mut collected_slots: Vec<StorageData>,
+) -> Result<StorageContinuationOutcome, SnapSyncError>
 where
     C: SnapClient + 'static,
-    F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-    F::ProviderRW: DBProvider + StateWriter,
-    <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     loop {
         *request_id += 1;
@@ -339,38 +354,96 @@ where
             _ => return Err(SnapSyncError::Network("unexpected snap response type".into())),
         };
 
-        let slots = msg.slots.first().cloned().unwrap_or_default();
-        if slots.is_empty() {
-            break;
+        if msg.slots.len() > 1 {
+            return Err(SnapSyncError::Network(
+                "snap storage continuation returned multiple slot lists".into(),
+            ));
         }
+
+        let Some(slots) = msg.slots.first() else {
+            return Ok(StorageContinuationOutcome::Stale);
+        };
+
+        if slots.is_empty() {
+            if !msg.proof.is_empty() {
+                verify_storage_range_proof(
+                    account_hash,
+                    storage_roots,
+                    starting_hash,
+                    slots,
+                    &msg.proof,
+                )?;
+            }
+            let decoded = verify_full_storage_range(account_hash, storage_roots, &collected_slots)?;
+            return Ok(StorageContinuationOutcome::Complete(decoded));
+        }
+
+        validate_storage_slots(account_hash, starting_hash, MAX_HASH, slots)?;
 
         if !msg.proof.is_empty() {
             verify_storage_range_proof(
                 account_hash,
                 storage_roots,
                 starting_hash,
-                &slots,
+                slots,
                 &msg.proof,
             )?;
         }
 
-        let mut entries = Vec::new();
-        for slot in &slots {
-            let value = slot
-                .decode_value()
-                .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
-            entries.push((account_hash, slot.hash, value));
-        }
-        write_hashed_storages(factory, &entries)?;
-
+        collected_slots.extend_from_slice(slots);
         if msg.proof.is_empty() {
-            break;
+            let decoded = verify_full_storage_range(account_hash, storage_roots, &collected_slots)?;
+            return Ok(StorageContinuationOutcome::Complete(decoded));
         }
 
         starting_hash = increment_b256(slots.last().unwrap().hash);
     }
+}
 
+fn validate_storage_slots(
+    account_hash: B256,
+    starting_hash: B256,
+    limit_hash: B256,
+    slots: &[StorageData],
+) -> Result<(), SnapSyncError> {
+    let mut previous = None;
+    for slot in slots {
+        if slot.hash < starting_hash || slot.hash >= limit_hash {
+            return Err(SnapSyncError::Network(format!(
+                "snap storage range for account {account_hash} returned slot outside requested bounds"
+            )))
+        }
+        if previous.is_some_and(|previous| slot.hash <= previous) {
+            return Err(SnapSyncError::Network(format!(
+                "snap storage range for account {account_hash} returned non-monotonic slots"
+            )))
+        }
+        previous = Some(slot.hash);
+    }
     Ok(())
+}
+
+fn verify_full_storage_range(
+    account_hash: B256,
+    storage_roots: &HashMap<B256, B256>,
+    slots: &[StorageData],
+) -> Result<DecodedStorageSlots, SnapSyncError> {
+    let Some(expected_root) = storage_roots.get(&account_hash).copied() else {
+        return Err(SnapSyncError::Network(format!(
+            "snap storage response for unknown account {account_hash}"
+        )));
+    };
+
+    let decoded = decode_storage_slots(slots)?;
+
+    let got = storage_root(decoded.iter().copied());
+    if got != expected_root {
+        return Err(SnapSyncError::Network(format!(
+            "snap full storage range root mismatch for account {account_hash}: expected {expected_root}, got {got}"
+        )))
+    }
+
+    Ok(decoded)
 }
 
 fn verify_account_range_proof(
@@ -379,75 +452,51 @@ fn verify_account_range_proof(
     accounts: &[(B256, TrieAccount)],
     proof: &[Bytes],
 ) -> Result<(), SnapSyncError> {
-    let Some((first_hash, first_account)) = accounts.first().copied() else {
-        return Ok(());
-    };
+    let leaves =
+        accounts.iter().copied().map(|(hash, account)| (hash, account_trie_value(account)));
 
-    let expected_start = (first_hash == starting_hash).then(|| account_trie_value(first_account));
-    verify_trie_value(root_hash, starting_hash, expected_start, proof, "account range start")?;
-
-    let (last_hash, last_account) =
-        accounts.last().copied().expect("first account exists, so last account exists");
-    verify_trie_value(
-        root_hash,
-        last_hash,
-        Some(account_trie_value(last_account)),
-        proof,
-        "account range end",
-    )
+    verify_range_proof(root_hash, starting_hash, leaves, proof)
+        .map_err(|e| SnapSyncError::Network(format!("invalid snap account range proof: {e}")))
 }
 
 fn verify_storage_range_proof(
     account_hash: B256,
     storage_roots: &HashMap<B256, B256>,
     starting_hash: B256,
-    slots: &[reth_eth_wire_types::snap::StorageData],
+    slots: &[StorageData],
     proof: &[Bytes],
-) -> Result<(), SnapSyncError> {
+) -> Result<DecodedStorageSlots, SnapSyncError> {
     let Some(storage_root) = storage_roots.get(&account_hash).copied() else {
         return Err(SnapSyncError::Network(format!(
             "snap storage proof for unknown account {account_hash}"
         )));
     };
 
-    let Some(first_slot) = slots.first() else {
-        return verify_trie_value(storage_root, starting_hash, None, proof, "empty storage range");
-    };
+    let decoded = decode_storage_slots(slots)?;
+    let leaves = decoded
+        .iter()
+        .map(|(hash, value)| (*hash, alloy_rlp::encode_fixed_size(value).as_ref().to_vec()));
 
-    let expected_start = if first_slot.hash == starting_hash {
-        let value = first_slot
-            .decode_value()
-            .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
-        (!value.is_zero()).then(|| alloy_rlp::encode_fixed_size(&value).as_ref().to_vec())
-    } else {
-        None
-    };
-    verify_trie_value(storage_root, starting_hash, expected_start, proof, "storage range start")?;
+    verify_range_proof(storage_root, starting_hash, leaves, proof)
+        .map_err(|e| SnapSyncError::Network(format!("invalid snap storage range proof: {e}")))?;
 
-    let last_slot = slots.last().expect("first slot exists, so last slot exists");
-    let value = last_slot
-        .decode_value()
-        .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
-
-    let expected =
-        (!value.is_zero()).then(|| alloy_rlp::encode_fixed_size(&value).as_ref().to_vec());
-    verify_trie_value(storage_root, last_slot.hash, expected, proof, "storage range end")
-}
-
-fn verify_trie_value(
-    root: B256,
-    key: B256,
-    expected: Option<Vec<u8>>,
-    proof: &[Bytes],
-    context: &'static str,
-) -> Result<(), SnapSyncError> {
-    let nibbles = Nibbles::unpack(key);
-    verify_unordered_proof(root, nibbles, expected, proof)
-        .map_err(|e| SnapSyncError::Network(format!("invalid snap {context} proof: {e}")))
+    Ok(decoded)
 }
 
 fn account_trie_value(account: TrieAccount) -> Vec<u8> {
     alloy_rlp::encode(account)
+}
+
+fn decode_storage_slots(slots: &[StorageData]) -> Result<DecodedStorageSlots, SnapSyncError> {
+    slots
+        .iter()
+        .map(|slot| {
+            let value = slot
+                .decode_value()
+                .map_err(|e| SnapSyncError::RlpDecode(format!("snap storage decode: {e}")))?;
+            Ok((slot.hash, value))
+        })
+        .collect()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -455,15 +504,12 @@ fn account_trie_value(account: TrieAccount) -> Vec<u8> {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Fetches and writes bytecodes for a set of code hashes.
-///
-/// Returns `Ok(true)` if the serving peer returned empty (stale root),
-/// `Ok(false)` if all bytecodes were fetched successfully.
 async fn fetch_bytecodes<C, F>(
     client: &C,
     factory: &F,
     code_hashes: &HashSet<B256>,
     request_id: &mut u64,
-) -> Result<bool, SnapSyncError>
+) -> Result<(), SnapSyncError>
 where
     C: SnapClient + 'static,
     F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
@@ -471,7 +517,7 @@ where
     <F::ProviderRW as DBProvider>::Tx: DbTxMut,
 {
     let hashes: Vec<B256> = code_hashes.iter().copied().collect();
-    for (chunk_idx, chunk) in hashes.chunks(BYTECODE_BATCH_SIZE).enumerate() {
+    for chunk in hashes.chunks(BYTECODE_BATCH_SIZE) {
         *request_id += 1;
         let request = GetByteCodesMessage {
             request_id: *request_id,
@@ -488,21 +534,117 @@ where
             _ => return Err(SnapSyncError::Network("unexpected snap response type".into())),
         };
 
-        if msg.codes.is_empty() && chunk_idx == 0 && !hashes.is_empty() {
-            return Ok(true);
-        }
-
-        let mut codes = Vec::with_capacity(msg.codes.len());
-        for (i, code) in msg.codes.iter().enumerate() {
-            if i < chunk.len() {
-                codes.push((chunk[i], code.clone()));
-            }
-        }
+        let codes = match_bytecodes_to_hashes(chunk, &msg.codes)?;
 
         if !codes.is_empty() {
             write_bytecodes(factory, &codes)?;
         }
     }
 
-    Ok(false)
+    Ok(())
+}
+
+fn match_bytecodes_to_hashes(
+    requested_hashes: &[B256],
+    codes: &[Bytes],
+) -> Result<Vec<(B256, Bytes)>, SnapSyncError> {
+    let requested: HashMap<_, _> =
+        requested_hashes.iter().copied().enumerate().map(|(i, hash)| (hash, i)).collect();
+    let mut seen = HashSet::new();
+    let mut last_position = None;
+    let mut matched = Vec::with_capacity(codes.len());
+
+    for code in codes {
+        let hash = keccak256(code.as_ref());
+        let Some(position) = requested.get(&hash).copied() else {
+            return Err(SnapSyncError::Network(format!(
+                "snap bytecode response contained unrequested code hash {hash}"
+            )))
+        };
+        if last_position.is_some_and(|last| position <= last) {
+            return Err(SnapSyncError::Network(
+                "snap bytecode response was not in request order".into(),
+            ));
+        }
+        if !seen.insert(hash) {
+            return Err(SnapSyncError::Network(format!(
+                "snap bytecode response duplicated code hash {hash}"
+            )))
+        }
+        last_position = Some(position);
+        matched.push((hash, code.clone()));
+    }
+
+    Ok(matched)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn b256_from_u64(value: u64) -> B256 {
+        B256::left_padding_from(&value.to_be_bytes())
+    }
+
+    #[test]
+    fn bytecode_matching_uses_returned_code_hashes() {
+        let first = Bytes::from_static(&[1, 2, 3]);
+        let second = Bytes::from_static(&[4, 5, 6]);
+        let requested = vec![keccak256(second.as_ref()), keccak256(first.as_ref())];
+
+        let matched = match_bytecodes_to_hashes(&requested, &[first.clone()]).unwrap();
+
+        assert_eq!(matched, vec![(keccak256(first.as_ref()), first)]);
+    }
+
+    #[test]
+    fn bytecode_matching_rejects_unrequested_code() {
+        let requested = vec![keccak256([1, 2, 3])];
+        let unrequested = Bytes::from_static(&[4, 5, 6]);
+
+        assert!(match_bytecodes_to_hashes(&requested, &[unrequested]).is_err());
+    }
+
+    #[test]
+    fn bytecode_matching_rejects_out_of_order_codes() {
+        let first = Bytes::from_static(&[1, 2, 3]);
+        let second = Bytes::from_static(&[4, 5, 6]);
+        let requested = vec![keccak256(first.as_ref()), keccak256(second.as_ref())];
+
+        assert!(match_bytecodes_to_hashes(&requested, &[second, first]).is_err());
+    }
+
+    #[test]
+    fn storage_slots_must_be_ordered_within_bounds() {
+        let account = b256_from_u64(1);
+        let first = StorageData::from_value(b256_from_u64(2), alloy_primitives::U256::from(2));
+        let second = StorageData::from_value(b256_from_u64(3), alloy_primitives::U256::from(3));
+
+        assert!(validate_storage_slots(
+            account,
+            b256_from_u64(2),
+            b256_from_u64(4),
+            &[first.clone(), second.clone()]
+        )
+        .is_ok());
+        assert!(validate_storage_slots(
+            account,
+            b256_from_u64(2),
+            b256_from_u64(4),
+            &[second, first]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn full_storage_range_verifies_storage_root() {
+        let account = b256_from_u64(1);
+        let slot = b256_from_u64(2);
+        let value = alloy_primitives::U256::from(3);
+        let storage_roots = HashMap::from([(account, storage_root([(slot, value)]))]);
+        let slots = vec![StorageData::from_value(slot, value)];
+
+        assert!(verify_full_storage_range(account, &storage_roots, &slots).is_ok());
+        assert!(verify_full_storage_range(account, &storage_roots, &[]).is_err());
+    }
 }

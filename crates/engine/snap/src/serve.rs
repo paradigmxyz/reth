@@ -174,23 +174,22 @@ where
         let mut raw_accounts = Vec::new();
         let mut total_bytes: u64 = 0;
 
-        if let Ok(Some((hash, account))) = cursor.seek(starting_hash) &&
-            hash < limit_hash
-        {
-            let body_len = alloy_rlp::encode(account.into_trie_account(EMPTY_ROOT_HASH)).len();
+        if let Ok(Some((hash, account))) = cursor.seek(starting_hash) {
+            let body_len = snap_account_body_len_upper_bound(account);
             total_bytes += body_len as u64 + 32;
             raw_accounts.push((hash, account));
-        }
 
-        while raw_accounts.len() < MAX_ACCOUNTS_SERVE && total_bytes < response_bytes {
-            match cursor.next() {
-                Ok(Some((hash, account))) if hash < limit_hash => {
-                    let body_len =
-                        alloy_rlp::encode(account.into_trie_account(EMPTY_ROOT_HASH)).len();
-                    total_bytes += body_len as u64 + 32;
-                    raw_accounts.push((hash, account));
+            if hash < limit_hash {
+                while raw_accounts.len() < MAX_ACCOUNTS_SERVE && total_bytes < response_bytes {
+                    match cursor.next() {
+                        Ok(Some((hash, account))) if hash < limit_hash => {
+                            let body_len = snap_account_body_len_upper_bound(account);
+                            total_bytes += body_len as u64 + 32;
+                            raw_accounts.push((hash, account));
+                        }
+                        _ => break,
+                    }
                 }
-                _ => break,
             }
         }
 
@@ -230,12 +229,17 @@ where
             &revert_state,
         );
 
-        let mut all_slots = Vec::new();
+        if !requested_accounts_available(&cursor_factory, &account_hashes).unwrap_or(false) {
+            return empty;
+        }
+
+        let mut all_slots: Vec<Vec<StorageData>> = Vec::new();
         let mut total_bytes: u64 = 0;
         let mut partial_range = None;
 
         for (i, account_hash) in account_hashes.iter().enumerate() {
-            if total_bytes >= response_bytes {
+            let prior_slots_returned = all_slots.iter().any(|slots| !slots.is_empty());
+            if total_bytes >= response_bytes && prior_slots_returned {
                 break;
             }
 
@@ -256,7 +260,7 @@ where
                 slots.push(slot);
             }
 
-            while total_bytes < response_bytes {
+            while total_bytes < response_bytes || (!prior_slots_returned && slots.is_empty()) {
                 match cursor.next() {
                     Ok(Some((key, value))) if key < limit_hash => {
                         if value.is_zero() {
@@ -304,7 +308,7 @@ where
                 break;
             }
             if let Ok(Some(code)) = state.bytecode_by_hash(&hash) {
-                let bytes = Bytes::from(code.bytes().to_vec());
+                let bytes = code.original_bytes();
                 total += bytes.len() as u64;
                 out.push(bytes);
             }
@@ -327,10 +331,6 @@ where
     Provider: DBProvider + StorageSettingsCache,
     Provider::Tx: DbTx,
 {
-    if accounts.is_empty() {
-        return Some((B256Map::default(), Vec::new()));
-    }
-
     reth_trie_db::with_adapter!(provider, |A| {
         let mut targets = MultiProofTargets::accounts([starting_hash]);
         targets.extend(MultiProofTargets::accounts(accounts.iter().map(|(hash, _)| *hash)));
@@ -357,6 +357,27 @@ where
 
         Some((storage_roots, proof))
     })
+}
+
+fn requested_accounts_available<CF>(
+    cursor_factory: &CF,
+    account_hashes: &[B256],
+) -> Result<bool, reth_db_api::DatabaseError>
+where
+    CF: HashedCursorFactory,
+{
+    let mut cursor = cursor_factory.hashed_account_cursor()?;
+    for account_hash in account_hashes {
+        if !matches!(cursor.seek(*account_hash)?, Some((hash, _)) if hash == *account_hash) {
+            return Ok(false);
+        }
+        cursor.reset();
+    }
+    Ok(true)
+}
+
+fn snap_account_body_len_upper_bound(account: reth_primitives_traits::Account) -> usize {
+    AccountData::account_body_len(account.into_trie_account(B256::ZERO))
 }
 
 fn storage_range_proof<Provider>(

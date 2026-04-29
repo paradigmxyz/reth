@@ -8145,6 +8145,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "futures",
  "reth-config",
  "reth-consensus",
