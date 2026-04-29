@@ -4,6 +4,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    num::NonZeroUsize,
     ops::Not,
     path::PathBuf,
     sync::OnceLock,
@@ -30,7 +31,9 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
         },
         TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig,
@@ -75,12 +78,16 @@ pub struct DefaultNetworkArgs {
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Default max capacity of cache of hashes for transactions pending fetch.
     pub max_capacity_cache_txns_pending_fetch: u32,
+    /// Default memory limit (in bytes) for the network manager → transactions manager channel.
+    pub tx_channel_memory_limit_bytes: usize,
     /// Default transaction propagation policy.
     pub tx_propagation_policy: TransactionPropagationKind,
     /// Default transaction ingress policy.
     pub tx_ingress_policy: TransactionIngressPolicy,
     /// Default transaction propagation mode.
     pub propagation_mode: TransactionPropagationMode,
+    /// Default enforce ENR fork ID setting.
+    pub enforce_enr_fork_id: bool,
 }
 
 impl DefaultNetworkArgs {
@@ -166,6 +173,13 @@ impl DefaultNetworkArgs {
         self
     }
 
+    /// Set the default memory limit (in bytes) for the network manager → transactions
+    /// manager channel.
+    pub const fn with_tx_channel_memory_limit_bytes(mut self, v: usize) -> Self {
+        self.tx_channel_memory_limit_bytes = v;
+        self
+    }
+
     /// Set the default transaction propagation policy.
     pub const fn with_tx_propagation_policy(mut self, v: TransactionPropagationKind) -> Self {
         self.tx_propagation_policy = v;
@@ -181,6 +195,12 @@ impl DefaultNetworkArgs {
     /// Set the default transaction propagation mode.
     pub const fn with_propagation_mode(mut self, v: TransactionPropagationMode) -> Self {
         self.propagation_mode = v;
+        self
+    }
+
+    /// Set the default enforce ENR fork ID setting.
+    pub const fn with_enforce_enr_fork_id(mut self, v: bool) -> Self {
+        self.enforce_enr_fork_id = v;
         self
     }
 }
@@ -201,9 +221,11 @@ impl Default for DefaultNetworkArgs {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
+            enforce_enr_fork_id: false,
         }
     }
 }
@@ -338,6 +360,15 @@ pub struct NetworkArgs {
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_capacity_cache_txns_pending_fetch, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 
+    /// Memory limit (in bytes) for the channel that buffers transaction events flowing
+    /// from the network manager to the transactions manager.
+    ///
+    /// When the budget is exhausted, new events are dropped (see metric
+    /// `total_dropped_tx_events_at_full_capacity`). Acts as a backstop against unbounded
+    /// memory growth under sustained P2P transaction flooding.
+    #[arg(long = "tx-channel-memory-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().tx_channel_memory_limit_bytes, verbatim_doc_comment)]
+    pub tx_channel_memory_limit_bytes: usize,
+
     /// Name of network interface used to communicate with peers.
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
@@ -384,6 +415,10 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub network_id: Option<u64>,
 
+    /// Maximum allowed ETH message size in bytes. Default is 10 MiB.
+    #[arg(long = "eth-max-message-size", value_name = "BYTES")]
+    pub eth_max_message_size: Option<NonZeroUsize>,
+
     /// Restrict network communication to the given IP networks (CIDR masks).
     ///
     /// Comma separated list of CIDR network specifications.
@@ -398,7 +433,7 @@ pub struct NetworkArgs {
     /// When enabled, peers discovered without a confirmed fork ID are not added to the peer set
     /// until their fork ID is verified via EIP-868 ENR request. This filters out peers from other
     /// networks that pollute the discovery table.
-    #[arg(long)]
+    #[arg(long, default_value_t = DefaultNetworkArgs::get_global().enforce_enr_fork_id)]
     pub enforce_enr_fork_id: bool,
 }
 
@@ -471,6 +506,7 @@ impl NetworkArgs {
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
+            tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
         }
     }
 
@@ -544,6 +580,7 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
+            .eth_max_message_size_opt(self.eth_max_message_size.map(NonZeroUsize::get))
             .network_id(self.network_id)
     }
 
@@ -645,9 +682,11 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             max_capacity_cache_txns_pending_fetch,
+            tx_channel_memory_limit_bytes,
             tx_propagation_policy,
             tx_ingress_policy,
             propagation_mode,
+            enforce_enr_fork_id,
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
@@ -673,6 +712,7 @@ impl Default for NetworkArgs {
             max_pending_pool_imports,
             max_seen_tx_history,
             max_capacity_cache_txns_pending_fetch,
+            tx_channel_memory_limit_bytes,
             net_if: None,
             tx_propagation_policy,
             tx_ingress_policy,
@@ -680,8 +720,9 @@ impl Default for NetworkArgs {
             propagation_mode,
             required_block_hashes: vec![],
             network_id: None,
+            eth_max_message_size: None,
             netrestrict: None,
-            enforce_enr_fork_id: false,
+            enforce_enr_fork_id,
         }
     }
 }
@@ -702,8 +743,15 @@ pub struct DiscoveryArgs {
     pub disable_discv4_discovery: bool,
 
     /// Enable Discv5 discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    ///
+    /// Discv5 is now enabled by default, so this flag is a no-op and will be removed in a future
+    /// release.
+    #[arg(long, conflicts_with = "disable_discovery", hide = true)]
     pub enable_discv5_discovery: bool,
+
+    /// Disable Discv5 discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_discv5_discovery: bool,
 
     /// Disable Nat discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
@@ -835,21 +883,23 @@ impl DiscoveryArgs {
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
-    /// Returns true if discv5 discovery should be configured
+    /// Returns true if discv5 discovery should be configured.
+    ///
+    /// Discv5 is enabled by default and can be disabled with `--disable-discv5-discovery`.
     const fn should_enable_discv5(&self) -> bool {
-        if self.disable_discovery {
+        if self.disable_discovery || self.disable_discv5_discovery {
             return false;
         }
 
-        self.enable_discv5_discovery ||
-            self.discv5_addr.is_some() ||
-            self.discv5_addr_ipv6.is_some()
+        true
     }
 
-    /// Set the discovery port to zero, to allow the OS to assign a random unused port when
-    /// discovery binds to the socket.
+    /// Set the discovery ports to zero, to allow the OS to assign random unused ports when
+    /// discovery binds to the sockets.
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
+        self.discv5_port = 0;
+        self.discv5_port_ipv6 = 0;
         self
     }
 
@@ -879,6 +929,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_discv5_discovery: false,
             disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
@@ -1093,6 +1144,37 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn parse_eth_max_message_size() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--eth-max-message-size",
+            "15728640",
+        ])
+        .args;
+
+        assert_eq!(args.eth_max_message_size, Some(NonZeroUsize::new(15 * 1024 * 1024).unwrap()));
+    }
+
+    #[test]
+    fn parse_eth_max_message_size_zero_rejected() {
+        let result =
+            CommandParser::<NetworkArgs>::try_parse_from(["reth", "--eth-max-message-size", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_eth_max_message_size_above_rlpx_cap() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--eth-max-message-size",
+            "16777216",
+        ]);
+        assert!(result.is_ok());
+        let args = result.unwrap().args;
+        assert_eq!(args.eth_max_message_size, Some(NonZeroUsize::new(16 * 1024 * 1024).unwrap()));
     }
 
     #[test]

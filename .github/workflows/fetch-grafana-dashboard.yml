@@ -1,0 +1,72 @@
+name: Fetch Grafana Dashboard
+
+on:
+  workflow_dispatch:
+    inputs:
+      dashboard_uid:
+        description: "Grafana dashboard UID to export"
+        required: true
+        default: "2k8BXz24x"
+      target_path:
+        description: "Target file path in the repo (e.g. etc/grafana/dashboards/overview.json)"
+        required: true
+        default: "etc/grafana/dashboards/overview.json"
+
+permissions: {}
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch dashboard from Grafana
+        env:
+          FETCH_GRAFANA_DASHBOARD_URL: ${{ secrets.FETCH_GRAFANA_DASHBOARD_URL }}
+          FETCH_GRAFANA_DASHBOARD_TOKEN: ${{ secrets.FETCH_GRAFANA_DASHBOARD_TOKEN }}
+          DASHBOARD_UID: ${{ inputs.dashboard_uid }}
+          TARGET_PATH: ${{ inputs.target_path }}
+        run: |
+          python3 .github/scripts/fetch-grafana-dashboard.py "${DASHBOARD_UID}" \
+            > "${TARGET_PATH}"
+
+      - name: Check for changes
+        id: diff
+        env:
+          TARGET_PATH: ${{ inputs.target_path }}
+        run: |
+          if git diff --quiet "${TARGET_PATH}"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DASHBOARD_UID: ${{ inputs.dashboard_uid }}
+          TARGET_PATH: ${{ inputs.target_path }}
+        run: |
+          TARGET="${TARGET_PATH}"
+          FILENAME="$(basename "$TARGET")"
+          BRANCH="chore/sync-grafana-${FILENAME%.*}-$(date +%Y%m%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "$TARGET"
+          git commit -m "chore: update Grafana dashboard ${FILENAME}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore: update Grafana dashboard ${FILENAME}" \
+            --body "Automated export from Grafana (dashboard UID: \`${DASHBOARD_UID}\`, target: \`${TARGET}\`)."

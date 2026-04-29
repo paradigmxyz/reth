@@ -37,7 +37,6 @@ reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
-
 # ethereum
 alloy-eips.workspace = true
 alloy-network.workspace = true
@@ -49,7 +48,7 @@ tokio.workspace = true
 
 # revm with required ethereum features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
 
 # misc
 eyre.workspace = true

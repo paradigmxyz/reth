@@ -89,7 +89,7 @@ impl Command {
 
         tool.provider_factory.db_ref().view(|tx| {
             let mut db_tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
-            db_tables.sort();
+            db_tables.sort_unstable();
             let mut total_size = 0;
             for db_table in db_tables {
                 let table_db = tx.inner().open_db(Some(db_table)).wrap_err("Could not open db.")?;

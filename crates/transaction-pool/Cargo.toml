@@ -55,6 +55,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 bitflags.workspace = true
 auto_impl.workspace = true
+imbl.workspace = true
 smallvec.workspace = true
 
 # testing
@@ -84,6 +85,7 @@ serde = [
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "bitflags/serde",
+    "imbl/serde",
     "parking_lot/serde",
     "rand?/serde",
     "smallvec/serde",
@@ -112,6 +114,7 @@ test-utils = [
 arbitrary = [
     "proptest",
     "proptest-arbitrary-interop",
+    "imbl/arbitrary",
     "reth-chainspec/arbitrary",
     "reth-eth-wire-types/arbitrary",
     "alloy-consensus/arbitrary",
@@ -124,4 +127,5 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "revm-primitives/arbitrary",
     "revm/arbitrary",
+    "imbl/arbitrary",
 ]

@@ -21,6 +21,8 @@ pub(crate) struct BenchContext {
     pub(crate) auth_provider: RootProvider<AnyNetwork>,
     /// The block provider is used for block queries.
     pub(crate) block_provider: RootProvider<AnyNetwork>,
+    /// The local regular RPC provider is used for non-authenticated node RPCs like `testing_*`.
+    pub(crate) local_rpc_provider: RootProvider<AnyNetwork>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
     pub(crate) benchmark_mode: BenchMode,
@@ -54,13 +56,8 @@ impl BenchContext {
             }
         }
 
-        // set up alloy client for blocks, retrying on 429/503 (default) and 502
-        let retry_policy =
-            RateLimitRetryPolicy::default().or(|err: &alloy_transport::TransportError| -> bool {
-                err.as_transport_err()
-                    .and_then(|t| t.as_http_error())
-                    .is_some_and(|e| e.status == 502)
-            });
+        // set up alloy client for blocks, retrying on any errors, whether HTTP or OS
+        let retry_policy = RateLimitRetryPolicy::default().or(|_| true);
         let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
             .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
@@ -87,6 +84,11 @@ impl BenchContext {
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
+
+        let local_rpc_url = Url::parse(&bench_args.local_rpc_url)?;
+        info!(target: "reth-bench", "Connecting to local regular RPC at {} for testing namespace calls", local_rpc_url);
+        let local_rpc_provider =
+            RootProvider::<AnyNetwork>::new(ClientBuilder::default().http(local_rpc_url));
 
         // Computes the block range for the benchmark.
         //
@@ -164,6 +166,7 @@ impl BenchContext {
         Ok(Self {
             auth_provider,
             block_provider,
+            local_rpc_provider,
             benchmark_mode,
             next_block,
             use_reth_namespace,

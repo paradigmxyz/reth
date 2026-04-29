@@ -3,6 +3,8 @@
 
 name: release
 
+permissions: {}
+
 on:
   push:
     tags:
@@ -13,14 +15,6 @@ on:
         description: "Enable dry run mode (builds artifacts but skips uploads and release creation)"
         type: boolean
         default: false
-      pgo:
-        description: "Enable PGO profiling"
-        type: boolean
-        default: false
-      pgo_blocks:
-        description: "Number of blocks to execute for PGO profiling on self-hosted runner"
-        type: string
-        default: "20"
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -28,21 +22,24 @@ env:
   REPRODUCIBLE_IMAGE_NAME: ${{ github.repository_owner }}/reth-reproducible
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/reth
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   dry-run:
     name: check dry run
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
-      - run: |
-          echo "Dry run value: ${{ github.event.inputs.dry_run }}"
-          echo "Dry run enabled: ${{ github.event.inputs.dry_run == 'true'}}"
-          echo "Dry run disabled: ${{ github.event.inputs.dry_run != 'true'}}"
+      - env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          echo "Dry run value: ${DRY_RUN}"
+          echo "Dry run enabled: $( [ "${DRY_RUN}" = 'true' ] && echo true || echo false )"
+          echo "Dry run disabled: $( [ "${DRY_RUN}" != 'true' ] && echo true || echo false )"
 
   extract-version:
     name: extract version
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Extract version
         run: echo "VERSION=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
@@ -53,12 +50,15 @@ jobs:
   check-version:
     name: check version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: extract-version
     if: ${{ github.event.inputs.dry_run != 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Verify crate version matches tag
         # Check that the Cargo version starts with the tag,
         # so that Cargo version 1.4.8 can be matched against both v1.4.8 and v1.4.8-rc.1
@@ -71,12 +71,20 @@ jobs:
   build:
     name: build release
     runs-on: ${{ matrix.configs.os }}
+    permissions:
+      contents: read
     needs: extract-version
     continue-on-error: ${{ matrix.configs.allow_fail }}
     strategy:
       fail-fast: true
       matrix:
         configs:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            profile: maxperf
+            allow_fail: false
+            rustflags: "-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"
+            native: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             profile: maxperf
@@ -97,20 +105,20 @@ jobs:
           - command: build
             binary: reth
     steps:
-      - uses: actions/checkout@v6
-      - uses: rui314/setup-mold@v1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.configs.target }}
-      - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install cross main
         if: ${{ !matrix.configs.native }}
         id: cross_main
         run: |
-          cargo install cross --locked --git https://github.com/cross-rs/cross
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+          cargo install cross --locked \
+            --git https://github.com/cross-rs/cross \
+            --rev 65fe72b0cdb1e7e0cc0652517498d4389cc8f5cf
 
       - name: Apple M1 setup
         if: matrix.configs.target == 'aarch64-apple-darwin'
@@ -119,6 +127,8 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
       - name: Build Reth
+        env:
+          CC: clang
         run: |
           if [ "${{ matrix.configs.native }}" = "true" ]; then
             make PROFILE=${{ matrix.configs.profile }} EXTRA_RUSTFLAGS="${{ matrix.configs.rustflags }}" ${{ matrix.build.command }}-native-${{ matrix.configs.target }}
@@ -145,105 +155,24 @@ jobs:
 
       - name: Upload artifact
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
 
-  collect-pgo-profile:
-    if: github.event_name == 'workflow_dispatch' && inputs.pgo
-    uses: ./.github/workflows/pgo-profile.yml
-    with:
-      pgo_blocks: ${{ inputs.pgo_blocks || '20' }}
-    secrets: inherit
-
-  build-pgo:
-    if: github.event_name == 'workflow_dispatch' && inputs.pgo
-    name: build release (x86_64-linux PGO+BOLT)
-    runs-on: [self-hosted, Linux, X64]
-    needs: [extract-version, collect-pgo-profile]
-    timeout-minutes: 120
-    env:
-      RUSTC_WRAPPER: "sccache"
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-      - uses: rui314/setup-mold@v1
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          target: x86_64-unknown-linux-gnu
-      - uses: mozilla-actions/sccache-action@v0.0.9
-        continue-on-error: true
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Download pre-collected PGO profile
-        uses: actions/download-artifact@v7
-        with:
-          name: pgo-profdata
-          path: dist
-
-      - name: Verify PGO profile artifact
-        run: |
-          test -f dist/merged.profdata
-          ls -lh dist/merged.profdata
-
-      - name: Build Reth with PGO+BOLT
-        run: |
-          SKIP_BOLT=true \
-          PGO_PROFDATA="$PWD/dist/merged.profdata" \
-          PROFILE=maxperf-symbols \
-          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
-          TARGET=x86_64-unknown-linux-gnu \
-          EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
-            .github/scripts/build_pgo_bolt.sh
-
-      - name: Move binary
-        run: |
-          mkdir artifacts
-          mv target/maxperf-symbols/reth ./artifacts
-
-      - name: Configure GPG and create artifacts
-        env:
-          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          export GPG_TTY=$(tty)
-          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
-          cd artifacts
-          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz reth*
-          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
-          mv *tar.gz* ..
-        shell: bash
-
-      - name: Upload artifact
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
-          path: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
-
-      - name: Upload signature
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc
-          path: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc
 
   draft-release:
     name: draft release
     runs-on: ubuntu-latest
-    needs: [build, build-pgo, extract-version]
-    if: ${{ !failure() && !cancelled() && github.event.inputs.dry_run != 'true' }}
+    needs: [build, extract-version]
+    if: ${{ github.event.inputs.dry_run != 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     permissions:
@@ -252,11 +181,12 @@ jobs:
     steps:
       # This is necessary for generating the changelog.
       # It has to come before "Download Artifacts" or else it deletes the artifacts.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       - name: Generate full changelog
         id: changelog
         run: |
@@ -276,7 +206,7 @@ jobs:
           fi
 
           body=$(cat <<- "ENDBODY"
-          ![image](https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png)
+          ![image](https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-2.png)
 
           ## Testing Checklist (DELETE ME)
 
@@ -342,6 +272,7 @@ jobs:
   dry-run-summary:
     name: dry run summary
     runs-on: ubuntu-latest
+    permissions: {}
     needs: [build, extract-version]
     if: ${{ github.event.inputs.dry_run == 'true' }}
     env:

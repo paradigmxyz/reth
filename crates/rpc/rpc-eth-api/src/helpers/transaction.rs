@@ -325,16 +325,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             if let Some(block) = self.recovered_block(block_id).await? {
                 let block_hash = block.hash();
                 let block_number = block.number();
+                let block_timestamp = block.timestamp();
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
-                    #[expect(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
+                        block_timestamp: Some(block_timestamp),
                         base_fee: base_fee_per_gas,
                         index: Some(index as u64),
-                        ..Default::default()
                     };
 
                     return Ok(Some(
@@ -396,6 +396,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .and_then(|block| {
                     let block_hash = block.hash();
                     let block_number = block.number();
+                    let block_timestamp = block.timestamp();
                     let base_fee_per_gas = block.base_fee_per_gas();
 
                     block
@@ -403,14 +404,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .enumerate()
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
-                            #[expect(clippy::needless_update)]
                             let tx_info = TransactionInfo {
                                 hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
+                                block_timestamp: Some(block_timestamp),
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
-                                ..Default::default()
                             };
                             Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
@@ -463,7 +463,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
             // set nonce if not already set before
             if request.as_ref().nonce().is_none() {
-                let nonce = self.next_available_nonce(from).await?;
+                let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
             }
 
@@ -505,17 +505,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
         async move {
-            let from = match request.as_ref().from() {
-                Some(from) => from,
-                None => return Err(SignError::NoAccount.into_eth_err()),
-            };
-
             if request.as_ref().value().is_none() {
                 request.as_mut().set_value(U256::ZERO);
             }
 
             if request.as_ref().nonce().is_none() {
-                let nonce = self.next_available_nonce(from).await?;
+                let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
             }
 
@@ -688,6 +683,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                     index: meta.index,
                     block_hash: meta.block_hash,
                     block_number: meta.block_number,
+                    block_timestamp: meta.timestamp,
                     base_fee: meta.base_fee,
                 }));
             }

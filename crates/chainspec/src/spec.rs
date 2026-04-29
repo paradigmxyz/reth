@@ -28,7 +28,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
-    eip7892::BlobScheduleBlobParams,
+    eip7892::BlobScheduleBlobParams, eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH,
 };
 use alloy_genesis::{ChainConfig, Genesis};
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -76,6 +76,18 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .active_at_timestamp(genesis.timestamp)
         .then_some(EMPTY_REQUESTS_HASH);
 
+    // If Amsterdam is activated at genesis we set block access list hash to an empty bal hash
+    let block_access_list_hash = hardforks
+        .fork(EthereumHardfork::Amsterdam)
+        .active_at_timestamp(genesis.timestamp)
+        .then_some(EMPTY_BLOCK_ACCESS_LIST_HASH);
+
+    // If Amsterdam is activated at genesis we set slot number to 0
+    let slot_number = hardforks
+        .fork(EthereumHardfork::Amsterdam)
+        .active_at_timestamp(genesis.timestamp)
+        .then_some(0);
+
     Header {
         number: genesis.number.unwrap_or_default(),
         parent_hash: genesis.parent_hash.unwrap_or_default(),
@@ -93,6 +105,8 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         blob_gas_used,
         excess_blob_gas,
         requests_hash,
+        block_access_list_hash,
+        slot_number,
         ..Default::default()
     }
 }
@@ -275,7 +289,6 @@ pub fn create_chain_config(
     // Check if DAO fork is supported (it has an activation block)
     let dao_fork_support = hardforks.fork(EthereumHardfork::Dao) != ForkCondition::Never;
 
-    #[expect(clippy::needless_update)]
     ChainConfig {
         chain_id: chain.map(|c| c.id()).unwrap_or(0),
         homestead_block: block_num(EthereumHardfork::Homestead),
@@ -298,6 +311,7 @@ pub fn create_chain_config(
         cancun_time: timestamp(EthereumHardfork::Cancun),
         prague_time: timestamp(EthereumHardfork::Prague),
         osaka_time: timestamp(EthereumHardfork::Osaka),
+        amsterdam_time: timestamp(EthereumHardfork::Amsterdam),
         bpo1_time: timestamp(EthereumHardfork::Bpo1),
         bpo2_time: timestamp(EthereumHardfork::Bpo2),
         bpo3_time: timestamp(EthereumHardfork::Bpo3),
@@ -305,10 +319,6 @@ pub fn create_chain_config(
         bpo5_time: timestamp(EthereumHardfork::Bpo5),
         terminal_total_difficulty,
         terminal_total_difficulty_passed,
-        ethash: None,
-        clique: None,
-        parlia: None,
-        extra_fields: Default::default(),
         deposit_contract_address,
         blob_schedule,
         ..Default::default()
@@ -885,6 +895,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
+            (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -1188,6 +1199,19 @@ impl ChainSpecBuilder {
     /// Enable Osaka at the given timestamp.
     pub fn with_osaka_at(mut self, timestamp: u64) -> Self {
         self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
+    /// Enable Amsterdam at genesis.
+    pub fn amsterdam_activated(mut self) -> Self {
+        self = self.osaka_activated();
+        self.hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Amsterdam at the given timestamp.
+    pub fn with_amsterdam_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(timestamp));
         self
     }
 

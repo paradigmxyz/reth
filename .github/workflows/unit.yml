@@ -17,10 +17,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   test:
     name: test / ${{ matrix.type }}
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     env:
       RUST_BACKTRACE: 1
     strategy:
@@ -32,16 +36,20 @@ jobs:
             exclude_args: ""
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: rui314/setup-mold@v1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@1f2425cdb59f8fffb99ee16a5968edf6f57a2b93 # v2.75.24
+        with:
+          tool: nextest
       - if: "${{ matrix.type == 'book' }}"
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
@@ -56,20 +64,25 @@ jobs:
   state:
     name: Ethereum state tests
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Checkout ethereum/tests
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ethereum/tests
           ref: 81862e4848585a438d64f911a19b3825f0f4cd95
           path: testing/ef-tests/ethereum-tests
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
       - name: Download & extract EEST fixtures (public)
         shell: bash
         env:
@@ -79,11 +92,13 @@ jobs:
           mkdir -p testing/ef-tests/execution-spec-tests
           URL="https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_TESTS_TAG}/fixtures_stable.tar.gz"
           curl -L "$URL" | tar -xz --strip-components=1 -C testing/ef-tests/execution-spec-tests
-      - uses: rui314/setup-mold@v1
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@nextest
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@1f2425cdb59f8fffb99ee16a5968edf6f57a2b93 # v2.75.24
+        with:
+          tool: nextest
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
       - run: cargo nextest run --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
@@ -91,15 +106,19 @@ jobs:
   doc:
     name: doc tests
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: rui314/setup-mold@v1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
       - name: Run doctests
@@ -113,6 +132,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
-        uses: re-actors/alls-green@release/v1
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
         with:
           jobs: ${{ toJSON(needs) }}

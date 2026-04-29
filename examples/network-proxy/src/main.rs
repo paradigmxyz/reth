@@ -19,13 +19,17 @@ use reth_ethereum::{
         config::rng_secret_key,
         eth_requests::IncomingEthRequest,
         p2p::HeadersClient,
-        transactions::NetworkTransactionEvent,
+        transactions::{
+            constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            NetworkTransactionEvent,
+        },
         types::{BlockHashOrNumber, NewPooledTransactionHashes68},
         BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
         NetworkHandle, NetworkInfo, NetworkManager, Peers,
     },
     tasks::Runtime,
 };
+use reth_metrics::common::mpsc::memory_bounded_channel;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -39,7 +43,10 @@ async fn main() -> eyre::Result<()> {
         NetworkConfig::builder(local_key, Runtime::test()).build_with_noop_provider(DEV.clone());
 
     let (requests_tx, mut requests_rx) = tokio::sync::mpsc::channel(1000);
-    let (transactions_tx, mut transactions_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (transactions_tx, mut transactions_rx) = memory_bounded_channel::<NetworkTransactionEvent>(
+        DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+        "tx_events",
+    );
 
     // create the network instance
     let network = NetworkManager::eth(config)

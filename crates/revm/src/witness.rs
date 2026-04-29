@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::{ExecutionWitnessMode, HashedPostState, HashedStorage};
 use revm::database::State;
 
 /// Tracks state changes during execution.
@@ -30,21 +30,34 @@ pub struct ExecutionWitnessRecord {
 }
 
 impl ExecutionWitnessRecord {
-    /// Records the state after execution.
-    pub fn record_executed_state<DB>(&mut self, statedb: &State<DB>) {
-        self.codes = statedb
-            .cache
-            .contracts
-            .values()
-            .map(|code| code.original_bytes())
-            .chain(
-                // cache state does not have all the contracts, especially when
-                // a contract is created within the block
-                // the contract only exists in bundle state, therefore we need
-                // to include them as well
-                statedb.bundle_state.contracts.values().map(|code| code.original_bytes()),
-            )
-            .collect();
+    /// Records the state after execution using the given witness generation mode.
+    pub fn record_executed_state<DB>(&mut self, statedb: &State<DB>, mode: ExecutionWitnessMode) {
+        self.codes = match mode {
+            ExecutionWitnessMode::Legacy => statedb
+                .cache
+                .contracts
+                .values()
+                .map(|code| code.original_bytes())
+                .chain(
+                    // cache state does not have all the contracts, especially when
+                    // a contract is created within the block
+                    // the contract only exists in bundle state, therefore we need
+                    // to include them as well
+                    statedb.bundle_state.contracts.values().map(|code| code.original_bytes()),
+                )
+                .collect(),
+            ExecutionWitnessMode::Canonical => {
+                let mut codes: Vec<_> = statedb
+                    .cache
+                    .contracts
+                    .values()
+                    .map(|c| c.original_bytes())
+                    .filter(|code| !code.is_empty())
+                    .collect();
+                codes.sort_unstable();
+                codes
+            }
+        };
 
         for (address, account) in &statedb.cache.accounts {
             let hashed_address = keccak256(address);
@@ -75,9 +88,9 @@ impl ExecutionWitnessRecord {
     }
 
     /// Creates the record from the state after execution.
-    pub fn from_executed_state<DB>(state: &State<DB>) -> Self {
+    pub fn from_executed_state<DB>(state: &State<DB>, mode: ExecutionWitnessMode) -> Self {
         let mut record = Self::default();
-        record.record_executed_state(state);
+        record.record_executed_state(state, mode);
         record
     }
 
@@ -93,6 +106,7 @@ impl ExecutionWitnessRecord {
         state_provider: &SP,
         headers_provider: &HP,
         block_number: u64,
+        mode: ExecutionWitnessMode,
     ) -> reth_storage_errors::provider::ProviderResult<alloy_rpc_types_debug::ExecutionWitness>
     where
         SP: reth_storage_api::StateProofProvider + ?Sized,
@@ -101,7 +115,7 @@ impl ExecutionWitnessRecord {
     {
         let Self { hashed_state, codes, keys, lowest_block_number } = self;
 
-        let state = state_provider.witness(Default::default(), hashed_state)?;
+        let state = state_provider.witness(Default::default(), hashed_state, mode)?;
         let mut exec_witness =
             alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, ..Default::default() };
 

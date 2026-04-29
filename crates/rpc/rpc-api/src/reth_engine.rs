@@ -43,8 +43,8 @@ pub enum RethNewPayloadInput<ExecutionData> {
 /// Reth-specific engine API extensions.
 ///
 /// This trait provides a `reth_newPayload` endpoint that accepts either `ExecutionData` directly
-/// (payload + sidecar) or an RLP-encoded block, optionally waiting for persistence and cache locks
-/// before processing.
+/// (payload + sidecar) or an RLP-encoded block, optionally alongside a block access list and
+/// waiting for persistence and cache locks before processing.
 ///
 /// By default, the endpoint waits for both in-flight persistence and cache updates to complete
 /// before executing the payload, providing unbiased timing measurements. Each can be independently
