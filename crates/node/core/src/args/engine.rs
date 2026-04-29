@@ -521,8 +521,8 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
     pub bal_parallel_state_root_disabled: bool,
 
-    /// Disable BAL (Block Access List) batched IO during prewarming. When set, falls back
-    /// to individual per-slot storage reads instead of batched cursor reads.
+    /// Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL
+    /// storage slots are not read into the execution cache.
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 
