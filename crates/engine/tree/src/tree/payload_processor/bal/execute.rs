@@ -615,13 +615,13 @@ mod tests {
                 }),
             );
 
-            if let Some(info) = account {
-                if info.code_hash != KECCAK_EMPTY {
-                    let code = info
-                        .code
-                        .unwrap_or_else(|| db.code_by_hash(info.code_hash).expect("snapshot code"));
-                    pre.code.insert(info.code_hash, Some(reth_primitives_traits::Bytecode(code)));
-                }
+            if let Some(info) = account &&
+                info.code_hash != KECCAK_EMPTY
+            {
+                let code = info
+                    .code
+                    .unwrap_or_else(|| db.code_by_hash(info.code_hash).expect("snapshot code"));
+                pre.code.insert(info.code_hash, Some(reth_primitives_traits::Bytecode(code)));
             }
         }
 
@@ -878,8 +878,7 @@ mod tests {
         // BAL path: stamp the hash of the reference BAL onto the header.
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash); // same shape, updated hash
-        let snapshot =
-            snapshot_for_bal(canonical_db_template.clone(), &reference_bal, block.number);
+        let snapshot = snapshot_for_bal(canonical_db_template, &reference_bal, block.number);
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let bal_out = executor
@@ -1091,7 +1090,7 @@ mod tests {
                 nonce: 1,
                 balance: U256::ZERO,
                 code_hash,
-                code: Some(Bytecode::new_raw(revert_code.clone())),
+                code: Some(Bytecode::new_raw(revert_code)),
                 account_id: None,
             },
         );
@@ -1157,7 +1156,7 @@ mod tests {
                 nonce: 1,
                 balance: U256::ZERO,
                 code_hash,
-                code: Some(Bytecode::new_raw(sstore_code.clone())),
+                code: Some(Bytecode::new_raw(sstore_code)),
                 account_id: None,
             },
         );
