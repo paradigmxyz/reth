@@ -33,6 +33,7 @@ use reth_node_builder::{
     },
     BuilderContext, Node,
 };
+use reth_node_core::args::DefaultEngineValues;
 use reth_node_ethereum::{
     EthEngineTypes, EthereumEngineValidatorBuilder, EthereumEthApiBuilder, EthereumNetworkBuilder,
     EthereumNode, EthereumPayloadBuilder, EthereumPoolBuilder,
@@ -356,16 +357,12 @@ fn main() {
 
     let pending: BigBlockMap = Arc::new(Mutex::new(HashMap::new()));
 
+    let _ = DefaultEngineValues::default().with_bal_parallel_execution_disabled(false).try_init();
+
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching big block node");
 
-        // Force-enable BAL parallel execution: reth-bb's reason for existing is to exercise
-        // that path on replayed big blocks.
-        let node_builder = builder.node(BbNode::new(pending.clone()));
-        let mut launcher = node_builder.engine_api_launcher();
-        launcher.engine_tree_config =
-            launcher.engine_tree_config.clone().without_bal_parallel_execution(false);
-        let handle = node_builder.launch_with(launcher).await?;
+        let handle = builder.launch_node(BbNode::new(pending.clone())).await?;
 
         handle.wait_for_node_exit().await
     }) {

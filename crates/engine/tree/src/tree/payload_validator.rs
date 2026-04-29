@@ -529,7 +529,7 @@ where
 
         // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
         // `provider_builder` (consumed by `spawn_payload_processor` below).
-        let bal_eligible = self.bal_path_eligible(env.decoded_bal.as_deref());
+        let bal_eligible = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
         let bal_provider_builder = bal_eligible.then(|| provider_builder.clone());
 
         // Spawn the appropriate processor based on strategy
@@ -564,16 +564,12 @@ where
             None
         };
 
-        // Convert input to block before dispatch. Both paths use `&block` directly. On the BAL
-        // path the block is needed by `BalPayloadExecutor`; on the serial path the block fills
-        // the same role as the late conversion that previously happened after execution.
-        let block = convert_to_block(input)?;
-
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
+        let (output, senders, receipt_root_rx, built_bal, block) = if bal_eligible {
+            let block = convert_to_block(input)?;
             let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
             let built_bal = Some(decoded_bal.as_bal().clone().into());
             let provider_builder =
@@ -587,7 +583,7 @@ where
                 provider_builder,
             ) {
                 Ok((output, senders, receipt_root_rx)) => {
-                    (output, senders, receipt_root_rx, built_bal)
+                    (output, senders, receipt_root_rx, built_bal, block)
                 }
                 Err(err) => {
                     return self.handle_execution_error_with_block(block, err, &parent_block)
@@ -595,8 +591,12 @@ where
             }
         } else {
             match self.execute_block(state_provider, env, &input, &mut handle) {
-                Ok(output) => output,
+                Ok((output, senders, receipt_root_rx, built_bal)) => {
+                    let block = convert_to_block(input)?;
+                    (output, senders, receipt_root_rx, built_bal, block)
+                }
                 Err(err) => {
+                    let block = convert_to_block(input)?;
                     return self.handle_execution_error_with_block(block, err, &parent_block)
                 }
             }
@@ -1061,8 +1061,17 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, provider setup and worker scheduling overhead can exceed the gain. Tune
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
-    const fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> bool {
-        bal.is_some() && !self.config.disable_bal_parallel_execution()
+    fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
+        let has_bal = bal.is_some();
+        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
+        if parallel_execution && self.config.disable_bal_parallel_state_root() {
+            return Err(InsertBlockErrorKind::Other(
+                "disabling parallel state root is impossible when parallel execution is enabled"
+                    .into(),
+            ));
+        }
+
+        Ok(parallel_execution)
     }
 
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]
@@ -1070,7 +1079,7 @@ where
     ///
     /// Inside, this:
     /// 1. Creates a shared parent-state cache handle for provider-backed workers.
-    /// 2. Spawns the provider/cache-backed sparse-trie BAL stream.
+    /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::BalPayloadExecutor::execute_block`].
     /// 5. Adapts the BAL output to a [`BlockExecutionOutput`] and forwards receipts to the
@@ -1101,8 +1110,6 @@ where
         BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
         Evm: ConfigureEvm<Primitives = N>,
     {
-        use crate::tree::payload_processor::bal::spawn_stream_bal_to_sparse_trie;
-
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
         let header_bal_hash = block.header().block_access_list_hash().ok_or_else(|| {
@@ -1116,22 +1123,6 @@ where
         })?;
         let cache_metrics = handle.cache_metrics().unwrap_or_default();
         let saved_cache = SavedCache::new(env.parent_hash, cache);
-
-        // Spawn sparse-trie streaming. It reads unchanged account fields through the same
-        // provider/cache path as the BAL workers, sends BAL-derived updates, then closes the
-        // sparse-trie stream with `FinishedStateUpdates`.
-        let stream_done = if let Some(to_sparse_trie_task) = handle.sparse_trie_updates_tx() {
-            Some(spawn_stream_bal_to_sparse_trie(
-                self.payload_processor.executor().bal_streaming_pool(),
-                provider_builder.clone(),
-                saved_cache.clone(),
-                cache_metrics.clone(),
-                Arc::clone(&decoded_bal),
-                to_sparse_trie_task,
-            ))
-        } else {
-            None
-        };
 
         // Spawn the receipt-root task.
         let receipts_len = env.transaction_count;
@@ -1184,17 +1175,6 @@ where
             block_gas_limit,
         )?;
         let execution_duration = execution_start.elapsed();
-
-        if let Some(stream_done) = stream_done {
-            stream_done
-                .blocking_recv()
-                .map_err(|_| {
-                    InsertBlockErrorKind::Other(
-                        "BAL sparse-trie stream dropped without completion".into(),
-                    )
-                })?
-                .map_err(InsertBlockErrorKind::Provider)?;
-        }
 
         // Forward all receipts to the receipt-root task, in order. Drop the sender so the task
         // knows the stream is closed.
