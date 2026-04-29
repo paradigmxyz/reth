@@ -58,7 +58,9 @@ pub use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvm, OpEvm
 #[error("meta tx is disabled")]
 struct MetaTxDisabled;
 
-fn ensure_payload_transaction_input_supported<T: SignedTransaction>(tx: &T) -> Result<(), AnyError> {
+fn ensure_payload_transaction_input_supported<T: SignedTransaction>(
+    tx: &T,
+) -> Result<(), AnyError> {
     if is_mantle_meta_tx(tx.input()) {
         tracing::warn!(
             target: "consensus::engine",
@@ -259,7 +261,9 @@ mod tests {
     use alloy_consensus::{Header, Receipt, SignableTransaction, TxEip1559};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{bytes, map::HashMap, Address, Bytes, LogData, Signature, TxKind, B256, U256};
+    use alloy_primitives::{
+        bytes, map::HashMap, Address, Bytes, LogData, Signature, TxKind, B256, U256,
+    };
     use op_revm::OpSpecId;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
