@@ -264,6 +264,7 @@ where
             self.spawn_tx_iterator(transactions, env.transaction_count);
 
         let span = Span::current();
+        let use_bal_prewarm = self.should_use_bal_prewarm(&env);
 
         let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
         let state_root_handle = self.spawn_state_root(
@@ -272,7 +273,7 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = env.decoded_bal.is_none();
+        let install_state_hook = !use_bal_prewarm;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -287,6 +288,18 @@ where
             transactions: execution_rx,
             _span: span,
         }
+    }
+
+    /// Returns whether this payload will use BAL-based prewarming.
+    ///
+    /// BAL presence alone is not enough: the engine falls back to tx-based prewarming when BAL
+    /// execution is disabled, prewarming is disabled, or the block is too small. Those fallback
+    /// paths still rely on the execution state hook to emit `FinishedStateUpdates`.
+    fn should_use_bal_prewarm(&self, env: &ExecutionEnv<Evm>) -> bool {
+        env.decoded_bal.is_some() &&
+            !self.disable_transaction_prewarming &&
+            env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD &&
+            !self.disable_bal_parallel_execution
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -474,8 +487,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
+        let use_bal_prewarm = self.should_use_bal_prewarm(&env);
+        let skip_prewarm = !use_bal_prewarm &&
+            (self.disable_transaction_prewarming ||
+                env.transaction_count < SMALL_BLOCK_TX_THRESHOLD);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -505,13 +520,10 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
-                } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
-                {
+                } else if let Some(decoded_bal) = maybe_decoded_bal.filter(|_| use_bal_prewarm) {
                     PrewarmMode::BlockAccessList(decoded_bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
@@ -961,10 +973,14 @@ where
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
+        payload_processor::{
+            evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor,
+            SMALL_BLOCK_TX_THRESHOLD,
+        },
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
+    use alloy_eip7928::bal::{Bal, DecodedBal};
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
     use rand::Rng;
@@ -990,6 +1006,43 @@ mod tests {
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    fn make_decoded_bal() -> Arc<DecodedBal> {
+        let raw = alloy_rlp::encode(Bal::default());
+        Arc::new(DecodedBal::from_rlp_bytes(raw.into()).expect("empty BAL should decode"))
+    }
+
+    #[test]
+    fn decoded_bal_only_disables_state_hook_when_bal_prewarm_is_active() {
+        let mut env = ExecutionEnv::<EthEvmConfig>::test_default();
+        env.transaction_count = SMALL_BLOCK_TX_THRESHOLD;
+        env.decoded_bal = Some(make_decoded_bal());
+
+        let default_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+        assert!(
+            !default_processor.should_use_bal_prewarm(&env),
+            "upstream defaults disable BAL parallel execution"
+        );
+
+        let bal_enabled_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default().without_bal_parallel_execution(false),
+            PrecompileCacheMap::default(),
+        );
+        assert!(bal_enabled_processor.should_use_bal_prewarm(&env));
+
+        env.transaction_count = SMALL_BLOCK_TX_THRESHOLD - 1;
+        assert!(
+            !bal_enabled_processor.should_use_bal_prewarm(&env),
+            "small BAL blocks still need the execution state hook because prewarming is skipped"
+        );
     }
 
     #[test]
@@ -1267,6 +1320,81 @@ mod tests {
         assert_eq!(
             root_from_task, root_from_regular,
             "State root mismatch: task={root_from_task}, base={root_from_regular}"
+        );
+    }
+
+    #[test]
+    fn state_hook_stays_enabled_for_bal_when_bal_prewarm_is_disabled() {
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+
+        let mut payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(factory.chain_spec()),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let mut env = ExecutionEnv::test_default();
+        env.transaction_count = SMALL_BLOCK_TX_THRESHOLD;
+        env.decoded_bal = Some(make_decoded_bal());
+
+        let handle = payload_processor.spawn(
+            env,
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(
+                provider_factory,
+                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+            ),
+            &TreeConfig::default(),
+        );
+
+        assert!(
+            handle.state_hook().is_some(),
+            "tx-based fallback must keep the execution state hook so the sparse trie task receives FinishedStateUpdates"
+        );
+    }
+
+    #[test]
+    fn state_hook_is_disabled_when_bal_prewarm_is_active() {
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+
+        let config = TreeConfig::default().without_bal_parallel_execution(false);
+        let mut payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(factory.chain_spec()),
+            &config,
+            PrecompileCacheMap::default(),
+        );
+
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let mut env = ExecutionEnv::test_default();
+        env.transaction_count = SMALL_BLOCK_TX_THRESHOLD;
+        env.decoded_bal = Some(make_decoded_bal());
+
+        let handle = payload_processor.spawn(
+            env,
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(
+                provider_factory,
+                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+            ),
+            &config,
+        );
+
+        assert!(
+            handle.state_hook().is_none(),
+            "BAL prewarm should own state-root completion and does not need execution state hooks"
         );
     }
 
