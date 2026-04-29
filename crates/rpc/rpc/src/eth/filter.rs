@@ -737,11 +737,8 @@ where
                 is_multi_block_range &&
                 all_logs.len() > max_logs_per_response
             {
-                let retry_to_block = if num_hash.number == from_block {
-                    from_block
-                } else {
-                    num_hash.number - 1
-                };
+                let retry_to_block =
+                    if num_hash.number == from_block { from_block } else { num_hash.number - 1 };
 
                 debug!(
                     target: "rpc::eth::filter",
