@@ -1146,20 +1146,15 @@ where
             txs.iter().map(|tx| *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(tx)).collect();
 
         let block_gas_limit = block.header().gas_limit();
-        let make_db = {
-            let provider_builder = provider_builder.clone();
-            let saved_cache = saved_cache.clone();
-            let cache_metrics = cache_metrics.clone();
-            move || {
-                let provider = provider_builder
-                    .build()
-                    .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
-                Ok(StateProviderDatabase::new(CachedStateProvider::new_prewarm(
-                    provider,
-                    saved_cache.cache().clone(),
-                    cache_metrics.clone(),
-                )))
-            }
+        let make_db = move || {
+            let provider = provider_builder
+                .build()
+                .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
+            Ok(StateProviderDatabase::new(CachedStateProvider::new_prewarm(
+                provider,
+                saved_cache.cache().clone(),
+                cache_metrics.clone(),
+            )))
         };
         let execution_start = Instant::now();
         let bal_output = crate::tree::payload_processor::bal::BalPayloadExecutor::new(

@@ -66,7 +66,7 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
     pub requests: alloy_eips::eip7685::Requests,
 }
 
-/// Errors surfaced by [`execute_block_bal`].
+/// Errors surfaced by [`BalPayloadExecutor::execute_block`].
 #[derive(Debug)]
 pub enum BalExecutionError {
     /// BAL-specific rejection — structural, feasibility, or final-hash mismatch.
@@ -121,12 +121,11 @@ pub struct BalPayloadExecutor<Evm: ConfigureEvm> {
 
 impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
     /// Wraps an `evm_config` together with the runtime that owns the persistent BAL worker pool.
-    pub fn new(runtime: Runtime, evm_config: Evm) -> Self {
+    pub const fn new(runtime: Runtime, evm_config: Evm) -> Self {
         Self { evm_config, runtime }
     }
 
     /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
-    #[expect(clippy::too_many_arguments)]
     pub fn execute_block<Tx, DB, MakeDb>(
         &self,
         make_db: MakeDb,
