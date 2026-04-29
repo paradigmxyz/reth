@@ -272,6 +272,8 @@ where
             halve_workers,
             config,
         );
+        // If no BALs are present or we have them explicitly disabled, we use sparse trie task and
+        // need to send the updates to it via state hook
         let install_state_hook = env.decoded_bal.is_none() || self.disable_bal_parallel_state_root;
         let prewarm_handle = self.spawn_caching_with(
             env,
