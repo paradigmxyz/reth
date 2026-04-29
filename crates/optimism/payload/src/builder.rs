@@ -20,7 +20,6 @@ use reth_evm::{
     ConfigureEvm, Database,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_mantle_forks::is_mantle_meta_tx;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_optimism_txpool::{
@@ -89,56 +88,6 @@ where
             compute_pending_block: self.compute_pending_block,
             _pd: PhantomData,
         }
-    }
-}
-
-fn ensure_sequencer_transaction_input_supported(input: &[u8]) -> Result<(), PayloadBuilderError> {
-    if is_mantle_meta_tx(input) {
-        warn!(
-            target: "payload_builder",
-            "rejected MetaTx in sequencer transaction (permanently disabled since MantleEverest)"
-        );
-        return Err(PayloadBuilderError::other(OpPayloadBuilderError::MetaTxRejected));
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ensure_sequencer_transaction_input_supported;
-    use crate::error::OpPayloadBuilderError;
-    use reth_mantle_forks::MANTLE_META_TX_PREFIX;
-    use reth_payload_builder_primitives::PayloadBuilderError;
-
-    #[test]
-    fn sequencer_transaction_input_rejects_mantle_meta_tx() {
-        let mut input = MANTLE_META_TX_PREFIX.to_vec();
-        input.push(0xF8);
-
-        let err = ensure_sequencer_transaction_input_supported(&input).unwrap_err();
-
-        let PayloadBuilderError::Other(err) = err else {
-            panic!("expected payload builder other error");
-        };
-        assert!(matches!(
-            err.downcast_ref::<OpPayloadBuilderError>(),
-            Some(OpPayloadBuilderError::MetaTxRejected)
-        ));
-        assert_eq!(err.to_string(), "meta tx is disabled");
-    }
-
-    #[test]
-    fn sequencer_transaction_input_allows_non_meta_tx_boundaries() {
-        assert!(ensure_sequencer_transaction_input_supported(&[]).is_ok());
-        assert!(ensure_sequencer_transaction_input_supported(&MANTLE_META_TX_PREFIX).is_ok());
-
-        let mut wrong_prefix = MANTLE_META_TX_PREFIX;
-        wrong_prefix[31] ^= 0x01;
-        let mut wrong_input = wrong_prefix.to_vec();
-        wrong_input.push(0xF8);
-
-        assert!(ensure_sequencer_transaction_input_supported(&wrong_input).is_ok());
     }
 }
 
@@ -712,8 +661,6 @@ where
                     OpPayloadBuilderError::BlobTransactionRejected,
                 ));
             }
-
-            ensure_sequencer_transaction_input_supported(sequencer_tx.value().input())?;
 
             // Convert the transaction to a [RecoveredTx]. This is
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.

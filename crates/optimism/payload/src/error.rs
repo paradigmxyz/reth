@@ -20,8 +20,4 @@ pub enum OpPayloadBuilderError {
     /// Thrown when a blob transaction is included in a sequencer's block.
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
-    /// Thrown when a Mantle `MetaTx` is included in a sequencer's block.
-    /// `MetaTx` has been permanently disabled since the `MantleEverest` hardfork.
-    #[error("meta tx is disabled")]
-    MetaTxRejected,
 }

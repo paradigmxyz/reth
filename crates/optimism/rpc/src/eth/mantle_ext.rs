@@ -1,8 +1,7 @@
 //! Mantle Eth API extension implementation.
 
-use super::transaction::ensure_transaction_input_supported;
 use crate::{error::SequencerClientError, SequencerClient};
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag, Encodable2718};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, Sealable, TxKind, U256};
@@ -19,7 +18,6 @@ use reth_rpc_eth_api::{
     helpers::Call, EthApiServer, EthApiTypes, MantleEthApiExtServer, PreconfTxEvent, RpcBlock,
     RpcNodeCore,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::{BlockNumReader, BlockReaderIdExt, StateProviderFactory};
 use std::sync::Arc;
@@ -83,12 +81,6 @@ where
 {
     ensure_create_kind_when_to_missing(&mut request);
     request.try_into_sim_tx().map(|tx| tx.encoded_2718()).map_err(|_| ())
-}
-
-fn ensure_preconf_raw_transaction_input_supported(bytes: &[u8]) -> RpcResult<()> {
-    let recovered_tx = recover_raw_transaction::<op_alloy_consensus::OpTxEnvelope>(bytes)
-        .map_err(ErrorObject::from)?;
-    ensure_transaction_input_supported(recovered_tx.input()).map_err(ErrorObject::from)
 }
 
 /// Mantle-specific `Eth` API extensions implementation.
@@ -235,8 +227,6 @@ where
     async fn send_raw_transaction_with_preconf(&self, bytes: Bytes) -> RpcResult<PreconfTxEvent> {
         // If we have a sequencer client, forward the transaction to it
         if let Some(sequencer) = self.sequencer_client.as_ref() {
-            ensure_preconf_raw_transaction_input_supported(&bytes)?;
-
             tracing::debug!(target: "rpc::eth", "forwarding raw transaction with preconf to sequencer");
             sequencer
                 .forward_raw_transaction_with_preconf(bytes.as_ref())
@@ -450,40 +440,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{SignableTransaction, TxEip1559};
-    use alloy_primitives::{Address, Bytes, Signature, TxKind};
+    use alloy_primitives::TxKind;
     use alloy_rpc_types_eth::TransactionInput;
     use op_alloy_rpc_types::OpTransactionRequest;
-    use reth_mantle_forks::MANTLE_META_TX_PREFIX;
-
-    fn raw_eip1559_with_input(input: Bytes) -> Bytes {
-        TxEip1559 {
-            chain_id: 5000,
-            nonce: 0,
-            gas_limit: 100_000,
-            max_fee_per_gas: 1,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(Address::ZERO),
-            input,
-            ..Default::default()
-        }
-        .into_signed(Signature::test_signature())
-        .encoded_2718()
-        .into()
-    }
-
-    #[test]
-    fn preconf_raw_transaction_rejects_mantle_meta_tx_before_forwarding() {
-        let mut input = MANTLE_META_TX_PREFIX.to_vec();
-        input.push(0xF8);
-
-        let err =
-            ensure_preconf_raw_transaction_input_supported(&raw_eip1559_with_input(input.into()))
-                .unwrap_err();
-
-        assert_eq!(err.code(), -32000);
-        assert_eq!(err.message(), "meta tx is disabled");
-    }
 
     #[test]
     fn estimate_total_fee_gas_price_prefers_explicit_gas_price() {
