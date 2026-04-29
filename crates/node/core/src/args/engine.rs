@@ -289,7 +289,7 @@ impl Default for DefaultEngineValues {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
-            bal_parallel_execution_disabled: false,
+            bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: false,
         }
     }
@@ -511,8 +511,8 @@ pub struct EngineArgs {
     )]
     pub suppress_persistence_during_build: bool,
 
-    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. When set, falls back
-    /// to transaction-based prewarming even when a BAL is available.
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled,
+    /// falling back to transaction-based prewarming even when a BAL is available.
     #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
     pub bal_parallel_execution_disabled: bool,
 

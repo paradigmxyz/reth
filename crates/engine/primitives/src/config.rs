@@ -239,7 +239,7 @@ impl Default for TreeConfig {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
-            disable_bal_parallel_execution: false,
+            disable_bal_parallel_execution: true,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
@@ -316,7 +316,7 @@ impl TreeConfig {
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build: false,
-            disable_bal_parallel_execution: false,
+            disable_bal_parallel_execution: true,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]

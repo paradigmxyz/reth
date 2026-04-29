@@ -313,9 +313,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.33.1"
+version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd3e12b99b0c8f7298ffd3604c58310cba310203c5f6cd5e024f3b2bd9c3b09c"
+checksum = "c1ceeea6dcbbcd4e546b27700763a6f6c3b3fee30054209884f521078b6fda4f"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 2.0.1",
@@ -2950,7 +2950,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ab67060fc6b8ef687992d439ca0fa36e7ed17e9a0b16b25b601e8757df720de"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3128,8 +3128,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c7999df38d0bd8f688212e1a4fae31fd2fea6d218649b9cd7c40bf3ec1318fc"
+source = "git+https://github.com/sigp/discv5?rev=7663c00#7663c00ee0837ea98547caaedede95d9d6736f4d"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3750,6 +3749,7 @@ dependencies = [
  "eyre",
  "futures",
  "reth-ethereum",
+ "reth-metrics",
  "reth-tracing",
  "tokio",
 ]
@@ -8862,6 +8862,7 @@ dependencies = [
  "futures",
  "metrics",
  "metrics-derive",
+ "reth-primitives-traits",
  "tokio",
  "tokio-util",
 ]
@@ -8941,6 +8942,7 @@ dependencies = [
  "secp256k1 0.30.0",
  "serde",
  "smallvec",
+ "socket2",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
