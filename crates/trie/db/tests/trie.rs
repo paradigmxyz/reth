@@ -126,6 +126,49 @@ fn branch_node_child_changes() {
 }
 
 #[test]
+fn reapplying_identical_storage_trie_updates_is_noop() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+    let hashed_address = B256::with_last_byte(7);
+
+    let mut hashed_storage_cursor =
+        tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    for key in [
+        "1000000000000000000000000000000000000000000000000000000000000000",
+        "1100000000000000000000000000000000000000000000000000000000000000",
+        "1110000000000000000000000000000000000000000000000000000000000000",
+        "1200000000000000000000000000000000000000000000000000000000000000",
+        "1220000000000000000000000000000000000000000000000000000000000000",
+        "1320000000000000000000000000000000000000000000000000000000000000",
+    ]
+    .into_iter()
+    .map(|key| B256::from_str(key).unwrap())
+    {
+        hashed_storage_cursor
+            .upsert(hashed_address, &StorageEntry { key, value: U256::ZERO })
+            .unwrap();
+    }
+
+    reth_trie_db::with_adapter!(tx, |A| {
+        let (_, _, trie_updates) =
+            DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+                .root_with_updates()
+                .unwrap();
+        let trie_updates = trie_updates.into_sorted();
+
+        let first_write = tx
+            .write_storage_trie_updates_sorted(core::iter::once((&hashed_address, &trie_updates)))
+            .unwrap();
+        assert!(first_write > 0);
+
+        let second_write = tx
+            .write_storage_trie_updates_sorted(core::iter::once((&hashed_address, &trie_updates)))
+            .unwrap();
+        assert_eq!(second_write, 0);
+    });
+}
+
+#[test]
 fn arbitrary_storage_root() {
     proptest!(ProptestConfig::with_cases(10), |(item in arb::<(Address, std::collections::BTreeMap<B256, U256>)>())| {
         let (address, storage) = item;
