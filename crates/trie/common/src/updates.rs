@@ -646,7 +646,8 @@ impl TrieUpdatesSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
-        const THRESHOLD: usize = 30;
+        const SMALL_BATCH_THRESHOLD: usize = 4;
+        const SMALL_TOTAL_LEN_THRESHOLD: usize = 4_096;
 
         let k = items.len();
 
@@ -657,7 +658,8 @@ impl TrieUpdatesSorted {
             return items[0].as_ref().clone();
         }
 
-        if k < THRESHOLD {
+        let total_len = items.iter().map(|item| item.as_ref().total_len()).sum::<usize>();
+        if k <= SMALL_BATCH_THRESHOLD && total_len <= SMALL_TOTAL_LEN_THRESHOLD {
             // Small k: extend loop, oldest-to-newest so newer overrides older.
             let mut iter = items.iter().rev();
             let mut acc = iter.next().expect("k > 0").as_ref().clone();
@@ -677,6 +679,7 @@ impl TrieUpdatesSorted {
             slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
         }
 
+        let slices_capacity = k.min(SMALL_BATCH_THRESHOLD);
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
         for item in items {
@@ -684,7 +687,7 @@ impl TrieUpdatesSorted {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     is_deleted: false,
                     sealed: false,
-                    slices: Vec::new(),
+                    slices: Vec::with_capacity(slices_capacity),
                 });
 
                 if entry.sealed {
