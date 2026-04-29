@@ -18,7 +18,6 @@
 
 pub mod error;
 pub mod execute;
-pub mod feasibility;
 #[cfg(test)]
 pub mod pre_state;
 #[cfg(test)]

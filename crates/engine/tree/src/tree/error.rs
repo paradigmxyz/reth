@@ -117,8 +117,8 @@ pub enum InsertBlockErrorKind {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
-    /// BAL-driven block execution rejected the block. Covers structural BAL errors,
-    /// feasibility-check failures, and the final-hash mismatch.
+    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
+    /// final-hash mismatch.
     #[error(transparent)]
     InvalidBlockAccessList(BalExecutionError),
     /// Other errors.
@@ -192,8 +192,8 @@ pub enum InsertBlockValidationError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// BAL-driven block execution rejected the block. Covers structural BAL errors,
-    /// feasibility-check failures, and the final-hash mismatch.
+    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
+    /// final-hash mismatch.
     #[error(transparent)]
     InvalidBlockAccessList(BalExecutionError),
 }
