@@ -1,8 +1,8 @@
 use futures_util::StreamExt;
-use reth_node_api::{BlockBody, PayloadAttributes, PayloadKind};
+use reth_node_api::{PayloadAttributes, PayloadKind};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use reth_payload_builder_primitives::Events;
-use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
