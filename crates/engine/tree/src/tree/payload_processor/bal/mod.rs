@@ -9,8 +9,7 @@
 //! - Commit worker outputs to a canonical `BlockExecutor` in tx order, preserving client-override
 //!   extension points (`apply_pre_execution_changes`, `commit_transaction`,
 //!   `apply_post_execution_changes`).
-//! - Feed sparse-trie state-root work from the BAL while unchanged account fields are read through
-//!   the same parent-state provider/cache path as execution.
+//! - Feed sparse-trie state-root work from the BAL through the payload prewarm task.
 //!
 //! See `BAL.md` at the repo root for the full design.
 //!
@@ -26,7 +25,6 @@ pub mod pre_state;
 pub mod snapshot;
 #[cfg(test)]
 pub mod snapshot_db;
-pub mod sparse_trie_stream;
 pub mod validation;
 #[cfg(test)]
 pub mod worker;
@@ -39,7 +37,6 @@ pub use pre_state::{BlockPreState, RequiredReads};
 pub use snapshot::build_pre_state;
 #[cfg(test)]
 pub use snapshot_db::{SnapshotDatabase, SnapshotDbError};
-pub use sparse_trie_stream::spawn_stream_bal_to_sparse_trie;
 pub use validation::{check_bal_hash, check_item_count, BAL_ITEM_COST};
 #[cfg(test)]
 pub use worker::{BalBlockExecutor, WorkerError};

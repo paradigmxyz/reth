@@ -124,8 +124,9 @@ where
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable BAL-driven parallel state root computation.
+    /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
-    /// Whether BAL batched IO is disabled.
+    /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
 }
 
@@ -270,17 +271,22 @@ where
             halve_workers,
             config,
         );
-        // BAL blocks stream sparse-trie updates either through the serial BAL prewarm path or the
-        // parallel BAL execute path. Non-BAL blocks use the normal execution state hook.
-        let bal_will_dispatch =
+        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
+        // consumes the BAL. If BAL execution is disabled, treat the BAL as absent here so the
+        // block follows today's sequential execution and transaction-prewarm path.
+        //
+        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
+        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
+        // prewarm, not this dispatch decision.
+        let parallel_bal_execution =
             !config.disable_bal_parallel_execution() && env.decoded_bal.is_some();
-        let install_state_hook = env.decoded_bal.is_none();
+        let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
-            bal_will_dispatch,
+            parallel_bal_execution,
         );
 
         PayloadHandle {
@@ -463,9 +469,9 @@ where
 
     /// Spawn prewarming optionally wired to the sparse trie task for target updates.
     ///
-    /// `bal_will_dispatch` is true when the BAL execute path will execute this block; in that
-    /// case prewarming would re-execute the same transactions in parallel for no benefit, so
-    /// the prewarm task spawns in `Skipped` mode and only the cache wiring stays alive.
+    /// `parallel_bal_execution` is true when the BAL execute path will execute this block. In
+    /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
+    /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
@@ -473,16 +479,22 @@ where
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
-        bal_will_dispatch: bool,
+        parallel_bal_execution: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm = self.disable_transaction_prewarming ||
-            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD ||
-            bal_will_dispatch;
-        let maybe_decoded_bal = env.decoded_bal.clone();
-
+        let mode = if parallel_bal_execution {
+            PrewarmMode::BlockAccessList(
+                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+            )
+        } else if self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        {
+            PrewarmMode::Skipped
+        } else {
+            PrewarmMode::Transactions(transactions)
+        };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
@@ -511,13 +523,6 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking_named("prewarm", move || {
-                let mode = if skip_prewarm {
-                    PrewarmMode::Skipped
-                } else if let Some(decoded_bal) = maybe_decoded_bal {
-                    PrewarmMode::BlockAccessList(decoded_bal)
-                } else {
-                    PrewarmMode::Transactions(transactions)
-                };
                 prewarm_task.run(mode, to_prewarm_task);
             });
         }
