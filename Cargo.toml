@@ -433,14 +433,14 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.3.1", default-features = false }
 
 # revm
-revm = { version = "38.0.0", default-features = false }
-revm-bytecode = { version = "10.0.0", default-features = false }
-revm-database = { version = "13.0.0", default-features = false }
-revm-state = { version = "11.0.0", default-features = false }
-revm-primitives = { version = "23.0.0", default-features = false }
-revm-interpreter = { version = "35.0.0", default-features = false }
-revm-database-interface = { version = "11.0.0", default-features = false }
-revm-inspectors = "0.39.0"
+revm = { version = "=38.0.0", default-features = false }
+revm-bytecode = { version = "=10.0.0", default-features = false }
+revm-database = { version = "=13.0.1", default-features = false }
+revm-state = { version = "=11.0.1", default-features = false }
+revm-primitives = { version = "=23.0.0", default-features = false }
+revm-interpreter = { version = "=35.0.1", default-features = false }
+revm-database-interface = { version = "=11.0.1", default-features = false }
+revm-inspectors = "=0.39.0"
 
 # eth
 alloy-dyn-abi = "1.5.6"
@@ -700,3 +700,24 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "3ed3bdfed9ad6e5ba37f4e1f015436ab89ca98be" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "5eebb56819ee6bec5bfbc69a415276ee1a784fec" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet-4" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "8612239c4f3dda83cc389f577b9eb04f10ebf81d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "8612239c4f3dda83cc389f577b9eb04f10ebf81d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "8612239c4f3dda83cc389f577b9eb04f10ebf81d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "8612239c4f3dda83cc389f577b9eb04f10ebf81d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "8612239c4f3dda83cc389f577b9eb04f10ebf81d" }

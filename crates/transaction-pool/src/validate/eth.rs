@@ -1424,6 +1424,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
             .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
             .unwrap_or_default() as u64,
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        revm_primitives::eip8037::CPSB_GLAMSTERDAM,
     );
 
     let gas_limit = transaction.gas_limit();

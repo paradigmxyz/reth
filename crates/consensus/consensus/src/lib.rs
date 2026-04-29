@@ -38,6 +38,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::Header;
+use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::{error::Error, fmt::Display};
 
@@ -85,6 +86,7 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list: Option<BlockAccessList>,
     ) -> Result<(), ConsensusError>;
 }
 
@@ -474,6 +476,12 @@ pub enum ConsensusError {
     /// EIP-7825: Transaction gas limit exceeds maximum allowed
     #[error(transparent)]
     TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
+    /// Error when an unexpected block access list cost is encountered.
+    #[error("block access list exceeds gas limit")]
+    BlockAccessListExceedsGasLimit,
+    /// Error when the block access list hash doesn't match the expected value.
+    #[error("block access list hash mismatch: {0}")]
+    BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
@@ -517,6 +525,23 @@ impl ConsensusError {
     pub fn is_other<T: Error + 'static>(&self) -> bool {
         self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
     }
+}
+
+/// Validates the block access list against the gas limit.
+///
+/// EIP-7925 specifies that the total cost of the block access list items must not exceed
+/// the gas limit. Each item costs `ITEM_COST` gas.
+pub fn validate_block_access_list_gas(
+    block_access_list: Option<&alloy_eip7928::BlockAccessList>,
+    gas_limit: u64,
+) -> Result<(), ConsensusError> {
+    if let Some(bal) = block_access_list {
+        let bal_items = alloy_eip7928::total_bal_items(bal);
+        if bal_items > gas_limit / alloy_eip7928::ITEM_COST as u64 {
+            return Err(ConsensusError::BlockAccessListExceedsGasLimit)
+        }
+    }
+    Ok(())
 }
 
 impl From<InvalidTransactionError> for ConsensusError {

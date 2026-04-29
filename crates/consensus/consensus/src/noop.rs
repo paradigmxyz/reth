@@ -20,6 +20,7 @@
 
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use alloc::sync::Arc;
+use alloy_eip7928::BlockAccessList;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 
@@ -77,6 +78,7 @@ impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
         _receipt_root_bloom: Option<ReceiptRootBloom>,
+        _block_access_list: Option<BlockAccessList>,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }
