@@ -168,17 +168,39 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
 
     /// Positions the DB cursor state using the underlying cursor when needed.
     fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
-        // Only seek if:
-        // 1. We have a cursor entry and need to seek forward (entry.0 < key), OR
-        // 2. The DB cursor needs to be positioned.
-        let should_seek = match &self.db_cursor_state {
-            DbCursorState::NeedsPosition => true,
-            DbCursorState::Positioned((entry_key, _)) => entry_key < &key,
-            DbCursorState::Exhausted | DbCursorState::Wiped => false,
-        };
+        const LINEAR_PROBE_STEPS: usize = 4;
 
-        if should_seek {
-            let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
+        match &self.db_cursor_state {
+            DbCursorState::NeedsPosition => {
+                let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
+                self.db_cursor_state.set_entry(entry);
+            }
+            DbCursorState::Positioned((entry_key, _)) if entry_key < &key => {
+                for _ in 0..LINEAR_PROBE_STEPS {
+                    if !matches!(self.db_cursor_state.entry(), Some((entry_key, _)) if entry_key < &key)
+                    {
+                        break;
+                    }
+                    self.advance_db_cursor()?;
+                }
+
+                if matches!(self.db_cursor_state.entry(), Some((entry_key, _)) if entry_key < &key)
+                {
+                    let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
+                    self.db_cursor_state.set_entry(entry);
+                }
+            }
+            DbCursorState::Positioned(_) | DbCursorState::Exhausted | DbCursorState::Wiped => {}
+        }
+
+        Ok(())
+    }
+
+    fn advance_db_cursor(&mut self) -> Result<(), DatabaseError> {
+        // Exhausted and wiped states are stable; only advance if the DB cursor currently points to
+        // an entry.
+        if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
+            let entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -193,14 +215,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             debug_assert!(!matches!(self.db_cursor_state, DbCursorState::NeedsPosition));
         }
 
-        // Exhausted and wiped states are stable; only advance if the DB cursor currently points to
-        // an entry.
-        if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
-            let entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
-            self.db_cursor_state.set_entry(entry);
-        }
-
-        Ok(())
+        self.advance_db_cursor()
     }
 
     /// Compares the current in-memory entry with the current entry of the cursor, and applies the
@@ -374,6 +389,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock::KeyVisitType;
     use crate::trie_cursor::mock::MockTrieCursor;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
@@ -600,6 +616,35 @@ mod tests {
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_seek_exact_probes_forward_before_reseeking() {
+        let key1 = Nibbles::from_nibbles([0x1]);
+        let key2 = Nibbles::from_nibbles([0x2]);
+        let key3 = Nibbles::from_nibbles([0x3]);
+        let key8 = Nibbles::from_nibbles([0x8]);
+        let node = BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None);
+
+        let db_nodes = Arc::new(BTreeMap::from([
+            (key1, node.clone()),
+            (key2, node.clone()),
+            (key3, node.clone()),
+            (key8, node.clone()),
+        ]));
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes, Arc::clone(&visited_keys));
+        let trie_updates = TrieUpdatesSorted::default();
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+        assert_eq!(cursor.seek_exact(key1).unwrap().map(|(key, _)| key), Some(key1));
+        assert_eq!(cursor.seek_exact(key3).unwrap().map(|(key, _)| key), Some(key3));
+
+        let visits = visited_keys.lock().clone();
+        assert_eq!(visits.len(), 3);
+        assert_eq!(visits[0].visit_type, KeyVisitType::SeekNonExact(key1));
+        assert_eq!(visits[1].visit_type, KeyVisitType::Next);
+        assert_eq!(visits[2].visit_type, KeyVisitType::Next);
     }
 
     #[test]
