@@ -191,13 +191,24 @@ impl DeferredTrieData {
 
         drop(_span);
 
+        let sorted_hashed_state = Arc::new(sorted_hashed_state);
+        let sorted_trie_updates = Arc::new(sorted_trie_updates);
+
         let _span = debug_span!(target: "engine::tree::deferred_trie", "build_overlay").entered();
 
-        // Reuse parent's overlay if available and anchors match.
-        // We can only reuse the parent's overlay if it was built on top of the same
-        // persisted anchor. If the anchor has changed (e.g., due to persistence),
-        // the parent's overlay is relative to an old state and cannot be used.
-        let overlay = if let Some(parent) = ancestors.last() {
+        // Reuse the sorted block outputs directly when there is no in-memory ancestor.
+        // This avoids cloning the freshly sorted state and trie updates into a one-block overlay.
+        let overlay = if ancestors.is_empty() {
+            TrieInputSorted::new(
+                Arc::clone(&sorted_trie_updates),
+                Arc::clone(&sorted_hashed_state),
+                Default::default(),
+            )
+        } else if let Some(parent) = ancestors.last() {
+            // Reuse parent's overlay if available and anchors match.
+            // We can only reuse the parent's overlay if it was built on top of the same
+            // persisted anchor. If the anchor has changed (e.g., due to persistence),
+            // the parent's overlay is relative to an old state and cannot be used.
             let parent_data = parent.wait_cloned();
 
             match &parent_data.anchored_trie_input {
@@ -221,13 +232,13 @@ impl DeferredTrieData {
                             || {
                                 if !sorted_hashed_state.is_empty() {
                                     Arc::make_mut(&mut overlay.state)
-                                        .extend_ref_and_sort(&sorted_hashed_state);
+                                        .extend_ref_and_sort(sorted_hashed_state.as_ref());
                                 }
                             },
                             || {
                                 if !sorted_trie_updates.is_empty() {
                                     Arc::make_mut(&mut overlay.nodes)
-                                        .extend_ref_and_sort(&sorted_trie_updates);
+                                        .extend_ref_and_sort(sorted_trie_updates.as_ref());
                                 }
                             },
                         );
@@ -236,11 +247,11 @@ impl DeferredTrieData {
                     {
                         if !sorted_hashed_state.is_empty() {
                             Arc::make_mut(&mut overlay.state)
-                                .extend_ref_and_sort(&sorted_hashed_state);
+                                .extend_ref_and_sort(sorted_hashed_state.as_ref());
                         }
                         if !sorted_trie_updates.is_empty() {
                             Arc::make_mut(&mut overlay.nodes)
-                                .extend_ref_and_sort(&sorted_trie_updates);
+                                .extend_ref_and_sort(sorted_trie_updates.as_ref());
                         }
                     }
                     overlay
@@ -249,19 +260,17 @@ impl DeferredTrieData {
                 // We must rebuild from the ancestors list (which only contains unpersisted blocks).
                 _ => Self::merge_ancestors_into_overlay(
                     ancestors,
-                    &sorted_hashed_state,
-                    &sorted_trie_updates,
+                    sorted_hashed_state.as_ref(),
+                    sorted_trie_updates.as_ref(),
                 ),
             }
         } else {
-            // Case 3: No in-memory ancestors (first block after persisted anchor).
-            // Build overlay with just this block's data.
-            Self::merge_ancestors_into_overlay(&[], &sorted_hashed_state, &sorted_trie_updates)
+            unreachable!("checked ancestors.is_empty() above")
         };
 
         ComputedTrieData::with_trie_input(
-            Arc::new(sorted_hashed_state),
-            Arc::new(sorted_trie_updates),
+            sorted_hashed_state,
+            sorted_trie_updates,
             anchor_hash,
             Arc::new(overlay),
         )
