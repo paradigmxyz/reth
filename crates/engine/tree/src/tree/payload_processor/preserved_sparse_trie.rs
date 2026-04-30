@@ -50,6 +50,16 @@ impl SharedPreservedSparseTrie {
         }
         elapsed
     }
+
+    /// Tries to acquire the preserved trie lock without blocking.
+    ///
+    /// Returns `Some(wait_duration)` if the lock was immediately available and `None` when the
+    /// caller should fall back to the contended wait path.
+    pub(super) fn try_wait_for_availability(&self) -> Option<std::time::Duration> {
+        let start = Instant::now();
+        let _guard = self.0.try_lock()?;
+        Some(start.elapsed())
+    }
 }
 
 /// Guard that holds the lock on the preserved trie.
@@ -134,5 +144,38 @@ impl PreservedSparseTrie {
                 trie
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn try_wait_for_availability_succeeds_when_uncontended() {
+        let trie = SharedPreservedSparseTrie::default();
+
+        assert!(trie.try_wait_for_availability().is_some());
+    }
+
+    #[test]
+    fn try_wait_for_availability_reports_contention() {
+        let trie = Arc::new(SharedPreservedSparseTrie::default());
+        let held_trie = Arc::clone(&trie);
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let _guard = held_trie.0.lock();
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+
+        locked_rx.recv().unwrap();
+        assert!(trie.try_wait_for_availability().is_none());
+
+        release_tx.send(()).unwrap();
+        handle.join().unwrap();
     }
 }

@@ -122,6 +122,16 @@ impl PayloadExecutionCache {
         elapsed
     }
 
+    /// Tries to acquire the cache lock without spawning any helper work.
+    ///
+    /// Returns `Some(wait_duration)` if the lock was immediately available and `None` when the
+    /// caller should fall back to the contended wait path.
+    pub fn try_wait_for_availability(&self) -> Option<Duration> {
+        let start = Instant::now();
+        let _guard = self.inner.try_lock()?;
+        Some(start.elapsed())
+    }
+
     /// Updates the cache with a closure that has exclusive access to the guard.
     /// This ensures that all cache operations happen atomically.
     ///
@@ -158,6 +168,7 @@ struct PayloadExecutionCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn single_checkout_blocks_second() {
@@ -211,5 +222,32 @@ mod tests {
     fn empty_cache_returns_none() {
         let cache = PayloadExecutionCache::default();
         assert!(cache.get_cache_for(B256::ZERO).is_none());
+    }
+
+    #[test]
+    fn try_wait_for_availability_succeeds_when_uncontended() {
+        let cache = PayloadExecutionCache::default();
+
+        assert!(cache.try_wait_for_availability().is_some());
+    }
+
+    #[test]
+    fn try_wait_for_availability_reports_contention() {
+        let cache = Arc::new(PayloadExecutionCache::default());
+        let held_cache = Arc::clone(&cache);
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let _guard = held_cache.inner.lock();
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+
+        locked_rx.recv().unwrap();
+        assert!(cache.try_wait_for_availability().is_none());
+
+        release_tx.send(()).unwrap();
+        handle.join().unwrap();
     }
 }
