@@ -125,6 +125,40 @@ impl HashedPostState {
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
+    /// Converts hashed state into its sorted representation while constructing trie prefix sets in
+    /// the same pass.
+    pub fn into_sorted_with_prefix_sets(self) -> (HashedPostStateSorted, TriePrefixSetsMut) {
+        let accounts_len = self.accounts.len();
+        let storages_len = self.storages.len();
+
+        let mut accounts = Vec::with_capacity(accounts_len);
+        let mut account_prefix_set = PrefixSetMut::with_capacity(accounts_len + storages_len);
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in self.accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account.is_none() {
+                destroyed_accounts.insert(hashed_address);
+            }
+            accounts.push((hashed_address, account));
+        }
+        accounts.sort_unstable_by_key(|(hashed_address, _)| *hashed_address);
+
+        let mut storages = B256Map::with_capacity_and_hasher(storages_len, Default::default());
+        let mut storage_prefix_sets =
+            HashMap::with_capacity_and_hasher(storages_len, Default::default());
+        for (hashed_address, storage) in self.storages {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            let (sorted_storage, prefix_set) = storage.into_sorted_with_prefix_set();
+            storages.insert(hashed_address, sorted_storage);
+            storage_prefix_sets.insert(hashed_address, prefix_set);
+        }
+
+        (
+            HashedPostStateSorted { accounts, storages },
+            TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts },
+        )
+    }
+
     /// Create multiproof targets for this state.
     pub fn multi_proof_targets(&self) -> MultiProofTargets {
         // Pre-allocate minimum capacity for the targets.
@@ -187,10 +221,10 @@ impl HashedPostState {
                 Some(storage_in_targets) => {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
-                        if storage_in_targets.contains(&slot) &&
-                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
+                        if storage_in_targets.contains(&slot)
+                            && !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
                         {
-                            return true
+                            return true;
                         }
 
                         storage_not_in_targets.storage.insert(slot, *value);
@@ -225,7 +259,7 @@ impl HashedPostState {
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
-                return true
+                return true;
             }
 
             state_updates_not_in_targets.accounts.insert(address, *account);
@@ -244,8 +278,9 @@ impl HashedPostState {
 
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
-        self.accounts.len() +
-            self.storages
+        self.accounts.len()
+            + self
+                .storages
                 .values()
                 .map(|storage| if storage.wiped { 1 } else { 0 } + storage.storage.len())
                 .sum::<usize>()
@@ -352,6 +387,42 @@ impl HashedPostState {
             .collect();
 
         HashedPostStateSorted { accounts, storages }
+    }
+
+    /// Creates a sorted copy and trie prefix sets without consuming self.
+    ///
+    /// More efficient than `construct_prefix_sets()` plus `clone_into_sorted()` as it only walks
+    /// the account and storage maps once.
+    pub fn clone_into_sorted_with_prefix_sets(&self) -> (HashedPostStateSorted, TriePrefixSetsMut) {
+        let accounts_len = self.accounts.len();
+        let storages_len = self.storages.len();
+
+        let mut accounts = Vec::with_capacity(accounts_len);
+        let mut account_prefix_set = PrefixSetMut::with_capacity(accounts_len + storages_len);
+        let mut destroyed_accounts = HashSet::default();
+        for (&hashed_address, &account) in &self.accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account.is_none() {
+                destroyed_accounts.insert(hashed_address);
+            }
+            accounts.push((hashed_address, account));
+        }
+        accounts.sort_unstable_by_key(|(hashed_address, _)| *hashed_address);
+
+        let mut storages = B256Map::with_capacity_and_hasher(storages_len, Default::default());
+        let mut storage_prefix_sets =
+            HashMap::with_capacity_and_hasher(storages_len, Default::default());
+        for (&hashed_address, storage) in &self.storages {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            let (sorted_storage, prefix_set) = storage.clone_into_sorted_with_prefix_set();
+            storages.insert(hashed_address, sorted_storage);
+            storage_prefix_sets.insert(hashed_address, prefix_set);
+        }
+
+        (
+            HashedPostStateSorted { accounts, storages },
+            TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts },
+        )
     }
 
     /// Clears the account and storage maps of this `HashedPostState`.
@@ -467,6 +538,30 @@ impl HashedStorage {
         }
     }
 
+    /// Converts hashed storage into its sorted representation while constructing the storage
+    /// prefix set in the same pass.
+    pub fn into_sorted_with_prefix_set(self) -> (HashedStorageSorted, PrefixSetMut) {
+        if self.wiped {
+            return (
+                HashedStorageSorted {
+                    storage_slots: self.storage.into_iter().collect(),
+                    wiped: true,
+                },
+                PrefixSetMut::all(),
+            );
+        }
+
+        let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
+        let mut storage_slots = Vec::with_capacity(self.storage.len());
+        for (hashed_slot, value) in self.storage {
+            prefix_set.insert(Nibbles::unpack(hashed_slot));
+            storage_slots.push((hashed_slot, value));
+        }
+        storage_slots.sort_unstable_by_key(|(hashed_slot, _)| *hashed_slot);
+
+        (HashedStorageSorted { storage_slots, wiped: false }, prefix_set)
+    }
+
     /// Extend hashed storage with contents of other.
     /// The entries in second hashed storage take precedence.
     pub fn extend(&mut self, other: &Self) {
@@ -510,6 +605,29 @@ impl HashedStorage {
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
+    }
+
+    /// Creates a sorted copy and storage prefix set without consuming self.
+    pub fn clone_into_sorted_with_prefix_set(&self) -> (HashedStorageSorted, PrefixSetMut) {
+        if self.wiped {
+            return (
+                HashedStorageSorted {
+                    storage_slots: self.storage.iter().map(|(&k, &v)| (k, v)).collect(),
+                    wiped: true,
+                },
+                PrefixSetMut::all(),
+            );
+        }
+
+        let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
+        let mut storage_slots = Vec::with_capacity(self.storage.len());
+        for (&hashed_slot, &value) in &self.storage {
+            prefix_set.insert(Nibbles::unpack(hashed_slot));
+            storage_slots.push((hashed_slot, value));
+        }
+        storage_slots.sort_unstable_by_key(|(hashed_slot, _)| *hashed_slot);
+
+        (HashedStorageSorted { storage_slots, wiped: false }, prefix_set)
     }
 }
 
@@ -1679,6 +1797,63 @@ mod tests {
 
         assert_eq!(sorted_via_clone, sorted_via_clone_into);
 
+        let (sorted_via_fused_clone, prefix_sets_via_fused_clone) =
+            state.clone_into_sorted_with_prefix_sets();
+        assert_eq!(sorted_via_clone, sorted_via_fused_clone);
+        let prefix_sets_via_construct = state.construct_prefix_sets().freeze();
+        let prefix_sets_via_fused_clone = prefix_sets_via_fused_clone.freeze();
+        assert_eq!(
+            prefix_sets_via_construct.account_prefix_set.iter().copied().collect::<Vec<_>>(),
+            prefix_sets_via_fused_clone.account_prefix_set.iter().copied().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            prefix_sets_via_construct.destroyed_accounts,
+            prefix_sets_via_fused_clone.destroyed_accounts
+        );
+        assert_eq!(
+            prefix_sets_via_construct.storage_prefix_sets.len(),
+            prefix_sets_via_fused_clone.storage_prefix_sets.len()
+        );
+        for (hashed_address, prefix_set) in &prefix_sets_via_construct.storage_prefix_sets {
+            let fused_prefix_set = prefix_sets_via_fused_clone
+                .storage_prefix_sets
+                .get(hashed_address)
+                .expect("missing fused storage prefix set");
+            assert_eq!(prefix_set.all(), fused_prefix_set.all());
+            assert_eq!(
+                prefix_set.iter().copied().collect::<Vec<_>>(),
+                fused_prefix_set.iter().copied().collect::<Vec<_>>()
+            );
+        }
+
+        let (sorted_via_fused_into, prefix_sets_via_fused_into) =
+            state.clone().into_sorted_with_prefix_sets();
+        assert_eq!(sorted_via_clone, sorted_via_fused_into);
+        let prefix_sets_via_fused_into = prefix_sets_via_fused_into.freeze();
+        assert_eq!(
+            prefix_sets_via_construct.account_prefix_set.iter().copied().collect::<Vec<_>>(),
+            prefix_sets_via_fused_into.account_prefix_set.iter().copied().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            prefix_sets_via_construct.destroyed_accounts,
+            prefix_sets_via_fused_into.destroyed_accounts
+        );
+        assert_eq!(
+            prefix_sets_via_construct.storage_prefix_sets.len(),
+            prefix_sets_via_fused_into.storage_prefix_sets.len()
+        );
+        for (hashed_address, prefix_set) in &prefix_sets_via_construct.storage_prefix_sets {
+            let fused_prefix_set = prefix_sets_via_fused_into
+                .storage_prefix_sets
+                .get(hashed_address)
+                .expect("missing fused storage prefix set");
+            assert_eq!(prefix_set.all(), fused_prefix_set.all());
+            assert_eq!(
+                prefix_set.iter().copied().collect::<Vec<_>>(),
+                fused_prefix_set.iter().copied().collect::<Vec<_>>()
+            );
+        }
+
         // Verify the original state is not consumed
         assert_eq!(state.accounts.len(), 3);
         assert_eq!(state.storages.len(), 2);
@@ -1704,6 +1879,27 @@ mod tests {
         let sorted_via_clone_into = storage.clone_into_sorted();
 
         assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        let (sorted_via_fused_clone, prefix_set_via_fused_clone) =
+            storage.clone_into_sorted_with_prefix_set();
+        assert_eq!(sorted_via_clone, sorted_via_fused_clone);
+        let prefix_set_via_construct = storage.construct_prefix_set().freeze();
+        let prefix_set_via_fused_clone = prefix_set_via_fused_clone.freeze();
+        assert_eq!(prefix_set_via_construct.all(), prefix_set_via_fused_clone.all());
+        assert_eq!(
+            prefix_set_via_construct.iter().copied().collect::<Vec<_>>(),
+            prefix_set_via_fused_clone.iter().copied().collect::<Vec<_>>()
+        );
+
+        let (sorted_via_fused_into, prefix_set_via_fused_into) =
+            storage.clone().into_sorted_with_prefix_set();
+        assert_eq!(sorted_via_clone, sorted_via_fused_into);
+        let prefix_set_via_fused_into = prefix_set_via_fused_into.freeze();
+        assert_eq!(prefix_set_via_construct.all(), prefix_set_via_fused_into.all());
+        assert_eq!(
+            prefix_set_via_construct.iter().copied().collect::<Vec<_>>(),
+            prefix_set_via_fused_into.iter().copied().collect::<Vec<_>>()
+        );
 
         // Verify the original storage is not consumed
         assert_eq!(storage.storage.len(), 3);
