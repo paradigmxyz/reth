@@ -8163,6 +8163,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-trie-common",
+ "revm",
  "serde",
  "thiserror 2.0.18",
  "tokio",

@@ -355,7 +355,7 @@ where
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block, None) {
             // Header validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into());
         }
 
         // Also validate against the parent
@@ -363,7 +363,7 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             // Parent validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into());
         }
 
         // No header validation errors, return the original execution error
@@ -438,7 +438,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = convert_to_block(input)?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -471,7 +471,7 @@ where
                 convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
@@ -484,7 +484,7 @@ where
                 convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
@@ -655,112 +655,126 @@ where
         );
 
         let root_time = Instant::now();
+
+        let custom_state_root =
+            self.validator.compute_state_root(&output.state, block.header().parent_hash());
+        if let Some(custom_root) = custom_state_root {
+            info!(
+                target: "engine::tree::payload_validator",
+                ?custom_root,
+                elapsed = ?root_time.elapsed(),
+                "Custom state root computed"
+            );
+        }
+
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
 
-        match strategy {
-            StateRootStrategy::StateRootTask => {
-                debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
+        if custom_state_root.is_none() {
+            match strategy {
+                StateRootStrategy::StateRootTask => {
+                    debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
 
-                let task_result = ensure_ok_post_block!(
-                    self.await_state_root_with_timeout(
-                        &mut handle,
-                        provider_builder.clone(),
-                        &hashed_state,
-                    ),
-                    block
-                );
+                    let task_result = ensure_ok_post_block!(
+                        self.await_state_root_with_timeout(
+                            &mut handle,
+                            provider_builder.clone(),
+                            &hashed_state,
+                        ),
+                        block
+                    );
 
-                match task_result {
-                    Ok(StateRootComputeOutcome {
-                        state_root,
-                        trie_updates,
-                        #[cfg(feature = "trie-debug")]
-                        debug_recorders,
-                    }) => {
-                        let elapsed = root_time.elapsed();
-                        info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
-
-                        #[cfg(feature = "trie-debug")]
-                        {
-                            trie_debug_recorders = debug_recorders;
-                        }
-
-                        // Compare trie updates with serial computation if configured
-                        if self.config.always_compare_trie_updates() {
-                            let _has_diff = self.compare_trie_updates_with_serial(
-                                provider_builder.clone(),
-                                provider_factory,
-                                overlay_builder,
-                                &hashed_state,
-                                trie_updates.as_ref().clone(),
-                            );
+                    match task_result {
+                        Ok(StateRootComputeOutcome {
+                            state_root,
+                            trie_updates,
                             #[cfg(feature = "trie-debug")]
-                            if _has_diff {
+                            debug_recorders,
+                        }) => {
+                            let elapsed = root_time.elapsed();
+                            info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
+
+                            #[cfg(feature = "trie-debug")]
+                            {
+                                trie_debug_recorders = debug_recorders;
+                            }
+
+                            // Compare trie updates with serial computation if configured
+                            if self.config.always_compare_trie_updates() {
+                                let _has_diff = self.compare_trie_updates_with_serial(
+                                    provider_builder.clone(),
+                                    provider_factory,
+                                    overlay_builder,
+                                    &hashed_state,
+                                    trie_updates.as_ref().clone(),
+                                );
+                                #[cfg(feature = "trie-debug")]
+                                if _has_diff {
+                                    Self::write_trie_debug_recorders(
+                                        block.header().number(),
+                                        &trie_debug_recorders,
+                                    );
+                                }
+                            }
+
+                            // we double check the state root here for good measure
+                            if state_root == block.header().state_root() {
+                                maybe_state_root = Some((state_root, trie_updates, elapsed))
+                            } else {
+                                warn!(
+                                    target: "engine::tree::payload_validator",
+                                    ?state_root,
+                                    block_state_root = ?block.header().state_root(),
+                                    "State root task returned incorrect state root"
+                                );
+                                #[cfg(feature = "trie-debug")]
                                 Self::write_trie_debug_recorders(
                                     block.header().number(),
                                     &trie_debug_recorders,
                                 );
+                                state_root_task_failed = true;
                             }
                         }
-
-                        // we double check the state root here for good measure
-                        if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
-                        } else {
-                            warn!(
-                                target: "engine::tree::payload_validator",
-                                ?state_root,
-                                block_state_root = ?block.header().state_root(),
-                                "State root task returned incorrect state root"
-                            );
-                            #[cfg(feature = "trie-debug")]
-                            Self::write_trie_debug_recorders(
-                                block.header().number(),
-                                &trie_debug_recorders,
-                            );
+                        Err(error) => {
+                            debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
                             state_root_task_failed = true;
                         }
                     }
-                    Err(error) => {
-                        debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
-                        state_root_task_failed = true;
+                }
+                StateRootStrategy::Parallel => {
+                    debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
+                    match self.compute_state_root_parallel(
+                        provider_factory,
+                        overlay_builder,
+                        &hashed_state,
+                    ) {
+                        Ok(result) => {
+                            let elapsed = root_time.elapsed();
+                            info!(
+                                target: "engine::tree::payload_validator",
+                                regular_state_root = ?result.0,
+                                ?elapsed,
+                                "Regular root task finished"
+                            );
+                            maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
+                        }
+                        Err(error) => {
+                            debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
+                        }
                     }
                 }
+                StateRootStrategy::Synchronous => {}
             }
-            StateRootStrategy::Parallel => {
-                debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(
-                    provider_factory,
-                    overlay_builder,
-                    &hashed_state,
-                ) {
-                    Ok(result) => {
-                        let elapsed = root_time.elapsed();
-                        info!(
-                            target: "engine::tree::payload_validator",
-                            regular_state_root = ?result.0,
-                            ?elapsed,
-                            "Regular root task finished"
-                        );
-                        maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
-                    }
-                    Err(error) => {
-                        debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
-                    }
-                }
-            }
-            StateRootStrategy::Synchronous => {}
         }
 
         // Determine the state root.
         // If the state root was computed in parallel, we use it.
         // Otherwise, we fall back to computing it synchronously.
-        let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
-            maybe_state_root
-        {
+        let (state_root, trie_output, root_elapsed) = if let Some(custom_root) = custom_state_root {
+            (custom_root, Arc::new(TrieUpdates::default()), root_time.elapsed())
+        } else if let Some(maybe_state_root) = maybe_state_root {
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
@@ -811,7 +825,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         let timing_stats = state_provider_stats.map(|stats| {
@@ -873,14 +887,14 @@ where
     ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) =
             self.consensus.validate_block_pre_execution_with_tx_root(block, transaction_root)
         {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         Ok(())
@@ -1371,7 +1385,7 @@ where
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         if let Err(e) = self.validate_block_inner(block, transaction_root) {
-            return Err(e.into())
+            return Err(e.into());
         }
 
         // now validate against the parent
@@ -1380,7 +1394,7 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
+            return Err(e.into());
         }
         drop(_enter);
 
@@ -1393,7 +1407,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1409,7 +1423,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
 
         // record post-execution validation duration
@@ -1510,7 +1524,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1518,7 +1532,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1550,7 +1564,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -1799,9 +1813,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
