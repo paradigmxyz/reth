@@ -471,9 +471,7 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config {
-        discv5_config, fork, tcp_socket, other_enr_kv_pairs, advertised_ip, ..
-    } = config;
+    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, advertised_ip, .. } = config;
 
     let socket = {
         let v4 = crate::config::ipv4(&discv5_config.listen_config);
@@ -1156,6 +1154,8 @@ mod test {
 
         assert_eq!(enr.ip4(), Some(advertised));
         assert!(enr.ip6().is_none());
+        // udp6 remains (documented limitation: v4 override with dual-stack listen keeps udp6)
+        assert!(enr.udp6().is_some());
     }
 
     #[test]

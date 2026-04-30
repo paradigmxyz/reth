@@ -256,7 +256,10 @@ impl ConfigBuilder {
         discv5_config.listen_config =
             amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
 
-        if advertised_ip.is_some() { discv5_config.enr_update = false; } // peer-observation must not overwrite a statically advertised address
+        // Peer-observation ENR updates must not overwrite a statically advertised address.
+        if advertised_ip.is_some() {
+            discv5_config.enr_update = false;
+        }
 
         let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
