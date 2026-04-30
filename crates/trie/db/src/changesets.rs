@@ -847,9 +847,10 @@ impl ChangesetCacheInner {
             "Starting cache eviction"
         );
 
-        // Find all block numbers that should be evicted (< up_to_block)
-        let blocks_to_evict: Vec<u64> =
-            self.block_numbers.range(..up_to_block).map(|(num, _)| *num).collect();
+        // Split the sorted block index once so we can drain evicted buckets without collecting
+        // and re-removing the same keys.
+        let retained_blocks = self.block_numbers.split_off(&up_to_block);
+        let blocks_to_evict = std::mem::replace(&mut self.block_numbers, retained_blocks);
 
         // Remove entries for each block number below threshold
         #[cfg(feature = "metrics")]
@@ -857,18 +858,16 @@ impl ChangesetCacheInner {
         #[cfg(not(feature = "metrics"))]
         let mut evicted_count = 0;
 
-        for block_number in &blocks_to_evict {
-            if let Some(hashes) = self.block_numbers.remove(block_number) {
-                debug!(
-                    target: "trie::changeset_cache",
-                    block_number,
-                    num_hashes = hashes.len(),
-                    "Evicting block from cache"
-                );
-                for hash in hashes {
-                    if self.entries.remove(&hash).is_some() {
-                        evicted_count += 1;
-                    }
+        for (block_number, hashes) in blocks_to_evict {
+            debug!(
+                target: "trie::changeset_cache",
+                block_number,
+                num_hashes = hashes.len(),
+                "Evicting block from cache"
+            );
+            for hash in hashes {
+                if self.entries.remove(&hash).is_some() {
+                    evicted_count += 1;
                 }
             }
         }
