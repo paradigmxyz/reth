@@ -596,6 +596,49 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let first_block_number = blocks[0].recovered_block().number();
 
+        // Small engine persistence bursts already overlap static-file work with MDBX/RocksDB.
+        // Avoid a second layer of segment fanout when there isn't enough work to amortize it.
+        if blocks.len() <= 4 && tx_nums.len() <= 1024 {
+            self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
+                Self::write_headers(w, blocks)
+            })?;
+            self.write_segment(StaticFileSegment::Transactions, first_block_number, |w| {
+                Self::write_transactions(w, blocks, tx_nums)
+            })?;
+
+            if ctx.write_senders {
+                self.write_segment(
+                    StaticFileSegment::TransactionSenders,
+                    first_block_number,
+                    |w| Self::write_transaction_senders(w, blocks, tx_nums),
+                )?;
+            }
+
+            if ctx.write_receipts {
+                self.write_segment(StaticFileSegment::Receipts, first_block_number, |w| {
+                    Self::write_receipts(w, blocks, tx_nums, &ctx)
+                })?;
+            }
+
+            if ctx.write_account_changesets {
+                self.write_segment(
+                    StaticFileSegment::AccountChangeSets,
+                    first_block_number,
+                    |w| Self::write_account_changesets(w, blocks),
+                )?;
+            }
+
+            if ctx.write_storage_changesets {
+                self.write_segment(
+                    StaticFileSegment::StorageChangeSets,
+                    first_block_number,
+                    |w| Self::write_storage_changesets(w, blocks),
+                )?;
+            }
+
+            return Ok(());
+        }
+
         let mut r_headers = None;
         let mut r_txs = None;
         let mut r_senders = None;
