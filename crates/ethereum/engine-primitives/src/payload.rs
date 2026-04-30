@@ -414,7 +414,7 @@ mod tests {
             None,
         );
 
-        let execution_data: ExecutionData = payload.try_into().expect("infallible conversion");
+        let execution_data: ExecutionData = payload.into();
 
         assert_eq!(
             execution_data.sidecar.parent_beacon_block_root(),
@@ -441,5 +441,12 @@ mod tests {
         let execution_data: ExecutionData = payload.into();
 
         assert_eq!(execution_data.payload.block_access_list(), Some(&block_access_list));
+    }
+
+    #[test]
+    fn execution_data_has_infallible_try_from_impl() {
+        fn assert_try_from<T: TryFrom<EthBuiltPayload, Error = core::convert::Infallible>>() {}
+
+        assert_try_from::<ExecutionData>();
     }
 }
