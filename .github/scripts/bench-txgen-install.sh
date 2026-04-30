@@ -24,7 +24,7 @@ if [ -n "${TXGEN_DEPLOY_KEY:-}" ]; then
   ssh-keyscan github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
   export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/txgen_deploy_key -o IdentitiesOnly=yes"
   set -x
-  TXGEN_REPO="${TXGEN_SSH_REPO:-git@github.com:tempoxyz/txgen.git}"
+  TXGEN_REPO="${TXGEN_SSH_REPO:-ssh://git@github.com/tempoxyz/txgen.git}"
 elif [ -n "${TXGEN_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_PAT:-${DEREK_TOKEN:-}}}}" ]; then
   AUTH_TOKEN="${TXGEN_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_PAT:-${DEREK_TOKEN:-}}}}"
   set +x
