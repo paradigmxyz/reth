@@ -36,6 +36,6 @@ pub use pre_state::{BlockPreState, RequiredReads};
 pub use snapshot::build_pre_state;
 #[cfg(test)]
 pub use snapshot_db::{SnapshotDatabase, SnapshotDbError};
-pub use validation::{check_bal_hash, check_item_count, BAL_ITEM_COST};
+pub use validation::{check_bal_hash, check_item_count};
 #[cfg(test)]
 pub use worker::{BalBlockExecutor, WorkerError};

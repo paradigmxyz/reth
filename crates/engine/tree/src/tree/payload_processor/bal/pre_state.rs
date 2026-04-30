@@ -6,9 +6,11 @@
 
 use alloc::collections::BTreeSet;
 use alloy_eip7928::AccountChanges;
-use alloy_primitives::{map::B256HashMap, Address, StorageKey, StorageValue, B256, U256};
+use alloy_primitives::{
+    map::{AddressHashMap, B256HashMap, HashMap},
+    Address, StorageKey, StorageValue, B256, U256,
+};
 use reth_primitives_traits::{Account, Bytecode};
-use std::collections::HashMap;
 
 /// Immutable pre-block state materialized in memory for every key the block reads.
 ///
@@ -20,7 +22,7 @@ use std::collections::HashMap;
 #[derive(Debug, Default, Clone)]
 pub struct BlockPreState {
     /// Pre-block account state. `None` means the account did not exist pre-block.
-    pub accounts: HashMap<Address, Option<Account>>,
+    pub accounts: AddressHashMap<Option<Account>>,
 
     /// Pre-block storage values. Missing entries are treated as zero at lookup time only if the
     /// miss is legitimate; a miss while executing always indicates an undeclared access.
