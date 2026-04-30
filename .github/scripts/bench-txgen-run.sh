@@ -222,6 +222,7 @@ SOURCE_RPC_URL="${BENCH_TXGEN_RPC_URL:-$BENCH_RPC_URL}"
 echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
 python3 .github/scripts/bench-txgen-extract.py \
   --rpc "$SOURCE_RPC_URL" \
+  --metadata-rpc "$BENCH_RPC_URL" \
   --from "$EXTRACT_FROM" \
   --to "$EXTRACT_TO" \
   -o "$ALL_BLOCKS"
