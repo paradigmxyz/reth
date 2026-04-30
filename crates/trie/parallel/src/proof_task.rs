@@ -160,6 +160,7 @@ impl ProofWorkerHandle {
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
+    /// - `requested_workers`: Optional cap for each proof worker pool
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -170,6 +171,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
+        requested_workers: Option<usize>,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -183,11 +185,16 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_worker_count = Self::worker_count_for(
+            runtime.proof_storage_worker_pool().current_num_threads(),
+            halve_workers,
+            requested_workers,
+        );
+        let account_worker_count = Self::worker_count_for(
+            runtime.proof_account_worker_pool().current_num_threads(),
+            halve_workers,
+            requested_workers,
+        );
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -197,6 +204,7 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             halve_workers,
+            ?requested_workers,
             "Spawning proof worker pools"
         );
 
@@ -288,6 +296,18 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
         }
+    }
+
+    fn worker_count_for(
+        available_workers: usize,
+        halve_workers: bool,
+        requested_workers: Option<usize>,
+    ) -> usize {
+        let available_workers =
+            if halve_workers { available_workers / 2 } else { available_workers }.max(1);
+
+        requested_workers
+            .map_or(available_workers, |requested| available_workers.min(requested.max(1)))
     }
 
     /// Returns `true` if more than one storage worker is currently idle.
@@ -1176,7 +1196,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, None);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

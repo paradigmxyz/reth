@@ -2038,6 +2038,7 @@ where
             parent_state_root,
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
+            None,
             &self.config,
         ))
     }

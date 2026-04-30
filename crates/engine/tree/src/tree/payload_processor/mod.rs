@@ -270,6 +270,7 @@ where
             multiproof_provider_factory,
             env.parent_state_root,
             halve_workers,
+            Some(Self::proof_worker_limit(env.transaction_count)),
             config,
         );
         let install_state_hook = env.decoded_bal.is_none();
@@ -332,6 +333,7 @@ where
         multiproof_provider_factory: F,
         parent_state_root: B256,
         halve_workers: bool,
+        requested_workers: Option<usize>,
         config: &TreeConfig,
     ) -> StateRootHandle
     where
@@ -346,7 +348,8 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, requested_workers);
 
         let (state_root_tx, state_root_rx) = channel();
 
@@ -365,6 +368,12 @@ where
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
+    /// Target amount of block work per proof worker when sizing the pool for payload validation.
+    ///
+    /// The state-root path already batches proof requests, so medium blocks do not need the full
+    /// proof pool just to stay ahead of execution.
+    const TARGET_TXS_PER_PROOF_WORKER: usize = 16;
+
     /// Transaction count threshold below which sequential conversion is used.
     ///
     /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
@@ -381,6 +390,10 @@ where
     /// a small head sequentially and sending it immediately, execution can start without
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
+
+    fn proof_worker_limit(transaction_count: usize) -> usize {
+        transaction_count.div_ceil(Self::TARGET_TXS_PER_PROOF_WORKER).max(1)
+    }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
