@@ -521,6 +521,7 @@ def main():
     parser.add_argument("--warmup-blocks", default=None, help="Number of warmup blocks")
     parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
     parser.add_argument("--bal-mode", default=None, help="BAL mode (true, feature, baseline)")
+    parser.add_argument("--driver", default=None, help="Benchmark driver used for this run")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
@@ -605,6 +606,7 @@ def main():
 
     summary = {
         "blocks": paired_stats["blocks"],
+        "driver": args.driver,
         "big_blocks": args.big_blocks,
         "warmup_blocks": args.warmup_blocks,
         "wait_time": args.wait_time,
