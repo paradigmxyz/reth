@@ -68,7 +68,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    HashedPostStateSorted, Nibbles,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
@@ -100,6 +100,60 @@ impl CommitOrder {
     pub const fn is_unwind(&self) -> bool {
         matches!(self, Self::Unwind)
     }
+}
+
+fn format_trie_node_path(path: &Nibbles) -> String {
+    let mut formatted = String::from("0x");
+    for nibble in path.iter() {
+        formatted.push(char::from_digit(nibble as u32, 16).expect("nibbles are always hex"));
+    }
+    formatted
+}
+
+fn collect_account_trie_node_paths(trie_updates: &TrieUpdatesSorted) -> Vec<String> {
+    trie_updates
+        .account_nodes_ref()
+        .iter()
+        .map(|(path, node)| {
+            format!(
+                "{} ({})",
+                format_trie_node_path(path),
+                if node.is_some() { "upsert" } else { "remove" }
+            )
+        })
+        .collect()
+}
+
+fn collect_all_trie_node_paths(trie_updates: &TrieUpdatesSorted) -> Vec<String> {
+    let mut paths = trie_updates
+        .account_nodes_ref()
+        .iter()
+        .map(|(path, node)| {
+            format!(
+                "account {} ({})",
+                format_trie_node_path(path),
+                if node.is_some() { "upsert" } else { "remove" }
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (hashed_address, storage_trie) in
+        trie_updates.storage_tries_ref().iter().sorted_by_key(|(hashed_address, _)| *hashed_address)
+    {
+        if storage_trie.is_deleted() {
+            paths.push(format!("storage {hashed_address:#x} (delete trie)"));
+        }
+
+        paths.extend(storage_trie.storage_nodes_ref().iter().map(|(path, node)| {
+            format!(
+                "storage {hashed_address:#x}@{} ({})",
+                format_trie_node_path(path),
+                if node.is_some() { "upsert" } else { "remove" }
+            )
+        }));
+    }
+
+    paths
 }
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -609,6 +663,33 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let last_block_number = plan.last_block().expect("checked non-empty block range").number;
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
+        for (step_index, step) in plan.steps.iter().enumerate() {
+            let step_blocks = blocks[step.block_range.clone()]
+                .iter()
+                .map(|block| block.recovered_block().num_hash())
+                .collect::<Vec<_>>();
+            let masking_blocks = step
+                .state_trie_masking_range
+                .as_ref()
+                .map(|range| {
+                    blocks[range.clone()]
+                        .iter()
+                        .map(|block| block.recovered_block().num_hash())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            debug!(
+                target: "providers::db",
+                step = step_index,
+                block_range = ?step.block_range,
+                persist_rest = step.persist_rest,
+                state_trie_masking_range = ?step.state_trie_masking_range,
+                step_blocks = ?step_blocks,
+                masking_blocks = ?masking_blocks,
+                "save_blocks step plan"
+            );
+        }
 
         let tx_nums: Vec<TxNumber> = if persist_rest_blocks.is_empty() {
             Vec::new()
@@ -753,7 +834,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             let mut next_persist_rest_tx_num = 0;
-            for step in &plan.steps {
+            for (step_index, step) in plan.steps.iter().enumerate() {
                 let step_blocks = &blocks[step.block_range.clone()];
 
                 if step.persist_rest {
@@ -801,6 +882,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .iter()
                     .map(|block| block.trie_data())
                     .collect::<Vec<_>>();
+                let masking_trie_updates = masking_trie_data
+                    .iter()
+                    .map(|data| data.trie_updates.as_ref())
+                    .collect::<Vec<_>>();
+                let merged_masking_trie = TrieUpdatesSorted::merge_slice(&masking_trie_updates);
 
                 let start = Instant::now();
                 let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
@@ -816,6 +902,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
                     step_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
                     masking_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                );
+                debug!(
+                    target: "providers::db",
+                    step = step_index,
+                    persisted_account_trie_node_paths = ?collect_account_trie_node_paths(&merged_trie),
+                    masking_trie_node_paths = ?collect_all_trie_node_paths(&merged_masking_trie),
+                    "save_blocks trie paths"
                 );
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
