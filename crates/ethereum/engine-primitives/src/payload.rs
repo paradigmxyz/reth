@@ -202,6 +202,10 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
         self.fees
     }
 
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.block_access_list.as_ref()
+    }
+
     fn requests(&self) -> Option<Requests> {
         self.requests.clone()
     }
