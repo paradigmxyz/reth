@@ -14,5 +14,9 @@ set -euxo pipefail
 
 TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
 
+# txgen is private. Use the git CLI so cargo honors the workflow's
+# url.*.insteadOf auth configuration from the dependency install step.
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+
 cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" txgen-ethereum --bin txgen-ethereum --locked
 cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" bench-cli --bin bench --locked
