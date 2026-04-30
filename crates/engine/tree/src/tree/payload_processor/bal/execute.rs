@@ -8,7 +8,6 @@
 //!
 //! ### Checks performed
 //!
-//! - **A (structural hash)**: `check_bal_hash(received_bal, header_bal_hash)` at entry.
 //! - **B (item-count gate)**: `check_item_count(received_bal, block_gas_limit)` at entry.
 //! - **F (final hash)**: rebuilt composed BAL hashed against the header's commitment after
 //!   post-execution.
@@ -16,10 +15,7 @@
 //! Check E (per-tx fragment compare) is skipped — check F is authoritative, and a
 //! lightweight fragment compare isn't yet designed.
 
-use super::{
-    validation::{check_bal_hash, check_item_count},
-    RejectReason,
-};
+use super::{validation::check_item_count, RejectReason};
 use alloy_consensus::Transaction;
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
@@ -67,7 +63,7 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
 /// Errors surfaced by [`BalPayloadExecutor::execute_block`].
 #[derive(Debug)]
 pub enum BalExecutionError {
-    /// BAL-specific rejection — structural or final-hash mismatch.
+    /// BAL-specific rejection.
     Reject(RejectReason),
     /// Worker or canonical EVM failure (including revm `BalError` for undeclared accesses,
     /// surfaced opaquely until upstream revm carries address/slot metadata).
@@ -166,7 +162,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         DB: Database + Send,
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
-        check_bal_hash(&received_bal, header_bal_hash)?;
         let bal = received_bal.as_bal();
         check_item_count(bal, block_gas_limit)?;
 
@@ -457,31 +452,6 @@ mod tests {
             },
         };
         block.seal_slow()
-    }
-
-    #[test]
-    fn rejects_bad_bal_hash_up_front() {
-        // Check A: the received BAL's hash must match the header's commitment.
-        let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
-        let snapshot = Arc::new(BlockPreState::default());
-        let received_bal: BlockAccessList = Vec::new();
-        let wrong_hash = B256::repeat_byte(0xff);
-        let block = empty_amsterdam_block(wrong_hash);
-
-        let result = executor.execute_block(
-            snapshot_db(snapshot),
-            to_arc_decoded(received_bal),
-            &block,
-            Vec::<Recovered<TransactionSigned>>::new(),
-            wrong_hash,
-            30_000_000,
-        );
-
-        match result {
-            Err(BalExecutionError::Reject(RejectReason::HeaderHashMismatch { .. })) => {}
-            Err(e) => panic!("expected HeaderHashMismatch, got error {e:?}"),
-            Ok(_) => panic!("expected HeaderHashMismatch, got Ok"),
-        }
     }
 
     #[test]
