@@ -54,6 +54,8 @@ function balModeLabel(mode) {
 
 function blocksLabel(summary) {
   const parts = [];
+  const driver = summary.driver || process.env.BENCH_DRIVER || '';
+  if (driver) parts.push({ key: 'Driver', value: driver });
   if (summary.big_blocks) {
     parts.push({ key: 'Big Blocks', value: summary.blocks });
     const balMode = balModeLabel(summary.bal_mode || summary.bal || process.env.BENCH_BAL || 'false');
