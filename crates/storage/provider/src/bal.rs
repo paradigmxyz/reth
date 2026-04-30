@@ -35,7 +35,7 @@ pub const DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE: u64 = 100_000;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BalConfig {
     /// Retention policy for BALs kept in memory.
-    pub in_memory_retention: Option<PruneMode>,
+    in_memory_retention: Option<PruneMode>,
 }
 
 impl BalConfig {
