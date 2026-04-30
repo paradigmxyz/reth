@@ -222,6 +222,11 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         Ok(())
     }
 
+    /// Returns true if this validator needs hashed post-state during post-execution validation.
+    fn requires_hashed_post_state(&self) -> bool {
+        false
+    }
+
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the

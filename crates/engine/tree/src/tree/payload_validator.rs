@@ -587,20 +587,10 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Spawn hashed post state computation in background so it runs concurrently with
-        // block conversion and receipt root computation. This is a pure CPU-bound task
-        // (keccak256 hashing of all changed addresses and storage slots).
-        let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState =
-            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_validator",
-                    "hashed_post_state",
-                )
-                .entered();
-                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
-            });
+        let mut hashed_state = (self.validator.requires_hashed_post_state() ||
+            self.config.always_compare_trie_updates() ||
+            !matches!(strategy, StateRootStrategy::StateRootTask))
+        .then(|| self.spawn_hashed_post_state(output.clone()));
 
         let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
@@ -641,7 +631,7 @@ where
             handle.try_into_inner().expect("sole handle")
         });
 
-        let hashed_state = ensure_ok_post_block!(
+        ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
                 &parent_block,
@@ -649,10 +639,13 @@ where
                 &mut ctx,
                 transaction_root,
                 receipt_root_bloom,
-                hashed_state,
+                &mut hashed_state,
             ),
             block
         );
+
+        let hashed_state =
+            hashed_state.unwrap_or_else(|| self.spawn_hashed_post_state(output.clone()));
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -1115,6 +1108,18 @@ where
             .incremental_root_with_updates()
     }
 
+    fn spawn_hashed_post_state(
+        &self,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
+    ) -> LazyHashedPostState {
+        let hashed_state_provider = self.provider.clone();
+        self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
+            let _span = debug_span!(target: "engine::tree::payload_validator", "hashed_post_state")
+                .entered();
+            hashed_state_provider.hashed_post_state(&output.state)
+        })
+    }
+
     /// Compute state root for the given hashed post state in serial.
     ///
     /// Uses the same provider construction path as main execution and computes the state root and
@@ -1357,12 +1362,12 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
-        output: &BlockExecutionOutput<N::Receipt>,
+        output: &Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &mut TreeCtx<'_, N>,
         transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        hashed_state: LazyHashedPostState,
-    ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
+        hashed_state: &mut Option<LazyHashedPostState>,
+    ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1397,19 +1402,27 @@ where
         }
         drop(_enter);
 
-        // Wait for the background keccak256 hashing task to complete. This blocks until
-        // all changed addresses and storage slots have been hashed.
-        let hashed_state_ref =
-            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                .in_scope(|| hashed_state.get());
+        if self.validator.requires_hashed_post_state() {
+            // Only block on hashing when the chain-specific validator actually consults it.
+            let hashed_state_ref = debug_span!(
+                target: "engine::tree::payload_validator",
+                "wait_hashed_post_state"
+            )
+            .in_scope(|| {
+                hashed_state
+                    .get_or_insert_with(|| self.spawn_hashed_post_state(output.clone()))
+                    .get()
+            });
 
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
-        {
-            // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
+            if let Err(err) = self
+                .validator
+                .validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
+            {
+                // call post-block hook
+                self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+                return Err(err.into())
+            }
         }
 
         // record post-execution validation duration
@@ -1418,7 +1431,7 @@ where
             .post_execution_validation_duration
             .record(start.elapsed().as_secs_f64());
 
-        Ok(hashed_state)
+        Ok(())
     }
 
     /// Spawns a payload processor task based on the state root strategy.
