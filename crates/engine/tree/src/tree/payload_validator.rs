@@ -110,6 +110,14 @@ pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
 
+/// Small payloads are cheaper to hash inline than to round-trip through a blocking task.
+const INLINE_PAYLOAD_TX_ROOT_THRESHOLD: usize = 8;
+
+enum PendingPayloadTxRoot {
+    Ready(B256),
+    Spawned(reth_tasks::LazyHandle<B256>),
+}
+
 /// Result type for block validation with optional timing stats.
 type InsertPayloadResult<N> = Result<
     (ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>),
@@ -604,15 +612,23 @@ where
 
         let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
-            let body = block.body().clone();
-            let parent_span = Span::current();
-            let num_hash = block.num_hash();
-            self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
-                let _span =
-                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
-                        .entered();
-                body.calculate_tx_root()
-            })
+            if block.body().transaction_count() <= INLINE_PAYLOAD_TX_ROOT_THRESHOLD {
+                PendingPayloadTxRoot::Ready(block.body().calculate_tx_root())
+            } else {
+                let body = block.body().clone();
+                let parent_span = Span::current();
+                let num_hash = block.num_hash();
+                PendingPayloadTxRoot::Spawned(
+                    self.payload_processor
+                        .executor()
+                        .spawn_blocking_named("payload-tx-root", move || {
+                            let _span =
+                                debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
+                                    .entered();
+                            body.calculate_tx_root()
+                        }),
+                )
+            }
         });
         let block = block.with_senders(senders);
 
@@ -634,11 +650,14 @@ where
                 })
                 .ok()
         };
-        let transaction_root = transaction_root.map(|handle| {
-            let _span =
-                debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
-                    .entered();
-            handle.try_into_inner().expect("sole handle")
+        let transaction_root = transaction_root.map(|pending| match pending {
+            PendingPayloadTxRoot::Ready(root) => root,
+            PendingPayloadTxRoot::Spawned(handle) => {
+                let _span =
+                    debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
+                        .entered();
+                handle.try_into_inner().expect("sole handle")
+            }
         });
 
         let hashed_state = ensure_ok_post_block!(
