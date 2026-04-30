@@ -95,38 +95,51 @@ pub(crate) fn prune_history_indices<Provider, T, SK>(
 where
     Provider: DBProvider<Tx: DbTxMut>,
     T: Table<Value = BlockNumberList>,
-    T::Key: AsRef<ShardedKey<SK>>,
+    T::Key: AsRef<ShardedKey<SK>> + Ord,
 {
     let mut outcomes = PrunedIndices::default();
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
+    let mut shard = None;
 
     for sharded_key in highest_sharded_keys {
-        // Seek to the shard that has the key >= the given sharded key
-        // TODO: optimize
-        let mut shard = cursor.seek(RawKey::new(sharded_key.clone()))?;
-
         // Get the highest block number that needs to be deleted for this sharded key
         let to_block = sharded_key.as_ref().highest_block_number;
 
-        'shard: loop {
-            let Some((key, block_nums)) =
-                shard.map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v))).transpose()?
-            else {
-                break
-            };
-
-            if key_matches(&key, &sharded_key) {
-                match prune_shard(&mut cursor, key, block_nums, to_block, &key_matches)? {
-                    PruneShardOutcome::Deleted => outcomes.deleted += 1,
-                    PruneShardOutcome::Updated => outcomes.updated += 1,
-                    PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
+        let mut shard_row = loop {
+            if let Some((key, block_nums)) = shard.take() {
+                if key >= sharded_key {
+                    break Some((key, block_nums))
                 }
-            } else {
-                // If such shard doesn't exist, skip to the next sharded key
-                break 'shard
+
+                shard = cursor
+                    .next()?
+                    .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
+                    .transpose()?;
+                continue
             }
 
-            shard = cursor.next()?;
+            break cursor
+                .seek(RawKey::new(sharded_key.clone()))?
+                .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
+                .transpose()?
+        };
+
+        while let Some((key, block_nums)) = shard_row {
+            if !key_matches(&key, &sharded_key) {
+                shard = Some((key, block_nums));
+                break
+            }
+
+            match prune_shard(&mut cursor, key, block_nums, to_block, &key_matches)? {
+                PruneShardOutcome::Deleted => outcomes.deleted += 1,
+                PruneShardOutcome::Updated => outcomes.updated += 1,
+                PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
+            }
+
+            shard_row = cursor
+                .next()?
+                .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
+                .transpose()?;
         }
     }
 
@@ -163,18 +176,7 @@ where
     // contain the target block number, as it's in this shard.
     else {
         let blocks = raw_blocks.value()?;
-        let higher_blocks =
-            blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
-
-        // If there were blocks less than or equal to the target one
-        // (so the shard has changed), update the shard.
-        if blocks.len() as usize == higher_blocks.len() {
-            return Ok(PruneShardOutcome::Unchanged);
-        }
-
-        // If there will be no more blocks in the shard after pruning blocks below target
-        // block, we need to remove it, as empty shards are not allowed.
-        if higher_blocks.is_empty() {
+        let Some(first_retained_index) = blocks.iter().position(|block| block > to_block) else {
             if key.as_ref().highest_block_number == u64::MAX {
                 let prev_row = cursor
                     .prev()?
@@ -188,7 +190,7 @@ where
                         // Upsert will replace the last shard for this sharded key with
                         // the previous value.
                         cursor.upsert(RawKey::new(key), &prev_value)?;
-                        Ok(PruneShardOutcome::Updated)
+                        return Ok(PruneShardOutcome::Updated)
                     }
                     // If there's no previous shard for this sharded key,
                     // just delete last shard completely.
@@ -200,22 +202,29 @@ where
                         }
                         // Delete shard.
                         cursor.delete_current()?;
-                        Ok(PruneShardOutcome::Deleted)
+                        return Ok(PruneShardOutcome::Deleted)
                     }
                 }
             }
+
             // If current shard is not the last shard for this sharded key,
             // just delete it.
-            else {
-                cursor.delete_current()?;
-                Ok(PruneShardOutcome::Deleted)
-            }
-        } else {
-            cursor.upsert(
-                RawKey::new(key),
-                &RawValue::new(BlockNumberList::new_pre_sorted(higher_blocks)),
-            )?;
-            Ok(PruneShardOutcome::Updated)
+            cursor.delete_current()?;
+            return Ok(PruneShardOutcome::Deleted)
+        };
+
+        // If there were blocks less than or equal to the target one
+        // (so the shard has changed), update the shard.
+        if first_retained_index == 0 {
+            return Ok(PruneShardOutcome::Unchanged);
         }
+
+        cursor.upsert(
+            RawKey::new(key),
+            &RawValue::new(BlockNumberList::new_pre_sorted(
+                blocks.iter().skip(first_retained_index),
+            )),
+        )?;
+        Ok(PruneShardOutcome::Updated)
     }
 }
