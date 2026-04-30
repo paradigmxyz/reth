@@ -847,18 +847,18 @@ impl ChangesetCacheInner {
             "Starting cache eviction"
         );
 
-        // Find all block numbers that should be evicted (< up_to_block)
-        let blocks_to_evict: Vec<u64> =
-            self.block_numbers.range(..up_to_block).map(|(num, _)| *num).collect();
-
         // Remove entries for each block number below threshold
         #[cfg(feature = "metrics")]
         let mut evicted_count = 0;
         #[cfg(not(feature = "metrics"))]
         let mut evicted_count = 0;
 
-        for block_number in &blocks_to_evict {
-            if let Some(hashes) = self.block_numbers.remove(block_number) {
+        while let Some((&block_number, _)) = self.block_numbers.first_key_value() {
+            if block_number >= up_to_block {
+                break;
+            }
+
+            if let Some((_, hashes)) = self.block_numbers.pop_first() {
                 debug!(
                     target: "trie::changeset_cache",
                     block_number,
