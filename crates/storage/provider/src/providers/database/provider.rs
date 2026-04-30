@@ -718,19 +718,20 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                // Compute each deferred trie bundle once, then reuse it for both merge passes.
+                // This keeps persistence from paying a second `wait_cloned()`/bundle clone pass
+                // just to switch from hashed state to trie updates.
+                let trie_data: Vec<_> = blocks.iter().rev().map(|block| block.trie_data()).collect();
+
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
+                let merged_hashed_state = HashedPostStateSorted::merge_slice(&trie_data);
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                let merged_trie = TrieUpdatesSorted::merge_slice(&trie_data);
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }

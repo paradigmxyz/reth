@@ -431,6 +431,18 @@ impl ComputedTrieData {
     }
 }
 
+impl AsRef<HashedPostStateSorted> for ComputedTrieData {
+    fn as_ref(&self) -> &HashedPostStateSorted {
+        self.hashed_state.as_ref()
+    }
+}
+
+impl AsRef<TrieUpdatesSorted> for ComputedTrieData {
+    fn as_ref(&self) -> &TrieUpdatesSorted {
+        self.trie_updates.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
