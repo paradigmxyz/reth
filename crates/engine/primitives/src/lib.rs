@@ -13,7 +13,6 @@ extern crate alloc;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
-use revm::database::states::BundleState;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
@@ -21,6 +20,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
+use revm::database::states::BundleState;
 use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
@@ -218,14 +218,9 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     ///
     /// Returns `None` by default to use th standard Ethereum state root. Returning `Some` will
     /// cause the engine to skip trie computation and validate using the returned value instead.
-    fn compute_state_root(
-        &self,
-        _bundle_state: &BundleState,
-        _parent_hash: B256,
-    ) -> Option<B256> {
+    fn compute_state_root(&self, _bundle_state: &BundleState, _parent_hash: B256) -> Option<B256> {
         None
     }
-
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(

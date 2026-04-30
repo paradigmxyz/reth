@@ -1813,9 +1813,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency()
-            + provider_stats.total_storage_fetch_latency()
-            + provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency() +
+            provider_stats.total_storage_fetch_latency() +
+            provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
