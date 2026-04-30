@@ -60,6 +60,8 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Latest tip that should be pruned once the persistence queue goes idle.
+    pending_prune_tip: Option<u64>,
 }
 
 impl<N> PersistenceService<N>
@@ -81,6 +83,7 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            pending_prune_tip: None,
         }
     }
 }
@@ -92,37 +95,69 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
+        loop {
+            let Ok(action) = self.incoming.recv() else {
+                self.maybe_run_pending_prune()?;
+                return Ok(())
+            };
+            self.handle_action(action)?;
+
+            while let Ok(action) = self.incoming.try_recv() {
+                self.handle_action(action)?;
+            }
+
+            self.maybe_run_pending_prune()?;
+        }
+    }
+
+    fn handle_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+    ) -> Result<(), PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                self.pending_prune_tip = None;
+                let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+            }
+            PersistenceAction::SaveBlocks(blocks, sender) => {
+                let result = self.on_save_blocks(blocks)?;
+                let result_number = result.last_block.map(|b| b.number);
+
+                let _ = sender.send(result);
+
+                if let Some(block_number) = result_number {
                     let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
-                }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.last_block.map(|b| b.number);
-
-                    let _ = sender.send(result);
-
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                    }
-                }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
-                }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: block_number });
                 }
             }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
+            }
         }
+
+        Ok(())
+    }
+
+    fn maybe_run_pending_prune(&mut self) -> Result<(), PersistenceError> {
+        let Some(tip_block_number) = self.pending_prune_tip else { return Ok(()) };
+        if !self.pruner.is_pruning_needed(tip_block_number) {
+            return Ok(())
+        }
+
+        debug!(target: "engine::persistence", block_num=?tip_block_number, "Running coalesced pruner");
+        let prune_start = Instant::now();
+        let provider_rw = self.provider.database_provider_rw()?;
+        let _ = self.pruner.run_with_provider(&provider_rw, tip_block_number)?;
+        provider_rw.commit()?;
+        self.pending_prune_tip = None;
+        debug!(target: "engine::persistence", tip=?tip_block_number, "Finished coalesced pruning");
+        self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+
         Ok(())
     }
 
@@ -180,19 +215,11 @@ where
             provider_rw.commit()?;
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
-            // Run the pruner in a separate provider so it reads committed RocksDB state
-            // that includes the history entries written by save_blocks above.
-            //
-            // The pruner reads the indices from rocksdb, filters it, and writes to indices, so it
-            // must be able to read anything written by save_blocks.
-            if self.pruner.is_pruning_needed(last.number) {
-                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
-                let prune_start = Instant::now();
-                let provider_rw = self.provider.database_provider_rw()?;
-                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
-                provider_rw.commit()?;
-                debug!(target: "engine::persistence", tip=?last.number, "Finished pruning after saving blocks");
-                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+            // Keep the latest tip queued for pruning, then run the pruner once after the current
+            // burst of persistence actions drains. This preserves the committed-state requirement
+            // while removing repeated prune passes from the save-blocks critical path.
+            if self.pending_prune_tip.is_some() || self.pruner.is_pruning_needed(last.number) {
+                self.pending_prune_tip = Some(last.number);
             }
         }
 
@@ -696,5 +723,35 @@ mod tests {
             account_at_2.nonce, nonce_after_reorg_block2,
             "signer nonce at block 2 must reflect reorged execution"
         );
+    }
+
+    #[test]
+    fn test_save_blocks_coalesces_pruning_until_idle() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory();
+        let (_incoming_tx, incoming_rx) = std::sync::mpsc::channel();
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 1, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), incoming_rx, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks = test_block_builder.get_executed_blocks(0..4).collect::<Vec<_>>();
+
+        service.on_save_blocks(blocks[..2].to_vec()).unwrap();
+        assert_eq!(service.pending_prune_tip, Some(1));
+        assert!(service.pruner.is_pruning_needed(1));
+
+        service.on_save_blocks(blocks[2..].to_vec()).unwrap();
+        assert_eq!(service.pending_prune_tip, Some(3));
+        assert!(service.pruner.is_pruning_needed(3));
+
+        service.maybe_run_pending_prune().unwrap();
+        assert_eq!(service.pending_prune_tip, None);
+        assert!(!service.pruner.is_pruning_needed(3));
     }
 }
