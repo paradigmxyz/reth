@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 
 
-def rpc_call(url: str, method: str, params: list, retries: int = 4):
+def rpc_call(url: str, method: str, params: list, retries: int = 12):
     payload = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode()
     last_err = None
     for attempt in range(retries):
@@ -33,7 +33,7 @@ def rpc_call(url: str, method: str, params: list, retries: int = 4):
             last_err = err
             if attempt + 1 == retries:
                 break
-            time.sleep(0.5 * (2**attempt))
+            time.sleep(min(10.0, 0.5 * (2**attempt)))
     raise RuntimeError(last_err)
 
 
@@ -44,6 +44,7 @@ def parse_quantity(value: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rpc", required=True)
+    parser.add_argument("--metadata-rpc")
     parser.add_argument("--from", dest="from_block", type=int, required=True)
     parser.add_argument("--to", dest="to_block", type=int, required=True)
     parser.add_argument("-o", "--output", required=True)
@@ -52,6 +53,7 @@ def main() -> int:
     if args.from_block > args.to_block:
         parser.error("--from must be <= --to")
 
+    metadata_rpc = args.metadata_rpc or args.rpc
     total = args.to_block - args.from_block + 1
     started = time.monotonic()
     last_log = started
@@ -60,7 +62,7 @@ def main() -> int:
         for idx, number in enumerate(range(args.from_block, args.to_block + 1), start=1):
             try:
                 raw = rpc_call(args.rpc, "debug_getRawBlock", [number])
-                block = rpc_call(args.rpc, "eth_getBlockByNumber", [hex(number), False])
+                block = rpc_call(metadata_rpc, "eth_getBlockByNumber", [hex(number), False])
             except RuntimeError as err:
                 print(f"failed to fetch block {number}: {err}", file=sys.stderr)
                 return 1
