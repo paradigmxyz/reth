@@ -1041,8 +1041,6 @@ where
         // Extract the built bal if payload has bal
         let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
 
-        tracing::info!("Built Bal is {:?}", built_bal);
-
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
