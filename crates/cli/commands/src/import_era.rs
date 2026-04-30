@@ -6,6 +6,7 @@ use eyre::eyre;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_era::common::file_ops::EraFileType;
 use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
@@ -96,7 +97,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             fs::create_dir_all(&folder)?;
 
             let config = EraStreamConfig::default().start_from(next_block);
-            let client = EraClient::new(Client::new(), url, folder);
+            let client =
+                EraClient::new(Client::new(), url, folder).with_era_type(EraFileType::Era1);
             let stream = EraStream::new(client, config);
 
             era::import(stream, &provider_factory, &mut hash_collector)?;
