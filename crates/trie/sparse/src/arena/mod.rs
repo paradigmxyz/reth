@@ -265,18 +265,17 @@ impl ArenaSparseSubtrie {
             // Logical path of this branch (path TO node + its extension/short_key).
             let mut branch_logical_path = node_path;
             branch_logical_path.extend(&b.short_key);
+            let state_mask = b.state_mask;
 
-            // Collect (dense_pos, nibble, old_child_idx) for revealed children.
-            let children: SmallVec<[(usize, u8, Index); 16]> = BranchChildIter::new(b.state_mask)
-                .filter_map(|(dense_idx, nibble)| match &b.children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(old_idx) => {
-                        Some((dense_idx.get(), nibble, *old_idx))
-                    }
-                    _ => None,
-                })
-                .collect();
+            for (dense_idx, nibble) in BranchChildIter::new(state_mask) {
+                let Some(old_child_idx) = (match new_arena[new_idx].branch_ref().children[dense_idx]
+                {
+                    ArenaSparseNodeBranchChild::Revealed(old_idx) => Some(old_idx),
+                    ArenaSparseNodeBranchChild::Blinded(_) => None,
+                }) else {
+                    continue;
+                };
 
-            for (child_pos, nibble, old_child_idx) in children {
                 // Child's path in the trie (edges to reach it, excluding its own short_key).
                 let mut child_path = branch_logical_path;
                 child_path.push(nibble);
@@ -297,7 +296,8 @@ impl ArenaSparseSubtrie {
                     let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
                         unreachable!()
                     };
-                    b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+                    b.children[dense_idx.get()] =
+                        ArenaSparseNodeBranchChild::Revealed(new_child_idx);
                     queue.push_back((new_child_idx, child_path));
                 } else {
                     // Not retained — blind the child slot in the new arena.
@@ -310,7 +310,7 @@ impl ArenaSparseSubtrie {
                     let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
                         unreachable!()
                     };
-                    b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+                    b.children[dense_idx.get()] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
                 }
             }
         }
