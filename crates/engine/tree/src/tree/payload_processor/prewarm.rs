@@ -84,6 +84,10 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
+    /// Minimum transactions per prewarm worker needed to justify eagerly building every
+    /// per-thread EVM upfront.
+    const EAGER_INIT_TXS_PER_WORKER: usize = 30;
+
     /// Initializes the task with the given transactions pending execution
     pub fn new(
         executor: Runtime,
@@ -115,10 +119,9 @@ where
 
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
-    /// transactions as they arrive and wait for all spawned tasks to complete before
-    /// clearing per-thread state. Workers that start via work-stealing lazily initialise
-    /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
+    /// For large blocks, eagerly initializes EVM state on every worker so the pool is ready to
+    /// saturate immediately. For medium blocks, leaves worker initialization lazy so we avoid
+    /// faulting providers and cache state into threads that never do useful work.
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -141,13 +144,17 @@ where
 
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
+            let eager_init_all_workers = ctx.env.transaction_count >=
+                pool.current_num_threads() * Self::EAGER_INIT_TXS_PER_WORKER;
 
             let mut tx_count = 0usize;
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
             pool.in_place_scope(|s| {
-                s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
-                });
+                if eager_init_all_workers {
+                    s.spawn(|_| {
+                        pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    });
+                }
 
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
