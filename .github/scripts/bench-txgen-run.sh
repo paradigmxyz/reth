@@ -218,9 +218,10 @@ BENCHMARK_BLOCKS="$TXGEN_DIR/benchmark-blocks.ndjson"
 
 EXTRACT_FROM=$(( HEAD_DEC + 1 ))
 EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
+SOURCE_RPC_URL="${BENCH_TXGEN_RPC_URL:-$BENCH_RPC_URL}"
 echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
-"$TXGEN_ETHEREUM" extract \
-  --rpc "$BENCH_RPC_URL" \
+python3 .github/scripts/bench-txgen-extract.py \
+  --rpc "$SOURCE_RPC_URL" \
   --from "$EXTRACT_FROM" \
   --to "$EXTRACT_TO" \
   -o "$ALL_BLOCKS"
