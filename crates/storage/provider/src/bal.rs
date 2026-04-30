@@ -69,7 +69,12 @@ impl InMemoryBalStoreInner {
     // Inserts a BAL and keeps the block-number index in sync.
     fn insert(&mut self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
         if let Some(entry) = self.entries.insert(block_hash, BalEntry { block_number, bal }) {
-            self.remove_number_index(entry.block_number, block_hash);
+            if let Some(hashes) = self.hashes_by_number.get_mut(&entry.block_number) {
+                hashes.retain(|hash| *hash != block_hash);
+                if hashes.is_empty() {
+                    self.hashes_by_number.remove(&entry.block_number);
+                }
+            }
         }
 
         self.hashes_by_number.entry(block_number).or_default().push(block_hash);
@@ -92,15 +97,6 @@ impl InMemoryBalStoreInner {
             for hash in hashes {
                 self.entries.remove(&hash);
             }
-        }
-    }
-
-    // Drops a stale block-number index entry for a reinserted hash.
-    fn remove_number_index(&mut self, block_number: BlockNumber, block_hash: BlockHash) {
-        let Some(hashes) = self.hashes_by_number.get_mut(&block_number) else { return };
-        hashes.retain(|hash| *hash != block_hash);
-        if hashes.is_empty() {
-            self.hashes_by_number.remove(&block_number);
         }
     }
 }
