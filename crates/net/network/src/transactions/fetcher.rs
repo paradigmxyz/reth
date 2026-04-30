@@ -464,6 +464,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             {
                 self.fill_request_from_hashes_pending_fetch(
                     &mut hashes_to_request,
+                    &peer_id,
                     &peer.seen_transactions,
                     budget_fill_request,
                 )
@@ -515,30 +516,31 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-            if let Some(TxFetchMetadata{ tx_encoded_length: previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
+            if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
-                if let Some((_ty, size)) = metadata {
-                    if let Some(prev_size) = previously_seen_size {
+                if let Some(announced_metadata) = TxAnnouncementMetadata::from_eth68_metadata(*metadata) {
+                    if let Some(prev_metadata) = entry.first_different_announcement_metadata(announced_metadata) {
                         // check if this peer is announcing a different size than a previous peer
-                        if size != prev_size {
-                            trace!(target: "net::tx",
-                                peer_id=format!("{peer_id:#}"),
-                                %hash,
-                                size,
-                                previously_seen_size,
-                                %client_version,
-                                "peer announced a different size for tx, this is especially worrying if one size is much bigger..."
-                            );
-                        }
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            %hash,
+                            size=announced_metadata.size,
+                            ty=announced_metadata.ty,
+                            previously_seen_size=prev_metadata.size,
+                            previously_seen_ty=prev_metadata.ty,
+                            %client_version,
+                            "peer announced different metadata for tx, this is especially worrying if one size is much bigger..."
+                        );
                     }
-                    // believe the most recent peer to announce tx
-                    *previously_seen_size = Some(*size);
+                    entry.record_announcement_metadata(*peer_id, announced_metadata);
                 }
 
                 // hash has been seen but is not inflight
                 if self.hashes_pending_fetch.remove(hash) {
                     return true
                 }
+
+                entry.fallback_peers_mut().insert(*peer_id);
 
                 return false
             }
@@ -551,9 +553,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             previously_unseen_hashes_count += 1;
 
-            if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
-                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
-            ).is_none() {
+            if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, || {
+                let mut fetch_metadata = TxFetchMetadata::new(
+                    0,
+                    LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+                    LruMap::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+                );
+                if let Some(announced_metadata) =
+                    TxAnnouncementMetadata::from_eth68_metadata(*metadata)
+                {
+                    fetch_metadata.record_announcement_metadata(*peer_id, announced_metadata);
+                }
+                fetch_metadata
+            }).is_none() {
 
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
@@ -603,6 +615,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             return Some(new_announced_hashes)
         }
 
+        let expected_metadata = self.expected_metadata_for_request(&peer_id, &new_announced_hashes);
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
@@ -633,9 +646,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         format!("{:?}", new_announced_hashes),
                         new_announced_hashes.iter().map(|hash| {
                             let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
-                            // Assuming you only need `retries` and `tx_encoded_length` for debugging
-                            (*hash, metadata.map(|m| (m.retries, m.tx_encoded_length)))
-                        }).collect::<Vec<(TxHash, Option<(u8, Option<usize>)>)>>())
+                            (*hash, metadata.map(|m| (m.retries, m.announced_metadata_for_peer(&peer_id))))
+                        }).collect::<Vec<(TxHash, Option<(u8, Option<TxAnnouncementMetadata>)>)>>())
                 }
             }
         }
@@ -659,9 +671,30 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         *inflight_count += 1;
         // stores a new request future for the request
-        self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, new_announced_hashes, rx));
+        self.inflight_requests.push(GetPooledTxRequestFut::new(
+            peer_id,
+            new_announced_hashes,
+            expected_metadata,
+            rx,
+        ));
 
         None
+    }
+
+    fn expected_metadata_for_request(
+        &self,
+        peer_id: &PeerId,
+        requested_hashes: &RequestTxHashes,
+    ) -> ExpectedTxMetadata {
+        requested_hashes
+            .iter()
+            .filter_map(|hash| {
+                self.hashes_fetch_inflight_and_pending_fetch
+                    .peek(hash)
+                    .and_then(|entry| entry.announced_metadata_for_peer(peer_id))
+                    .map(|metadata| (*hash, metadata))
+            })
+            .collect()
     }
 
     /// Tries to fill request with hashes pending fetch so that the expected [`PooledTransactions`]
@@ -686,6 +719,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn fill_request_from_hashes_pending_fetch(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
+        peer_id: &PeerId,
         seen_hashes: &LruCache<TxHash>,
         mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
@@ -694,7 +728,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let mut acc_size_response = self
             .hashes_fetch_inflight_and_pending_fetch
             .get(hash)
-            .and_then(|entry| entry.tx_encoded_len())
+            .and_then(|entry| entry.tx_encoded_len_for_peer(peer_id))
             .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
         // if request full enough already, we're satisfied, send request for single tx
@@ -719,7 +753,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             let size = self
                 .hashes_fetch_inflight_and_pending_fetch
                 .get(hash)
-                .and_then(|entry| entry.tx_encoded_len())
+                .and_then(|entry| entry.tx_encoded_len_for_peer(peer_id))
                 .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
             acc_size_response = acc_size_response.saturating_add(size);
@@ -848,7 +882,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     ) -> FetchEvent<N::PooledTransaction> {
         // update peer activity, requests for buffered hashes can only be made to idle
         // fallback peers
-        let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
+        let GetPooledTxResponse { peer_id, mut requested_hashes, expected_metadata, result } =
+            response;
 
         self.decrement_inflight_request_count_for(&peer_id);
 
@@ -875,7 +910,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
                 let unverified_len = payload.len();
                 let (verification_outcome, verified_payload) =
-                    payload.verify(&requested_hashes, &peer_id);
+                    payload.verify(&requested_hashes, &expected_metadata, &peer_id);
 
                 let unsolicited = unverified_len - verified_payload.len();
                 if unsolicited > 0 {
@@ -905,11 +940,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 let unvalidated_payload_len = verified_payload.len();
 
                 let valid_payload = verified_payload.dedup();
-
-                // todo: validate based on announced tx size/type and report peer for sending
-                // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
-                // passing the rlp encoded length down from active session along with the decoded
-                // tx.
 
                 if valid_payload.len() != unvalidated_payload_len {
                     trace!(target: "net::tx",
@@ -1004,32 +1034,83 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
     }
 }
 
+type ExpectedTxMetadata = HashMap<TxHash, TxAnnouncementMetadata>;
+
+/// Metadata for a transaction hash announced over eth/68.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxAnnouncementMetadata {
+    ty: u8,
+    size: usize,
+}
+
+impl TxAnnouncementMetadata {
+    /// Creates new eth/68 transaction announcement metadata.
+    pub const fn new(ty: u8, size: usize) -> Self {
+        Self { ty, size }
+    }
+
+    const fn from_eth68_metadata(metadata: Option<(u8, usize)>) -> Option<Self> {
+        if let Some((ty, size)) = metadata {
+            Some(Self::new(ty, size))
+        } else {
+            None
+        }
+    }
+}
+
 /// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug, Constructor)]
+#[derive(Debug)]
 pub struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
     fallback_peers: LruCache<PeerId>,
-    /// Size metadata of the transaction if it has been seen in an eth68 announcement.
-    // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
-    // another size tx than they announced. alt enter in request (won't catch peers announcing
-    // wrong size for requests assembled from hashes pending fetch if stored in request fut)
-    tx_encoded_length: Option<usize>,
+    /// Eth/68 announcement metadata by peer.
+    announced_metadata: LruMap<PeerId, TxAnnouncementMetadata>,
 }
 
 impl TxFetchMetadata {
+    /// Creates new fetch metadata for a transaction hash.
+    pub const fn new(
+        retries: u8,
+        fallback_peers: LruCache<PeerId>,
+        announced_metadata: LruMap<PeerId, TxAnnouncementMetadata>,
+    ) -> Self {
+        Self { retries, fallback_peers, announced_metadata }
+    }
+
     /// Returns a mutable reference to the fallback peers cache for this transaction hash.
     pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
     }
 
-    /// Returns the size of the transaction, if its hash has been received in any
-    /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement. If the transaction hash has only
-    /// been seen in [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcements so far, this will
-    /// return `None`.
-    pub const fn tx_encoded_len(&self) -> Option<usize> {
-        self.tx_encoded_length
+    /// Records eth/68 announcement metadata from a peer.
+    pub fn record_announcement_metadata(
+        &mut self,
+        peer_id: PeerId,
+        metadata: TxAnnouncementMetadata,
+    ) {
+        self.announced_metadata.insert(peer_id, metadata);
+    }
+
+    /// Returns eth/68 announcement metadata for a specific peer.
+    pub fn announced_metadata_for_peer(&self, peer_id: &PeerId) -> Option<TxAnnouncementMetadata> {
+        self.announced_metadata.peek(peer_id).copied()
+    }
+
+    /// Returns the transaction size announced by a specific peer.
+    pub fn tx_encoded_len_for_peer(&self, peer_id: &PeerId) -> Option<usize> {
+        self.announced_metadata_for_peer(peer_id).map(|metadata| metadata.size)
+    }
+
+    fn first_different_announcement_metadata(
+        &self,
+        metadata: TxAnnouncementMetadata,
+    ) -> Option<TxAnnouncementMetadata> {
+        self.announced_metadata
+            .iter()
+            .map(|(_, metadata)| *metadata)
+            .find(|seen_metadata| *seen_metadata != metadata)
     }
 }
 
@@ -1066,6 +1147,8 @@ pub struct GetPooledTxRequest<T = PooledTransaction> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
     requested_hashes: RequestTxHashes,
+    /// Eth/68 metadata the peer announced for requested hashes.
+    expected_metadata: ExpectedTxMetadata,
     response: oneshot::Receiver<RequestResult<PooledTransactions<T>>>,
 }
 
@@ -1077,6 +1160,8 @@ pub struct GetPooledTxResponse<T = PooledTransaction> {
     /// Transaction hashes that were requested, for cleanup purposes, since peer may only return a
     /// subset of requested hashes.
     requested_hashes: RequestTxHashes,
+    /// Eth/68 metadata the peer announced for requested hashes.
+    expected_metadata: ExpectedTxMetadata,
     result: Result<RequestResult<PooledTransactions<T>>, RecvError>,
 }
 
@@ -1095,9 +1180,17 @@ impl<T> GetPooledTxRequestFut<T> {
     const fn new(
         peer_id: PeerId,
         requested_hashes: RequestTxHashes,
+        expected_metadata: ExpectedTxMetadata,
         response: oneshot::Receiver<RequestResult<PooledTransactions<T>>>,
     ) -> Self {
-        Self { inner: Some(GetPooledTxRequest { peer_id, requested_hashes, response }) }
+        Self {
+            inner: Some(GetPooledTxRequest {
+                peer_id,
+                requested_hashes,
+                expected_metadata,
+                response,
+            }),
+        }
     }
 }
 
@@ -1110,6 +1203,7 @@ impl<T> Future for GetPooledTxRequestFut<T> {
             Poll::Ready(result) => Poll::Ready(GetPooledTxResponse {
                 peer_id: req.peer_id,
                 requested_hashes: req.requested_hashes,
+                expected_metadata: req.expected_metadata,
                 result,
             }),
             Poll::Pending => {
@@ -1157,6 +1251,7 @@ trait VerifyPooledTransactionsResponse {
     fn verify(
         self,
         requested_hashes: &RequestTxHashes,
+        expected_metadata: &ExpectedTxMetadata,
         peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions<Self::Transaction>);
 }
@@ -1167,7 +1262,8 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
     fn verify(
         self,
         requested_hashes: &RequestTxHashes,
-        _peer_id: &PeerId,
+        expected_metadata: &ExpectedTxMetadata,
+        peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions<T>) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
@@ -1175,8 +1271,13 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
 
         #[cfg(debug_assertions)]
         let mut tx_hashes_not_requested: smallvec::SmallVec<[TxHash; 16]> = smallvec::smallvec!();
+        #[cfg(debug_assertions)]
+        let mut tx_hashes_with_invalid_metadata: smallvec::SmallVec<[TxHash; 16]> =
+            smallvec::smallvec!();
         #[cfg(not(debug_assertions))]
         let mut tx_hashes_not_requested_count = 0;
+        #[cfg(not(debug_assertions))]
+        let mut tx_hashes_with_invalid_metadata_count = 0;
 
         txns.0.retain(|tx| {
             if !requested_hashes.contains(tx.tx_hash()) {
@@ -1191,13 +1292,28 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
 
                 return false
             }
+            if let Some(expected) = expected_metadata.get(tx.tx_hash()) {
+                let actual = TxAnnouncementMetadata::new(tx.ty(), tx.encode_2718_len());
+                if actual != *expected {
+                    verification_outcome = VerificationOutcome::ReportPeer;
+
+                    #[cfg(debug_assertions)]
+                    tx_hashes_with_invalid_metadata.push(*tx.tx_hash());
+                    #[cfg(not(debug_assertions))]
+                    {
+                        tx_hashes_with_invalid_metadata_count += 1;
+                    }
+
+                    return false
+                }
+            }
             true
         });
 
         #[cfg(debug_assertions)]
         if !tx_hashes_not_requested.is_empty() {
             trace!(target: "net::tx",
-                peer_id=format!("{_peer_id:#}"),
+                peer_id=format!("{peer_id:#}"),
                 ?tx_hashes_not_requested,
                 "transactions in `PooledTransactions` response from peer were not requested"
             );
@@ -1205,9 +1321,25 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
         #[cfg(not(debug_assertions))]
         if tx_hashes_not_requested_count != 0 {
             trace!(target: "net::tx",
-                peer_id=format!("{_peer_id:#}"),
+                peer_id=format!("{peer_id:#}"),
                 tx_hashes_not_requested_count,
                 "transactions in `PooledTransactions` response from peer were not requested"
+            );
+        }
+        #[cfg(debug_assertions)]
+        if !tx_hashes_with_invalid_metadata.is_empty() {
+            trace!(target: "net::tx",
+                peer_id=format!("{peer_id:#}"),
+                ?tx_hashes_with_invalid_metadata,
+                "transactions in `PooledTransactions` response from peer did not match announced eth/68 metadata"
+            );
+        }
+        #[cfg(not(debug_assertions))]
+        if tx_hashes_with_invalid_metadata_count != 0 {
+            trace!(target: "net::tx",
+                peer_id=format!("{peer_id:#}"),
+                tx_hashes_with_invalid_metadata_count,
+                "transactions in `PooledTransactions` response from peer did not match announced eth/68 metadata"
             );
         }
 
@@ -1288,10 +1420,11 @@ struct TxFetcherSearchDurations {
 mod test {
     use super::*;
     use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
+    use alloy_eips::{Encodable2718, Typed2718};
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
-    use reth_eth_wire_types::EthVersion;
+    use reth_eth_wire_types::{EthVersion, NewPooledTransactionHashes68};
     use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 
@@ -1316,6 +1449,24 @@ mod test {
         fn msg_version(&self) -> EthVersion {
             EthVersion::Eth68
         }
+    }
+
+    fn valid_eth68_announcement(
+        entries: impl IntoIterator<Item = (TxHash, u8, usize)>,
+    ) -> ValidAnnouncementData {
+        let mut hashes = Vec::new();
+        let mut types = Vec::new();
+        let mut sizes = Vec::new();
+
+        for (hash, ty, size) in entries {
+            hashes.push(hash);
+            types.push(ty);
+            sizes.push(size);
+        }
+
+        ValidAnnouncementData::from_partially_valid_data(
+            NewPooledTransactionHashes68 { types, sizes, hashes }.dedup(),
+        )
     }
 
     #[test]
@@ -1404,6 +1555,92 @@ mod test {
 
         assert_eq!(expected_request_hashes, eth68_hashes_to_request);
         assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
+    }
+
+    #[test]
+    fn filter_unseen_hashes_stores_eth68_metadata_by_peer() {
+        reth_tracing::init_test_tracing();
+
+        let tx_fetcher = &mut TransactionFetcher::<EthNetworkPrimitives>::default();
+        let hash = B256::from_slice(&[1; 32]);
+        let peer_1 = PeerId::new([1; 64]);
+        let peer_2 = PeerId::new([2; 64]);
+
+        let mut peer_1_announcement = valid_eth68_announcement([(hash, 0x02, 120)]);
+        tx_fetcher.filter_unseen_and_pending_hashes(
+            &mut peer_1_announcement,
+            |_| false,
+            &peer_1,
+            "peer-1",
+        );
+
+        let mut peer_2_announcement = valid_eth68_announcement([(hash, 0x02, 220)]);
+        tx_fetcher.filter_unseen_and_pending_hashes(
+            &mut peer_2_announcement,
+            |_| false,
+            &peer_2,
+            "peer-2",
+        );
+
+        let metadata = tx_fetcher.hashes_fetch_inflight_and_pending_fetch.peek(&hash).unwrap();
+        assert_eq!(
+            metadata.announced_metadata_for_peer(&peer_1),
+            Some(TxAnnouncementMetadata::new(0x02, 120))
+        );
+        assert_eq!(
+            metadata.announced_metadata_for_peer(&peer_2),
+            Some(TxAnnouncementMetadata::new(0x02, 220))
+        );
+    }
+
+    #[test]
+    fn verify_response_uses_request_peer_announced_metadata() {
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
+        );
+        let signed_tx: PooledTransaction =
+            TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
+        let hash = *signed_tx.tx_hash();
+        let peer_1 = PeerId::new([1; 64]);
+        let peer_2 = PeerId::new([2; 64]);
+
+        let tx_fetcher = &mut TransactionFetcher::<EthNetworkPrimitives>::default();
+        let mut metadata = TxFetchMetadata::new(
+            0,
+            LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+            LruMap::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+        );
+        metadata.record_announcement_metadata(
+            peer_1,
+            TxAnnouncementMetadata::new(signed_tx.ty(), signed_tx.encode_2718_len() - 1),
+        );
+        metadata.record_announcement_metadata(
+            peer_2,
+            TxAnnouncementMetadata::new(signed_tx.ty(), signed_tx.encode_2718_len()),
+        );
+        tx_fetcher.hashes_fetch_inflight_and_pending_fetch.get_or_insert(hash, || metadata);
+
+        let request_hashes = RequestTxHashes::new(std::iter::once(hash).collect());
+        let peer_1_expected_metadata =
+            tx_fetcher.expected_metadata_for_request(&peer_1, &request_hashes);
+        let response_txns = PooledTransactions(vec![signed_tx.clone()]);
+        let payload = UnverifiedPooledTransactions::new(response_txns);
+        let (outcome, verified_payload) =
+            payload.verify(&request_hashes, &peer_1_expected_metadata, &peer_1);
+
+        assert_eq!(VerificationOutcome::ReportPeer, outcome);
+        assert!(verified_payload.is_empty());
+
+        let peer_2_expected_metadata =
+            tx_fetcher.expected_metadata_for_request(&peer_2, &request_hashes);
+        let response_txns = PooledTransactions(vec![signed_tx.clone()]);
+        let payload = UnverifiedPooledTransactions::new(response_txns);
+        let (outcome, verified_payload) =
+            payload.verify(&request_hashes, &peer_2_expected_metadata, &peer_2);
+
+        assert_eq!(VerificationOutcome::Ok, outcome);
+        assert_eq!(1, verified_payload.len());
+        assert!(verified_payload.contains(&signed_tx));
     }
 
     #[tokio::test]
@@ -1545,7 +1782,9 @@ mod test {
         let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
         let payload = UnverifiedPooledTransactions::new(response_txns);
 
-        let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);
+        let expected_metadata = ExpectedTxMetadata::default();
+        let (outcome, verified_payload) =
+            payload.verify(&request_hashes, &expected_metadata, &PeerId::ZERO);
 
         assert_eq!(VerificationOutcome::ReportPeer, outcome);
         assert_eq!(1, verified_payload.len());

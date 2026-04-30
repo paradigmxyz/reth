@@ -3,13 +3,13 @@
 #![allow(dead_code)]
 
 use crate::{
-    cache::LruCache,
+    cache::{LruCache, LruMap},
     transactions::{
         constants::{
             tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS,
             tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         },
-        fetcher::{TransactionFetcher, TxFetchMetadata},
+        fetcher::{TransactionFetcher, TxAnnouncementMetadata, TxFetchMetadata},
         PeerMetadata, TransactionsManager,
     },
     NetworkConfigBuilder, NetworkManager,
@@ -61,14 +61,22 @@ pub fn buffer_hash_to_tx_fetcher(
     tx_encoded_length: Option<usize>,
 ) {
     match tx_fetcher.hashes_fetch_inflight_and_pending_fetch.get_or_insert(hash, || {
-        TxFetchMetadata::new(
+        let mut metadata = TxFetchMetadata::new(
             retries,
             LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
-            tx_encoded_length,
-        )
+            LruMap::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+        );
+        if let Some(size) = tx_encoded_length {
+            metadata.record_announcement_metadata(peer_id, TxAnnouncementMetadata::new(0, size));
+        }
+        metadata
     }) {
         Some(metadata) => {
             metadata.fallback_peers_mut().insert(peer_id);
+            if let Some(size) = tx_encoded_length {
+                metadata
+                    .record_announcement_metadata(peer_id, TxAnnouncementMetadata::new(0, size));
+            }
         }
         None => {
             trace!(target: "net::tx",
