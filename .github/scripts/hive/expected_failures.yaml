@@ -2,7 +2,9 @@
 rpc-compat:
   - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawTransaction/get-invalid-hash (reth)
-
+  - debug_getRawReceipts/get-invalid-number (reth)
+  - debug_getRawHeader/get-invalid-number (reth)
+  - debug_getRawReceipts/get-block-n (reth)
   - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
   - eth_getStorageAt/get-storage-invalid-key (reth)
   - eth_getTransactionReceipt/get-legacy-contract (reth)
