@@ -14,5 +14,5 @@ set -euxo pipefail
 
 TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
 
-cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" -p txgen-ethereum --bin txgen-ethereum --locked
-cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" -p bench-cli --bin bench --locked
+cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" txgen-ethereum --bin txgen-ethereum --locked
+cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" bench-cli --bin bench --locked
