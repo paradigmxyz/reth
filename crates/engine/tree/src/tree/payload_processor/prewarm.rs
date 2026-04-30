@@ -54,6 +54,9 @@ pub enum PrewarmMode<Tx> {
     Skipped,
 }
 
+/// Number of queued transactions to batch into one prewarm task.
+const PREWARM_TX_BATCH_SIZE: usize = 8;
+
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
 ///
@@ -158,22 +161,39 @@ where
                         break;
                     }
 
-                    // skip transactions already executed by the main loop
-                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                    let mut batch = Vec::with_capacity(PREWARM_TX_BATCH_SIZE);
+                    let mut next = Some((index, tx));
+                    while let Some((index, tx)) = next.take() {
+                        // skip transactions already executed by the main loop
+                        if index >= ctx.executed_tx_index.load(Ordering::Relaxed) {
+                            tx_count += 1;
+                            batch.push((index, tx));
+                        }
+
+                        if batch.len() == PREWARM_TX_BATCH_SIZE {
+                            break;
+                        }
+
+                        next = pending.try_recv().ok();
+                    }
+
+                    if batch.is_empty() {
                         continue;
                     }
 
-                    tx_count += 1;
                     let parent_span = Span::current();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
                             parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
+                            "prewarm_batch",
+                            txs = batch.len(),
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+
+                        for (index, tx) in batch {
+                            Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+                        }
                     });
                 }
 
