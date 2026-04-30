@@ -1,26 +1,11 @@
-//! Structural BAL validation: the two cheapest checks in the validation chain.
+//! Structural BAL validation.
 //!
-//! Both run before any state I/O, letting us reject adversarial BALs without spending storage
-//! bandwidth. See `BAL.md` §Validation chain, checks A and B.
+//! These checks run before any state I/O, letting us reject adversarial BALs without spending
+//! storage bandwidth.
 
-use alloy_eip7928::{bal::DecodedBal, AccountChanges};
-use alloy_primitives::B256;
+use alloy_eip7928::AccountChanges;
 
 use super::RejectReason;
-
-/// Check A: `keccak256(raw_rlp_of_received_bal) == header.block_access_list_hash`.
-///
-/// Uses [`DecodedBal`]'s cached hash (`keccak256` of the raw RLP bytes captured at decode
-/// time) — the same pre-image the header commits to. Zero I/O; first call computes the hash,
-/// subsequent calls are free.
-pub fn check_bal_hash(bal: &DecodedBal, expected: B256) -> Result<(), RejectReason> {
-    let computed = bal.hash();
-    if computed == expected {
-        Ok(())
-    } else {
-        Err(RejectReason::HeaderHashMismatch { computed, expected })
-    }
-}
 
 /// Check B: `(addresses + unique_storage_keys) * ITEM_COST <= block_gas_limit`.
 ///
@@ -40,8 +25,8 @@ pub fn check_item_count(bal: &[AccountChanges], block_gas_limit: u64) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eip7928::{bal::Bal as AlloyBal, AccountChanges, SlotChanges, StorageChange};
-    use alloy_primitives::{b256, Address, U256};
+    use alloy_eip7928::{AccountChanges, SlotChanges, StorageChange};
+    use alloy_primitives::{Address, U256};
 
     fn addr(byte: u8) -> Address {
         let mut a = [0u8; 20];
@@ -52,50 +37,6 @@ mod tests {
     fn slot(byte: u8) -> U256 {
         U256::from(byte)
     }
-
-    /// Wraps a `Vec<AccountChanges>` into a `DecodedBal` by RLP-encoding the contents — same
-    /// path a real block takes through `DecodedBal::from_rlp_bytes`, so the cached hash stays
-    /// faithful to what the header would commit to.
-    fn to_decoded(bal: Vec<AccountChanges>) -> DecodedBal {
-        let alloy_bal: AlloyBal = bal.into();
-        let raw = alloy_rlp::encode(&alloy_bal).into();
-        DecodedBal::new(alloy_bal, raw)
-    }
-
-    // ---- check_bal_hash ----
-
-    #[test]
-    fn check_bal_hash_accepts_matching_hash() {
-        let decoded = to_decoded(vec![AccountChanges::new(addr(1))]);
-        let computed = decoded.hash();
-        assert_eq!(check_bal_hash(&decoded, computed), Ok(()));
-    }
-
-    #[test]
-    fn check_bal_hash_rejects_with_populated_fields() {
-        let decoded = to_decoded(vec![AccountChanges::new(addr(1))]);
-        let expected = b256!("0xdeadbeef00000000000000000000000000000000000000000000000000000000");
-
-        let err = check_bal_hash(&decoded, expected).unwrap_err();
-
-        match err {
-            RejectReason::HeaderHashMismatch { computed, expected: got } => {
-                assert_eq!(got, expected);
-                assert_eq!(computed, decoded.hash());
-                assert_ne!(computed, expected);
-            }
-            other => panic!("expected HeaderHashMismatch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn check_bal_hash_handles_empty_bal() {
-        let decoded = to_decoded(Vec::new());
-        let computed = decoded.hash();
-        assert_eq!(check_bal_hash(&decoded, computed), Ok(()));
-    }
-
-    // ---- check_item_count ----
 
     #[test]
     fn check_item_count_accepts_empty_bal_with_zero_limit() {

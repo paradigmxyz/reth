@@ -9,14 +9,6 @@ use alloy_primitives::B256;
 /// block error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RejectReason {
-    /// `keccak256(rlp(received_bal))` disagrees with `header.block_access_list_hash`.
-    HeaderHashMismatch {
-        /// Hash computed from the received BAL bytes.
-        computed: B256,
-        /// Hash committed in the block header.
-        expected: B256,
-    },
-
     /// BAL fails the structural item-count gate:
     /// `(addresses + unique_storage_keys) * ITEM_COST > block_gas_limit`.
     ItemCountExceedsGasBudget {
