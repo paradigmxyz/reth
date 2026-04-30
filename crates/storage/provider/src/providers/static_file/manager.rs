@@ -465,18 +465,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    /// Writes transaction senders for all blocks to the static file segment.
+    /// Writes transactions and transaction senders in a single block walk.
     #[instrument(level = "debug", target = "providers::static_file", skip_all)]
-    fn write_transaction_senders(
-        w: &mut StaticFileProviderRWRefMut<'_, N>,
+    fn write_transactions_and_senders(
+        tx_writer: &mut StaticFileProviderRWRefMut<'_, N>,
+        senders_writer: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
     ) -> ProviderResult<()> {
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let b = block.recovered_block();
-            w.increment_block(b.number())?;
-            for (i, sender) in b.senders_iter().enumerate() {
-                w.append_transaction_sender(first_tx + i as u64, sender)?;
+            tx_writer.increment_block(b.number())?;
+            senders_writer.increment_block(b.number())?;
+
+            for ((i, tx), sender) in
+                b.body().transactions().iter().enumerate().zip(b.senders_iter())
+            {
+                let tx_num = first_tx + i as u64;
+                tx_writer.append_transaction(tx_num, tx)?;
+                senders_writer.append_transaction_sender(tx_num, sender)?;
             }
         }
         Ok(())
@@ -598,7 +605,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let mut r_headers = None;
         let mut r_txs = None;
-        let mut r_senders = None;
+        let mut r_senders: Option<ProviderResult<()>> = None;
         let mut r_receipts = None;
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
@@ -615,22 +622,34 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     }));
             });
 
-            s.spawn(|_| {
-                let _guard = span.enter();
-                r_txs = Some(self.write_segment(
-                    StaticFileSegment::Transactions,
-                    first_block_number,
-                    |w| Self::write_transactions(w, blocks, tx_nums),
-                ));
-            });
-
             if ctx.write_senders {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_senders = Some(self.write_segment(
-                        StaticFileSegment::TransactionSenders,
+                    r_txs = Some((|| {
+                        let mut tx_writer =
+                            self.get_writer(first_block_number, StaticFileSegment::Transactions)?;
+                        let mut senders_writer = self.get_writer(
+                            first_block_number,
+                            StaticFileSegment::TransactionSenders,
+                        )?;
+                        Self::write_transactions_and_senders(
+                            &mut tx_writer,
+                            &mut senders_writer,
+                            blocks,
+                            tx_nums,
+                        )?;
+                        tx_writer.sync_all()?;
+                        senders_writer.sync_all()
+                    })());
+                    r_senders = Some(Ok(()));
+                });
+            } else {
+                s.spawn(|_| {
+                    let _guard = span.enter();
+                    r_txs = Some(self.write_segment(
+                        StaticFileSegment::Transactions,
                         first_block_number,
-                        |w| Self::write_transaction_senders(w, blocks, tx_nums),
+                        |w| Self::write_transactions(w, blocks, tx_nums),
                     ));
                 });
             }
