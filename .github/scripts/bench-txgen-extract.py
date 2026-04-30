@@ -41,6 +41,46 @@ def parse_quantity(value: str) -> int:
     return int(value, 16) if isinstance(value, str) and value.startswith("0x") else int(value)
 
 
+def validate_top_level_rlp(raw: str) -> None:
+    if not isinstance(raw, str) or not raw.startswith("0x"):
+        raise ValueError("raw block is not a hex string")
+    data = bytes.fromhex(raw[2:])
+    if not data:
+        raise ValueError("raw block is empty")
+
+    prefix = data[0]
+    if prefix <= 0x7F:
+        total = 1
+    elif prefix <= 0xB7:
+        total = 1 + prefix - 0x80
+    elif prefix <= 0xBF:
+        len_len = prefix - 0xB7
+        total = 1 + len_len + int.from_bytes(data[1 : 1 + len_len], "big")
+    elif prefix <= 0xF7:
+        total = 1 + prefix - 0xC0
+    else:
+        len_len = prefix - 0xF7
+        total = 1 + len_len + int.from_bytes(data[1 : 1 + len_len], "big")
+
+    if total != len(data):
+        raise ValueError(f"raw block RLP length mismatch: expected {total} bytes, got {len(data)}")
+
+
+def fetch_raw_block(url: str, number: int, retries: int = 12) -> str:
+    last_err = None
+    for attempt in range(retries):
+        try:
+            raw = rpc_call(url, "debug_getRawBlock", [number], retries=1)
+            validate_top_level_rlp(raw)
+            return raw
+        except (RuntimeError, ValueError) as err:
+            last_err = err
+            if attempt + 1 == retries:
+                break
+            time.sleep(min(10.0, 0.5 * (2**attempt)))
+    raise RuntimeError(last_err)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rpc", required=True)
@@ -61,7 +101,7 @@ def main() -> int:
     with open(args.output, "w", encoding="utf-8") as out:
         for idx, number in enumerate(range(args.from_block, args.to_block + 1), start=1):
             try:
-                raw = rpc_call(args.rpc, "debug_getRawBlock", [number])
+                raw = fetch_raw_block(args.rpc, number)
                 block = rpc_call(metadata_rpc, "eth_getBlockByNumber", [hex(number), False])
             except RuntimeError as err:
                 print(f"failed to fetch block {number}: {err}", file=sys.stderr)
