@@ -660,9 +660,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         // Resolve the externally-advertised IP from the NAT resolver (if the variant is static:
         // `extip:` or `extaddr:`). Async variants (`upnp`, `publicip`, `any`) return `None` here
         // and continue to rely on discv5's peer-observation ENR update.
-        let advertised_enr_ip = nat.clone().and_then(|nat| {
-            nat.as_external_ip(listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS).port())
-        });
+        let advertised_enr_ip = nat.as_ref().and_then(|n| n.clone().as_external_ip(0));
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
@@ -872,5 +870,19 @@ mod tests {
             .expect("should be non-empty");
 
         assert_eq!(advertised_fork_id, fork_id);
+    }
+
+    #[test]
+    fn test_discv5_advertised_ip_from_nat() {
+        let ip: Ipv4Addr = "1.2.3.4".parse().unwrap();
+
+        let config = builder()
+            .external_ip_resolver(NatResolver::ExternalIp(ip.into()))
+            .discovery_v5(reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into()))
+            .build(NoopProvider::default());
+
+        let discv5_config = config.discovery_v5_config.expect("should have discv5 config");
+        let (enr, _, _, _) = build_local_enr(&config.secret_key, &discv5_config);
+        assert_eq!(enr.ip4(), Some(ip));
     }
 }
