@@ -289,7 +289,11 @@ pub struct NetworkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
 
-    /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
+    /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>|extaddr:\<DOMAIN\>)
+    ///
+    /// Static variants (`extip:`, `extaddr:`) are also baked into the discv5 ENR's `ip4`/`ip6`
+    /// field at startup so peers gossip the advertised address; discv5's peer-observation ENR
+    /// update is disabled to keep the static value stable.
     #[arg(long, default_value_t = DefaultNetworkArgs::get_global().nat.clone())]
     pub nat: NatResolver,
 

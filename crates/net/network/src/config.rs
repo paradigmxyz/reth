@@ -657,10 +657,21 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             total_difficulty: chain_spec.genesis().difficulty,
         });
 
+        // Resolve the externally-advertised IP from the NAT resolver (if the variant is static:
+        // `extip:` or `extaddr:`). Async variants (`upnp`, `publicip`, `any`) return `None` here
+        // and continue to rely on discv5's peer-observation ENR update.
+        let advertised_enr_ip = nat.clone().and_then(|nat| {
+            nat.as_external_ip(listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS).port())
+        });
+
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
                 let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
+            }
+
+            if let Some(ip) = advertised_enr_ip {
+                builder = builder.advertised_ip(ip)
             }
 
             builder

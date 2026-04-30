@@ -85,6 +85,10 @@ pub struct ConfigBuilder {
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     discovered_peer_filter: Option<MustNotIncludeKeys>,
+    /// IP to advertise in the local [`Enr`](discv5::enr::Enr) regardless of the UDP listen
+    /// address. Intended for deployments where the node is reachable on an address it doesn't
+    /// bind locally (behind a load balancer, static NAT, or 1:1 DNAT).
+    advertised_ip: Option<IpAddr>,
 }
 
 impl ConfigBuilder {
@@ -100,6 +104,7 @@ impl ConfigBuilder {
             bootstrap_lookup_interval,
             bootstrap_lookup_countdown,
             discovered_peer_filter,
+            advertised_ip,
         } = discv5_config;
 
         Self {
@@ -112,6 +117,7 @@ impl ConfigBuilder {
             bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
             bootstrap_lookup_countdown: Some(bootstrap_lookup_countdown),
             discovered_peer_filter: Some(discovered_peer_filter),
+            advertised_ip,
         }
     }
 
@@ -214,6 +220,20 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the IP advertised in the local [`Enr`](discv5::enr::Enr).
+    ///
+    /// Takes precedence over the IP derived from the UDP listen address when
+    /// [`build_local_enr`](crate::build_local_enr) constructs the ENR. Also disables discv5's
+    /// peer-observation ENR update so the static value doesn't get flapped by observed source
+    /// IPs.
+    ///
+    /// Note: when paired with a dual-stack listen config and a v4-only override, the ENR will
+    /// carry a `udp6` port without an `ip6` address.
+    pub const fn advertised_ip(mut self, ip: IpAddr) -> Self {
+        self.advertised_ip = Some(ip);
+        self
+    }
+
     /// Returns a new [`Config`].
     pub fn build(self) -> Config {
         let Self {
@@ -226,6 +246,7 @@ impl ConfigBuilder {
             bootstrap_lookup_interval,
             bootstrap_lookup_countdown,
             discovered_peer_filter,
+            advertised_ip,
         } = self;
 
         let mut discv5_config = discv5_config.unwrap_or_else(|| {
@@ -234,6 +255,8 @@ impl ConfigBuilder {
 
         discv5_config.listen_config =
             amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
+
+        if advertised_ip.is_some() { discv5_config.enr_update = false; } // peer-observation must not overwrite a statically advertised address
 
         let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
@@ -256,6 +279,7 @@ impl ConfigBuilder {
             bootstrap_lookup_interval,
             bootstrap_lookup_countdown,
             discovered_peer_filter,
+            advertised_ip,
         }
     }
 }
@@ -289,6 +313,9 @@ pub struct Config {
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     pub(super) discovered_peer_filter: MustNotIncludeKeys,
+    /// IP to advertise in the local [`Enr`](discv5::enr::Enr). Overrides the IP derived from the
+    /// UDP listen address when the ENR is built.
+    pub(super) advertised_ip: Option<IpAddr>,
 }
 
 impl Config {
@@ -305,6 +332,7 @@ impl Config {
             bootstrap_lookup_interval: None,
             bootstrap_lookup_countdown: None,
             discovered_peer_filter: None,
+            advertised_ip: None,
         }
     }
 

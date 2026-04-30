@@ -471,7 +471,9 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
+    let Config {
+        discv5_config, fork, tcp_socket, other_enr_kv_pairs, advertised_ip, ..
+    } = config;
 
     let socket = {
         let v4 = crate::config::ipv4(&discv5_config.listen_config);
@@ -501,6 +503,19 @@ pub fn build_local_enr(
             .or_else(|| v4.map(SocketAddr::V4))
             .unwrap_or_else(|| SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))
     };
+
+    // Node may be reachable on an address it doesn't bind (e.g. behind a load balancer or static
+    // NAT); this wins unconditionally over the listen-derived IP.
+    if let Some(advertised) = advertised_ip {
+        match advertised.to_canonical() {
+            IpAddr::V4(ip) => {
+                builder.ip4(ip);
+            }
+            IpAddr::V6(ip) => {
+                builder.ip6(ip);
+            }
+        }
+    }
 
     let rlpx_ip_mode = if tcp_socket.is_ipv4() { IpMode::Ip4 } else { IpMode::Ip6 };
 
@@ -1047,5 +1062,110 @@ mod test {
             discv5.get_fork_id(&enr_without_network_stack_id),
             Err(Error::NetworkStackIdNotConfigured)
         ));
+    }
+
+    fn config_with_advertised_ip(
+        rlpx_addr: SocketAddr,
+        listen_config: ListenConfig,
+        advertised: IpAddr,
+    ) -> Config {
+        Config::builder(rlpx_addr)
+            .discv5_config(discv5::ConfigBuilder::new(listen_config).build())
+            .advertised_ip(advertised)
+            .build()
+    }
+
+    #[test]
+    fn advertised_ipv4_set_in_enr() {
+        let sk = SecretKey::new(&mut thread_rng());
+        let advertised: Ipv4Addr = "1.2.3.4".parse().unwrap();
+        let config = config_with_advertised_ip(
+            "127.0.0.1:30303".parse().unwrap(),
+            ListenConfig::Ipv4 { ip: Ipv4Addr::UNSPECIFIED, port: 30304 },
+            advertised.into(),
+        );
+
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.ip4(), Some(advertised));
+    }
+
+    #[test]
+    fn advertised_ipv6_set_in_enr() {
+        let sk = SecretKey::new(&mut thread_rng());
+        let advertised: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let config = config_with_advertised_ip(
+            "[::1]:30303".parse().unwrap(),
+            ListenConfig::Ipv6 { ip: Ipv6Addr::UNSPECIFIED, port: 30304 },
+            advertised.into(),
+        );
+
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.ip6(), Some(advertised));
+        assert!(enr.ip4().is_none());
+    }
+
+    #[test]
+    fn advertised_ipv4_mapped_ipv6_is_canonicalized() {
+        let sk = SecretKey::new(&mut thread_rng());
+        let mapped: Ipv6Addr = "::ffff:1.2.3.4".parse().unwrap();
+        let config = config_with_advertised_ip(
+            "127.0.0.1:30303".parse().unwrap(),
+            ListenConfig::Ipv4 { ip: Ipv4Addr::UNSPECIFIED, port: 30304 },
+            mapped.into(),
+        );
+
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.ip4(), Some("1.2.3.4".parse().unwrap()));
+        assert!(enr.ip6().is_none());
+    }
+
+    #[test]
+    fn advertised_ip_overrides_listen_ip() {
+        let sk = SecretKey::new(&mut thread_rng());
+        let advertised: Ipv4Addr = "1.2.3.4".parse().unwrap();
+        let config = config_with_advertised_ip(
+            "127.0.0.1:30303".parse().unwrap(),
+            ListenConfig::Ipv4 { ip: "10.0.0.1".parse().unwrap(), port: 30304 },
+            advertised.into(),
+        );
+
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.ip4(), Some(advertised));
+    }
+
+    #[test]
+    fn advertised_ip_wins_on_dual_stack_listen() {
+        let sk = SecretKey::new(&mut thread_rng());
+        let advertised: Ipv4Addr = "1.2.3.4".parse().unwrap();
+        let config = config_with_advertised_ip(
+            "127.0.0.1:30303".parse().unwrap(),
+            ListenConfig::DualStack {
+                ipv4: Ipv4Addr::UNSPECIFIED,
+                ipv4_port: 30304,
+                ipv6: Ipv6Addr::UNSPECIFIED,
+                ipv6_port: 30304,
+            },
+            advertised.into(),
+        );
+
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.ip4(), Some(advertised));
+        assert!(enr.ip6().is_none());
+    }
+
+    #[test]
+    fn advertised_ip_disables_enr_update() {
+        let config = config_with_advertised_ip(
+            "127.0.0.1:30303".parse().unwrap(),
+            ListenConfig::Ipv4 { ip: Ipv4Addr::UNSPECIFIED, port: 30304 },
+            Ipv4Addr::new(1, 2, 3, 4).into(),
+        );
+
+        assert!(!config.discv5_config.enr_update);
     }
 }
