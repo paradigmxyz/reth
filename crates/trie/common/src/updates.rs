@@ -10,6 +10,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
+use itertools::Itertools;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -718,11 +719,35 @@ impl TrieUpdatesSorted {
     /// the batch, later items take precedence over earlier ones. The order of the mask does not
     /// matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
-        let account_nodes = kway_merge_disjoint_sorted(
-            batch.iter().map(|item| item.account_nodes.len()).sum(),
-            batch.iter().rev().map(|item| item.account_nodes.as_slice()),
-            mask.iter().map(|item| item.account_nodes.as_slice()),
-        );
+        let merged_batch_account_nodes =
+            kway_merge_sorted(batch.iter().rev().map(|item| item.account_nodes.as_slice()));
+        let masked_account_node_keys = mask
+            .iter()
+            .map(|item| item.account_nodes.as_slice())
+            .filter(|slice| !slice.is_empty())
+            .map(|slice| slice.iter().map(|(key, _)| key))
+            .kmerge()
+            .dedup()
+            .cloned()
+            .collect::<Vec<_>>();
+        let directly_unmasked_account_node_keys = merged_batch_account_nodes
+            .iter()
+            .filter(|(key, _)| masked_account_node_keys.binary_search(key).is_err())
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+
+        let account_nodes = merged_batch_account_nodes
+            .into_iter()
+            .filter(|(key, _)| {
+                masked_account_node_keys.binary_search(key).is_err() ||
+                    directly_unmasked_account_node_keys
+                        .get(
+                            directly_unmasked_account_node_keys
+                                .partition_point(|candidate| candidate <= key),
+                        )
+                        .is_some_and(|candidate| candidate.starts_with(key))
+            })
+            .collect();
 
         struct StorageAcc<'a> {
             is_deleted: bool,
@@ -1221,6 +1246,40 @@ mod tests {
                 is_deleted: false,
                 storage_nodes: vec![(slot, Some(BranchNodeCompact::default()))],
             })
+        );
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_masked_ancestors_of_unmasked_nodes() {
+        let grandparent = Nibbles::from_nibbles_unchecked([0x05]);
+        let parent = Nibbles::from_nibbles_unchecked([0x05, 0x04]);
+        let child = Nibbles::from_nibbles_unchecked([0x05, 0x04, 0x03]);
+
+        let batch = TrieUpdatesSorted::new(
+            vec![
+                (grandparent, Some(BranchNodeCompact::default())),
+                (parent, Some(BranchNodeCompact::default())),
+                (child, Some(BranchNodeCompact::default())),
+            ],
+            B256Map::default(),
+        );
+        let mask = TrieUpdatesSorted::new(
+            vec![
+                (grandparent, Some(BranchNodeCompact::default())),
+                (parent, Some(BranchNodeCompact::default())),
+            ],
+            B256Map::default(),
+        );
+
+        let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
+
+        assert_eq!(
+            result.account_nodes,
+            vec![
+                (grandparent, Some(BranchNodeCompact::default())),
+                (parent, Some(BranchNodeCompact::default())),
+                (child, Some(BranchNodeCompact::default())),
+            ]
         );
     }
 
