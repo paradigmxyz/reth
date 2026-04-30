@@ -14,8 +14,14 @@ set -euxo pipefail
 
 TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
 
-# txgen is private. Use the git CLI so cargo honors the workflow's
-# url.*.insteadOf auth configuration from the dependency install step.
+# txgen is private. Use the git CLI so cargo honors git's auth configuration.
+# Configure auth here as well because cargo invokes git from this build step,
+# not from the earlier dependency-install step.
+if [ -n "${DEREK_TOKEN:-}" ]; then
+  set +x
+  git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+  set -x
+fi
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" txgen-ethereum --bin txgen-ethereum --locked
