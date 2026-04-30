@@ -513,16 +513,21 @@ impl SparseTrie for ParallelSparseTrie {
         {
             use rayon::prelude::*;
 
-            changed_subtries.par_iter_mut().for_each(|changed_subtrie| {
-                #[cfg(feature = "metrics")]
-                let start = Instant::now();
-                changed_subtrie.subtrie.update_hashes(
-                    &mut changed_subtrie.prefix_set,
-                    &mut changed_subtrie.update_actions_buf,
-                    &self.branch_node_masks,
-                );
-                #[cfg(feature = "metrics")]
-                self.metrics.subtrie_hash_update_latency.record(start.elapsed());
+            let target_jobs = rayon::current_num_threads().saturating_mul(4).max(1);
+            let chunk_size = changed_subtries.len().div_ceil(target_jobs).max(1);
+
+            changed_subtries.par_chunks_mut(chunk_size).for_each(|chunk| {
+                for changed_subtrie in chunk {
+                    #[cfg(feature = "metrics")]
+                    let start = Instant::now();
+                    changed_subtrie.subtrie.update_hashes(
+                        &mut changed_subtrie.prefix_set,
+                        &mut changed_subtrie.update_actions_buf,
+                        &self.branch_node_masks,
+                    );
+                    #[cfg(feature = "metrics")]
+                    self.metrics.subtrie_hash_update_latency.record(start.elapsed());
+                }
             });
 
             self.insert_changed_subtries(changed_subtries);
