@@ -66,6 +66,7 @@ struct InMemoryBalStoreInner {
 }
 
 impl InMemoryBalStoreInner {
+    // Inserts a BAL and keeps the block-number index in sync.
     fn insert(&mut self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
         if let Some(entry) = self.entries.insert(block_hash, BalEntry { block_number, bal }) {
             self.remove_number_index(entry.block_number, block_hash);
@@ -77,6 +78,7 @@ impl InMemoryBalStoreInner {
         );
     }
 
+    // Removes BALs outside the configured retention window.
     fn prune(&mut self, prune_mode: Option<PruneMode>) {
         let Some(prune_mode) = prune_mode else { return };
         let Some(tip) = self.highest_block_number else { return };
@@ -93,6 +95,7 @@ impl InMemoryBalStoreInner {
         }
     }
 
+    // Drops a stale block-number index entry for a reinserted hash.
     fn remove_number_index(&mut self, block_number: BlockNumber, block_hash: BlockHash) {
         let Some(hashes) = self.hashes_by_number.get_mut(&block_number) else { return };
         hashes.retain(|hash| *hash != block_hash);
