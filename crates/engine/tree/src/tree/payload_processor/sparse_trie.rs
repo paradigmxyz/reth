@@ -22,7 +22,8 @@ use reth_trie::{
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofTaskCtx,
+        ProofWorkerHandle,
     },
     root::ParallelStateRootError,
 };
@@ -37,6 +38,8 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+type ProofWorkerFactory = Box<dyn Fn() -> ProofWorkerHandle + Send + Sync>;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
     /// Sender for proof results.
@@ -49,8 +52,10 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
     parent_state_root: B256,
-    /// Handle to the proof worker pools (storage and account).
-    proof_worker_handle: ProofWorkerHandle,
+    /// Lazily-created handle to the proof worker pools (storage and account).
+    proof_worker_handle: Option<ProofWorkerHandle>,
+    /// Creates proof workers on first proof dispatch instead of at task startup.
+    make_proof_worker_handle: ProofWorkerFactory,
 
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
@@ -117,15 +122,25 @@ where
     S: SparseTrie + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
-    pub(super) fn new_with_trie(
+    pub(super) fn new_with_trie<Factory>(
         executor: &Runtime,
         updates: CrossbeamReceiver<StateRootMessage>,
-        proof_worker_handle: ProofWorkerHandle,
+        proof_task_ctx: ProofTaskCtx<Factory>,
+        halve_workers: bool,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
         chunk_size: usize,
-    ) -> Self {
+    ) -> Self
+    where
+        Factory: reth_provider::DatabaseProviderROFactory<
+                Provider: reth_trie::trie_cursor::TrieCursorFactory
+                              + reth_trie::hashed_cursor::HashedCursorFactory,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
@@ -136,11 +151,17 @@ where
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
 
+        let executor = executor.clone();
+        let make_proof_worker_handle = Box::new(move || {
+            ProofWorkerHandle::new(&executor, proof_task_ctx.clone(), halve_workers)
+        });
+
         Self {
             proof_result_tx,
             proof_result_rx,
             updates: hashed_state_rx,
-            proof_worker_handle,
+            proof_worker_handle: None,
+            make_proof_worker_handle,
             trie,
             parent_state_root,
             chunk_size,
@@ -800,20 +821,24 @@ where
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        let chunk_size = self.chunk_size;
+        let max_targets_for_chunking = self.max_targets_for_chunking;
+        let proof_result_tx = self.proof_result_tx.clone();
+        let proof_worker_handle = self.proof_worker_handle();
         dispatch_with_chunking(
             targets,
             chunking_length,
-            self.chunk_size,
-            self.max_targets_for_chunking,
-            self.proof_worker_handle.has_multiple_idle_account_workers(),
-            self.proof_worker_handle.has_multiple_idle_storage_workers(),
+            chunk_size,
+            max_targets_for_chunking,
+            proof_worker_handle.has_multiple_idle_account_workers(),
+            proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
                 if let Err(e) =
-                    self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
+                    proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
                         proof_result_sender: ProofResultContext::new(
-                            self.proof_result_tx.clone(),
+                            proof_result_tx.clone(),
                             HashedPostState::default(),
                             Instant::now(),
                         ),
@@ -823,6 +848,14 @@ where
                 }
             },
         );
+    }
+
+    fn proof_worker_handle(&mut self) -> &ProofWorkerHandle {
+        if self.proof_worker_handle.is_none() {
+            self.proof_worker_handle = Some((self.make_proof_worker_handle)());
+        }
+
+        self.proof_worker_handle.as_ref().expect("proof worker handle is initialized")
     }
 }
 
@@ -993,9 +1026,6 @@ mod tests {
                 ChangesetCache::new(),
             ),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
-
         let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
             ArenaParallelSparseTrie::default(),
         ));
@@ -1009,7 +1039,8 @@ mod tests {
         let mut task = SparseTrieCacheTask::new_with_trie(
             &runtime,
             updates_rx,
-            proof_worker_handle,
+            ProofTaskCtx::new(overlay_factory),
+            false,
             MultiProofTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -1024,5 +1055,6 @@ mod tests {
         assert_eq!(outcome.state_root, parent_state_root);
         assert!(outcome.trie_updates.is_empty());
         assert!(task.trie.state_trie_ref().is_none(), "blind trie should not be revealed");
+        assert!(task.proof_worker_handle.is_none(), "proof workers should stay lazy");
     }
 }

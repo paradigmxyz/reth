@@ -27,10 +27,7 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
-use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
-    root::ParallelStateRootError,
-};
+use reth_trie_parallel::{proof_task::ProofTaskCtx, root::ParallelStateRootError};
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, ConfigurableSparseTrie, RevealableSparseTrie, SparseStateTrie,
 };
@@ -346,12 +343,12 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
 
         self.spawn_sparse_trie_task(
-            proof_handle,
+            task_ctx,
+            halve_workers,
             state_root_tx,
             from_multi_proof,
             parent_state_root,
@@ -551,14 +548,21 @@ where
     /// Spawns the [`SparseTrieCacheTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    fn spawn_sparse_trie_task(
+    fn spawn_sparse_trie_task<F>(
         &self,
-        proof_worker_handle: ProofWorkerHandle,
+        proof_task_ctx: ProofTaskCtx<F>,
+        halve_workers: bool,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
-    ) {
+    ) where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
@@ -603,7 +607,8 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
-                proof_worker_handle,
+                proof_task_ctx,
+                halve_workers,
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
