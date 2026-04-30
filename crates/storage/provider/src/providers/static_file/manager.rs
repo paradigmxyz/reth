@@ -1056,6 +1056,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     indexes.get(segment).map(|index| &index.expected_block_ranges_by_max_block),
                     segment_max_block,
                 );
+                let should_cleanup_cached_jars =
+                    indexes.get(segment).is_some_and(|index| index.max_block > fixed_range.end());
 
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
@@ -1157,9 +1159,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 debug!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
                 self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
-                // Delete any cached provider that no longer has an associated jar.
-                debug!(target: "providers::static_file", ?segment, "Cleaning up jar map");
-                self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
+                if should_cleanup_cached_jars {
+                    // Only truncation/unwind paths can leave stale future jars behind. Normal
+                    // append growth already advances monotonically, so a full scan is wasted work.
+                    debug!(target: "providers::static_file", ?segment, "Cleaning up jar map");
+                    self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
+                }
             }
             None => {
                 debug!(target: "providers::static_file", ?segment, "Removing segment from index");
