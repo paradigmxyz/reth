@@ -30,6 +30,10 @@ use std::{
 };
 use tracing::debug;
 
+/// Response returned by [`FetchFullBlockRangeWithOptionalAccessListsFuture`].
+pub type FullBlockRangeWithOptionalAccessListsResponse<B> =
+    (Vec<SealedBlock<B>>, Option<BlockAccessLists>);
+
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
 pub struct FullBlockClient<Client>
@@ -541,7 +545,7 @@ where
     /// Returns the block range once blocks and the optional BAL lookup are both complete.
     fn take_response(
         &mut self,
-    ) -> Option<(Vec<SealedBlock<Client::Block>>, Option<BlockAccessLists>)> {
+    ) -> Option<FullBlockRangeWithOptionalAccessListsResponse<Client::Block>> {
         let OptionalBlockAccessListsState::Ready(access_lists) = &mut self.access_lists else {
             return None
         };
@@ -557,7 +561,7 @@ where
         + BlockAccessListsClient
         + 'static,
 {
-    type Output = (Vec<SealedBlock<Client::Block>>, Option<BlockAccessLists>);
+    type Output = FullBlockRangeWithOptionalAccessListsResponse<Client::Block>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
