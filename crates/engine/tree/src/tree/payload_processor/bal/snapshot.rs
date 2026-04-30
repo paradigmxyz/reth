@@ -26,7 +26,7 @@
 use super::pre_state::{BlockPreState, RequiredReads};
 use crate::tree::{CachedStateMetrics, CachedStateProvider, SavedCache, StateProviderBuilder};
 use alloy_primitives::{
-    map::{B256HashMap, B256HashSet},
+    map::{AddressHashMap, B256HashMap, B256HashSet, HashMap},
     Address, BlockNumber, StorageKey, StorageValue, B256,
 };
 use rayon::prelude::*;
@@ -36,7 +36,6 @@ use reth_provider::{
     AccountReader, BlockHashReader, BlockReader, BytecodeReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader,
 };
-use std::collections::HashMap;
 
 /// Size of the recent-block window exposed by the `BLOCKHASH` opcode.
 const BLOCK_HASH_WINDOW: u64 = 256;
@@ -120,7 +119,7 @@ pub(super) fn fetch_accounts<N, P>(
     saved_cache: &SavedCache,
     cache_metrics: &CachedStateMetrics,
     addresses: impl IntoIterator<Item = Address>,
-) -> ProviderResult<HashMap<Address, Option<Account>>>
+) -> ProviderResult<AddressHashMap<Option<Account>>>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
@@ -167,7 +166,7 @@ pub(super) fn fetch_code<N, P>(
     builder: &StateProviderBuilder<N, P>,
     saved_cache: &SavedCache,
     cache_metrics: &CachedStateMetrics,
-    accounts: &HashMap<Address, Option<Account>>,
+    accounts: &AddressHashMap<Option<Account>>,
 ) -> ProviderResult<B256HashMap<Option<Bytecode>>>
 where
     N: NodePrimitives,
