@@ -28,8 +28,8 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
-    StateReader,
+    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -377,7 +377,7 @@ where
                     || {
                         (
                             stream_ctx.clone(),
-                            None::<Box<dyn AccountReader>>,
+                            None::<BalAccountReader>,
                             provider_parent_span.clone(),
                         )
                     },
@@ -551,8 +551,27 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
+type BalStateProvider = CachedStateProvider<StateProviderBox, true>;
+
 type PrewarmEvmState<Evm> =
     Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+
+enum BalAccountReader {
+    Cached(BalStateProvider),
+    Plain(StateProviderBox),
+}
+
+impl AccountReader for BalAccountReader {
+    fn basic_account(
+        &self,
+        address: &alloy_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
+        match self {
+            Self::Cached(provider) => provider.basic_account(address),
+            Self::Plain(provider) => provider.basic_account(address),
+        }
+    }
+}
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -638,14 +657,33 @@ where
     fn send_bal_hashed_state(
         &self,
         parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
+        provider: &mut Option<BalAccountReader>,
         account_changes: &alloy_eip7928::AccountChanges,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
         if self.disable_bal_parallel_state_root {
             return;
         }
+
         let address = account_changes.address;
+        let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
+        let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
+        let code_hash = account_changes.code_changes.last().map(|code_change| {
+            if code_change.new_code.is_empty() {
+                alloy_consensus::constants::KECCAK_EMPTY
+            } else {
+                keccak256(&code_change.new_code)
+            }
+        });
+
+        if balance.is_none() &&
+            nonce.is_none() &&
+            code_hash.is_none() &&
+            account_changes.storage_changes.is_empty()
+        {
+            return;
+        }
+
         let mut hashed_address = None;
 
         if !account_changes.storage_changes.is_empty() {
@@ -684,39 +722,21 @@ where
                     return;
                 }
             };
-            let boxed: Box<dyn AccountReader> = if let Some(saved) = &self.saved_cache {
+            let account_reader = if let Some(saved) = &self.saved_cache {
                 let caches = saved.cache().clone();
-                Box::new(CachedStateProvider::new_prewarm(
+                BalAccountReader::Cached(CachedStateProvider::new_prewarm(
                     inner,
                     caches,
                     self.cache_metrics.clone().unwrap_or_default(),
                 ))
             } else {
-                Box::new(inner)
+                BalAccountReader::Plain(inner)
             };
-            *provider = Some(boxed);
+            *provider = Some(account_reader);
         }
         let account_reader = provider.as_ref().expect("provider just initialized");
 
         let existing_account = account_reader.basic_account(&address).ok().flatten();
-
-        let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
-        let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
-        let code_hash = account_changes.code_changes.last().map(|code_change| {
-            if code_change.new_code.is_empty() {
-                alloy_consensus::constants::KECCAK_EMPTY
-            } else {
-                keccak256(&code_change.new_code)
-            }
-        });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
 
         let account = reth_primitives_traits::Account {
             balance: balance.unwrap_or_else(|| {
