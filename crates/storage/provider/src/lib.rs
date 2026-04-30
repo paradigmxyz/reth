@@ -39,7 +39,7 @@ pub mod either_writer;
 pub use either_writer::*;
 
 mod bal;
-pub use bal::InMemoryBalStore;
+pub use bal::{BalConfig, InMemoryBalStore, DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE};
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
