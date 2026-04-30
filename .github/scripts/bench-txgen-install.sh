@@ -17,7 +17,7 @@ TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
 # txgen is private. Use the git CLI so cargo honors git's auth configuration.
 # Configure auth here as well because cargo invokes git from this build step,
 # not from the earlier dependency-install step.
-AUTH_TOKEN="${DEREK_PAT:-${DEREK_TOKEN:-}}"
+AUTH_TOKEN="${TXGEN_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_PAT:-${DEREK_TOKEN:-}}}}"
 if [ -n "$AUTH_TOKEN" ]; then
   set +x
   git config --global url."https://x-access-token:${AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
