@@ -456,9 +456,12 @@ impl Command {
                 let mut total_gas_limit = base.payload.as_v1().gas_limit;
 
                 // Concatenate transactions from subsequent blocks and build env_switches
-                for ((block_data, receipts), block_access_list) in
-                    blocks.into_iter().zip(block_receipts).zip(block_access_lists)
+                for (block_idx, ((block_data, receipts), block_access_list)) in
+                    blocks.into_iter().zip(block_receipts).zip(block_access_lists).enumerate()
                 {
+                    // Segment index in the merged big block. The base block is
+                    // segment 0; subsequent blocks are segments 1, 2, ...
+                    let segment_idx = (block_idx + 1) as u64;
                     let block_v1 = block_data.payload.as_v1();
                     let block_gas = block_v1.gas_used;
                     total_gas_used += block_gas;
@@ -469,6 +472,7 @@ impl Command {
                             merged_block_access_list.get_or_insert_with(Default::default),
                             block_access_list,
                             cumulative_tx_count as u64,
+                            segment_idx,
                         );
                     }
 
@@ -734,6 +738,7 @@ fn merge_block_access_list(
     merged: &mut BlockAccessList,
     incoming: BlockAccessList,
     tx_index_offset: u64,
+    segment_idx: u64,
 ) {
     let mut account_positions = merged
         .iter()
@@ -742,7 +747,7 @@ fn merge_block_access_list(
         .collect::<HashMap<_, _>>();
 
     for mut account_changes in incoming {
-        shift_account_changes(&mut account_changes, tx_index_offset);
+        shift_account_changes(&mut account_changes, tx_index_offset, segment_idx);
 
         if let Some(&idx) = account_positions.get(&account_changes.address) {
             merge_account_changes(&mut merged[idx], account_changes);
@@ -753,20 +758,37 @@ fn merge_block_access_list(
     }
 }
 
-fn shift_account_changes(account_changes: &mut AccountChanges, tx_index_offset: u64) {
+fn shift_account_changes(
+    account_changes: &mut AccountChanges,
+    tx_index_offset: u64,
+    segment_idx: u64,
+) {
+    // Per-block BALs use block_access_index = 0 for pre-execution writes
+    // (system contract calls before any tx), 1..tx_count for tx commits, and
+    // tx_count+1 for post-execution.
+    //
+    // Renumbering: each segment boundary reserves two distinct bal_indexes —
+    // one for the prior segment's `finish()` (post-execution withdrawals +
+    // EIP-7002/7251 system calls) and one for the new segment's
+    // `apply_pre_execution_changes()` (EIP-2935/EIP-4788). The renumbered
+    // bal_index for a block-local idx in segment `k` is
+    // `idx + tx_index_offset + 2*k`. This ensures BAL workers reading via
+    // `BalWrites::get` (strict less-than) see all prior segments' boundary
+    // writes.
+    let shift = tx_index_offset + 2 * segment_idx;
     for slot_changes in &mut account_changes.storage_changes {
         for change in &mut slot_changes.changes {
-            change.block_access_index += tx_index_offset;
+            change.block_access_index += shift;
         }
     }
     for change in &mut account_changes.balance_changes {
-        change.block_access_index += tx_index_offset;
+        change.block_access_index += shift;
     }
     for change in &mut account_changes.nonce_changes {
-        change.block_access_index += tx_index_offset;
+        change.block_access_index += shift;
     }
     for change in &mut account_changes.code_changes {
-        change.block_access_index += tx_index_offset;
+        change.block_access_index += shift;
     }
 }
 
@@ -865,7 +887,7 @@ mod tests {
             },
         ];
 
-        merge_block_access_list(&mut merged, incoming, 3);
+        merge_block_access_list(&mut merged, incoming, 3, 0);
 
         assert_eq!(merged.len(), 2);
 
