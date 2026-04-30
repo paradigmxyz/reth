@@ -3,14 +3,10 @@
 //! Both run before any state I/O, letting us reject adversarial BALs without spending storage
 //! bandwidth. See `BAL.md` §Validation chain, checks A and B.
 
-use alloy_eip7928::{bal::DecodedBal, total_bal_items, AccountChanges};
+use alloy_eip7928::{bal::DecodedBal, AccountChanges};
 use alloy_primitives::B256;
 
 use super::RejectReason;
-
-/// Per-item gas cost for the EIP-7928 structural budget. Deliberately set below a cold SLOAD's
-/// 2100 gas so the gate is tighter than raw opcode cost.
-pub const BAL_ITEM_COST: u64 = 2000;
 
 /// Check A: `keccak256(raw_rlp_of_received_bal) == header.block_access_list_hash`.
 ///
@@ -26,14 +22,14 @@ pub fn check_bal_hash(bal: &DecodedBal, expected: B256) -> Result<(), RejectReas
     }
 }
 
-/// Check B: `(addresses + unique_storage_keys) * BAL_ITEM_COST <= block_gas_limit`.
+/// Check B: `(addresses + unique_storage_keys) * ITEM_COST <= block_gas_limit`.
 ///
 /// `unique_storage_keys` dedupes `storage_reads ∪ storage_changes` per account (delegated to
 /// `alloy_eip7928::total_bal_items`). Saturating arithmetic defends against adversarial BALs
 /// whose raw item count would overflow `u64` — they reject cleanly instead of panicking.
 pub fn check_item_count(bal: &[AccountChanges], block_gas_limit: u64) -> Result<(), RejectReason> {
-    let bal_items = total_bal_items(bal);
-    let total_cost = bal_items.saturating_mul(BAL_ITEM_COST);
+    let bal_items = alloy_eip7928::total_bal_items(bal);
+    let total_cost = bal_items.saturating_mul(alloy_eip7928::ITEM_COST as u64);
     if total_cost <= block_gas_limit {
         Ok(())
     } else {
@@ -175,11 +171,5 @@ mod tests {
         let bal: Vec<AccountChanges> = (0u8..=200).map(|i| AccountChanges::new(addr(i))).collect();
         // 201 items * 2000 = 402_000, well inside u64 and under any realistic gas limit.
         assert!(check_item_count(&bal, 402_000).is_ok());
-    }
-
-    #[test]
-    fn item_cost_constant_matches_spec() {
-        // EIP-7928 + BAL.md §Validation chain pin this at 2000.
-        assert_eq!(BAL_ITEM_COST, 2000);
     }
 }
