@@ -686,30 +686,66 @@ where
 
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
-        tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                    ?address
-                )
-            } else {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                )
-            };
-            let _enter = span.entered();
-            // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
-            // - we do not insert/remove entries between pointer collection and use, so pointers
-            //   stay valid and map reallocation cannot occur;
-            // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
-        });
+        if tries_to_compute_roots.len() <= 2 {
+            for (address, SendStorageTriePtr(trie)) in tries_to_compute_roots {
+                let span = if tracing::enabled!(tracing::Level::TRACE) {
+                    debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                        ?address
+                    )
+                } else {
+                    debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                    )
+                };
+                let _enter = span.entered();
+                // SAFETY:
+                // - pointers are created from `storage_tries_mut().get_mut(address)` above;
+                // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
+                // - we do not insert/remove entries between pointer collection and use, so pointers
+                //   stay valid and map reallocation cannot occur;
+                // - the serial fast path touches one pointer at a time, so no aliasing mutable
+                //   access occurs.
+                unsafe {
+                    (*trie).root().expect("updates are drained, trie should be revealed by now")
+                };
+            }
+        } else {
+            tries_to_compute_roots.into_par_iter().for_each(
+                |(address, SendStorageTriePtr(trie))| {
+                    let span = if tracing::enabled!(tracing::Level::TRACE) {
+                        debug_span!(
+                            target: "engine::tree::payload_processor::sparse_trie",
+                            parent: &parent_span,
+                            "storage_root",
+                            ?address
+                        )
+                    } else {
+                        debug_span!(
+                            target: "engine::tree::payload_processor::sparse_trie",
+                            parent: &parent_span,
+                            "storage_root",
+                        )
+                    };
+                    let _enter = span.entered();
+                    // SAFETY:
+                    // - pointers are created from `storage_tries_mut().get_mut(address)` above;
+                    // - `addresses_to_compute_roots` comes from map iteration, so addresses are
+                    //   unique;
+                    // - we do not insert/remove entries between pointer collection and use, so
+                    //   pointers stay valid and map reallocation cannot occur;
+                    // - each pointer is consumed by at most one rayon task, so no aliasing mutable
+                    //   access occurs.
+                    unsafe {
+                        (*trie).root().expect("updates are drained, trie should be revealed by now")
+                    };
+                },
+            );
+        }
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
