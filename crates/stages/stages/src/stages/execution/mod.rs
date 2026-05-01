@@ -359,7 +359,8 @@ where
 
             let bal = executor.take_bal().unwrap_or_default();
             if block.header().block_access_list_hash().is_some() &&
-                let Err(err) = validate_block_access_list_gas(Some(&bal), block.gas_limit())
+                let Err(err) =
+                    validate_block_access_list_gas(Some(bal.as_slice()), block.gas_limit())
             {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
@@ -367,9 +368,12 @@ where
                 })
             }
 
-            if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, Some(bal))
-            {
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                &result,
+                None,
+                Some(bal.as_slice()),
+            ) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),

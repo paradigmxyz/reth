@@ -48,10 +48,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{
-    bal::{Bal, DecodedBal},
-    BlockAccessList,
-};
+use alloy_eip7928::{bal::DecodedBal, AccountChanges, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -530,6 +527,9 @@ where
         // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
         // `provider_builder` (consumed by `spawn_payload_processor` below).
         let bal_eligible = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let bal_for_validation = bal_eligible.then(|| {
+            Arc::clone(env.decoded_bal.as_ref().expect("eligibility implies BAL is present"))
+        });
         let bal_provider_builder = bal_eligible.then(|| provider_builder.clone());
 
         // Spawn the appropriate processor based on strategy
@@ -570,8 +570,9 @@ where
         let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx, built_bal, block) = if bal_eligible {
             let block = convert_to_block(input)?;
-            let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
-            let built_bal = Some(decoded_bal.as_bal().clone().into());
+            let decoded_bal = Arc::clone(
+                bal_for_validation.as_ref().expect("eligibility implies BAL is present"),
+            );
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
             match self.execute_block_bal(
@@ -583,7 +584,7 @@ where
                 provider_builder,
             ) {
                 Ok((output, senders, receipt_root_rx)) => {
-                    (output, senders, receipt_root_rx, built_bal, block)
+                    (output, senders, receipt_root_rx, None, block)
                 }
                 Err(err) => {
                     return self.handle_execution_error_with_block(block, err, &parent_block)
@@ -666,6 +667,9 @@ where
                 debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
                     .entered();
             handle.try_into_inner().expect("sole handle")
+        });
+        let built_bal = built_bal.as_deref().or_else(|| {
+            bal_for_validation.as_ref().map(|decoded_bal| decoded_bal.as_bal().as_slice())
         });
 
         let hashed_state = ensure_ok_post_block!(
@@ -950,16 +954,15 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        if let Some(bal_opt) = input.block_access_list() {
-            let bal = bal_opt.map_err(BlockExecutionError::other)?;
-            validate_block_access_list_gas(Some(&bal), input.gas_limit())
+        if let Some(decoded_bal) = env.decoded_bal.as_deref() {
+            validate_block_access_list_gas(Some(decoded_bal.as_bal().as_slice()), input.gas_limit())
                 .map_err(|e| {
                     debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
                     InsertBlockErrorKind::Consensus(e)
                 })?
         }
 
-        let has_bal = input.block_access_list().is_some();
+        let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1566,7 +1569,7 @@ where
         transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         hashed_state: LazyHashedPostState,
-        built_bal: Option<BlockAccessList>,
+        built_bal: Option<&[AccountChanges]>,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -2308,16 +2311,6 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
-        }
-    }
-
-    /// Returns the block access list embedded in a payload, if present.
-    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        match self {
-            Self::Payload(payload) => payload.block_access_list().map(|block_access_list| {
-                alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
-            }),
-            Self::Block(_) => None,
         }
     }
 

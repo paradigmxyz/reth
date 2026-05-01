@@ -38,7 +38,6 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::Header;
-use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::{error::Error, fmt::Display};
 
@@ -86,7 +85,7 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        block_access_list: Option<BlockAccessList>,
+        block_access_list: Option<&[alloy_eip7928::AccountChanges]>,
     ) -> Result<(), ConsensusError>;
 }
 
@@ -532,7 +531,7 @@ impl ConsensusError {
 /// EIP-7925 specifies that the total cost of the block access list items must not exceed
 /// the gas limit. Each item costs `ITEM_COST` gas.
 pub fn validate_block_access_list_gas(
-    block_access_list: Option<&alloy_eip7928::BlockAccessList>,
+    block_access_list: Option<&[alloy_eip7928::AccountChanges]>,
     gas_limit: u64,
 ) -> Result<(), ConsensusError> {
     if let Some(bal) = block_access_list {

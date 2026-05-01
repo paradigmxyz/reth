@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
 use alloy_eips::{
-    eip7928::{compute_block_access_list_hash, BlockAccessList},
+    eip7928::{compute_block_access_list_hash, AccountChanges},
     Encodable2718,
 };
 use alloy_primitives::{Bloom, Bytes, B256};
@@ -24,7 +24,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     chain_spec: &ChainSpec,
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
-    block_access_list: Option<BlockAccessList>,
+    block_access_list: Option<&[AccountChanges]>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -84,13 +84,10 @@ where
     }
 
     // Validate that the block access list hash matches the calculated block access list hash
-    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
-        block_access_list.is_some()
-    {
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        let Some(block_access_list) = block_access_list else { return Ok(()) };
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
-        let default_bal = BlockAccessList::default();
-        let block_access_list_hash =
-            compute_block_access_list_hash(block_access_list.as_ref().unwrap_or(&default_bal));
+        let block_access_list_hash = compute_block_access_list_hash(block_access_list);
         if block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 (block_access_list_hash, block_bal_hash).into(),
