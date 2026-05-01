@@ -138,6 +138,8 @@ write_summary() {
         printf 'node1_log=%s\n' "$NODE1_LOG"
         printf 'bench_log=%s\n' "$BENCH_LOG"
         printf 'node2_log=%s\n' "$NODE2_LOG"
+        printf 'unwind_trace_dir=%s\n' "$UNWIND_TRACE_DIR"
+        printf 'unwind_trace_log_glob=%s/%s*\n' "$UNWIND_TRACE_DIR" "$UNWIND_TRACE_LOG_NAME"
     } >"$SUMMARY_FILE"
 }
 
@@ -257,6 +259,8 @@ SUMMARY_FILE="${ARTIFACTS_DIR}/result.txt"
 NODE1_LOG="${ARTIFACTS_DIR}/node1.log"
 BENCH_LOG="${ARTIFACTS_DIR}/bench.log"
 NODE2_LOG="${ARTIFACTS_DIR}/node2.log"
+UNWIND_TRACE_DIR="${ARTIFACTS_DIR}/unwind-trace-logs"
+UNWIND_TRACE_LOG_NAME="unwind-trace.log"
 
 trap cleanup EXIT
 
@@ -291,6 +295,23 @@ capture_command reth "$RETH_BIN" node \
     --engine.deferred-trie-blocks 3 \
     --engine.accept-execution-requests-hash \
     --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
+    --color never
+
+capture_command reth_restart "$RETH_BIN" node \
+    --datadir "$DATADIR" \
+    --chain "$CHAIN" \
+    --http --http.addr 127.0.0.1 --http.port 8545 --http.api eth,net,web3,reth \
+    --ws --ws.addr 127.0.0.1 --ws.port 8546 --ws.api eth,net,web3,reth \
+    --authrpc.addr 127.0.0.1 --authrpc.port 8551 --authrpc.jwtsecret "$JWT_SECRET" \
+    --disable-discovery \
+    --engine.persistence-threshold 10 \
+    --engine.deferred-trie-blocks 3 \
+    --engine.accept-execution-requests-hash \
+    --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
+    --log.file.directory "$UNWIND_TRACE_DIR" \
+    --log.file.name "$UNWIND_TRACE_LOG_NAME" \
+    --log.file.filter trace \
+    --log.file.max-files 1 \
     --color never
 
 restore_snapshot() {
@@ -340,6 +361,30 @@ start_node() {
         --engine.deferred-trie-blocks 3 \
         --engine.accept-execution-requests-hash \
         --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
+        --color never \
+        >"$log_file" 2>&1 &
+    echo $!
+}
+
+start_unwind_node() {
+    local log_file="$1"
+
+    mkdir -p "$UNWIND_TRACE_DIR"
+    "$RETH_BIN" node \
+        --datadir "$DATADIR" \
+        --chain "$CHAIN" \
+        --http --http.addr 127.0.0.1 --http.port 8545 --http.api eth,net,web3,reth \
+        --ws --ws.addr 127.0.0.1 --ws.port 8546 --ws.api eth,net,web3,reth \
+        --authrpc.addr 127.0.0.1 --authrpc.port 8551 --authrpc.jwtsecret "$JWT_SECRET" \
+        --disable-discovery \
+        --engine.persistence-threshold 10 \
+        --engine.deferred-trie-blocks 3 \
+        --engine.accept-execution-requests-hash \
+        --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
+        --log.file.directory "$UNWIND_TRACE_DIR" \
+        --log.file.name "$UNWIND_TRACE_LOG_NAME" \
+        --log.file.filter trace \
+        --log.file.max-files 1 \
         --color never \
         >"$log_file" 2>&1 &
     echo $!
@@ -568,7 +613,7 @@ stop_bench
 remove_stale_locks
 
 log "Restarting reth to classify unwind behavior"
-NODE2_PID=$(start_node "$NODE2_LOG")
+NODE2_PID=$(start_unwind_node "$NODE2_LOG")
 classify_restart "$NODE2_PID" "$NODE2_LOG" "$RESTART_TIMEOUT" || exit 2
 
 log "Restart result: ${RESULT}"
