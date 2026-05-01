@@ -1,9 +1,11 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
-    PayloadStatus, PayloadStatusEnum,
+    ExecutionData, ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use core::{
     fmt::{self, Display},
@@ -183,6 +185,52 @@ pub struct BigBlockData<ExecutionData> {
 impl<T> Default for BigBlockData<T> {
     fn default() -> Self {
         Self { env_switches: Vec::new(), prior_block_hashes: Vec::new() }
+    }
+}
+
+impl ExecutionPayload for BigBlockData<ExecutionData> {
+    fn parent_hash(&self) -> B256 {
+        self.env_switches[0].1.parent_hash()
+    }
+
+    fn block_hash(&self) -> B256 {
+        self.env_switches[0].1.block_hash()
+    }
+
+    fn block_number(&self) -> u64 {
+        self.env_switches[0].1.block_number()
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+        self.env_switches[0].1.withdrawals()
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.env_switches[0].1.block_access_list()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.env_switches[0].1.parent_beacon_block_root()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.env_switches[0].1.timestamp()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.env_switches[0].1.gas_used()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.env_switches[0].1.gas_limit()
+    }
+
+    fn transaction_count(&self) -> usize {
+        self.env_switches[0].1.transaction_count()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.env_switches[0].1.payload.slot_number()
     }
 }
 

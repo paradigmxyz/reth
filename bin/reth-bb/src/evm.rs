@@ -37,10 +37,10 @@ use tracing::{debug, trace};
 // ---------------------------------------------------------------------------
 
 /// Runtime state for segment boundary tracking.
-#[derive(Clone)]
-pub(crate) struct BbEvmPlan {
+#[derive(Debug, Clone)]
+pub struct BbEvmPlan<'a> {
     /// The segment boundaries and environments.
-    pub(crate) segments: Vec<BigBlockSegment>,
+    pub(crate) segments: Vec<BigBlockSegment<'a>>,
     /// Index of the next segment to switch to (starts at 1).
     pub(crate) next_segment: usize,
     /// Number of user transactions executed so far.
@@ -50,9 +50,9 @@ pub(crate) struct BbEvmPlan {
     pub(crate) block_hashes_to_seed: Vec<(u64, B256)>,
 }
 
-impl BbEvmPlan {
+impl<'a> BbEvmPlan<'a> {
     /// Creates a new `BbEvmPlan` from segments and hardfork flags.
-    pub(crate) fn new(segments: Vec<BigBlockSegment>) -> Self {
+    pub(crate) fn new(segments: Vec<BigBlockSegment<'a>>) -> Self {
         // Pre-compute all inter-segment block hashes.
         let mut block_hashes_to_seed = Vec::new();
         for seg in segments.iter().skip(1) {
@@ -79,17 +79,6 @@ impl BbEvmPlan {
     /// Returns the segment that contains the transaction at `tx_index`.
     pub(crate) fn segment_index_for_tx(&self, tx_index: usize) -> usize {
         self.segments.partition_point(|segment| segment.start_tx <= tx_index).saturating_sub(1)
-    }
-}
-
-impl std::fmt::Debug for BbEvmPlan {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BbEvmPlan")
-            .field("segments", &self.segments)
-            .field("next_segment", &self.next_segment)
-            .field("tx_counter", &self.tx_counter)
-            .field("block_hashes_to_seed", &self.block_hashes_to_seed)
-            .finish()
     }
 }
 
@@ -153,7 +142,7 @@ where
 {
     /// The inner executor. `None` transiently during `apply_segment_boundary`.
     inner: Option<EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder>>,
-    plan: Option<BbEvmPlan>,
+    plan: BbEvmPlan<'a>,
     /// Requests accumulated from segments that have been finished at
     /// boundaries. Merged into the final result in `finish()`.
     accumulated_requests: Requests,
@@ -203,16 +192,15 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         evm: EthEvm<DB, I, P>,
-        ctx: EthBlockExecutionCtx<'a>,
+        plan: BbEvmPlan<'a>,
         spec: Spec,
         receipt_builder: RethReceiptBuilder,
-        plan: Option<BbEvmPlan>,
         block_hash_seeder: Option<BlockHashSeeder<DB>>,
         bal_index_reader: Option<BalIndexReader<DB>>,
         bal_index_bumper: Option<BalIndexBumper<DB>>,
         bal_index_setter: Option<BalIndexSetter<DB>>,
     ) -> Self {
-        let inner = EthBlockExecutor::new(evm, ctx, spec, receipt_builder);
+        let inner = EthBlockExecutor::new(evm, plan.segments[0].ctx.clone(), spec, receipt_builder);
         Self {
             inner: Some(inner),
             plan,
@@ -243,10 +231,7 @@ where
         }
         self.initialized = true;
 
-        let plan = match &self.plan {
-            Some(p) => p,
-            None => return Ok(()),
-        };
+        let plan = &self.plan;
 
         let bal_index =
             self.bal_index_reader.map(|reader| reader(self.inner().evm().db())).unwrap_or(0);
@@ -291,7 +276,6 @@ where
                 let renumbered = bal_index + 2 * segment_idx as u64;
                 setter(self.inner_mut().evm_mut().db_mut(), renumbered);
             }
-            self.plan = None;
         }
 
         Ok(())
@@ -319,19 +303,13 @@ where
 
     fn reseed_block_hashes_for(&mut self, block_number: u64) {
         let Some(seeder) = self.block_hash_seeder else { return };
-        let hashes = match &self.plan {
-            Some(plan) => plan.hashes_for_block(block_number),
-            None => return,
-        };
+        let hashes = self.plan.hashes_for_block(block_number);
         seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
     }
 
     fn maybe_apply_boundary(&mut self) -> Result<(), BlockExecutionError> {
         loop {
-            let plan = match &self.plan {
-                Some(p) => p,
-                None => return Ok(()),
-            };
+            let plan = &self.plan;
 
             if plan.next_segment >= plan.segments.len() ||
                 plan.tx_counter != plan.segments[plan.next_segment].start_tx
@@ -344,7 +322,7 @@ where
     }
 
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
-        let plan = self.plan.as_mut().expect("plan must exist");
+        let plan = &mut self.plan;
         let seg_idx = plan.next_segment;
         let prev_seg_idx = seg_idx - 1;
 
@@ -448,11 +426,8 @@ where
 
         // Reseed the block hash cache for the new segment's 256-block window
         // before applying pre-execution changes (which may use BLOCKHASH).
-        let new_block_number = self.plan.as_ref().unwrap().segments[seg_idx]
-            .evm_env
-            .block_env
-            .number
-            .saturating_to::<u64>();
+        let new_block_number =
+            self.plan.segments[seg_idx].evm_env.block_env.number.saturating_to::<u64>();
         self.reseed_block_hashes_for(new_block_number);
 
         // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788)
@@ -528,9 +503,7 @@ where
             receipt.cumulative_gas_used += offset;
         }
 
-        if let Some(plan) = &mut self.plan {
-            plan.tx_counter += 1;
-        }
+        self.plan.tx_counter += 1;
         gas_used
     }
 
@@ -540,18 +513,17 @@ where
         // Swap the inner executor's ctx to the last segment's ctx so that
         // EthBlockExecutor::finish() applies the correct withdrawal balance
         // increments and post-execution system calls.
-        if let Some(last_seg) = self.plan.as_ref().map(|p| p.segments.last().unwrap()) {
-            let last_ctx = EthBlockExecutionCtx {
-                parent_hash: last_seg.ctx.parent_hash,
-                parent_beacon_block_root: last_seg.ctx.parent_beacon_block_root,
-                ommers: last_seg.ctx.ommers,
-                withdrawals: last_seg.ctx.withdrawals.clone(),
-                extra_data: last_seg.ctx.extra_data.clone(),
-                tx_count_hint: last_seg.ctx.tx_count_hint,
-                slot_number: last_seg.ctx.slot_number,
-            };
-            self.inner_mut().ctx = last_ctx;
-        }
+        let last_seg = self.plan.segments.last().unwrap();
+        let last_ctx = EthBlockExecutionCtx {
+            parent_hash: last_seg.ctx.parent_hash,
+            parent_beacon_block_root: last_seg.ctx.parent_beacon_block_root,
+            ommers: last_seg.ctx.ommers,
+            withdrawals: last_seg.ctx.withdrawals.clone(),
+            extra_data: last_seg.ctx.extra_data.clone(),
+            tx_count_hint: last_seg.ctx.tx_count_hint,
+            slot_number: last_seg.ctx.slot_number,
+        };
+        self.inner_mut().ctx = last_ctx;
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
@@ -586,16 +558,12 @@ where
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-        if self.plan.is_some() {
-            // Store the real hook in the shared slot and give the inner
-            // executor a lightweight forwarder. This way the hook survives
-            // inner executor finish/reconstruct cycles at segment boundaries.
-            *self.shared_hook.lock().unwrap() = hook;
-            let fwd = self.forwarding_hook();
-            self.inner_mut().set_state_hook(fwd);
-        } else {
-            self.inner_mut().set_state_hook(hook);
-        }
+        // Store the real hook in the shared slot and give the inner
+        // executor a lightweight forwarder. This way the hook survives
+        // inner executor finish/reconstruct cycles at segment boundaries.
+        *self.shared_hook.lock().unwrap() = hook;
+        let fwd = self.forwarding_hook();
+        self.inner_mut().set_state_hook(fwd);
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
@@ -622,17 +590,15 @@ pub struct BbBlockExecutorFactory<Spec> {
     receipt_builder: RethReceiptBuilder,
     spec: Spec,
     evm_factory: EthEvmFactory,
-    /// Staged plan consumed by the next [`BbBlockExecutor`].
-    pub(crate) staged_plan: Arc<Mutex<Option<BbEvmPlan>>>,
 }
 
 impl<Spec> BbBlockExecutorFactory<Spec> {
-    pub fn new(
+    pub const fn new(
         receipt_builder: RethReceiptBuilder,
         spec: Spec,
         evm_factory: EthEvmFactory,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory, staged_plan: Arc::new(Mutex::new(None)) }
+        Self { receipt_builder, spec, evm_factory }
     }
 
     pub const fn evm_factory(&self) -> &EthEvmFactory {
@@ -647,26 +613,10 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         &self.receipt_builder
     }
 
-    pub(crate) fn stage_plan(&self, plan: BbEvmPlan) {
-        *self.staged_plan.lock().unwrap() = Some(plan);
-    }
-
-    pub(crate) fn clear_staged_plan(&self) {
-        *self.staged_plan.lock().unwrap() = None;
-    }
-
-    /// Returns a clone of the currently staged plan without consuming it.
-    ///
-    /// Cloning lets multiple executors (canonical + N parallel BAL workers
-    /// for the same block) each own their own plan state.
-    fn peek_plan(&self) -> Option<BbEvmPlan> {
-        self.staged_plan.lock().unwrap().clone()
-    }
-
     pub(crate) fn create_executor_with_seeder<'a, DB, I>(
         &'a self,
         evm: EthEvm<DB, I, PrecompilesMap>,
-        ctx: EthBlockExecutionCtx<'a>,
+        plan: BbEvmPlan<'a>,
         block_hash_seeder: Option<BlockHashSeeder<DB>>,
         bal_index_reader: Option<BalIndexReader<DB>>,
         bal_index_bumper: Option<BalIndexBumper<DB>>,
@@ -677,13 +627,11 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         DB: StateDB + 'a,
         I: Inspector<EthEvmContext<DB>> + 'a,
     {
-        let plan = self.peek_plan();
         BbBlockExecutor::new(
             evm,
-            ctx,
+            plan,
             &self.spec,
             self.receipt_builder,
-            plan,
             block_hash_seeder,
             bal_index_reader,
             bal_index_bumper,
@@ -698,7 +646,7 @@ where
     TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     type EvmFactory = EthEvmFactory;
-    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
+    type ExecutionCtx<'a> = BbEvmPlan<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
     type TxExecutionResult = EthTxResult<
@@ -715,23 +663,12 @@ where
     fn create_executor<'a, DB, I>(
         &'a self,
         evm: EthEvm<DB, I, PrecompilesMap>,
-        ctx: EthBlockExecutionCtx<'a>,
+        ctx: BbEvmPlan<'a>,
     ) -> Self::Executor<'a, DB, I>
     where
         DB: StateDB,
         I: Inspector<EthEvmContext<DB>>,
     {
-        let plan = self.peek_plan();
-        BbBlockExecutor::new(
-            evm,
-            ctx,
-            &self.spec,
-            self.receipt_builder,
-            plan,
-            None,
-            None,
-            None,
-            None,
-        )
+        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, None, None, None, None)
     }
 }
