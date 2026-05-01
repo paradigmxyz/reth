@@ -48,6 +48,10 @@ pub struct SparseStateTrie<
     hot_slots_lfu: BucketedLfu<HotSlotKey>,
     /// Global LFU tracker for hot account entries.
     hot_accounts_lfu: BucketedLfu<B256>,
+    /// The configured hot-slot LFU capacity.
+    hot_slots_capacity: usize,
+    /// The configured hot-account LFU capacity.
+    hot_accounts_capacity: usize,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -67,6 +71,8 @@ where
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
+            hot_slots_capacity: 0,
+            hot_accounts_capacity: 0,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -98,8 +104,14 @@ impl<A, S> SparseStateTrie<A, S> {
     /// This must happen before the first `record_*_touch` call, otherwise touches are ignored while
     /// the LFUs still have zero capacity.
     pub fn set_hot_cache_capacities(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
+        if self.hot_slots_capacity != max_hot_slots {
+            self.hot_slots_lfu.decay_and_evict(max_hot_slots);
+            self.hot_slots_capacity = max_hot_slots;
+        }
+        if self.hot_accounts_capacity != max_hot_accounts {
+            self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
+            self.hot_accounts_capacity = max_hot_accounts;
+        }
     }
 
     /// Seeds the hot account/storage LFU caches with their configured capacities.
@@ -827,8 +839,7 @@ where
         fields(%max_hot_slots, %max_hot_accounts)
     )]
     pub fn prune(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
+        self.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
         let retained = self.hot_slots_lfu.retained_slots_by_address();
 
         let retained_account_paths: Vec<Nibbles> =
