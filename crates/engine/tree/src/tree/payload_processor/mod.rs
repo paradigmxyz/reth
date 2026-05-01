@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use crossbeam_channel::{bounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
@@ -395,11 +395,11 @@ where
         transactions: I,
         transaction_count: usize,
     ) -> (
-        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+        CrossbeamReceiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
+        CrossbeamReceiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
-        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
-        let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
+        let (prewarm_tx, prewarm_rx) = bounded(transaction_count);
+        let (execute_tx, execute_rx) = bounded(transaction_count);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -467,7 +467,10 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+        transactions: CrossbeamReceiver<(
+            usize,
+            impl ExecutableTxFor<Evm> + Clone + Send + 'static,
+        )>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     ) -> CacheTaskHandle<N::Receipt>
@@ -729,8 +732,8 @@ where
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
-    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+    prewarm_tx: &CrossbeamSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    execute_tx: &CrossbeamSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
@@ -763,7 +766,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions
-    transactions: mpsc::Receiver<Result<Tx, Err>>,
+    transactions: CrossbeamReceiver<Result<Tx, Err>>,
     /// Span for tracing
     _span: Span,
 }

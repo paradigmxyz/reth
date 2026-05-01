@@ -21,7 +21,7 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, StorageKey, B256};
-use crossbeam_channel::Sender as CrossbeamSender;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -46,7 +46,7 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
-    Transactions(Receiver<(usize, Tx)>),
+    Transactions(CrossbeamReceiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<DecodedBal>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
@@ -121,7 +121,7 @@ where
     /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
-        pending: mpsc::Receiver<(usize, Tx)>,
+        pending: CrossbeamReceiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     ) where
@@ -178,9 +178,9 @@ where
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task &&
-                    let Some(withdrawals) = &ctx.env.withdrawals &&
-                    !withdrawals.is_empty()
+                if let Some(to_sparse_trie_task) = to_sparse_trie_task
+                    && let Some(withdrawals) = &ctx.env.withdrawals
+                    && !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -486,7 +486,7 @@ where
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
@@ -498,7 +498,7 @@ where
 
                     if final_execution_outcome.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
             }
@@ -571,7 +571,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return None;
             }
         };
 
@@ -710,10 +710,10 @@ where
             }
         });
 
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
+        if balance.is_none()
+            && nonce.is_none()
+            && code_hash.is_none()
+            && account_changes.storage_changes.is_empty()
         {
             return;
         }
@@ -757,8 +757,8 @@ where
         provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
-        if self.disable_bal_batch_io ||
-            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
+        if self.disable_bal_batch_io
+            || (account.storage_changes.is_empty() && account.storage_reads.is_empty())
         {
             return;
         }
@@ -822,7 +822,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         //
         // See: https://eips.ethereum.org/EIPS/eip-6780
         if !account.is_touched() || account.is_selfdestructed() {
-            continue
+            continue;
         }
 
         let hashed_address = keccak256(addr);
@@ -832,7 +832,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         for (key, slot) in account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
-                continue
+                continue;
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
