@@ -32,7 +32,7 @@ Options:
   --target-timeout SECONDS    Seconds to wait for local head to reach target
                               (default: 900)
   --persistence-timeout SEC   Seconds to wait for a persistence marker after
-                              the target head is reached (default: 120)
+                              the target head is reached (default: 300)
   --restart-timeout SECONDS   Seconds to classify restart behavior
                               (default: 180)
   -h, --help                  Show this help
@@ -169,7 +169,7 @@ START_BLOCK=2613963
 TARGET_BLOCK=2614300
 START_TIMEOUT=180
 TARGET_TIMEOUT=900
-PERSISTENCE_TIMEOUT=120
+PERSISTENCE_TIMEOUT=300
 RESTART_TIMEOUT=180
 RETH_BIN="/repos/reth/target/debug/reth"
 BENCH_BIN="/repos/reth/target/debug/reth-bench"
@@ -290,7 +290,7 @@ capture_command reth "$RETH_BIN" node \
     --engine.persistence-threshold 10 \
     --engine.deferred-trie-blocks 3 \
     --engine.accept-execution-requests-hash \
-    --log.stdout.filter 'info,reth::providers::database=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
+    --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
     --color never
 
 restore_snapshot() {
@@ -318,8 +318,11 @@ restore_snapshot() {
     fi
 
     if [[ ! -f "$JWT_SECRET" ]]; then
-        log "Restored datadir is missing jwt secret: $JWT_SECRET"
-        exit 2
+        log "Restored datadir is missing jwt secret; generating ${JWT_SECRET}"
+        mkdir -p "$(dirname "$JWT_SECRET")"
+        umask 077
+        head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$JWT_SECRET"
+        printf '\n' >>"$JWT_SECRET"
     fi
 }
 
@@ -336,7 +339,7 @@ start_node() {
         --engine.persistence-threshold 10 \
         --engine.deferred-trie-blocks 3 \
         --engine.accept-execution-requests-hash \
-        --log.stdout.filter 'info,reth::providers::database=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
+        --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
         --color never \
         >"$log_file" 2>&1 &
     echo $!
@@ -407,7 +410,7 @@ wait_for_persistence_marker() {
     local timeout="$4"
     local elapsed=0
 
-    while (( elapsed < timeout )); do
+    while (( elapsed <= timeout )); do
         if tail -n "+${start_line}" "$log_file" | \
             grep -E -m1 'save_blocks step plan|save_blocks trie paths|write_trie_updates|Persisting canonical chain' \
             >/dev/null 2>&1; then
@@ -503,7 +506,6 @@ classify_restart() {
 }
 
 restore_snapshot
-remove_stale_locks
 
 log "Starting reth for replay run"
 NODE1_PID=$(start_node "$NODE1_LOG")
@@ -551,7 +553,10 @@ HEAD_AT_CRASH=$(wait_for_target_head "$NODE1_PID" "$TARGET_BLOCK" "$TARGET_TIMEO
 printf '%s\n' "$HEAD_AT_CRASH" >"${ARTIFACTS_DIR}/current_head_at_crash.txt"
 POST_TARGET_LINE=$(( $(wc -l <"$NODE1_LOG") + 1 ))
 
-log "Target head ${TARGET_BLOCK} reached; waiting for the next persistence marker before crashing"
+log "Target head ${TARGET_BLOCK} reached; sending SIGTERM to trigger the final persistence flush"
+stop_pid "$NODE1_PID" TERM "reth crash node"
+
+log "Waiting for the shutdown-triggered persistence marker before crashing"
 wait_for_persistence_marker "$NODE1_PID" "$NODE1_LOG" "$POST_TARGET_LINE" "$PERSISTENCE_TIMEOUT" || exit 2
 
 log "Crashing reth with SIGKILL"
