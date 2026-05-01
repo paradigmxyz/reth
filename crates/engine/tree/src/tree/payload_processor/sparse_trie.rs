@@ -580,28 +580,31 @@ where
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+            let pending_targets = &mut self.pending_targets;
+            let address = *address;
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                        pending_targets.push_storage_target(
+                            address,
+                            ProofV2Target::new(path).with_min_len(min_len),
+                        );
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    pending_targets.push_storage_target(
+                        address,
+                        ProofV2Target::new(path).with_min_len(min_len),
+                    );
                 }
             })?;
             let updates_len_after = updates.len();
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
-
-            if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
-            }
         }
 
         drop(span);
@@ -872,10 +875,10 @@ impl PendingTargets {
         self.len += 1;
     }
 
-    /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
-        self.len += targets.len();
-        self.targets.storage_targets.entry(*address).or_default().extend(targets);
+    /// Adds a target to the storage targets for the given address.
+    fn push_storage_target(&mut self, address: B256, target: ProofV2Target) {
+        self.targets.storage_targets.entry(address).or_default().push(target);
+        self.len += 1;
     }
 }
 
