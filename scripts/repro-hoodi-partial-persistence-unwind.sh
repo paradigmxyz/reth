@@ -138,8 +138,13 @@ write_summary() {
         printf 'node1_log=%s\n' "$NODE1_LOG"
         printf 'bench_log=%s\n' "$BENCH_LOG"
         printf 'node2_log=%s\n' "$NODE2_LOG"
-        printf 'unwind_trace_dir=%s\n' "$UNWIND_TRACE_DIR"
-        printf 'unwind_trace_log_glob=%s/%s*\n' "$UNWIND_TRACE_DIR" "$UNWIND_TRACE_LOG_NAME"
+        printf 'restart_trace_log=%s\n' "$RESTART_TRACE_LOG"
+        printf 'failed_unwind_target=%s\n' "${FAILED_UNWIND_TARGET:-unknown}"
+        printf 'drop_merkle_result=%s\n' "${DROP_MERKLE_RESULT:-not_run}"
+        printf 'drop_merkle_log=%s\n' "$DROP_MERKLE_LOG"
+        printf 'post_drop_unwind_result=%s\n' "${POST_DROP_UNWIND_RESULT:-not_run}"
+        printf 'post_drop_unwind_log=%s\n' "$POST_DROP_UNWIND_LOG"
+        printf 'post_drop_unwind_trace_log=%s\n' "$POST_DROP_UNWIND_TRACE_LOG"
     } >"$SUMMARY_FILE"
 }
 
@@ -184,6 +189,9 @@ HEAD_AFTER_RESTART=""
 NODE1_PID=""
 NODE2_PID=""
 BENCH_PID=""
+FAILED_UNWIND_TARGET=""
+DROP_MERKLE_RESULT="not_run"
+POST_DROP_UNWIND_RESULT="not_run"
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
 ARTIFACTS_DIR="/tmp/reth-hoodi-unwind-${TIMESTAMP}"
 
@@ -259,8 +267,10 @@ SUMMARY_FILE="${ARTIFACTS_DIR}/result.txt"
 NODE1_LOG="${ARTIFACTS_DIR}/node1.log"
 BENCH_LOG="${ARTIFACTS_DIR}/bench.log"
 NODE2_LOG="${ARTIFACTS_DIR}/node2.log"
-UNWIND_TRACE_DIR="${ARTIFACTS_DIR}/unwind-trace-logs"
-UNWIND_TRACE_LOG_NAME="unwind-trace.log"
+RESTART_TRACE_LOG="${ARTIFACTS_DIR}/restart-trace.log"
+DROP_MERKLE_LOG="${ARTIFACTS_DIR}/drop-merkle.log"
+POST_DROP_UNWIND_LOG="${ARTIFACTS_DIR}/post-drop-unwind.log"
+POST_DROP_UNWIND_TRACE_LOG="${ARTIFACTS_DIR}/post-drop-unwind-trace.log"
 
 trap cleanup EXIT
 
@@ -307,12 +317,15 @@ capture_command reth_restart "$RETH_BIN" node \
     --engine.persistence-threshold 10 \
     --engine.deferred-trie-blocks 3 \
     --engine.accept-execution-requests-hash \
-    --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
-    --log.file.directory "$UNWIND_TRACE_DIR" \
-    --log.file.name "$UNWIND_TRACE_LOG_NAME" \
-    --log.file.filter trace \
-    --log.file.max-files 1 \
+    --log.stdout.filter trace \
     --color never
+
+capture_command reth_stage_drop_merkle "$RETH_BIN" stage drop \
+    --datadir "$DATADIR" \
+    --chain "$CHAIN" \
+    --log.stdout.filter info \
+    --color never \
+    merkle
 
 restore_snapshot() {
     local parent_dir
@@ -368,8 +381,8 @@ start_node() {
 
 start_unwind_node() {
     local log_file="$1"
+    local trace_log="$2"
 
-    mkdir -p "$UNWIND_TRACE_DIR"
     "$RETH_BIN" node \
         --datadir "$DATADIR" \
         --chain "$CHAIN" \
@@ -380,13 +393,9 @@ start_unwind_node() {
         --engine.persistence-threshold 10 \
         --engine.deferred-trie-blocks 3 \
         --engine.accept-execution-requests-hash \
-        --log.stdout.filter 'info,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug' \
-        --log.file.directory "$UNWIND_TRACE_DIR" \
-        --log.file.name "$UNWIND_TRACE_LOG_NAME" \
-        --log.file.filter trace \
-        --log.file.max-files 1 \
+        --log.stdout.filter trace \
         --color never \
-        >"$log_file" 2>&1 &
+        > >(tee "$trace_log" >"$log_file") 2>&1 &
     echo $!
 }
 
@@ -493,6 +502,51 @@ stop_bench() {
 
 remove_stale_locks() {
     rm -f "$DATADIR/db/lock" "$DATADIR/static_files/lock" "$DATADIR/rocksdb/LOCK"
+}
+
+stop_restart_node() {
+    if [[ -n "$NODE2_PID" ]] && kill -0 "$NODE2_PID" 2>/dev/null; then
+        stop_pid "$NODE2_PID" TERM "reth restart node"
+        if ! wait_for_pid_exit "$NODE2_PID" 30; then
+            stop_pid "$NODE2_PID" KILL "reth restart node"
+        fi
+    fi
+
+    if [[ -n "$NODE2_PID" ]]; then
+        wait "$NODE2_PID" 2>/dev/null || true
+    fi
+
+    NODE2_PID=""
+}
+
+extract_unwind_target() {
+    local log_file="$1"
+
+    sed -n 's/.*unwind_target=Unwind(\([0-9]\+\)).*/\1/p' "$log_file" | head -n1
+}
+
+run_drop_merkle() {
+    log "Dropping the Merkle stage before the targeted unwind rerun"
+    "$RETH_BIN" stage drop \
+        --datadir "$DATADIR" \
+        --chain "$CHAIN" \
+        --log.stdout.filter info \
+        --color never \
+        merkle \
+        >"$DROP_MERKLE_LOG" 2>&1
+}
+
+run_post_drop_unwind() {
+    local target="$1"
+
+    log "Re-running unwind with trace logs piped to ${POST_DROP_UNWIND_TRACE_LOG}"
+    "$RETH_BIN" stage unwind \
+        --datadir "$DATADIR" \
+        --chain "$CHAIN" \
+        --log.stdout.filter trace \
+        --color never \
+        to-block "$target" \
+        > >(tee "$POST_DROP_UNWIND_TRACE_LOG" >"$POST_DROP_UNWIND_LOG") 2>&1
 }
 
 classify_restart() {
@@ -613,7 +667,44 @@ stop_bench
 remove_stale_locks
 
 log "Restarting reth to classify unwind behavior"
-NODE2_PID=$(start_unwind_node "$NODE2_LOG")
+NODE2_PID=$(start_unwind_node "$NODE2_LOG" "$RESTART_TRACE_LOG")
 classify_restart "$NODE2_PID" "$NODE2_LOG" "$RESTART_TIMEOUT" || exit 2
+
+FAILED_UNWIND_TARGET=$(extract_unwind_target "$NODE2_LOG" || true)
+if [[ -n "$FAILED_UNWIND_TARGET" ]]; then
+    printf '%s\n' "$FAILED_UNWIND_TARGET" >"${ARTIFACTS_DIR}/failed_unwind_target.txt"
+fi
+
+stop_restart_node
+remove_stale_locks
+
+if [[ "$RESULT" == "unwind_failed" || "$RESULT" == "unwind_succeeded" ]]; then
+    if [[ -z "$FAILED_UNWIND_TARGET" ]]; then
+        log "Failed to extract unwind_target from ${NODE2_LOG}"
+        exit 2
+    fi
+
+    capture_command reth_stage_unwind "$RETH_BIN" stage unwind \
+        --datadir "$DATADIR" \
+        --chain "$CHAIN" \
+        --log.stdout.filter trace \
+        --color never \
+        to-block "$FAILED_UNWIND_TARGET"
+
+    if ! run_drop_merkle; then
+        DROP_MERKLE_RESULT="failed"
+        exit 2
+    fi
+    DROP_MERKLE_RESULT="ok"
+
+    if ! run_post_drop_unwind "$FAILED_UNWIND_TARGET"; then
+        POST_DROP_UNWIND_RESULT="failed"
+        exit 2
+    fi
+    POST_DROP_UNWIND_RESULT="ok"
+else
+    DROP_MERKLE_RESULT="skipped_no_unwind_target"
+    POST_DROP_UNWIND_RESULT="skipped_no_unwind_target"
+fi
 
 log "Restart result: ${RESULT}"
