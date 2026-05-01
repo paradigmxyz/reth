@@ -31,6 +31,16 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         bodies: Vec<(BlockNumber, Option<&Body>)>,
     ) -> ProviderResult<()>;
 
+    /// Writes a single block body to the storage.
+    fn write_block_body(
+        &self,
+        provider: &Provider,
+        block_number: BlockNumber,
+        body: Option<&Body>,
+    ) -> ProviderResult<()> {
+        self.write_block_bodies(provider, vec![(block_number, body)])
+    }
+
     /// Removes all block bodies above the given block number from the database.
     fn remove_block_bodies_above(
         &self,
@@ -128,6 +138,32 @@ where
         Ok(())
     }
 
+    fn write_block_body(
+        &self,
+        provider: &Provider,
+        block_number: u64,
+        body: Option<&alloy_consensus::BlockBody<T, H>>,
+    ) -> ProviderResult<()> {
+        let Some(body) = body else { return Ok(()) };
+
+        let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
+        let mut withdrawals_cursor =
+            provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?;
+
+        if !body.ommers.is_empty() {
+            ommers_cursor
+                .append(block_number, &StoredBlockOmmers { ommers: body.ommers.clone() })?;
+        }
+
+        if let Some(withdrawals) = body.withdrawals.clone() &&
+            !withdrawals.is_empty()
+        {
+            withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
+        }
+
+        Ok(())
+    }
+
     fn remove_block_bodies_above(
         &self,
         provider: &Provider,
@@ -216,6 +252,15 @@ where
         _bodies: Vec<(u64, Option<&alloy_consensus::BlockBody<T, H>>)>,
     ) -> ProviderResult<()> {
         // noop
+        Ok(())
+    }
+
+    fn write_block_body(
+        &self,
+        _provider: &Provider,
+        _block_number: u64,
+        _body: Option<&alloy_consensus::BlockBody<T, H>>,
+    ) -> ProviderResult<()> {
         Ok(())
     }
 

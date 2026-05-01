@@ -833,7 +833,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
 
         // MDBX: Ommers/Withdrawals
-        self.storage.writer().write_block_bodies(self, vec![(block_number, Some(body))])?;
+        self.storage.writer().write_block_body(self, block_number, Some(body))?;
 
         Ok(())
     }
