@@ -8,11 +8,14 @@
 pub(crate) use reth_engine_primitives::BigBlockData;
 
 use crate::{
-    evm::{BbBlockExecutorFactory, BbEvmPlan},
+    evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan},
     BigBlockMap,
 };
 use alloy_consensus::Header;
-use alloy_evm::eth::EthBlockExecutionCtx;
+use alloy_evm::{
+    eth::{spec::EthExecutorSpec, EthBlockExecutionCtx},
+    EthEvmFactory,
+};
 use alloy_primitives::B256;
 use alloy_rpc_types::engine::ExecutionData;
 use core::convert::Infallible;
@@ -20,17 +23,14 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, ExecutableTxIterator,
-    NextBlockEnvAttributes,
+    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, EvmEnvFor, ExecutableTxIterator,
+    ExecutionCtxFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::primitives::hardfork::SpecId;
 use std::sync::Arc;
 use tracing::debug;
-
-use alloy_evm::{eth::spec::EthExecutorSpec, EthEvmFactory};
-use reth_evm::{EvmEnvFor, ExecutionCtxFor};
 
 // ---------------------------------------------------------------------------
 // Execution plan types
@@ -55,7 +55,7 @@ pub(crate) struct BigBlockSegment {
 ///
 /// Wraps [`EthEvmConfig`] and a shared [`BigBlockMap`]. When a big-block
 /// payload is received, the plan is staged on the [`BbBlockExecutorFactory`]
-/// and consumed when the executor is created. Block hashes for inter-segment
+/// and cloned when executors are created. Block hashes for inter-segment
 /// BLOCKHASH resolution are reseeded into `State::block_hashes` at each
 /// segment boundary via a [`BlockHashSeeder`](crate::evm::BlockHashSeeder)
 /// callback injected in [`ConfigureEvm::create_executor`].
@@ -106,6 +106,10 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
     }
 }
 
+fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
+    state.bal_state.bal_index()
+}
+
 // ---------------------------------------------------------------------------
 // ConfigureEvm
 // ---------------------------------------------------------------------------
@@ -144,6 +148,12 @@ where
         &self,
         block: &'a SealedBlock<reth_ethereum_primitives::Block>,
     ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
+        if let Some(plan) = self.plan_for_payload_hash(&block.hash()) {
+            self.executor_factory.stage_plan(plan);
+        } else {
+            self.executor_factory.clear_staged_plan();
+        }
+
         self.inner.context_for_block(block)
     }
 
@@ -159,7 +169,7 @@ where
         &'a self,
         evm: reth_evm::EvmFor<Self, &'a mut revm::database::State<DB>, I>,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> impl alloy_evm::block::BlockExecutorFor<
+    ) -> alloy_evm::block::BlockExecutorFor<
         'a,
         Self::BlockExecutorFactory,
         &'a mut revm::database::State<DB>,
@@ -169,15 +179,16 @@ where
         DB: Database,
         I: reth_evm::InspectorFor<Self, &'a mut revm::database::State<DB>> + 'a,
     {
-        // Use create_executor_with_seeder to inject a concrete seeder that
-        // can reseed State::block_hashes at segment boundaries. The seeder
-        // is a function pointer that knows the concrete State<DB> type,
-        // allowing the generic BbBlockExecutor to reseed without additional
-        // trait bounds on DB.
+        let bal_index_reader: Option<BalIndexReader<&'a mut revm::database::State<DB>>> =
+            Some(read_bal_index::<DB>);
+
+        // Inject concrete function pointers that know the `State<DB>` type so
+        // the generic executor can reseed block hashes and read `bal_index`.
         self.executor_factory.create_executor_with_seeder(
             evm,
             ctx,
             Some(seed_state_block_hashes::<DB>),
+            bal_index_reader,
         )
     }
 }
@@ -214,6 +225,7 @@ where
 
             Ok(env)
         } else {
+            self.executor_factory.clear_staged_plan();
             self.inner.evm_env_for_payload(payload)
         }
     }
@@ -248,10 +260,12 @@ where
     /// In practice, this is called from `evm_env_for_payload` in the
     /// engine pipeline.
     pub fn stage_plan_for_payload(&self, payload_hash: &B256) {
-        let bb = match self.pending.lock().unwrap().remove(payload_hash) {
-            Some(bb) => bb,
-            None => return,
-        };
+        let Some(plan) = self.plan_for_payload_hash(payload_hash) else { return };
+        self.executor_factory.stage_plan(plan);
+    }
+
+    fn plan_for_payload_hash(&self, payload_hash: &B256) -> Option<BbEvmPlan> {
+        let bb = self.pending.lock().unwrap().remove(payload_hash)?;
 
         let segments: Vec<_> = bb
             .env_switches
@@ -287,6 +301,6 @@ where
 
         plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
 
-        self.executor_factory.stage_plan(plan);
+        Some(plan)
     }
 }

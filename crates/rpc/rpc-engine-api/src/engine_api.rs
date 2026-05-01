@@ -3,11 +3,11 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, B128, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -953,6 +953,35 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
+    fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        // Spec requires returning `null` if syncing.
+        if (*self.inner.is_syncing)() {
+            return Ok(None)
+        }
+
+        self.inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
+            .map(Some)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
     /// Metered version of `get_blobs_v2`.
     pub fn get_blobs_v2_metered(
         &self,
@@ -998,6 +1027,28 @@ where
         let start = Instant::now();
         let res = Self::get_blobs_v3(self, versioned_hashes);
         self.inner.metrics.latency.get_blobs_v3.record(start.elapsed());
+
+        if let Ok(Some(blobs)) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = hashes_len - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
+    }
+
+    /// Metered version of `get_blobs_v4`.
+    pub fn get_blobs_v4_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let hashes_len = versioned_hashes.len();
+        let start = Instant::now();
+        let res = Self::get_blobs_v4(self, versioned_hashes, indices_bitarray);
+        self.inner.metrics.latency.get_blobs_v4.record(start.elapsed());
 
         if let Ok(Some(blobs)) = &res {
             let blobs_found = blobs.iter().flatten().count();
@@ -1375,6 +1426,15 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
+
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV4");
+        Ok(self.get_blobs_v4_metered(versioned_hashes, indices_bitarray)?)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1657,6 +1717,37 @@ mod tests {
         );
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
+        assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn get_blobs_v4_returns_null_when_syncing() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, _engine_rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            TestNetworkInfo { syncing: true },
+        );
+
+        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128));
         assert_matches!(res, Ok(None));
     }
 

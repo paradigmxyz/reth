@@ -50,7 +50,7 @@ RUN if [ -n "$RUSTFLAGS" ]; then \
 RUN cp /app/target/$BUILD_PROFILE/reth /app/reth
 
 # Use Ubuntu as the release image
-FROM ubuntu AS runtime
+FROM ubuntu:24.04 AS runtime
 WORKDIR /app
 
 # Copy reth over from the build stage

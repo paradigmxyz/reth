@@ -21,6 +21,7 @@ use alloy_rpc_types_engine::{
 };
 use clap::Parser;
 use eyre::Context;
+use futures::{stream, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
@@ -29,7 +30,10 @@ use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::proofs;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 use tracing::{info, warn};
 
 use crate::bench::helpers::fetch_block_access_list;
@@ -267,6 +271,15 @@ pub struct Command {
     /// the flattened BAL on the stored payload.
     #[arg(long, default_value_t = false)]
     bal: bool,
+
+    /// Maximum number of in-flight RPC fetches to keep buffered ahead of the merger.
+    ///
+    /// Each entry is one full per-block fetch (block + receipts, plus BAL when `--bal` is
+    /// set). Larger values absorb RPC latency at the cost of more concurrent connections
+    /// and memory; the buffer persists across `--num-big-blocks` so prefetching continues
+    /// across big-block boundaries.
+    #[arg(long, value_name = "PREFETCH_BUFFER", default_value_t = 32)]
+    prefetch_buffer: usize,
 }
 
 impl Command {
@@ -319,13 +332,27 @@ impl Command {
         }
         let mut prev_big_block_header: Option<PrevBigBlockHeader> = None;
 
-        // Track the next block to fetch across big blocks so they don't overlap.
+        // Persistent prefetch stream: keeps `prefetch_buffer` per-block fetches in flight
+        // ahead of the merger across all big blocks. Each item is a fully materialized
+        // `FetchedBlock` (or `None` once the chain tip is reached on this fetch).
+        let prefetch_buffer = self.prefetch_buffer.max(1);
+        let bal_enabled = self.bal;
+        let block_stream = stream::iter(self.from_block..)
+            .map(|block_number| {
+                let provider = provider.clone();
+                async move { fetch_one_block(provider, block_number, bal_enabled).await }
+            })
+            .buffered(prefetch_buffer);
+        let mut block_stream = Box::pin(block_stream);
+
+        // Track the next block number we expect from the stream (purely for logging /
+        // big-block range bookkeeping; the stream produces blocks in `from_block..` order).
         let mut next_block = self.from_block;
 
         for big_block_idx in 0..self.num_big_blocks {
             let range_start = next_block;
 
-            // Fetch consecutive blocks until the gas target is reached.
+            // Drain the prefetch stream until the gas target is reached for this big block.
             let mut blocks = Vec::new();
             let mut block_receipts: Vec<Vec<Receipt>> = Vec::new();
             let mut block_access_lists: Vec<Option<BlockAccessList>> = Vec::new();
@@ -334,16 +361,11 @@ impl Command {
             let mut reached_chain_tip = false;
             while accumulated_block_gas < self.target_gas {
                 let block_number = next_block;
-                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Fetching block");
+                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Awaiting prefetched block");
 
-                let fetch_result = tokio::try_join!(
-                    provider.get_block_by_number(block_number.into()).full(),
-                    provider.get_block_receipts(block_number.into()),
-                );
-
-                let (rpc_block, receipts) = match fetch_result {
-                    Ok((Some(block), Some(receipts))) => (block, receipts),
-                    Ok((None, _) | (_, None)) => {
+                let fetched = match block_stream.next().await {
+                    Some(Ok(Some(fetched))) => fetched,
+                    Some(Ok(None)) => {
                         warn!(
                             target: "reth-bench",
                             block_number,
@@ -352,52 +374,16 @@ impl Command {
                         reached_chain_tip = true;
                         break;
                     }
-                    Err(e) => return Err(e.into()),
+                    Some(Err(e)) => return Err(e),
+                    // The block-number stream is open-ended; this only fires if the
+                    // upstream `iter(from..)` is somehow exhausted.
+                    None => {
+                        reached_chain_tip = true;
+                        break;
+                    }
                 };
-
-                let block_access_list = if self.bal {
-                    Some(fetch_block_access_list(&provider, block_number).await.wrap_err_with(
-                        || format!("Failed to fetch BAL for block {block_number}"),
-                    )?)
-                } else {
-                    None
-                };
-
-                // Convert RPC receipts to consensus receipts
-                let consensus_receipts: Vec<Receipt> = receipts
-                    .iter()
-                    .map(|r| {
-                        let inner = &r.inner.inner.inner;
-                        let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
-                        Receipt {
-                            tx_type,
-                            success: inner.receipt.status.coerce_status(),
-                            cumulative_gas_used: inner.receipt.cumulative_gas_used,
-                            logs: inner
-                                .receipt
-                                .logs
-                                .iter()
-                                .map(|log| alloy_primitives::Log {
-                                    address: log.inner.address,
-                                    data: log.inner.data.clone(),
-                                })
-                                .collect(),
-                        }
-                    })
-                    .collect();
-
-                // Convert to consensus block
-                let block = rpc_block
-                    .into_inner()
-                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
-                        tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
-                    })?
-                    .into_consensus();
-
-                // Convert to ExecutionData
-                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-                let execution_data = ExecutionData { payload, sidecar };
+                let FetchedBlock { execution_data, consensus_receipts, block_access_list } =
+                    fetched;
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
                 let block_blob_gas =
@@ -671,6 +657,79 @@ impl Command {
     }
 }
 
+/// One fully-materialized block fetched by the prefetcher.
+struct FetchedBlock {
+    /// Execution payload with sidecar derived from the RPC block.
+    execution_data: ExecutionData,
+    /// Consensus-format receipts (`cumulative_gas_used` is still per-block, callers offset
+    /// it when merging).
+    consensus_receipts: Vec<Receipt>,
+    /// `eth_getBlockAccessListByBlockNumber` result when `--bal` is enabled.
+    block_access_list: Option<BlockAccessList>,
+}
+
+/// Fetches one block + receipts (and optionally its BAL) from the RPC. Returns `Ok(None)`
+/// when the block doesn't exist yet (chain-tip reached).
+async fn fetch_one_block(
+    provider: RootProvider<AnyNetwork>,
+    block_number: u64,
+    bal_enabled: bool,
+) -> eyre::Result<Option<FetchedBlock>> {
+    let (rpc_block, receipts) = tokio::try_join!(
+        provider.get_block_by_number(block_number.into()).full(),
+        provider.get_block_receipts(block_number.into()),
+    )?;
+    let (rpc_block, receipts) = match (rpc_block, receipts) {
+        (Some(b), Some(r)) => (b, r),
+        _ => return Ok(None),
+    };
+
+    let block_access_list = if bal_enabled {
+        Some(
+            fetch_block_access_list(&provider, block_number)
+                .await
+                .wrap_err_with(|| format!("Failed to fetch BAL for block {block_number}"))?,
+        )
+    } else {
+        None
+    };
+
+    let consensus_receipts: Vec<Receipt> = receipts
+        .iter()
+        .map(|r| {
+            let inner = &r.inner.inner.inner;
+            let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
+            Receipt {
+                tx_type,
+                success: inner.receipt.status.coerce_status(),
+                cumulative_gas_used: inner.receipt.cumulative_gas_used,
+                logs: inner
+                    .receipt
+                    .logs
+                    .iter()
+                    .map(|log| alloy_primitives::Log {
+                        address: log.inner.address,
+                        data: log.inner.data.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    let block = rpc_block
+        .into_inner()
+        .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+        .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+            tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+        })?
+        .into_consensus();
+
+    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+    let execution_data = ExecutionData { payload, sidecar };
+
+    Ok(Some(FetchedBlock { execution_data, consensus_receipts, block_access_list }))
+}
+
 fn merge_block_access_list(
     merged: &mut BlockAccessList,
     incoming: BlockAccessList,
@@ -717,6 +776,17 @@ fn merge_account_changes(existing: &mut AccountChanges, incoming: AccountChanges
     existing.balance_changes.extend(incoming.balance_changes);
     existing.nonce_changes.extend(incoming.nonce_changes);
     existing.code_changes.extend(incoming.code_changes);
+
+    // EIP-7928 invariant: a slot must appear in either storage_changes or storage_reads,
+    // not both. Per-block BALs respect this, but merging blocks can produce a slot
+    // that is read in one block and changed in another. Without this normalization,
+    // an empty read entry can shadow the real writes during BAL deserialization,
+    // making reads of that slot fall through to stale snapshot state.
+    let written: HashSet<_> =
+        existing.storage_changes.iter().map(|slot_changes| slot_changes.slot).collect();
+    existing.storage_reads.retain(|slot| !written.contains(slot));
+    let mut seen = HashSet::with_capacity(existing.storage_reads.len());
+    existing.storage_reads.retain(|slot| seen.insert(*slot));
 }
 
 fn merge_slot_changes(existing: &mut Vec<SlotChanges>, incoming: Vec<SlotChanges>) {
@@ -835,5 +905,55 @@ mod tests {
         let other = &merged[1];
         assert_eq!(other.address, Address::repeat_byte(0x22));
         assert_eq!(other.storage_changes[0].changes[0].block_access_index, 3);
+    }
+
+    #[test]
+    fn merge_account_changes_normalizes_storage_reads_after_cross_block_merge() {
+        let address = Address::repeat_byte(0x33);
+        const A: U256 = U256::from_limbs([1, 0, 0, 0]);
+        const B: U256 = U256::from_limbs([2, 0, 0, 0]);
+        const C: U256 = U256::from_limbs([3, 0, 0, 0]);
+        const D: U256 = U256::from_limbs([4, 0, 0, 0]);
+
+        // Each AccountChanges value is valid on its own: storage slots only appear in
+        // either reads or changes. The invalid read/change overlap is introduced when
+        // these per-block BAL entries are merged for a standalone big block.
+        let mut existing = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges::new(A, vec![StorageChange::new(0, U256::from(10))])],
+            storage_reads: vec![B, C],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        // B is read before it is written by the incoming block, and A is written before
+        // it appears as a read in the incoming block. C is read in both blocks, so the
+        // merge should also dedupe it. D remains read-only.
+        let incoming = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges::new(B, vec![StorageChange::new(1, U256::from(20))])],
+            storage_reads: vec![A, C, D],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        merge_account_changes(&mut existing, incoming);
+
+        // Written slots remain represented by storage_changes, while storage_reads only
+        // keeps unique read-only slots in first-seen order.
+        assert_eq!(
+            existing
+                .storage_changes
+                .iter()
+                .map(|slot_changes| slot_changes.slot)
+                .collect::<Vec<_>>(),
+            vec![A, B]
+        );
+        assert_eq!(existing.storage_reads, vec![C, D]);
+        assert!(existing.storage_reads.iter().all(|read_slot| {
+            !existing.storage_changes.iter().any(|slot_changes| slot_changes.slot == *read_slot)
+        }));
     }
 }

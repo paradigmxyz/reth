@@ -199,7 +199,7 @@ impl EnvironmentFlags {
             flags |= ffi::MDBX_LIFORECLAIM;
         }
 
-        flags |= ffi::MDBX_NOTLS;
+        flags |= ffi::MDBX_NOSTICKYTHREADS;
 
         flags
     }

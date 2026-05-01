@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
+    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -269,9 +269,16 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// - [`StaticFileSegment::Transactions`](reth_static_file_types::StaticFileSegment::Transactions)
     ///   -> [`StageId::Bodies`]
     ///
+    /// This is a legacy storage.v1 backfill step. Storage.v2 writes directly to static files and
+    /// `RocksDB`, so there is no MDBX -> static-file migration to perform.
+    ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
     pub fn move_to_static_files(&self) -> RethResult<()> {
+        if self.provider_factory.cached_storage_settings().is_v2() {
+            return Ok(())
+        }
+
         // Copies data from database to static files
         let lowest_static_file_height =
             self.static_file_producer.lock().copy_to_static_files()?.min_block_num();

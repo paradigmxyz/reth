@@ -37,6 +37,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getBlobsV1",
     "engine_getBlobsV2",
     "engine_getBlobsV3",
+    "engine_getBlobsV4",
 ];
 
 /// Engine API capabilities set.
@@ -218,6 +219,7 @@ mod tests {
 
         assert!(!is_critical_method("engine_getBlobsV1"));
         assert!(!is_critical_method("engine_getBlobsV3"));
+        assert!(!is_critical_method("engine_getBlobsV4"));
         assert!(!is_critical_method("engine_getPayloadBodiesByHashV1"));
         assert!(!is_critical_method("engine_getPayloadBodiesByRangeV1"));
         assert!(!is_critical_method("engine_getClientVersionV1"));

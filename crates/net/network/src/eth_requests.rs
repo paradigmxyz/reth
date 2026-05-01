@@ -46,6 +46,11 @@ pub const MAX_HEADERS_SERVE: usize = 1024;
 /// `SOFT_RESPONSE_LIMIT`.
 pub const MAX_BODIES_SERVE: usize = 1024;
 
+/// Maximum number of block access lists to serve.
+///
+/// Used to limit lookups.
+pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
+
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
@@ -323,9 +328,11 @@ where
     fn on_block_access_lists_request(
         &self,
         _peer_id: PeerId,
-        request: GetBlockAccessLists,
+        mut request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
+        request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists = self
             .client
