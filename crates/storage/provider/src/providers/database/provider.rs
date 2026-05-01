@@ -1405,17 +1405,29 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     where
         P: Copy,
         T: Table<Value = BlockNumberList>,
+        T::Key: Ord,
     {
         // This function cannot be used with DUPSORT tables because `upsert` on DUPSORT tables
         // will append duplicate entries instead of updating existing ones, causing data corruption.
         assert!(!T::DUPSORT, "append_history_index cannot be used with DUPSORT tables");
 
         let mut cursor = self.tx.cursor_write::<T>()?;
+        let mut current = None;
 
         for (partial_key, indices) in index_updates {
             let last_key = sharded_key_factory(partial_key, u64::MAX);
-            let mut last_shard = cursor
-                .seek_exact(last_key.clone())?
+            let entry = match current.take() {
+                Some((key, list)) if key <= last_key => {
+                    let mut entry = Some((key, list));
+                    while entry.as_ref().is_some_and(|(key, _)| *key < last_key) {
+                        entry = cursor.next()?;
+                    }
+                    entry
+                }
+                _ => cursor.seek(last_key.clone())?,
+            };
+            let mut last_shard = entry
+                .filter(|(key, _)| *key == last_key)
                 .map(|(_, list)| list)
                 .unwrap_or_else(BlockNumberList::empty);
 
@@ -1424,6 +1436,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             // fast path: all indices fit in one shard
             if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
                 cursor.upsert(last_key, &last_shard)?;
+                current = cursor.current()?;
                 continue;
             }
 
@@ -1442,6 +1455,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
                 cursor.upsert(sharded_key_factory(partial_key, highest_block_number), &shard)?;
             }
+
+            current = cursor.current()?;
         }
 
         Ok(())
@@ -5258,6 +5273,57 @@ mod tests {
     #[test]
     fn test_save_blocks_v2_table_assertions() {
         run_save_blocks_and_verify(StorageMode::V2);
+    }
+
+    #[test]
+    fn insert_account_history_index_walks_sorted_keys_forward() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let shard_len = sharded_key::NUM_OF_INDICES_IN_SHARD as u64;
+        let address_a = Address::with_last_byte(0x0a);
+        let address_b = Address::with_last_byte(0x0b);
+
+        provider_rw
+            .insert_account_history_index([
+                (address_a, vec![1, 2]),
+                (address_b, (10..10 + shard_len + 1).collect::<Vec<_>>()),
+            ])
+            .unwrap();
+        provider_rw
+            .insert_account_history_index([
+                (address_a, vec![3, 4]),
+                (address_b, vec![10 + shard_len + 1, 10 + shard_len + 2]),
+            ])
+            .unwrap();
+
+        let mut cursor = provider_rw.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
+        let address_a_shards = cursor
+            .walk_range(ShardedKey::new(address_a, 0)..=ShardedKey::last(address_a))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(address_a_shards.len(), 1);
+        assert_eq!(address_a_shards[0].0, ShardedKey::last(address_a));
+        assert_eq!(address_a_shards[0].1.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+
+        let mut cursor = provider_rw.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
+        let address_b_shards = cursor
+            .walk_range(ShardedKey::new(address_b, 0)..=ShardedKey::last(address_b))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(address_b_shards.len(), 2);
+        assert_eq!(address_b_shards[0].0, ShardedKey::new(address_b, 10 + shard_len - 1));
+        assert_eq!(
+            address_b_shards[0].1.iter().collect::<Vec<_>>(),
+            (10..10 + shard_len).collect::<Vec<_>>()
+        );
+        assert_eq!(address_b_shards[1].0, ShardedKey::last(address_b));
+        assert_eq!(
+            address_b_shards[1].1.iter().collect::<Vec<_>>(),
+            vec![10 + shard_len, 10 + shard_len + 1, 10 + shard_len + 2]
+        );
     }
 
     #[test]
