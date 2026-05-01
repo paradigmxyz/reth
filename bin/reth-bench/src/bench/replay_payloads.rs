@@ -27,7 +27,6 @@ use reth_cli_runner::CliContext;
 use reth_engine_primitives::BigBlockData;
 use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::WaitForPersistence;
-use reth_rpc_api::RethNewPayloadInput;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -262,13 +261,6 @@ impl Command {
             );
 
             let (version, params) = if self.reth_new_payload {
-                let big_block_data_param = if payload.big_block_data.env_switches.is_empty() &&
-                    payload.big_block_data.prior_block_hashes.is_empty()
-                {
-                    None
-                } else {
-                    Some(payload.big_block_data.clone())
-                };
                 let wait_for_persistence = self
                     .wait_for_persistence
                     .unwrap_or(WaitForPersistence::Never)
@@ -302,13 +294,20 @@ impl Command {
                     execution_data.payload.as_v1_mut().block_hash = block_hash;
                 }
 
+                let execution_data = if payload.big_block_data.env_switches.is_empty() &&
+                    payload.big_block_data.prior_block_hashes.is_empty()
+                {
+                    serde_json::to_value(execution_data)?
+                } else {
+                    serde_json::to_value(&payload.big_block_data)?
+                };
+
                 (
                     None,
                     serde_json::to_value((
-                        RethNewPayloadInput::ExecutionData(execution_data),
+                        execution_data,
                         wait_for_persistence,
                         self.no_wait_for_caches.then_some(false),
-                        big_block_data_param,
                     ))?,
                 )
             } else {
