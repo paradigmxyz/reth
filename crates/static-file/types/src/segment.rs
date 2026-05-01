@@ -61,6 +61,11 @@ pub enum StaticFileSegment {
     /// Storage changeset static files append block-by-block changesets sorted by address and
     /// storage slot.
     StorageChangeSets,
+    /// Static File segment responsible for bytecode blobs.
+    ///
+    /// Bytecode static files are indexed by monotonically increasing bytecode IDs. MDBX keeps the
+    /// hash-to-ID index, while this segment stores the bytecode payloads by ID.
+    Bytecodes,
 }
 
 impl StaticFileSegment {
@@ -78,6 +83,7 @@ impl StaticFileSegment {
             Self::TransactionSenders => "transaction-senders",
             Self::AccountChangeSets => "account-change-sets",
             Self::StorageChangeSets => "storage-change-sets",
+            Self::Bytecodes => "bytecodes",
         }
     }
 
@@ -92,6 +98,7 @@ impl StaticFileSegment {
             Self::TransactionSenders => "tx-senders",
             Self::AccountChangeSets => "account-changes",
             Self::StorageChangeSets => "storage-changes",
+            Self::Bytecodes => "bytecodes",
         }
     }
 
@@ -105,6 +112,7 @@ impl StaticFileSegment {
             Self::TransactionSenders,
             Self::AccountChangeSets,
             Self::StorageChangeSets,
+            Self::Bytecodes,
         ]
         .into_iter()
     }
@@ -122,7 +130,8 @@ impl StaticFileSegment {
             Self::Receipts |
             Self::TransactionSenders |
             Self::AccountChangeSets |
-            Self::StorageChangeSets => 1,
+            Self::StorageChangeSets |
+            Self::Bytecodes => 1,
         }
     }
 
@@ -184,7 +193,9 @@ impl StaticFileSegment {
     pub const fn is_tx_based(&self) -> bool {
         match self {
             Self::Receipts | Self::Transactions | Self::TransactionSenders => true,
-            Self::Headers | Self::AccountChangeSets | Self::StorageChangeSets => false,
+            Self::Headers | Self::AccountChangeSets | Self::StorageChangeSets | Self::Bytecodes => {
+                false
+            }
         }
     }
 
@@ -192,14 +203,18 @@ impl StaticFileSegment {
     pub const fn is_change_based(&self) -> bool {
         match self {
             Self::AccountChangeSets | Self::StorageChangeSets => true,
-            Self::Receipts | Self::Transactions | Self::Headers | Self::TransactionSenders => false,
+            Self::Receipts |
+            Self::Transactions |
+            Self::Headers |
+            Self::TransactionSenders |
+            Self::Bytecodes => false,
         }
     }
 
     /// Returns `true` if a segment row is linked to a block.
     pub const fn is_block_based(&self) -> bool {
         match self {
-            Self::Headers => true,
+            Self::Headers | Self::Bytecodes => true,
             Self::Receipts |
             Self::Transactions |
             Self::TransactionSenders |
@@ -222,6 +237,7 @@ impl StaticFileSegment {
             Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {
                 StageId::Execution
             }
+            Self::Bytecodes => StageId::Execution,
             Self::TransactionSenders => StageId::SenderRecovery,
         }
     }
@@ -715,6 +731,12 @@ mod tests {
                 None,
             ),
             (
+                StaticFileSegment::Bytecodes,
+                1_123_233..=11_223_233,
+                "static_file_bytecodes_1123233_11223233",
+                None,
+            ),
+            (
                 StaticFileSegment::Headers,
                 2..=30,
                 "static_file_headers_2_30_none_lz4",
@@ -804,6 +826,13 @@ mod tests {
                 segment: StaticFileSegment::StorageChangeSets,
                 changeset_offsets_len: 100,
             },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: None,
+                segment: StaticFileSegment::Bytecodes,
+                changeset_offsets_len: 0,
+            },
         ];
         // Check that we test all segments
         assert_eq!(
@@ -838,6 +867,7 @@ mod tests {
                 StaticFileSegment::TransactionSenders => "transaction-senders",
                 StaticFileSegment::AccountChangeSets => "account-change-sets",
                 StaticFileSegment::StorageChangeSets => "storage-change-sets",
+                StaticFileSegment::Bytecodes => "bytecodes",
             };
             assert_eq!(static_str, expected_str);
         }
@@ -857,6 +887,7 @@ mod tests {
                 StaticFileSegment::TransactionSenders => "TransactionSenders",
                 StaticFileSegment::AccountChangeSets => "AccountChangeSets",
                 StaticFileSegment::StorageChangeSets => "StorageChangeSets",
+                StaticFileSegment::Bytecodes => "Bytecodes",
             };
             assert_eq!(ser, format!("\"{expected_str}\""));
         }

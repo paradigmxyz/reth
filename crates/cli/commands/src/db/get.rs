@@ -2,8 +2,8 @@ use alloy_primitives::{hex, Address, BlockHash, B256};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
-        ReceiptMask, TransactionMask, TransactionSenderMask,
+        AccountChangesetMask, BytecodeMask, ColumnSelectorOne, ColumnSelectorTwo,
+        HeaderWithHashMask, ReceiptMask, TransactionMask, TransactionSenderMask,
     },
     RawDupSort,
 };
@@ -207,6 +207,9 @@ impl Command {
                     StaticFileSegment::StorageChangeSets => {
                         unreachable!("storage changesets handled above");
                     }
+                    StaticFileSegment::Bytecodes => {
+                        (serde_json::from_str::<u64>(&key)?, None, BytecodeMask::MASK)
+                    }
                 };
 
                 // handle account changesets differently if a subkey is provided.
@@ -284,6 +287,13 @@ impl Command {
                                 }
                                 StaticFileSegment::StorageChangeSets => {
                                     unreachable!("storage changeset static files are special cased before this match")
+                                }
+                                StaticFileSegment::Bytecodes => {
+                                    let bytecode =
+                                        <<tables::Bytecodes as Table>::Value>::decompress(
+                                            content[0].as_slice(),
+                                        )?;
+                                    println!("{}", serde_json::to_string_pretty(&bytecode)?);
                                 }
                             }
                         }

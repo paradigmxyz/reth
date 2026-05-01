@@ -71,6 +71,7 @@ impl StaticFilesArgs {
                     .blocks_per_file_storage_change_sets
                     .or(minimal_blocks_per_file)
                     .or(config.blocks_per_file.storage_change_sets),
+                bytecodes: minimal_blocks_per_file.or(config.blocks_per_file.bytecodes),
             },
         }
     }

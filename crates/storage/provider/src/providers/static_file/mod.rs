@@ -91,20 +91,21 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{Address, BlockHash, Signature, TxNumber, B256, U160, U256};
+    use alloy_primitives::{Address, BlockHash, Bytes, Signature, TxNumber, B256, U160, U256};
     use rand::seq::SliceRandom;
     use reth_db::{
         models::{AccountBeforeTx, StorageBeforeTx},
         test_utils::create_test_static_files_dir,
     };
-    use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
+    use reth_db_api::{tables, transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, Bytecode};
     use reth_static_file_types::{
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
     use reth_storage_api::{
-        ChangeSetReader, ReceiptProvider, StorageChangeSetReader, TransactionsProvider,
+        BytecodeReader, ChangeSetReader, ReceiptProvider, StorageChangeSetReader,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
@@ -182,6 +183,57 @@ mod tests {
                 assert_eq!(header, jar_provider.header_by_number(header.number).unwrap().unwrap());
             }
         }
+    }
+
+    #[test]
+    fn test_bytecodes_static_file_by_id() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .with_blocks_per_file(2)
+                .build()
+                .expect("static file provider");
+
+        let bytecode0 = Bytecode::new_raw(Bytes::from(vec![0x60, 0x00]));
+        let bytecode1 = Bytecode::new_raw(Bytes::from(vec![0x60, 0x01]));
+        let bytecode2 = Bytecode::new_raw(Bytes::from(vec![0x60, 0x02]));
+
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::Bytecodes).unwrap();
+            writer.append_bytecode(0, &bytecode0).unwrap();
+            writer.append_bytecode(1, &bytecode1).unwrap();
+            writer.append_bytecode(2, &bytecode2).unwrap();
+            writer.commit().unwrap();
+        }
+
+        assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Bytecodes), Some(2));
+        assert_eq!(sf_rw.bytecode_by_id(0).unwrap(), Some(bytecode0));
+        assert_eq!(sf_rw.bytecode_by_id(1).unwrap(), Some(bytecode1));
+        assert_eq!(sf_rw.bytecode_by_id(2).unwrap(), Some(bytecode2));
+        assert_eq!(sf_rw.bytecode_by_id(3).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_state_reads_bytecode_from_static_file_id() {
+        let factory = create_test_provider_factory();
+        let bytecode = Bytecode::new_raw(Bytes::from(vec![0x60, 0x42]));
+        let hash = bytecode.hash_slow();
+
+        {
+            let mut provider_rw = factory.provider_rw().unwrap();
+            {
+                let static_file_provider = provider_rw.static_file_provider();
+                let mut writer =
+                    static_file_provider.latest_writer(StaticFileSegment::Bytecodes).unwrap();
+                writer.append_bytecode(0, &bytecode).unwrap();
+            }
+
+            provider_rw.tx_mut().put::<tables::BytecodeIds>(hash, 0).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.latest().bytecode_by_hash(&hash).unwrap(), Some(bytecode));
     }
 
     #[test]
@@ -352,7 +404,8 @@ mod tests {
                     match segment {
                         StaticFileSegment::Headers |
                         StaticFileSegment::AccountChangeSets |
-                        StaticFileSegment::StorageChangeSets => {
+                        StaticFileSegment::StorageChangeSets |
+                        StaticFileSegment::Bytecodes => {
                             panic!("non tx based segment")
                         }
                         StaticFileSegment::Transactions => {
@@ -471,7 +524,8 @@ mod tests {
             match segment {
                 StaticFileSegment::Headers |
                 StaticFileSegment::AccountChangeSets |
-                StaticFileSegment::StorageChangeSets => {
+                StaticFileSegment::StorageChangeSets |
+                StaticFileSegment::Bytecodes => {
                     panic!("non tx based segment")
                 }
                 StaticFileSegment::Transactions => {
@@ -498,7 +552,8 @@ mod tests {
                 match segment {
                     StaticFileSegment::Headers |
                     StaticFileSegment::AccountChangeSets |
-                    StaticFileSegment::StorageChangeSets => {
+                    StaticFileSegment::StorageChangeSets |
+                    StaticFileSegment::Bytecodes => {
                         panic!("non tx based segment")
                     }
                     StaticFileSegment::Transactions => assert_eyre(

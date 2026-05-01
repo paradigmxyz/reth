@@ -33,8 +33,8 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
-    dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader,
-    SignedTransaction, StorageEntry,
+    dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, Bytecode, RecoveredBlock,
+    SealedHeader, SignedTransaction, StorageEntry,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
@@ -686,6 +686,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .ok_or(StaticFileWriterError::ThreadPanic("storage_changesets"))??;
         }
         Ok(())
+    }
+
+    /// Reads bytecode by static-file bytecode ID.
+    pub fn bytecode_by_id(&self, bytecode_id: u64) -> ProviderResult<Option<Bytecode>> {
+        self.get_maybe_segment_provider(StaticFileSegment::Bytecodes, bytecode_id)?
+            .map(|provider| provider.bytecode_by_id(bytecode_id))
+            .transpose()
+            .map(Option::flatten)
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
@@ -1478,6 +1486,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
                 true
             }
+            StaticFileSegment::Bytecodes => false,
         }
     }
 
@@ -1614,6 +1623,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     highest_block,
                     |key| key.block_number(),
                 ),
+            StaticFileSegment::Bytecodes => Ok(None),
         }
     }
 
@@ -1742,7 +1752,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         }
                         StaticFileSegment::Headers |
                         StaticFileSegment::AccountChangeSets |
-                        StaticFileSegment::StorageChangeSets => {
+                        StaticFileSegment::StorageChangeSets |
+                        StaticFileSegment::Bytecodes => {
                             unreachable!()
                         }
                     }
@@ -1756,6 +1767,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::StorageChangeSets => {
                 writer.prune_storage_changesets(checkpoint_block_number)?;
             }
+            StaticFileSegment::Bytecodes => unreachable!(),
         }
 
         debug!(target: "reth::providers::static_file", "Committing writer after pruning");
