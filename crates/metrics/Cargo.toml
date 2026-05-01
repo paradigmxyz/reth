@@ -16,10 +16,13 @@ workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 
+# reth
+reth-primitives-traits = { workspace = true, optional = true }
+
 # async
 tokio = { workspace = true, features = ["full"], optional = true }
 futures = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 
 [features]
-common = ["tokio", "futures", "tokio-util"]
+common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]

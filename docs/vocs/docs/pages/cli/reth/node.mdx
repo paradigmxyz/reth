@@ -249,6 +249,16 @@ Networking:
 
           [default: 25600]
 
+      --tx-channel-memory-limit <BYTES>
+          Memory limit (in bytes) for the channel that buffers transaction events flowing
+          from the network manager to the transactions manager.
+
+          When the budget is exhausted, new events are dropped (see metric
+          `total_dropped_tx_events_at_full_capacity`). Acts as a backstop against unbounded
+          memory growth under sustained P2P transaction flooding.
+
+          [default: 1073741824]
+
       --net-if.experimental <IF_NAME>
           Name of network interface used to communicate with peers.
 

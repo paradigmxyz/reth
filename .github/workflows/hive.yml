@@ -17,8 +17,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   build-reth:
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive
@@ -29,6 +34,8 @@ jobs:
     if: github.repository == 'paradigmxyz/reth-oss' || github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
     runs-on: ${{ (github.repository == 'paradigmxyz/reth-oss' || github.repository == 'paradigmxyz/reth') && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -37,25 +44,28 @@ jobs:
           - osaka
     name: Prepare Hive - ${{ matrix.variant == 'amsterdam' && 'Amsterdam' || 'Osaka' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Checkout hive tests
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ethereum/hive
           path: hivetests
+          persist-credentials: false
 
       - name: Get hive commit hash
         id: hive-commit
         run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: "^1.13.1"
       - run: go version
 
       - name: Restore hive assets cache
         id: cache-hive
-        uses: actions/cache@v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ./hive_assets
           key: hive-assets-${{ matrix.variant }}-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
@@ -78,7 +88,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: hive_assets_${{ matrix.variant }}
           path: ./hive_assets
@@ -196,20 +206,22 @@ jobs:
     # Use larger runners for eels tests to avoid OOM runner crashes
     runs-on: ${{ (github.repository == 'paradigmxyz/reth-oss' || github.repository == 'paradigmxyz/reth') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
+      contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: hive_assets_amsterdam
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: reth
           path: /tmp
@@ -223,16 +235,21 @@ jobs:
           chmod +x /usr/local/bin/hive
 
       - name: Checkout hive tests
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ethereum/hive
           ref: master
           path: hivetests
+          persist-credentials: false
 
       - name: Run simulator
+        env:
+          SCENARIO_SIM: ${{ matrix.scenario.sim }}
+          SCENARIO_LIMIT: ${{ matrix.scenario.limit }}
+          SCENARIO_TESTS: ${{ join(matrix.scenario.include, '|') }}
         run: |
-          LIMIT="${{ matrix.scenario.limit }}"
-          TESTS="${{ join(matrix.scenario.include, '|') }}"
+          LIMIT="$SCENARIO_LIMIT"
+          TESTS="$SCENARIO_TESTS"
           if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
             FILTER="$LIMIT/$TESTS"
           elif [ -n "$LIMIT" ]; then
@@ -243,7 +260,7 @@ jobs:
             FILTER="/"
           fi
           echo "filter: $FILTER"
-          .github/scripts/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER" "amsterdam"
+          .github/scripts/hive/run_simulator.sh "$SCENARIO_SIM" "$FILTER" "amsterdam"
 
       - name: Parse hive output
         run: |
@@ -369,20 +386,22 @@ jobs:
     # Use larger runners for eels tests to avoid OOM runner crashes
     runs-on: ${{ (github.repository == 'paradigmxyz/reth-oss' || github.repository == 'paradigmxyz/reth') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
+      contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: hive_assets_osaka
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: reth
           path: /tmp
@@ -396,16 +415,21 @@ jobs:
           chmod +x /usr/local/bin/hive
 
       - name: Checkout hive tests
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ethereum/hive
           ref: master
           path: hivetests
+          persist-credentials: false
 
       - name: Run simulator
+        env:
+          SCENARIO_SIM: ${{ matrix.scenario.sim }}
+          SCENARIO_LIMIT: ${{ matrix.scenario.limit }}
+          SCENARIO_TESTS: ${{ join(matrix.scenario.include, '|') }}
         run: |
-          LIMIT="${{ matrix.scenario.limit }}"
-          TESTS="${{ join(matrix.scenario.include, '|') }}"
+          LIMIT="$SCENARIO_LIMIT"
+          TESTS="$SCENARIO_TESTS"
           if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
             FILTER="$LIMIT/$TESTS"
           elif [ -n "$LIMIT" ]; then
@@ -416,7 +440,7 @@ jobs:
             FILTER="/"
           fi
           echo "filter: $FILTER"
-          .github/scripts/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER" "osaka"
+          .github/scripts/hive/run_simulator.sh "$SCENARIO_SIM" "$FILTER" "osaka"
 
       - name: Parse hive output
         run: |
@@ -439,7 +463,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
-        uses: rtCamp/action-slack-notify@v2
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 # v2.3.3
         env:
           SLACK_COLOR: ${{ job.status }}
           SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"

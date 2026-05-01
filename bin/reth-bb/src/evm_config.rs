@@ -12,7 +12,10 @@ use crate::{
     BigBlockMap,
 };
 use alloy_consensus::Header;
-use alloy_evm::eth::EthBlockExecutionCtx;
+use alloy_evm::{
+    eth::{spec::EthExecutorSpec, EthBlockExecutionCtx},
+    EthEvmFactory,
+};
 use alloy_primitives::B256;
 use alloy_rpc_types::engine::ExecutionData;
 use core::convert::Infallible;
@@ -20,17 +23,14 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, ExecutableTxIterator,
-    NextBlockEnvAttributes,
+    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, EvmEnvFor, ExecutableTxIterator,
+    ExecutionCtxFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::primitives::hardfork::SpecId;
 use std::sync::Arc;
 use tracing::debug;
-
-use alloy_evm::{eth::spec::EthExecutorSpec, EthEvmFactory};
-use reth_evm::{EvmEnvFor, ExecutionCtxFor};
 
 // ---------------------------------------------------------------------------
 // Execution plan types

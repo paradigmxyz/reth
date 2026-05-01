@@ -123,6 +123,7 @@ where
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
+    #[allow(unused)]
     disable_bal_parallel_execution: bool,
     /// Whether to disable BAL-driven parallel state root computation.
     disable_bal_parallel_state_root: bool,
@@ -272,7 +273,9 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = env.decoded_bal.is_none();
+        // If no BALs are present or we have them explicitly disabled, we use sparse trie task and
+        // need to send the updates to it via state hook
+        let install_state_hook = env.decoded_bal.is_none() || self.disable_bal_parallel_state_root;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -505,14 +508,14 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
+            let disable_bal_parallel_state_root = self.disable_bal_parallel_state_root;
             self.executor.spawn_blocking_named("prewarm", move || {
-                let mode = if skip_prewarm {
-                    PrewarmMode::Skipped
-                } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
+                let mode = if let Some(decoded_bal) =
+                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_state_root)
                 {
                     PrewarmMode::BlockAccessList(decoded_bal)
+                } else if skip_prewarm {
+                    PrewarmMode::Skipped
                 } else {
                     PrewarmMode::Transactions(transactions)
                 };
@@ -798,7 +801,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a state hook to stream execution state updates to the sparse trie cache task.
     ///
-    /// Returns `None` when execution should not send state updates, such as BAL-driven execution.
+    /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
         self.install_state_hook
             .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))

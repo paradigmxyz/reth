@@ -7,6 +7,7 @@
 //! `execute_transaction` to apply segment-boundary changes.
 
 use crate::evm_config::BigBlockSegment;
+use alloy_consensus::TransactionEnvelope;
 use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
@@ -15,7 +16,7 @@ use alloy_evm::{
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
-    Database, EthEvm, EthEvmFactory, Evm, FromRecoveredTx, FromTxWithEncoded,
+    Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::B256;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -116,6 +117,7 @@ pub(crate) type BalIndexReader<DB> = fn(&DB) -> u64;
 /// Gas counters reset at each boundary so that each segment's real gas limit
 /// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
 /// are applied to receipts and totals in `finish()`.
+#[expect(missing_debug_implementations)]
 pub struct BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: Database,
@@ -143,21 +145,6 @@ where
     bal_index_reader: Option<BalIndexReader<DB>>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
-}
-
-impl<DB, I, P, Spec> std::fmt::Debug for BbBlockExecutor<'_, DB, I, P, Spec>
-where
-    DB: Database,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BbBlockExecutor")
-            .field("has_inner", &self.inner.is_some())
-            .field("plan", &self.plan)
-            .field("gas_used_offset", &self.gas_used_offset)
-            .field("blob_gas_used_offset", &self.blob_gas_used_offset)
-            .field("initialized", &self.initialized)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -447,6 +434,9 @@ where
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
+        self.maybe_apply_boundary()
+            .expect("segment boundary application must succeed before committing transaction");
+
         let gas_used = self.inner_mut().commit_transaction(output);
 
         // Fix up cumulative_gas_used on the just-committed receipt so that
@@ -624,7 +614,10 @@ where
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
-    type TxExecutionResult = EthTxResult<HaltReason, alloy_consensus::TxType>;
+    type TxExecutionResult = EthTxResult<
+        <EthEvmFactory as EvmFactory>::HaltReason,
+        <TransactionSigned as TransactionEnvelope>::TxType,
+    >;
     type Executor<'a, DB: StateDB, I: Inspector<EthEvmContext<DB>>> =
         BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>;
 

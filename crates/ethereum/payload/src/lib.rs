@@ -283,12 +283,12 @@ where
                     block_available_gas,
                 ),
             );
-            continue;
+            continue
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled);
+            return Ok(BuildOutcome::Cancelled)
         }
 
         // convert tx to a signed transaction
@@ -307,7 +307,7 @@ where
                     limit: MAX_RLP_BLOCK_SIZE,
                 },
             );
-            continue;
+            continue
         }
 
         // There's only limited amount of blob space available per block, so we need to check if
@@ -331,14 +331,14 @@ where
                         },
                     ),
                 );
-                continue;
+                continue
             }
 
             let blob_sidecar_result = 'sidecar: {
                 let Some(sidecar) =
                     pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)?
                 else {
-                    break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar);
+                    break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar)
                 };
 
                 if is_osaka {
@@ -358,7 +358,7 @@ where
                 Ok(sidecar) => Some(sidecar),
                 Err(error) => {
                     best_txs.mark_invalid(&pool_tx, &InvalidPoolTransactionError::Eip4844(error));
-                    continue;
+                    continue
                 }
             };
         }
@@ -388,7 +388,7 @@ where
                         ),
                     );
                 }
-                continue;
+                continue
             }
             // The executor is the source of truth for block gas availability. Keep this
             // non-fatal in case local builder accounting diverges from executor rules.
@@ -406,7 +406,7 @@ where
                         block_available_gas,
                     ),
                 );
-                continue;
+                continue
             }
             // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
@@ -443,7 +443,7 @@ where
         // Release db
         drop(builder);
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
     let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
