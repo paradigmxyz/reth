@@ -40,6 +40,8 @@ use std::sync::{
     Arc,
 };
 
+mod debug;
+
 /// Alias for the canonical receipt type produced by a given `ConfigureEvm`. Factory-level
 /// associated type — DB-independent.
 pub type ReceiptFor<Evm> =
@@ -267,6 +269,19 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
         let rebuilt = compute_block_access_list_hash(&composed_alloy);
         if rebuilt != header_bal_hash {
+            if tracing::enabled!(
+                target: "engine::tree::payload_processor::bal",
+                tracing::Level::DEBUG
+            ) {
+                let div = debug::first_bal_divergence(bal, &composed_alloy);
+                tracing::debug!(
+                    target: "engine::tree::payload_processor::bal",
+                    %rebuilt,
+                    expected = %header_bal_hash,
+                    ?div,
+                    "first BAL divergence",
+                );
+            }
             return Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
                 rebuilt,
                 expected: header_bal_hash,
