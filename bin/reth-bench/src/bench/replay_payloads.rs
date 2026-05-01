@@ -290,10 +290,10 @@ impl Command {
                     execution_data.payload.as_v1_mut().block_hash = block_hash;
                 }
 
-                let execution_data = if payload.big_block_data.is_none() {
-                    serde_json::to_value(execution_data)?
+                let execution_data = if let Some(big_block_data) = &payload.big_block_data {
+                    serde_json::to_value(big_block_data)?
                 } else {
-                    serde_json::to_value(&payload.big_block_data)?
+                    serde_json::to_value(execution_data)?
                 };
 
                 (
