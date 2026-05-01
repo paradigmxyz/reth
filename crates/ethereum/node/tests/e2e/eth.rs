@@ -320,9 +320,6 @@ async fn test_advance_amsterdam_chain_with_bal() -> eyre::Result<()> {
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
                 .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .prague_activated()
-                .osaka_activated()
                 .amsterdam_activated()
                 .build(),
         ),
