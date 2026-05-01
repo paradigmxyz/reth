@@ -8394,6 +8394,7 @@ dependencies = [
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "arbitrary",
  "bytes",
  "derive_more",
