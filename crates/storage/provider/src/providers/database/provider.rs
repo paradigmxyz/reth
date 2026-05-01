@@ -608,6 +608,31 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut timings =
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
+        let (account_transitions, storage_transitions) =
+            if save_mode.with_state() && !self.cached_storage_settings().storage_v2 {
+                let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+                let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+
+                for block in &blocks {
+                    let block_number = block.recovered_block().number();
+                    for block_reverts in block.execution_outcome().state.reverts.iter() {
+                        for (address, account_revert) in block_reverts {
+                            account_transitions.entry(*address).or_default().push(block_number);
+                            for storage_key in account_revert.storage.keys() {
+                                storage_transitions
+                                    .entry((*address, B256::from(storage_key.to_be_bytes())))
+                                    .or_default()
+                                    .push(block_number);
+                            }
+                        }
+                    }
+                }
+
+                (Some(account_transitions), Some(storage_transitions))
+            } else {
+                (None, None)
+            };
+
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
@@ -740,7 +765,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Full mode: update history indices
             if save_mode.with_state() {
                 let start = Instant::now();
-                self.update_history_indices(first_number..=last_block_number)?;
+                if let Some(account_transitions) = account_transitions.as_ref() {
+                    self.insert_account_history_index(
+                        account_transitions
+                            .iter()
+                            .map(|(address, blocks)| (*address, blocks.iter().copied())),
+                    )?;
+                }
+                if let Some(storage_transitions) = storage_transitions.as_ref() {
+                    self.insert_storage_history_index(storage_transitions.iter().map(
+                        |((address, key), blocks)| ((*address, *key), blocks.iter().copied()),
+                    ))?;
+                }
                 timings.update_history_indices = start.elapsed();
             }
 
