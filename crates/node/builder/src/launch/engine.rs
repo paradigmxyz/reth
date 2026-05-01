@@ -11,6 +11,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_engine_snap::on_demand::{EvmReplayBalGenerator, OnDemandBalStore};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
@@ -97,6 +98,12 @@ impl EngineNodeLauncher {
         // Create changeset cache that will be shared across the engine
         let changeset_cache = ChangesetCache::new();
 
+        // BAL store shared between the engine API (which writes BALs from `newPayload`) and the
+        // snap/eth serving paths (which read them). The generator is installed below, after
+        // components are built and the EVM config is available.
+        let on_demand_bal_store =
+            Arc::new(OnDemandBalStore::new(BalStoreHandle::new(BalCache::new())));
+
         // setup the launch context
         let ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
@@ -126,12 +133,24 @@ impl EngineNodeLauncher {
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
-                let mut provider = BlockchainProvider::new(provider_factory)?;
-                provider.set_bal_store(BalStoreHandle::new(BalCache::new()));
-                Ok(provider)
+            .with_blockchain_db::<T, _>({
+                let on_demand_bal_store = on_demand_bal_store.clone();
+                move |provider_factory| {
+                    let mut provider = BlockchainProvider::new(provider_factory)?;
+                    provider.set_bal_store(BalStoreHandle::new(on_demand_bal_store));
+                    Ok(provider)
+                }
             })?
             .with_components(components_builder, on_component_initialized).await?;
+
+        // Wire the on-demand BAL generator now that components (and therefore the EVM config)
+        // are available. Snap/eth peers requesting BALs we don't yet have will trigger replay
+        // of the requested block on top of the parent state. This is intended for testing
+        // snap/2 against networks that do not propagate BALs (e.g. mainnet today).
+        on_demand_bal_store.set_generator(Arc::new(EvmReplayBalGenerator::new(
+            ctx.blockchain_db().clone(),
+            ctx.components().evm_config().clone(),
+        )));
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;

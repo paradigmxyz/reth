@@ -8,6 +8,7 @@ pub mod bal;
 pub mod controller;
 pub mod download;
 pub mod finalize;
+pub mod on_demand;
 pub mod orchestrator;
 pub mod pivot;
 pub mod serve;

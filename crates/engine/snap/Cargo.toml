@@ -17,13 +17,16 @@ reth-config.workspace = true
 reth-consensus.workspace = true
 reth-downloaders.workspace = true
 reth-eth-wire-types.workspace = true
+reth-evm.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-revm.workspace = true
 reth-stages.workspace = true
 reth-stages-api.workspace = true
 reth-stages-types.workspace = true
 reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 reth-trie-db.workspace = true
