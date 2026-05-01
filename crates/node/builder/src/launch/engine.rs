@@ -152,6 +152,12 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
         )));
 
+        // Allow snap/2 sync against pre-Amsterdam blocks (whose headers carry no BAL hash) to
+        // accept BALs without verification when the operator has opted in.
+        if ctx.node_config().debug.snap_trust_unverified_bals {
+            reth_engine_snap::pivot::set_trust_unverified_bals(true);
+        }
+
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 

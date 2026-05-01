@@ -108,6 +108,15 @@ pub struct DebugArgs {
     /// the backfill, but did not yet receive any new blocks.
     #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
     pub startup_sync_state_idle: bool,
+
+    /// Accept BALs from peers without integrity checks when the corresponding header carries no
+    /// `block_access_list_hash` (i.e. pre-Amsterdam blocks).
+    ///
+    /// This is intended for testing snap/2 against networks that do not propagate BALs (e.g.
+    /// mainnet today). Do not enable on production-facing nodes: a malicious peer can serve any
+    /// BAL it likes for the affected blocks.
+    #[arg(long = "debug.snap-trust-unverified-bals", help_heading = "Debug")]
+    pub snap_trust_unverified_bals: bool,
 }
 
 impl Default for DebugArgs {
@@ -127,6 +136,7 @@ impl Default for DebugArgs {
             healthy_node_rpc_url: None,
             ethstats: None,
             startup_sync_state_idle: false,
+            snap_trust_unverified_bals: false,
         }
     }
 }

@@ -784,6 +784,11 @@ Debug:
 
           This makes the `eth_syncing` RPC return "Idle" when the node has just started or finished the backfill, but did not yet receive any new blocks.
 
+      --debug.snap-trust-unverified-bals
+          Accept BALs from peers without integrity checks when the corresponding header carries no `block_access_list_hash` (i.e. pre-Amsterdam blocks).
+
+          This is intended for testing snap/2 against networks that do not propagate BALs (e.g. mainnet today). Do not enable on production-facing nodes: a malicious peer can serve any BAL it likes for the affected blocks.
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
