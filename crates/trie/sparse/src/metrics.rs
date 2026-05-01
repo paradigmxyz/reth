@@ -1,6 +1,9 @@
 //! Metrics for the sparse state trie
 
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 
 /// Metrics for the sparse state trie
 #[derive(Default, Debug)]
@@ -71,8 +74,21 @@ impl Eq for ParallelSparseTrieMetrics {}
 #[derive(Metrics, Clone)]
 #[metrics(scope = "arena_parallel_sparse_trie")]
 pub(crate) struct ArenaParallelSparseTrieMetrics {
+    /// A counter for calls to `update_leaves`.
+    pub(crate) update_leaves_calls_total: Counter,
+    /// A counter for the total number of leaf updates passed to `update_leaves`.
+    pub(crate) update_leaves_input_entries_total: Counter,
     /// A histogram for the number of leaf updates passed to `update_leaves`.
     pub(crate) update_leaves_input_size: Histogram,
     /// A histogram for the time it took to sort leaf updates.
     pub(crate) update_leaves_sort_latency: Histogram,
+}
+
+impl ArenaParallelSparseTrieMetrics {
+    /// Records the input size for an `update_leaves` call.
+    pub(crate) fn record_update_leaves_input(&self, input_size: usize) {
+        self.update_leaves_calls_total.increment(1);
+        self.update_leaves_input_entries_total.increment(input_size as u64);
+        self.update_leaves_input_size.record(input_size as f64);
+    }
 }

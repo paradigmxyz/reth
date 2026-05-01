@@ -2800,7 +2800,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
         #[cfg(feature = "metrics")]
-        self.metrics.update_leaves_input_size.record(updates.len() as f64);
+        self.metrics.record_update_leaves_input(updates.len());
 
         if updates.is_empty() {
             return Ok(());
