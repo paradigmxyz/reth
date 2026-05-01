@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use parking_lot::Mutex;
 use reth_eth_wire_types::{BlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::{Block, BlockBody};
@@ -25,6 +25,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 pub struct TestFullBlockClient {
     headers: Arc<Mutex<B256Map<Header>>>,
     bodies: Arc<Mutex<B256Map<BlockBody>>>,
+    access_lists: Arc<Mutex<B256Map<Bytes>>>,
     // soft response limit, max number of bodies to respond with
     soft_limit: usize,
 }
@@ -34,6 +35,7 @@ impl Default for TestFullBlockClient {
         Self {
             headers: Arc::new(Mutex::new(B256Map::default())),
             bodies: Arc::new(Mutex::new(B256Map::default())),
+            access_lists: Arc::new(Mutex::new(B256Map::default())),
             soft_limit: 20,
         }
     }
@@ -45,6 +47,11 @@ impl TestFullBlockClient {
         let hash = header.hash();
         self.headers.lock().insert(hash, header.unseal());
         self.bodies.lock().insert(hash, body);
+    }
+
+    /// Insert the raw BAL bytes associated with a block hash.
+    pub fn insert_access_list(&self, hash: B256, access_list: Bytes) {
+        self.access_lists.lock().insert(hash, access_list);
     }
 
     /// Set the soft response limit.
@@ -177,10 +184,20 @@ impl BlockAccessListsClient for TestFullBlockClient {
 
     fn get_block_access_lists_with_priority_and_requirement(
         &self,
-        _hashes: Vec<B256>,
+        hashes: Vec<B256>,
         _priority: Priority,
         _requirement: BalRequirement,
     ) -> Self::Output {
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists::default())))
+        let access_lists = self.access_lists.lock();
+        let response = hashes
+            .into_iter()
+            .map(|hash| {
+                access_lists
+                    .get(&hash)
+                    .cloned()
+                    .unwrap_or_else(|| Bytes::from_static(&[0xc0]))
+            })
+            .collect();
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(response))))
     }
 }

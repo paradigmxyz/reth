@@ -9,7 +9,7 @@ use crate::{
     BlockClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Sealable, B256};
+use alloy_primitives::{Bytes, Sealable, B256};
 use core::marker::PhantomData;
 use futures::FutureExt;
 use reth_consensus::Consensus;
@@ -1085,11 +1085,14 @@ where
 
     fn get_block_access_lists_with_priority_and_requirement(
         &self,
-        _hashes: Vec<B256>,
+        hashes: Vec<B256>,
         _priority: Priority,
         _requirement: BalRequirement,
     ) -> Self::Output {
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists::default())))
+        futures::future::ready(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Bytes::from_static(&[0xc0]); hashes.len()]),
+        )))
     }
 }
 

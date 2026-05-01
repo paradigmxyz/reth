@@ -8,7 +8,7 @@ use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{
-        FetchFullBlockFuture, FetchFullBlockRangeWithOptionalAccessListsFuture, FullBlockClient,
+        FetchFullBlockRangeFuture, FetchFullBlockWithAccessListsFuture, FullBlockClient,
     },
     BlockAccessLists, BlockAccessListsClient, BlockClient,
 };
@@ -121,9 +121,9 @@ where
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
     /// In-flight full block requests in progress.
-    inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
+    inflight_full_block_requests: Vec<FetchFullBlockWithAccessListsFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
-    inflight_block_range_requests: Vec<InflightBlockRangeRequest<Client>>,
+    inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     set_buffered_blocks: BinaryHeap<Reverse<OrderedDownloadedBlock<B>>>,
@@ -185,16 +185,12 @@ where
                 "start downloading full block range."
             );
 
+            let request = self.full_block_client.get_full_block_range(hash, count);
             self.push_pending_event(DownloadOutcome::NewDownloadStarted {
-                remaining_blocks: count,
-                target: hash,
+                remaining_blocks: request.count(),
+                target: request.start_hash(),
             });
-            self.inflight_block_range_requests.push(InflightBlockRangeRequest {
-                count,
-                request: self
-                    .full_block_client
-                    .get_full_block_range_with_optional_access_lists(hash, count),
-            });
+            self.inflight_block_range_requests.push(request);
 
             self.update_block_download_metrics();
         }
@@ -219,7 +215,7 @@ where
             "Start downloading full block"
         );
 
-        let request = self.full_block_client.get_full_block(hash);
+        let request = self.full_block_client.get_full_block_with_access_lists(hash);
         self.inflight_full_block_requests.push(request);
 
         self.update_block_download_metrics();
@@ -235,7 +231,7 @@ where
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
         let blocks = self.inflight_full_block_requests.len() +
-            self.inflight_block_range_requests.iter().map(|r| r.count as usize).sum::<usize>();
+            self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
         self.metrics.active_block_downloads.set(blocks as f64);
     }
 
@@ -274,9 +270,11 @@ where
         // advance all full block requests
         for idx in (0..self.inflight_full_block_requests.len()).rev() {
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
-            if let Poll::Ready(block) = request.poll_unpin(cx) {
+            if let Poll::Ready((block, access_lists)) = request.poll_unpin(cx) {
                 trace!(target: "engine::download", block=?block.num_hash(), "Received single full block, buffering");
-                self.set_buffered_blocks.push(Reverse(DownloadedBlock::without_bal(block).into()));
+                self.set_buffered_blocks.push(Reverse(
+                    downloaded_block_with_decoded_access_list(block, access_lists).into(),
+                ));
             } else {
                 // still pending
                 self.inflight_full_block_requests.push(request);
@@ -286,11 +284,12 @@ where
         // advance all full block range requests
         for idx in (0..self.inflight_block_range_requests.len()).rev() {
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
-            if let Poll::Ready((blocks, access_lists)) = request.request.poll_unpin(cx) {
+            if let Poll::Ready(blocks) = request.poll_unpin(cx) {
                 trace!(target: "engine::download", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
                 self.set_buffered_blocks.extend(
-                    blocks_with_decoded_access_lists(blocks, access_lists)
+                    blocks
                         .into_iter()
+                        .map(DownloadedBlock::without_bal)
                         .map(OrderedDownloadedBlock)
                         .map(Reverse),
                 );
@@ -356,30 +355,16 @@ impl<B: Block> From<OrderedDownloadedBlock<B>> for DownloadedBlock<B> {
     }
 }
 
-struct InflightBlockRangeRequest<Client>
-where
-    Client: BlockClient + BlockAccessListsClient,
-{
-    count: u64,
-    request: FetchFullBlockRangeWithOptionalAccessListsFuture<Client>,
-}
-
-fn blocks_with_decoded_access_lists<B: Block>(
-    blocks: Vec<SealedBlock<B>>,
-    access_lists: Option<BlockAccessLists>,
-) -> Vec<DownloadedBlock<B>> {
-    let mut access_lists = access_lists.map(|access_lists| access_lists.0.into_iter());
-
-    blocks
+fn downloaded_block_with_decoded_access_list<B: Block>(
+    block: SealedBlock<B>,
+    access_lists: BlockAccessLists,
+) -> DownloadedBlock<B> {
+    let decoded_bal = access_lists
+        .0
         .into_iter()
-        .map(|block| {
-            let decoded_bal = access_lists
-                .as_mut()
-                .and_then(Iterator::next)
-                .and_then(|raw| decode_block_access_list(&block, raw));
-            DownloadedBlock::new(block, decoded_bal)
-        })
-        .collect()
+        .next()
+        .and_then(|raw| decode_block_access_list(&block, raw));
+    DownloadedBlock::new(block, decoded_bal)
 }
 
 fn decode_block_access_list<B: Block>(
@@ -494,7 +479,8 @@ mod tests {
 
         // ensure the range request is made correctly
         let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
-        assert_eq!(first_req.count, tip.number);
+        assert_eq!(first_req.start_hash(), tip.hash());
+        assert_eq!(first_req.count(), tip.number);
 
         // poll downloader
         let sync_future = poll_fn(|cx| block_downloader.poll(cx));
@@ -557,6 +543,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn block_downloader_single_request_attaches_decoded_bal() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+
+        let raw = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        let decoded = DecodedBal::from_rlp_bytes(raw.clone()).unwrap();
+        let header = Header {
+            base_fee_per_gas: Some(7),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            block_access_list_hash: Some(decoded.hash()),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let client = TestFullBlockClient::default();
+        insert_headers_into_client(&client, header, 0..1);
+        let tip = client.highest_block().expect("there should be a downloaded block");
+        client.insert_access_list(tip.hash(), raw);
+
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
+        let mut block_downloader = BasicBlockDownloader::new(client, consensus);
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::single_block(
+            tip.hash(),
+        )));
+
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
+        let next_ready = sync_future.await;
+        assert_matches!(next_ready, DownloadOutcome::NewDownloadStarted { remaining_blocks, target } => {
+            assert_eq!(remaining_blocks, 1);
+            assert_eq!(target, tip.hash());
+        });
+
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
+        let next_ready = sync_future.await;
+        assert_matches!(next_ready, DownloadOutcome::Blocks(blocks) => {
+            assert_eq!(blocks.len(), 1);
+            assert_eq!(blocks[0].block().hash(), tip.hash());
+            assert_eq!(blocks[0].decoded_bal().as_ref().map(|bal| bal.hash()), Some(decoded.hash()));
+        });
+    }
+
+    #[tokio::test]
     async fn block_downloader_clear_request() {
         const TOTAL_BLOCKS: usize = 10;
         let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
@@ -579,7 +612,8 @@ mod tests {
 
         // ensure the range request is made correctly
         let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
-        assert_eq!(first_req.count, tip.number);
+        assert_eq!(first_req.start_hash(), tip.hash());
+        assert_eq!(first_req.count(), tip.number);
 
         // ensure we have download_set.len() in flight full block request
         assert_eq!(block_downloader.inflight_full_block_requests.len(), download_set.len());
@@ -602,14 +636,11 @@ mod tests {
         let block: SealedBlock<reth_ethereum_primitives::Block> =
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
-        let blocks = blocks_with_decoded_access_lists(
-            vec![block.clone()],
-            Some(BlockAccessLists(vec![raw])),
-        );
+        let downloaded =
+            downloaded_block_with_decoded_access_list(block.clone(), BlockAccessLists(vec![raw]));
 
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].block(), &block);
-        assert_eq!(blocks[0].decoded_bal().as_ref().map(|bal| bal.hash()), Some(decoded.hash()));
+        assert_eq!(downloaded.block(), &block);
+        assert_eq!(downloaded.decoded_bal().as_ref().map(|bal| bal.hash()), Some(decoded.hash()));
     }
 
     #[test]
@@ -619,10 +650,8 @@ mod tests {
         let block: SealedBlock<reth_ethereum_primitives::Block> =
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
-        let blocks =
-            blocks_with_decoded_access_lists(vec![block], Some(BlockAccessLists(vec![raw])));
+        let downloaded = downloaded_block_with_decoded_access_list(block, BlockAccessLists(vec![raw]));
 
-        assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].decoded_bal().is_none());
+        assert!(downloaded.decoded_bal().is_none());
     }
 }
