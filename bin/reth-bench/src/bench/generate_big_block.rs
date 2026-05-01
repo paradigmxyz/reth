@@ -221,7 +221,6 @@ pub struct BigBlockPayload {
     /// The primary execution data with all concatenated transactions.
     pub execution_data: ExecutionData,
     /// Big block data containing environment switches and prior block hashes.
-    #[serde(default)]
     pub big_block_data: BigBlockData<ExecutionData>,
     /// Flattened BAL across all constituent blocks, if requested during generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -567,11 +566,12 @@ pub(crate) fn big_blocks_stream(
             prev_big_block_hash = Some(block_hash);
 
             let big_block = BigBlockPayload {
-                execution_data: base,
                 big_block_data: BigBlockData {
                     env_switches,
                     prior_block_hashes: accumulated_block_hashes.clone(),
+                    block_number: base.block_number(),
                 },
+                execution_data: base,
                 block_access_list: merged_block_access_list,
             };
 

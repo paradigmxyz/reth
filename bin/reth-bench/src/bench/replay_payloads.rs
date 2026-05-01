@@ -25,7 +25,7 @@ use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::BigBlockData;
-use reth_node_api::EngineApiMessageVersion;
+use reth_node_api::{EngineApiMessageVersion, ExecutionPayload as _};
 use reth_node_core::args::WaitForPersistence;
 use std::{
     path::PathBuf,
@@ -134,7 +134,7 @@ struct LoadedPayload {
     /// The block hash.
     block_hash: B256,
     /// Big block data containing environment switches and prior block hashes.
-    big_block_data: BigBlockData<ExecutionData>,
+    big_block_data: Option<BigBlockData<ExecutionData>>,
     /// Optional BAL flattened into the payload file.
     block_access_list: Option<BlockAccessList>,
 }
@@ -199,25 +199,17 @@ impl Command {
         }
         info!(target: "reth-bench", count = payloads.len(), "Loaded main payloads from disk");
 
-        let has_env_switches = payloads.iter().any(|p| !p.big_block_data.env_switches.is_empty());
         let has_block_access_lists = payloads.iter().any(|p| {
             p.block_access_list.as_ref().is_some_and(|bal: &BlockAccessList| !bal.is_empty())
         });
 
         // If any payload has env_switches but we're not using reth_newPayload, warn the user
         if !self.reth_new_payload {
-            if has_env_switches {
+            if payloads.iter().any(|p| p.big_block_data.is_some()) {
                 warn!(
                     target: "reth-bench",
-                    "Payloads contain env_switches but --reth-new-payload is not set. \
-                     env_switches are only supported with reth_newPayload and will be ignored."
-                );
-            }
-            if has_block_access_lists {
-                warn!(
-                    target: "reth-bench",
-                    "Payloads contain block_access_list data but --reth-new-payload is not set. \
-                     BALs are only forwarded with reth_newPayload and will be ignored."
+                    "Payloads contain big blocks but --reth-new-payload is not set. \
+                     big blocks are only supported with reth_newPayload and will be ignored."
                 );
             }
         } else if has_block_access_lists && !self.bal {
@@ -234,7 +226,11 @@ impl Command {
 
         for (i, payload) in payloads.iter().enumerate() {
             let execution_data = &payload.execution_data;
-            let mut block_hash = payload.block_hash;
+            let mut block_hash = if let Some(big_block_data) = &payload.big_block_data {
+                big_block_data.block_hash()
+            } else {
+                payload.block_hash
+            };
             let v1 = execution_data.payload.as_v1();
 
             let gas_used = v1.gas_used;
@@ -294,9 +290,7 @@ impl Command {
                     execution_data.payload.as_v1_mut().block_hash = block_hash;
                 }
 
-                let execution_data = if payload.big_block_data.env_switches.is_empty() &&
-                    payload.big_block_data.prior_block_hashes.is_empty()
-                {
+                let execution_data = if payload.big_block_data.is_none() {
                     serde_json::to_value(execution_data)?
                 } else {
                     serde_json::to_value(&payload.big_block_data)?
@@ -474,27 +468,31 @@ impl Command {
                 .wrap_err_with(|| format!("Failed to read {:?}", path))?;
 
             // Try BigBlockPayload first, then fall back to legacy ExecutionPayloadEnvelopeV4
-            let (execution_data, big_block_data, block_access_list) = if let Ok(big_block) =
-                serde_json::from_str::<BigBlockPayload>(&content)
-            {
-                (big_block.execution_data, big_block.big_block_data, big_block.block_access_list)
-            } else {
-                let envelope: ExecutionPayloadEnvelopeV6 = serde_json::from_str(&content)
-                    .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
-                let execution_data = ExecutionData {
-                    payload: envelope.execution_payload.clone().into(),
-                    sidecar: ExecutionPayloadSidecar::v4(
-                        CancunPayloadFields {
-                            versioned_hashes: Vec::new(),
-                            parent_beacon_block_root: B256::ZERO,
-                        },
-                        PraguePayloadFields {
-                            requests: envelope.execution_requests.clone().into(),
-                        },
-                    ),
+            let (execution_data, big_block_data, block_access_list) =
+                if let Ok(mut big_block) = serde_json::from_str::<BigBlockPayload>(&content) {
+                    big_block.big_block_data.block_number = big_block.execution_data.block_number();
+                    (
+                        big_block.execution_data,
+                        Some(big_block.big_block_data),
+                        big_block.block_access_list,
+                    )
+                } else {
+                    let envelope: ExecutionPayloadEnvelopeV6 = serde_json::from_str(&content)
+                        .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
+                    let execution_data = ExecutionData {
+                        payload: envelope.execution_payload.clone().into(),
+                        sidecar: ExecutionPayloadSidecar::v4(
+                            CancunPayloadFields {
+                                versioned_hashes: Vec::new(),
+                                parent_beacon_block_root: B256::ZERO,
+                            },
+                            PraguePayloadFields {
+                                requests: envelope.execution_requests.clone().into(),
+                            },
+                        ),
+                    };
+                    (execution_data, None, None)
                 };
-                (execution_data, BigBlockData::default(), None)
-            };
 
             let block_hash = execution_data.payload.as_v1().block_hash;
 
@@ -502,8 +500,8 @@ impl Command {
                 target: "reth-bench",
                 index = index,
                 block_hash = %block_hash,
-                env_switches = big_block_data.env_switches.len(),
-                prior_block_hashes = big_block_data.prior_block_hashes.len(),
+                env_switches = big_block_data.as_ref().map(|data| data.env_switches.len()).unwrap_or(0),
+                prior_block_hashes = big_block_data.as_ref().map(|data| data.prior_block_hashes.len()).unwrap_or(0),
                 bal_accounts = block_access_list.as_ref().map_or(0, Vec::len),
                 path = %path.display(),
                 "Loaded payload"

@@ -180,12 +180,9 @@ pub struct BigBlockData<ExecutionData> {
     /// When replaying chained big blocks, the BLOCKHASH opcode needs real hashes for blocks
     /// that were merged into earlier big blocks (and thus not individually persisted).
     pub prior_block_hashes: Vec<(u64, alloy_primitives::B256)>,
-}
-
-impl<T> Default for BigBlockData<T> {
-    fn default() -> Self {
-        Self { env_switches: Vec::new(), prior_block_hashes: Vec::new() }
-    }
+    /// Block number for this big block.
+    #[serde(default)]
+    pub block_number: u64,
 }
 
 impl ExecutionPayload for BigBlockData<ExecutionData> {
@@ -194,11 +191,11 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
     }
 
     fn block_hash(&self) -> B256 {
-        self.env_switches[0].1.block_hash()
+        self.env_switches.last().unwrap().1.block_hash()
     }
 
     fn block_number(&self) -> u64 {
-        self.env_switches[0].1.block_number()
+        self.block_number
     }
 
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
@@ -218,7 +215,7 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
     }
 
     fn gas_used(&self) -> u64 {
-        self.env_switches[0].1.gas_used()
+        self.env_switches.iter().map(|(_, data)| data.gas_used()).sum()
     }
 
     fn gas_limit(&self) -> u64 {
@@ -226,7 +223,7 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
     }
 
     fn transaction_count(&self) -> usize {
-        self.env_switches[0].1.transaction_count()
+        self.env_switches.iter().map(|(_, data)| data.transaction_count()).sum()
     }
 
     fn slot_number(&self) -> Option<u64> {

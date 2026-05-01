@@ -44,14 +44,11 @@ impl PayloadTypes for BbPayloadTypes {
     type PayloadAttributes = <EthPayloadTypes as PayloadTypes>::PayloadAttributes;
 
     fn block_to_payload(
-        block: SealedBlock<
+        _block: SealedBlock<
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
     ) -> Self::ExecutionData {
-        BigBlockData {
-            env_switches: vec![(0, EthPayloadTypes::block_to_payload(block))],
-            prior_block_hashes: vec![],
-        }
+        unreachable!()
     }
 }
 
@@ -79,12 +76,39 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
 
     fn convert_payload_to_block(
         &self,
-        mut payload: BigBlockData<ExecutionData>,
+        payload: BigBlockData<ExecutionData>,
     ) -> Result<SealedBlock<Block>, NewPayloadError> {
-        PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(
-            &self.inner,
-            payload.env_switches.remove(0).1,
-        )
+        let mut blocks = payload
+            .env_switches
+            .into_iter()
+            .map(|(_, data)| {
+                PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)
+            })
+            .collect::<Result<Vec<SealedBlock<Block>>, NewPayloadError>>()?;
+
+        let (mut block, hash) = blocks.pop().unwrap().split();
+
+        // Override the block number
+        block.header.number = payload.block_number;
+
+        // Set block's parent hash to the parent of the first block in this batch so that engine
+        // tree state is consistent.
+        if let Some(first) = blocks.first() {
+            block.header.parent_hash = first.parent_hash;
+        }
+
+        // Update block's gas usage to make sure metrics are correct
+        block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
+
+        // Prepend transactions from previous blocks to make sure that persistence indices are correct.
+        block.body.transactions = blocks
+            .into_iter()
+            .flat_map(|b| b.into_body().transactions)
+            .chain(core::mem::take(&mut block.body.transactions))
+            .collect();
+
+        // Use `new_unchecked` to preserve the hash
+        Ok(SealedBlock::new_unchecked(block, hash))
     }
 }
 
