@@ -6,7 +6,7 @@ use futures::Future;
 use reth_network_p2p::{BlockAccessListsClient, BlockClient};
 use tokio::sync::oneshot;
 
-/// Provides a client for downloading blocks and related block data.
+/// Provides client for downloading blocks.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockDownloaderProvider {
     /// The client this type can provide.
@@ -17,7 +17,7 @@ pub trait BlockDownloaderProvider {
         + Clone
         + 'static;
 
-    /// Returns a new download client, used for fetching blocks from peers.
+    /// Returns a new [`BlockClient`], used for fetching blocks from peers.
     ///
     /// The client is the entrypoint for sending block requests to the network.
     fn fetch_client(
