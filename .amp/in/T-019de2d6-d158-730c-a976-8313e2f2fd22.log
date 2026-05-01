@@ -1,0 +1,1 @@
+{"fallbackModel":"vertexai/gemini-3-flash-preview","level":"info","maxInputTokens":300000,"message":"Thread input tokens exceed model context limit, falling back to Gemini","model":"anthropic/claude-opus-4-7","pid":97132,"threadId":"T-019de2d6-d158-730c-a976-8313e2f2fd22","timestamp":"2026-05-01T10:10:15.939Z","totalInputTokens":301286}

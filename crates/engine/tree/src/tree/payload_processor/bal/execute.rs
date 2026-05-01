@@ -16,7 +16,7 @@
 //! lightweight fragment compare isn't yet designed.
 
 use super::{validation::check_item_count, RejectReason};
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
     block::{
@@ -267,6 +267,20 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
         let rebuilt = compute_block_access_list_hash(&composed_alloy);
         if rebuilt != header_bal_hash {
+            // Debug aid: dump rebuilt vs expected BAL using Debug formatting to /tmp on
+            // mismatch so we can diff them and pinpoint the discrepancy. Best-effort,
+            // never fails execution.
+            let block_number = block.header().number();
+            let path = std::env::temp_dir().join(format!("reth-bal-mismatch-{block_number}.txt"));
+            let dump = format!(
+                "block_number: {block_number}\nblock_hash:    {:?}\nrebuilt_hash:  {rebuilt:?}\nexpected_hash: {header_bal_hash:?}\n\n=== REBUILT ===\n{:#?}\n\n=== EXPECTED ===\n{:#?}\n",
+                block.hash(),
+                composed_alloy,
+                received_bal.as_bal(),
+            );
+            let _ = std::fs::write(&path, dump);
+            tracing::warn!(target: "engine::tree::bal", ?path, block_number, ?block_result, header = ?block.header(), "Dumped BAL mismatch");
+
             return Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
                 rebuilt,
                 expected: header_bal_hash,
@@ -1136,6 +1150,97 @@ mod tests {
                     gas_price: 1,
                     gas_limit: 100_000,
                     to: TxKind::Call(sstore_contract),
+                    value: U256::ZERO,
+                    input: Default::default(),
+                }),
+            ),
+            alice,
+        );
+
+        assert_shadow_equal(
+            evm_config,
+            db,
+            empty_amsterdam_block(B256::ZERO),
+            vec![tx],
+            30_000_000,
+        );
+    }
+
+    #[test]
+    fn shadow_call_with_value_to_non_existing_account() {
+        // Reproduces the EELS pattern that was failing on devnet-3:
+        //   `test_account_access[opcode_CALL, value_sent_1, NON_EXISTING_ACCOUNT, *]`.
+        //
+        // A deployed contract issues a `CALL` with `value=1` to a fixed non-existing
+        // address. The recipient never appeared in state before the block, so the worker's
+        // `Account` carries `LoadedAsNotExisting` and `original_info = AccountInfo::default()`,
+        // while `info.balance` jumps from 0 to 1. The BAL must record a single balance change
+        // for the recipient with no nonce / code / storage entries, and the canonical commit
+        // path must rebuild the same composed BAL the serial path produces.
+        //
+        // Bytecode (31 bytes):
+        //   PUSH1 0x00  PUSH1 0x00  PUSH1 0x00  PUSH1 0x00  // ret/args size+offset
+        //   PUSH1 0x01                                       // value = 1 wei
+        //   PUSH20 <recipient>                               // call target
+        //   PUSH2 0x2710                                     // gas stipend
+        //   CALL  POP  STOP
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Bytes, TxKind};
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+        use revm::primitives::keccak256;
+
+        let evm_config = EthEvmConfig::mainnet();
+        let caller_contract: alloy_primitives::Address =
+            alloy_primitives::Address::from([0xC1; 20]);
+        let non_existing_recipient: alloy_primitives::Address =
+            alloy_primitives::Address::from([0xAB; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+
+        // CALL(gas=0x2710, addr=non_existing_recipient, value=1, ...) ; POP ; STOP
+        let mut code = Vec::with_capacity(31);
+        code.extend_from_slice(&[0x60, 0x00]); // PUSH1 0 (retSize)
+        code.extend_from_slice(&[0x60, 0x00]); // PUSH1 0 (retOffset)
+        code.extend_from_slice(&[0x60, 0x00]); // PUSH1 0 (argsSize)
+        code.extend_from_slice(&[0x60, 0x00]); // PUSH1 0 (argsOffset)
+        code.extend_from_slice(&[0x60, 0x01]); // PUSH1 1 (value)
+        code.push(0x73); // PUSH20
+        code.extend_from_slice(non_existing_recipient.as_slice());
+        code.extend_from_slice(&[0x61, 0x27, 0x10]); // PUSH2 0x2710 (gas)
+        code.push(0xF1); // CALL
+        code.push(0x50); // POP
+        code.push(0x00); // STOP
+        let caller_code = Bytes::from(code);
+        let code_hash = keccak256(&caller_code);
+
+        // Pre-state: alice (sender) and the caller contract (with 1 wei to cover CALL value).
+        let mut db = system_contracts_db();
+        insert_funded(&mut db, alice, sender_balance);
+        db.insert_account_info(
+            caller_contract,
+            AccountInfo {
+                nonce: 1,
+                balance: U256::from(1u64),
+                code_hash,
+                code: Some(Bytecode::new_raw(caller_code)),
+                account_id: None,
+            },
+        );
+
+        let tx = Recovered::new_unchecked(
+            sign_tx_with_key_pair(
+                alice_kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(MAINNET.chain.id()),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(caller_contract),
                     value: U256::ZERO,
                     input: Default::default(),
                 }),
