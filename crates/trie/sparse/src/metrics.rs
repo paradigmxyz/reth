@@ -66,3 +66,13 @@ impl PartialEq for ParallelSparseTrieMetrics {
 }
 
 impl Eq for ParallelSparseTrieMetrics {}
+
+/// Metrics for the arena-based parallel sparse trie.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "arena_parallel_sparse_trie")]
+pub(crate) struct ArenaParallelSparseTrieMetrics {
+    /// A histogram for the number of leaf updates passed to `update_leaves`.
+    pub(crate) update_leaves_input_size: Histogram,
+    /// A histogram for the time it took to sort leaf updates.
+    pub(crate) update_leaves_sort_latency: Histogram,
+}

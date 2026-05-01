@@ -18,6 +18,8 @@ use alloy_primitives::{
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
+#[cfg(feature = "metrics")]
+use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
@@ -627,6 +629,9 @@ pub struct ArenaParallelSparseTrie {
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Metrics for the arena-based parallel sparse trie.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ArenaParallelSparseTrieMetrics,
     /// Debug recorder for tracking mutating operations.
     #[cfg(feature = "trie-debug")]
     debug_recorder: TrieDebugRecorder,
@@ -2192,6 +2197,8 @@ impl Default for ArenaParallelSparseTrie {
             updates: None,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
             #[cfg(feature = "trie-debug")]
             debug_recorder: Default::default(),
         }
@@ -2792,6 +2799,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         updates: &mut B256Map<LeafUpdate>,
         mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
+        #[cfg(feature = "metrics")]
+        self.metrics.update_leaves_input_size.record(updates.len() as f64);
+
         if updates.is_empty() {
             return Ok(());
         }
@@ -2805,7 +2815,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
+        #[cfg(feature = "metrics")]
+        let sort_start = Instant::now();
         sorted.sort_unstable_by_key(|entry| entry.1);
+        #[cfg(feature = "metrics")]
+        self.metrics.update_leaves_sort_latency.record(sort_start.elapsed());
 
         let threshold = self.parallelism_thresholds.min_updates;
 
