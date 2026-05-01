@@ -281,8 +281,10 @@ where
         &mut self,
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
+        let trie_deleted = updates.is_deleted();
+
         // The storage trie for this account has to be deleted.
-        if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+        if trie_deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
 
@@ -292,13 +294,15 @@ where
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
             // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
-            {
-                self.cursor.delete_current()?;
+            if !trie_deleted {
+                if self
+                    .cursor
+                    .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                    .as_ref()
+                    .is_some_and(|e| *e.nibbles() == nibbles)
+                {
+                    self.cursor.delete_current()?;
+                }
             }
 
             // There is an updated version of this node, insert new entry.
@@ -374,7 +378,10 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::hex_literal::hex;
-    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+    use reth_db_api::{
+        cursor::{DbCursorRW, DbDupCursorRO},
+        transaction::DbTxMut,
+    };
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
@@ -440,5 +447,55 @@ mod tests {
             let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
             assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
         });
+    }
+
+    #[test]
+    fn write_storage_trie_updates_sorted_skips_reseek_after_delete() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::repeat_byte(0x11);
+
+        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        cursor
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry {
+                    nibbles: StoredNibblesSubKey::from(vec![0x01]),
+                    node: BranchNodeCompact::new(1, 0, 0, Vec::new(), None),
+                },
+            )
+            .unwrap();
+        cursor
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry {
+                    nibbles: StoredNibblesSubKey::from(vec![0x02]),
+                    node: BranchNodeCompact::new(2, 0, 0, Vec::new(), None),
+                },
+            )
+            .unwrap();
+
+        let updates = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (
+                    Nibbles::from_nibbles([0x02]),
+                    Some(BranchNodeCompact::new(3, 0, 0, Vec::new(), None)),
+                ),
+                (Nibbles::from_nibbles([0x03]), None),
+            ],
+        };
+
+        let mut trie_cursor = DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+            provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+        trie_cursor.write_storage_trie_updates_sorted(&updates).unwrap();
+
+        let mut cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+        let (_, first) = cursor.seek_exact(hashed_address).unwrap().unwrap();
+        assert_eq!(first.nibbles, StoredNibblesSubKey::from(vec![0x02]));
+        assert_eq!(first.node, BranchNodeCompact::new(3, 0, 0, Vec::new(), None));
+        assert!(cursor.next_dup().unwrap().is_none());
     }
 }
