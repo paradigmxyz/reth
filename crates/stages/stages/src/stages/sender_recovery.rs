@@ -171,16 +171,18 @@ where
         for range in batch {
             // Pair each transaction number with its block number
             let start = Instant::now();
-            let block_numbers = range.clone().fold(Vec::new(), |mut block_numbers, tx| {
-                while let Some((block, index)) = blocks_with_indices.peek() {
-                    if index.contains_tx(tx) {
-                        block_numbers.push(*block);
-                        return block_numbers
+            let tx_batch_len = (range.end.saturating_sub(range.start)) as usize;
+            let block_numbers =
+                range.clone().fold(Vec::with_capacity(tx_batch_len), |mut block_numbers, tx| {
+                    while let Some((block, index)) = blocks_with_indices.peek() {
+                        if index.contains_tx(tx) {
+                            block_numbers.push(*block);
+                            return block_numbers
+                        }
+                        blocks_with_indices.next();
                     }
-                    blocks_with_indices.next();
-                }
-                block_numbers
-            });
+                    block_numbers
+                });
             let fold_elapsed = start.elapsed();
             debug!(target: "sync::stages::sender_recovery", ?block_body_indices_elapsed, ?fold_elapsed, len = block_numbers.len(), "Calculated block numbers");
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
