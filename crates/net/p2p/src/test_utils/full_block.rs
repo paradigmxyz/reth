@@ -1,4 +1,5 @@
 use crate::{
+    block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::BodiesClient,
     download::DownloadClient,
     error::PeerRequestResult,
@@ -10,7 +11,7 @@ use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::B256Map, B256};
 use parking_lot::Mutex;
-use reth_eth_wire_types::HeadersDirection;
+use reth_eth_wire_types::{BlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -169,4 +170,17 @@ impl BodiesClient for TestFullBlockClient {
 
 impl BlockClient for TestFullBlockClient {
     type Block = reth_ethereum_primitives::Block;
+}
+
+impl BlockAccessListsClient for TestFullBlockClient {
+    type Output = futures::future::Ready<PeerRequestResult<BlockAccessLists>>;
+
+    fn get_block_access_lists_with_priority_and_requirement(
+        &self,
+        _hashes: Vec<B256>,
+        _priority: Priority,
+        _requirement: BalRequirement,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists::default())))
+    }
 }

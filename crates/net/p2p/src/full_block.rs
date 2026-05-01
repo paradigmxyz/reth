@@ -1077,6 +1077,22 @@ where
     type Block = Net::Block;
 }
 
+impl<Net> BlockAccessListsClient for NoopFullBlockClient<Net>
+where
+    Net: NetworkPrimitives,
+{
+    type Output = futures::future::Ready<PeerRequestResult<BlockAccessLists>>;
+
+    fn get_block_access_lists_with_priority_and_requirement(
+        &self,
+        _hashes: Vec<B256>,
+        _priority: Priority,
+        _requirement: BalRequirement,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists::default())))
+    }
+}
+
 impl<Net> Default for NoopFullBlockClient<Net> {
     fn default() -> Self {
         Self(PhantomData::<Net>)
