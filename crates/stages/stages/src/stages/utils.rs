@@ -1,5 +1,5 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{map::{AddressMap, HashMap as FastHashMap}, Address, BlockNumber, TxNumber, B256};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -179,7 +179,7 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: FastHashMap<AddressStorageKey, Vec<u64>> = FastHashMap::default();
 
     let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
         let last = indices.last().expect("qed");
