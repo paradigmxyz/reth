@@ -38,14 +38,18 @@
 //! [`FullConsensus::validate_block_post_execution`]: reth_consensus::FullConsensus::validate_block_post_execution
 //! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
-use crate::tree::{
-    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::{InstrumentedStateProvider, StateProviderStats},
-    multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+use crate::{
+    download::DownloadedBlock,
+    tree::{
+        error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+        instrumented_state::{InstrumentedStateProvider, StateProviderStats},
+        multiproof::{StateRootComputeOutcome, StateRootHandle},
+        payload_processor::PayloadProcessor,
+        precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+        CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState,
+        ExecutionEnv, PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+        WaitForCaches,
+    },
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
@@ -269,7 +273,7 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
-            BlockOrPayload::Block(block) => Ok(block),
+            BlockOrPayload::Block(block) => Ok(block.into_block()),
         }
     }
 
@@ -284,7 +288,7 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
-            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())?),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.block().header())?),
         }
     }
 
@@ -306,7 +310,7 @@ where
                 Either::Left(iter)
             }
             BlockOrPayload::Block(block) => {
-                let txs = block.body().clone_transactions();
+                let txs = block.block().body().clone_transactions();
                 let convert = |tx: N::SignedTx| tx.try_into_recovered();
                 Either::Right((txs, convert))
             }
@@ -324,7 +328,7 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
-            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block.block())?),
         }
     }
 
@@ -425,7 +429,7 @@ where
                     Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
                     Either::Right(()) => {
                         let BlockOrPayload::Block(block) = input else { unreachable!() };
-                        Ok(block)
+                        Ok(block.into_block())
                     }
                 }
             };
@@ -494,8 +498,7 @@ where
         // Extract the decoded BAL, if valid and available.
         let decoded_bal = ensure_ok!(input
             .try_decoded_access_list()
-            .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }))
-        .map(Arc::new);
+            .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }));
 
         let env = ExecutionEnv {
             evm_env,
@@ -1936,6 +1939,15 @@ pub trait EngineValidator<
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
 
+    /// Validates a block downloaded from the network with optional decoded BAL data.
+    fn validate_downloaded_block(
+        &mut self,
+        block: DownloadedBlock<N::Block>,
+        ctx: TreeCtx<'_, N>,
+    ) -> ValidationOutcome<N> {
+        self.validate_block(block.into_block(), ctx)
+    }
+
     /// Hook called after an executed block is inserted directly into the tree.
     ///
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
@@ -2006,6 +2018,14 @@ where
         block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
+        self.validate_downloaded_block(DownloadedBlock::without_bal(block), ctx)
+    }
+
+    fn validate_downloaded_block(
+        &mut self,
+        block: DownloadedBlock<N::Block>,
+        ctx: TreeCtx<'_, N>,
+    ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
     }
 
@@ -2058,7 +2078,7 @@ pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
     /// Block.
-    Block(SealedBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
+    Block(DownloadedBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {
@@ -2066,7 +2086,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn hash(&self) -> B256 {
         match self {
             Self::Payload(payload) => payload.block_hash(),
-            Self::Block(block) => block.hash(),
+            Self::Block(block) => block.block().hash(),
         }
     }
 
@@ -2074,7 +2094,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn num_hash(&self) -> NumHash {
         match self {
             Self::Payload(payload) => payload.num_hash(),
-            Self::Block(block) => block.num_hash(),
+            Self::Block(block) => block.block().num_hash(),
         }
     }
 
@@ -2082,7 +2102,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn parent_hash(&self) -> B256 {
         match self {
             Self::Payload(payload) => payload.parent_hash(),
-            Self::Block(block) => block.parent_hash(),
+            Self::Block(block) => block.block().parent_hash(),
         }
     }
 
@@ -2090,7 +2110,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn block_with_parent(&self) -> BlockWithParent {
         match self {
             Self::Payload(payload) => payload.block_with_parent(),
-            Self::Block(block) => block.block_with_parent(),
+            Self::Block(block) => block.block().block_with_parent(),
         }
     }
 
@@ -2113,13 +2133,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 
     /// Returns the decoded block access list, if present and successfully decoded.
-    pub fn try_decoded_access_list(&self) -> Result<Option<DecodedBal>, alloy_rlp::Error> {
+    pub fn try_decoded_access_list(&self) -> Result<Option<Arc<DecodedBal>>, alloy_rlp::Error> {
         match self {
             Self::Payload(payload) => payload
                 .block_access_list()
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
+                .map(|result| result.map(Arc::new))
                 .transpose(),
-            Self::Block(_) => Ok(None),
+            Self::Block(block) => Ok(block.decoded_bal()),
         }
     }
 
@@ -2130,7 +2151,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
-            Self::Block(block) => block.transaction_count(),
+            Self::Block(block) => block.block().transaction_count(),
         }
     }
 
@@ -2141,7 +2162,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
-            Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
+            Self::Block(block) => block.block().body().withdrawals().map(|w| w.as_slice()),
         }
     }
 
@@ -2152,7 +2173,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.gas_used(),
-            Self::Block(block) => block.gas_used(),
+            Self::Block(block) => block.block().gas_used(),
         }
     }
 
@@ -2163,7 +2184,34 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.gas_limit(),
-            Self::Block(block) => block.gas_limit(),
+            Self::Block(block) => block.block().gas_limit(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::Bytes;
+    use alloy_rlp::EMPTY_LIST_CODE;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_primitives::BlockBody;
+
+    #[test]
+    fn block_or_payload_returns_downloaded_decoded_bal() {
+        let raw = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        let decoded_bal = Arc::new(DecodedBal::from_rlp_bytes(raw).unwrap());
+        let block: SealedBlock<reth_ethereum_primitives::Block> =
+            SealedBlock::from_parts_unchecked(Header::default(), BlockBody::default(), B256::ZERO);
+        let input = BlockOrPayload::<EthEngineTypes>::Block(DownloadedBlock::new(
+            block,
+            Some(decoded_bal.clone()),
+        ));
+
+        assert_eq!(
+            input.try_decoded_access_list().unwrap().as_ref().map(|bal| bal.hash()),
+            Some(decoded_bal.hash())
+        );
     }
 }
