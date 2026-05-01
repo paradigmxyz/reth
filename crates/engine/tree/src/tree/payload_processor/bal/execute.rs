@@ -45,6 +45,9 @@ use std::sync::{
 pub type ReceiptFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Receipt;
 
+type WorkerTxSender<Tx> = crossbeam_channel::Sender<Result<Tx, BalExecutionError>>;
+type WorkerTxReceiver<Tx> = crossbeam_channel::Receiver<Result<Tx, BalExecutionError>>;
+
 /// Output of a successful BAL-path block execution.
 #[expect(missing_debug_implementations)]
 pub struct BalExecutionOutput<Evm: ConfigureEvm> {
@@ -134,11 +137,42 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         DB: Database + Send,
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
-        self.execute_block_in_pool(
+        let tx_count = txs.len();
+        self.execute_block_stream(
+            make_db,
+            received_bal,
+            block,
+            tx_count,
+            txs.into_iter().map(Ok),
+            header_bal_hash,
+            block_gas_limit,
+        )
+    }
+
+    /// Executes one block on the BAL path while consuming recovered transactions as a stream.
+    #[expect(clippy::too_many_arguments)]
+    pub fn execute_block_stream<Tx, DB, MakeDb, Txs>(
+        &self,
+        make_db: MakeDb,
+        received_bal: Arc<DecodedBal>,
+        block: &SealedBlock<BlockTy<Evm::Primitives>>,
+        tx_count: usize,
+        txs: Txs,
+        header_bal_hash: B256,
+        block_gas_limit: u64,
+    ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<Evm> + Send,
+        DB: Database + Send,
+        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+        Txs: IntoIterator<Item = Result<Tx, BalExecutionError>>,
+    {
+        self.execute_block_stream_in_pool(
             self.runtime.bal_streaming_pool(),
             make_db,
             received_bal,
             block,
+            tx_count,
             txs,
             header_bal_hash,
             block_gas_limit,
@@ -161,6 +195,39 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         Tx: ExecutableTxFor<Evm> + Send,
         DB: Database + Send,
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+    {
+        let tx_count = txs.len();
+        self.execute_block_stream_in_pool(
+            worker_pool,
+            make_db,
+            received_bal,
+            block,
+            tx_count,
+            txs.into_iter().map(Ok),
+            header_bal_hash,
+            block_gas_limit,
+        )
+    }
+
+    /// Executes one block on the BAL path using the provided worker pool while consuming
+    /// recovered transactions as a stream.
+    #[expect(clippy::too_many_arguments)]
+    pub fn execute_block_stream_in_pool<Tx, DB, MakeDb, Txs>(
+        &self,
+        worker_pool: &WorkerPool,
+        make_db: MakeDb,
+        received_bal: Arc<DecodedBal>,
+        block: &SealedBlock<BlockTy<Evm::Primitives>>,
+        tx_count: usize,
+        txs: Txs,
+        header_bal_hash: B256,
+        block_gas_limit: u64,
+    ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<Evm> + Send,
+        DB: Database + Send,
+        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+        Txs: IntoIterator<Item = Result<Tx, BalExecutionError>>,
     {
         let bal = received_bal.as_bal();
         check_item_count(bal, block_gas_limit)?;
@@ -185,7 +252,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             .spec
             .into()
             .is_enabled_in(SpecId::AMSTERDAM);
-        let tx_gas_limits: Vec<_> = txs.iter().map(|tx| tx.tx().gas_limit()).collect();
 
         // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
         // (called by `commit_transaction`) panics at revm-database's
@@ -211,18 +277,22 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
 
             let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
             let abort = Arc::new(AtomicBool::new(false));
-            let tx_count = txs.len() as u64;
             let make_db = &make_db;
 
             worker_pool.in_place_scope(|scope| -> Result<(), BalExecutionError> {
-                let mut result_rxs = Vec::with_capacity(tx_count as usize);
+                let mut tx_senders = Vec::with_capacity(tx_count);
+                let mut result_rxs = Vec::with_capacity(tx_count);
 
-                for (i, tx) in txs.into_iter().enumerate() {
+                for i in 0..tx_count {
                     let tx_index = i as u64 + 1;
                     let abort = Arc::clone(&abort);
                     let received_bal_revm = Arc::clone(&received_bal_revm);
                     let evm_config = worker_evm_config.clone();
+                    let (tx_sender, tx_receiver): (WorkerTxSender<Tx>, WorkerTxReceiver<Tx>) =
+                        crossbeam_channel::bounded(1);
                     let result_rx = spawn_worker(scope, abort, move || {
+                        let tx = recv_worker_tx(tx_receiver)?;
+                        let tx_gas_limit = tx.tx().gas_limit();
                         let mut worker_state = State::builder()
                             .with_database(make_db()?)
                             .with_bal(received_bal_revm)
@@ -234,11 +304,16 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                             .executor_for_block(&mut worker_state, block)
                             .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
                             .execute_transaction_without_commit(tx)
+                            .map(|worker_result| (tx_gas_limit, worker_result))
                             .map_err(BalExecutionError::Evm)
                     });
+                    tx_senders.push(tx_sender);
                     result_rxs.push(result_rx);
                 }
-                for (i, result_rx) in result_rxs.into_iter().enumerate() {
+
+                send_transactions_to_workers(tx_senders, txs)?;
+
+                for result_rx in result_rxs {
                     let worker_result = result_rx.recv().map_err(|_| {
                         BalExecutionError::Evm(BlockExecutionError::msg(
                             "BAL worker result channel closed before result arrived",
@@ -251,7 +326,8 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                             return Err(err);
                         }
                     };
-                    gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
+                    let (tx_gas_limit, worker_result) = worker_result;
+                    gas_tracker.validate_tx_limit(tx_gas_limit)?;
                     gas_tracker.record_result(worker_result.result());
                     canonical_executor.evm_mut().db_mut().bump_bal_index();
                     commit_worker_result(&mut canonical_executor, worker_result);
@@ -326,6 +402,37 @@ impl BlockGasTracker {
     }
 }
 
+fn send_transactions_to_workers<Tx, Txs>(
+    tx_senders: Vec<WorkerTxSender<Tx>>,
+    txs: Txs,
+) -> Result<(), BalExecutionError>
+where
+    Txs: IntoIterator<Item = Result<Tx, BalExecutionError>>,
+{
+    let expected_tx_count = tx_senders.len();
+    let mut txs = txs.into_iter();
+
+    for (i, tx_sender) in tx_senders.into_iter().enumerate() {
+        let tx =
+            txs.next().ok_or_else(|| missing_worker_transaction_error(expected_tx_count, i))?;
+        let stop = tx.is_err();
+
+        tx_sender.send(tx).map_err(|_| worker_tx_channel_closed_error())?;
+        if stop {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn recv_worker_tx<Tx>(tx_receiver: WorkerTxReceiver<Tx>) -> Result<Tx, BalExecutionError> {
+    match tx_receiver.recv() {
+        Ok(tx) => tx,
+        Err(_) => Err(worker_tx_channel_closed_error()),
+    }
+}
+
 fn spawn_worker<'scope, R, F>(
     scope: &rayon::Scope<'scope>,
     abort: Arc<AtomicBool>,
@@ -346,6 +453,18 @@ where
     });
 
     result_rx
+}
+
+fn missing_worker_transaction_error(expected: usize, received: usize) -> BalExecutionError {
+    BalExecutionError::Evm(BlockExecutionError::msg(format_args!(
+        "BAL transaction stream ended after {received} transactions, expected {expected}",
+    )))
+}
+
+fn worker_tx_channel_closed_error() -> BalExecutionError {
+    BalExecutionError::Evm(BlockExecutionError::msg(
+        "BAL worker transaction channel closed before transaction arrived",
+    ))
 }
 
 fn commit_worker_result<E>(executor: &mut E, worker_result: E::Result)

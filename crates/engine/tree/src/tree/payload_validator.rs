@@ -1131,17 +1131,16 @@ where
             .executor()
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
-        // Collect txs from the handle's iterator. The BAL executor needs a `Vec<Tx>` because it
-        // owns each tx for the (currently sequential) commit loop.
-        //
-        // TODO: this can be optimized so that transactions are streamed directly to the BAL
-        // executor.
-        let txs: Vec<Tx> = handle
-            .iter_transactions()
-            .collect::<Result<Vec<Tx>, Err>>()
-            .map_err(BlockExecutionError::other)?;
-        let senders: Vec<Address> =
-            txs.iter().map(|tx| *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(tx)).collect();
+        let mut senders = Vec::with_capacity(env.transaction_count);
+        let txs = handle.iter_transactions().map(|tx| {
+            let tx = tx.map_err(|err| {
+                crate::tree::payload_processor::bal::BalExecutionError::Evm(
+                    BlockExecutionError::other(err),
+                )
+            })?;
+            senders.push(*<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx));
+            Ok(tx)
+        });
 
         let block_gas_limit = block.header().gas_limit();
         let make_db = move || {
@@ -1159,10 +1158,11 @@ where
             self.runtime.clone(),
             self.evm_config.clone(),
         )
-        .execute_block(
+        .execute_block_stream(
             make_db,
             decoded_bal,
             block,
+            env.transaction_count,
             txs,
             header_bal_hash,
             block_gas_limit,
