@@ -1,8 +1,8 @@
 //! Perform DNS lookups
 
 use dashmap::DashMap;
-use hickory_resolver::{ConnectionProvider, net::NetError, proto::rr::RData};
-pub use hickory_resolver::{TokioResolver};
+pub use hickory_resolver::{net::NetError, TokioResolver};
+use hickory_resolver::{proto::rr::RData, ConnectionProvider};
 use std::future::Future;
 use tracing::trace;
 
