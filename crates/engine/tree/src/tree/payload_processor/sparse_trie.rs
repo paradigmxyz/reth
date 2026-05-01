@@ -17,7 +17,6 @@ use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -89,8 +88,6 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Cache of storage proof targets that have already been fetched/requested from the proof
     /// workers. account -> slot -> lowest `min_len` requested.
     fetched_storage_targets: B256Map<B256Map<u8>>,
-    /// Reusable buffer for RLP encoding of accounts.
-    account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
     /// Accumulated account leaf update cache hits.
@@ -152,7 +149,6 @@ where
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
-            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             account_cache_hits: 0,
             account_cache_misses: 0,
@@ -732,7 +728,6 @@ where
         loop {
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
-            let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
                 if let Some(updates) = self.storage_updates.get(addr) {
@@ -741,7 +736,7 @@ where
                         return true;
                     } else if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                        let encoded = encode_account_leaf_value(account, storage_root);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
                         return false;
@@ -772,7 +767,7 @@ where
                     (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
-                let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                let encoded = encode_account_leaf_value(account, storage_root);
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 num_promoted += 1;
 
@@ -827,18 +822,15 @@ where
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
-fn encode_account_leaf_value(
-    account: Option<Account>,
-    storage_root: B256,
-    account_rlp_buf: &mut Vec<u8>,
-) -> Vec<u8> {
+fn encode_account_leaf_value(account: Option<Account>, storage_root: B256) -> Vec<u8> {
     if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
         return Vec::new();
     }
 
-    account_rlp_buf.clear();
-    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-    account_rlp_buf.clone()
+    let trie_account = account.unwrap_or_default().into_trie_account(storage_root);
+    let mut encoded = Vec::with_capacity(trie_account.length());
+    trie_account.encode(&mut encoded);
+    encoded
 }
 
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
@@ -954,12 +946,9 @@ mod tests {
 
     #[test]
     fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
-        let mut account_rlp_buf = vec![0xAB];
-        let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
+        let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH);
 
         assert!(encoded.is_empty());
-        // Early return should not touch the caller's buffer.
-        assert_eq!(account_rlp_buf, vec![0xAB]);
     }
 
     #[test]
@@ -970,15 +959,13 @@ mod tests {
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
         });
-        let mut account_rlp_buf = vec![0x00, 0x01];
 
-        let encoded = encode_account_leaf_value(account, storage_root, &mut account_rlp_buf);
+        let encoded = encode_account_leaf_value(account, storage_root);
         let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
 
         assert_eq!(decoded.nonce, 7);
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
-        assert_eq!(account_rlp_buf, encoded);
     }
 
     #[test]
