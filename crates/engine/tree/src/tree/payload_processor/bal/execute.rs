@@ -281,6 +281,17 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
                     ?div,
                     "first BAL divergence",
                 );
+                if tracing::enabled!(
+                    target: "engine::tree::payload_processor::bal",
+                    tracing::Level::TRACE
+                ) && let Some(deep) = div.deep_diff(bal, &composed_alloy)
+                {
+                    tracing::trace!(
+                        target: "engine::tree::payload_processor::bal",
+                        ?deep,
+                        "first BAL divergence (deep)",
+                    );
+                }
             }
             return Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
                 rebuilt,
