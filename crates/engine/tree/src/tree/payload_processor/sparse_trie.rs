@@ -659,10 +659,19 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
+        if self.pending_account_updates.is_empty() {
+            return;
+        }
+
         let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
+            .pending_account_updates
+            .keys()
+            .filter_map(|address| {
+                self.storage_updates
+                    .get(address)
+                    .is_some_and(|updates| updates.is_empty())
+                    .then_some(*address)
+            })
             .collect();
 
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
