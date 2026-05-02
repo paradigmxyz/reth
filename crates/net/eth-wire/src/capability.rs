@@ -188,7 +188,7 @@ impl SharedCapabilities {
         self.0.iter().find(|c| c.version() == cap.version as u8 && c.name() == cap.name)
     }
 
-    /// Converts a capability-local message ID into the relative RLPx message ID used by
+    /// Converts a capability-local message ID into the relative `RLPx` message ID used by
     /// [`P2PStream`](crate::P2PStream).
     ///
     /// `P2PStream` strips the reserved p2p message ID range before yielding subprotocol messages,
@@ -203,7 +203,7 @@ impl SharedCapabilities {
         shared.relative_message_id_offset().checked_add(message_id)
     }
 
-    /// Converts a relative RLPx message ID back into the message ID local to `cap`.
+    /// Converts a relative `RLPx` message ID back into the message ID local to `cap`.
     ///
     /// Returns `None` if `cap` is not shared, if the relative ID belongs to a different
     /// capability, or if it is outside the capability's negotiated message range.
@@ -565,7 +565,7 @@ mod tests {
         let snap = Capability::snap(SnapVersion::V1);
         let eth = Capability::eth(EthVersion::Eth69);
         let local_capabilities =
-            vec![EthVersion::Eth69.into(), intermediate.clone(), Protocol::snap(SnapVersion::V1)];
+            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V1)];
         let peer_capabilities = vec![eth, intermediate_cap, snap.clone()];
 
         let shared = SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap();
@@ -581,7 +581,7 @@ mod tests {
         let intermediate = Protocol::new(intermediate_cap.clone(), 3);
         let snap = Capability::snap(SnapVersion::V1);
         let local_capabilities =
-            vec![EthVersion::Eth69.into(), intermediate.clone(), Protocol::snap(SnapVersion::V1)];
+            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V1)];
         let peer_capabilities =
             vec![Capability::eth(EthVersion::Eth69), intermediate_cap.clone(), snap.clone()];
 
