@@ -144,7 +144,9 @@ write_summary() {
         printf 'drop_merkle_log=%s\n' "$DROP_MERKLE_LOG"
         printf 'post_drop_unwind_result=%s\n' "${POST_DROP_UNWIND_RESULT:-not_run}"
         printf 'post_drop_unwind_log=%s\n' "$POST_DROP_UNWIND_LOG"
-        printf 'post_drop_unwind_trace_log=%s\n' "$POST_DROP_UNWIND_TRACE_LOG"
+        printf 'post_drop_merkle_run_result=%s\n' "${POST_DROP_MERKLE_RUN_RESULT:-not_run}"
+        printf 'post_drop_merkle_run_log=%s\n' "$POST_DROP_MERKLE_RUN_LOG"
+        printf 'post_drop_merkle_run_trace_log=%s\n' "$POST_DROP_MERKLE_RUN_TRACE_LOG"
     } >"$SUMMARY_FILE"
 }
 
@@ -178,9 +180,11 @@ START_TIMEOUT=180
 TARGET_TIMEOUT=900
 PERSISTENCE_TIMEOUT=300
 RESTART_TIMEOUT=180
-RETH_BIN="/repos/reth/target/debug/reth"
-BENCH_BIN="/repos/reth/target/debug/reth-bench"
+RETH_BIN="/repos/reth/target/profiling/reth"
+BENCH_BIN="/repos/reth/target/profiling/reth-bench"
 CHAIN="hoodi"
+MERKLE_TRACE_FILTER='info,sync::pipeline=debug,reth::cli=info,trie::node_iter=trace,trie::state_root=trace,trie::storage_root=trace'
+MERKLE_TRACE_CAPTURE_PATTERN='trie::node_iter: return=Ok\(Some\(Leaf\(|trie::state_root: calculated state root|trie::storage_root: calculated storage root'
 RESULT="script_error"
 ADVANCE=""
 HEAD_BEFORE=""
@@ -192,6 +196,7 @@ BENCH_PID=""
 FAILED_UNWIND_TARGET=""
 DROP_MERKLE_RESULT="not_run"
 POST_DROP_UNWIND_RESULT="not_run"
+POST_DROP_MERKLE_RUN_RESULT="not_run"
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
 ARTIFACTS_DIR="/tmp/reth-hoodi-unwind-${TIMESTAMP}"
 
@@ -270,7 +275,8 @@ NODE2_LOG="${ARTIFACTS_DIR}/node2.log"
 RESTART_TRACE_LOG="${ARTIFACTS_DIR}/restart-trace.log"
 DROP_MERKLE_LOG="${ARTIFACTS_DIR}/drop-merkle.log"
 POST_DROP_UNWIND_LOG="${ARTIFACTS_DIR}/post-drop-unwind.log"
-POST_DROP_UNWIND_TRACE_LOG="${ARTIFACTS_DIR}/post-drop-unwind-trace.log"
+POST_DROP_MERKLE_RUN_LOG="${ARTIFACTS_DIR}/post-drop-merkle-run.log"
+POST_DROP_MERKLE_RUN_TRACE_LOG="${ARTIFACTS_DIR}/post-drop-merkle-run-trace.log"
 
 trap cleanup EXIT
 
@@ -331,6 +337,9 @@ restore_snapshot() {
     local parent_dir
     local base_name
     local extract_root
+    local candidate_datadir=""
+    local -a nested_candidates=()
+    local nested_dir
 
     parent_dir=$(dirname "$DATADIR")
     base_name=$(basename "$DATADIR")
@@ -342,13 +351,34 @@ restore_snapshot() {
     tar --zstd -xf "$SNAPSHOT" -C "$extract_root"
 
     if [[ -d "${extract_root}/${base_name}/db" && -d "${extract_root}/${base_name}/static_files" ]]; then
-        mv "${extract_root}/${base_name}" "$DATADIR"
-        rm -rf "$extract_root"
-    elif [[ -d "${extract_root}/db" && -d "${extract_root}/static_files" ]]; then
-        mv "$extract_root" "$DATADIR"
+        candidate_datadir="${extract_root}/${base_name}"
     else
+        while IFS= read -r nested_dir; do
+            if [[ -d "${nested_dir}/db" && -d "${nested_dir}/static_files" ]]; then
+                nested_candidates+=("$nested_dir")
+            fi
+        done < <(find "$extract_root" -mindepth 1 -maxdepth 1 -type d | sort)
+
+        if ((${#nested_candidates[@]} == 1)); then
+            candidate_datadir="${nested_candidates[0]}"
+        elif ((${#nested_candidates[@]} > 1)); then
+            log "Snapshot layout produced multiple nested datadir candidates under ${extract_root}: ${nested_candidates[*]}"
+            exit 2
+        elif [[ -d "${extract_root}/db" && -d "${extract_root}/static_files" ]]; then
+            candidate_datadir="$extract_root"
+        fi
+    fi
+
+    if [[ -z "$candidate_datadir" ]]; then
         log "Snapshot layout did not produce an expected datadir under ${extract_root}"
         exit 2
+    fi
+
+    if [[ "$candidate_datadir" == "$extract_root" ]]; then
+        mv "$extract_root" "$DATADIR"
+    else
+        mv "$candidate_datadir" "$DATADIR"
+        rm -rf "$extract_root"
     fi
 
     if [[ ! -f "$JWT_SECRET" ]]; then
@@ -539,14 +569,45 @@ run_drop_merkle() {
 run_post_drop_unwind() {
     local target="$1"
 
-    log "Re-running unwind with trace logs piped to ${POST_DROP_UNWIND_TRACE_LOG}"
+    log "Re-running unwind without trace capture to restore the pre-failure head"
     "$RETH_BIN" stage unwind \
         --datadir "$DATADIR" \
         --chain "$CHAIN" \
-        --log.stdout.filter trace \
+        --log.stdout.filter info \
         --color never \
         to-block "$target" \
-        > >(tee "$POST_DROP_UNWIND_TRACE_LOG" >"$POST_DROP_UNWIND_LOG") 2>&1
+        >"$POST_DROP_UNWIND_LOG" 2>&1
+}
+
+run_post_drop_merkle() {
+    local target="$1"
+    local merkle_pid
+
+    log "Rebuilding the Merkle stage with filtered trace logs piped to ${POST_DROP_MERKLE_RUN_TRACE_LOG}"
+    (
+        "$RETH_BIN" stage run \
+            --datadir "$DATADIR" \
+            --chain "$CHAIN" \
+            --from 0 \
+            --to "$target" \
+            --skip-unwind \
+            --checkpoints \
+            --commit \
+            --disable-discovery \
+            --log.stdout.filter "$MERKLE_TRACE_FILTER" \
+            --color never \
+            merkle 2>&1 | \
+            rg --line-buffered "$MERKLE_TRACE_CAPTURE_PATTERN" | \
+            tee "$POST_DROP_MERKLE_RUN_TRACE_LOG" >"$POST_DROP_MERKLE_RUN_LOG"
+    ) &
+    merkle_pid=$!
+
+    while kill -0 "$merkle_pid" 2>/dev/null; do
+        log "Waiting for the post-drop Merkle rebuild to finish"
+        sleep 300
+    done
+
+    wait "$merkle_pid"
 }
 
 classify_restart() {
@@ -687,9 +748,22 @@ if [[ "$RESULT" == "unwind_failed" || "$RESULT" == "unwind_succeeded" ]]; then
     capture_command reth_stage_unwind "$RETH_BIN" stage unwind \
         --datadir "$DATADIR" \
         --chain "$CHAIN" \
-        --log.stdout.filter trace \
+        --log.stdout.filter info \
         --color never \
         to-block "$FAILED_UNWIND_TARGET"
+
+    capture_command reth_stage_run_merkle "$RETH_BIN" stage run \
+        --datadir "$DATADIR" \
+        --chain "$CHAIN" \
+        --from 0 \
+        --to "$FAILED_UNWIND_TARGET" \
+        --skip-unwind \
+        --checkpoints \
+        --commit \
+        --disable-discovery \
+        --log.stdout.filter "$MERKLE_TRACE_FILTER" \
+        --color never \
+        merkle
 
     if ! run_drop_merkle; then
         DROP_MERKLE_RESULT="failed"
@@ -702,9 +776,18 @@ if [[ "$RESULT" == "unwind_failed" || "$RESULT" == "unwind_succeeded" ]]; then
         exit 2
     fi
     POST_DROP_UNWIND_RESULT="ok"
+
+    remove_stale_locks
+
+    if ! run_post_drop_merkle "$FAILED_UNWIND_TARGET"; then
+        POST_DROP_MERKLE_RUN_RESULT="failed"
+        exit 2
+    fi
+    POST_DROP_MERKLE_RUN_RESULT="ok"
 else
     DROP_MERKLE_RESULT="skipped_no_unwind_target"
     POST_DROP_UNWIND_RESULT="skipped_no_unwind_target"
+    POST_DROP_MERKLE_RUN_RESULT="skipped_no_unwind_target"
 fi
 
 log "Restart result: ${RESULT}"
