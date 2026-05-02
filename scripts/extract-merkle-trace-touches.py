@@ -4,7 +4,8 @@
 
 The trace logs emitted by `reth` only include hashed addresses and hashed storage
 slots, so this script reports the hashed values exactly as they appear in the
-trace.
+trace. It supports both pipeline logs with `stage=Merkle...` spans and standalone
+`reth stage run merkle` logs.
 """
 
 from __future__ import annotations
@@ -48,6 +49,11 @@ STORAGE_ROOT_RE = re.compile(
     r"branches_added=([0-9]+) "
     r"leaves_added=([0-9]+)"
 )
+MERKLE_LINE_MARKERS = (
+    "trie::node_iter:",
+    "trie::state_root:",
+    "trie::storage_root:",
+)
 
 
 def bool_from_string(value: str) -> bool:
@@ -73,6 +79,18 @@ def sorted_records(bucket: dict[tuple[str, ...], dict[str, object]]) -> list[dic
     return sorted(bucket.values(), key=lambda item: (int(item["first_line"]), int(item["last_line"])))
 
 
+def detect_stage(line: str) -> str | None:
+    stage_match = STAGE_RE.search(line)
+    if stage_match is not None:
+        stage = stage_match.group(1).strip()
+        return stage if stage.startswith("Merkle") else None
+
+    if any(marker in line for marker in MERKLE_LINE_MARKERS):
+        return "Merkle"
+
+    return None
+
+
 def parse_trace(trace_path: Path) -> dict[str, object]:
     account_leaves: dict[tuple[str, ...], dict[str, object]] = {}
     storage_leaves: dict[tuple[str, ...], dict[str, object]] = {}
@@ -89,13 +107,10 @@ def parse_trace(trace_path: Path) -> dict[str, object]:
 
     with trace_path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
-            stage_match = STAGE_RE.search(line)
-            if stage_match is None:
+            stage = detect_stage(line)
+            if stage is None:
                 continue
 
-            stage = stage_match.group(1)
-            if not stage.startswith("Merkle"):
-                continue
             stages_seen.add(stage)
 
             storage_addr_match = STORAGE_TRIE_ADDR_RE.search(line)
