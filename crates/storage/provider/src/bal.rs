@@ -1,23 +1,41 @@
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
-use reth_storage_api::{BalStore, GetBlockAccessListLimit};
+use reth_storage_api::{
+    BalNotification, BalNotificationSender, BalNotifications, BalStore, GetBlockAccessListLimit,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::HashMap, sync::Arc};
 
 /// Basic in-memory BAL store keyed by block hash.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct InMemoryBalStore {
     entries: Arc<RwLock<HashMap<BlockHash, Bytes>>>,
+    notifications: BalNotificationSender,
+}
+
+// Match the canonical state broadcast buffer so BAL subscriptions behave like the existing
+// in-memory notification path. This is a bounded best-effort channel, not a durability boundary.
+const DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE: usize = 256;
+
+impl Default for InMemoryBalStore {
+    fn default() -> Self {
+        // `broadcast::Sender` has no meaningful default because it must be tied to a channel with
+        // an explicit capacity, so the store cannot derive `Default`.
+        let (notifications, _) =
+            tokio::sync::broadcast::channel(DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE);
+        Self { entries: Default::default(), notifications }
+    }
 }
 
 impl BalStore for InMemoryBalStore {
     fn insert(
         &self,
         block_hash: BlockHash,
-        _block_number: BlockNumber,
+        block_number: BlockNumber,
         bal: Bytes,
     ) -> ProviderResult<()> {
-        self.entries.write().insert(block_hash, bal);
+        self.entries.write().insert(block_hash, bal.clone());
+        let _ = self.notifications.send(BalNotification::new(block_hash, block_number, bal));
         Ok(())
     }
 
@@ -57,12 +75,18 @@ impl BalStore for InMemoryBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
+
+    fn subscribe_to_bal(&self) -> BalNotifications {
+        self.notifications.subscribe()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use tokio::sync::broadcast::error::TryRecvError;
+    use tokio_stream::StreamExt;
 
     #[test]
     fn insert_and_lookup_by_hash() {
@@ -105,5 +129,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(limited, vec![bal0, bal1]);
+    }
+
+    #[test]
+    fn insert_notifies_subscribers() {
+        let store = InMemoryBalStore::default();
+        let hash = B256::random();
+        let block_number = 7;
+        let bal = Bytes::from_static(b"bal");
+        let mut notifications = store.subscribe_to_bal();
+
+        store.insert(hash, block_number, bal.clone()).unwrap();
+
+        assert_eq!(
+            notifications.try_recv().unwrap(),
+            BalNotification::new(hash, block_number, bal)
+        );
+    }
+
+    #[test]
+    fn insert_without_subscribers_still_succeeds() {
+        let store = InMemoryBalStore::default();
+
+        assert!(store.insert(B256::random(), 1, Bytes::from_static(b"bal")).is_ok());
+    }
+
+    #[tokio::test]
+    async fn bal_stream_skips_lagged_notifications() {
+        let store = InMemoryBalStore::default();
+        let mut stream = store.bal_stream();
+
+        for number in 0..=DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE as u64 {
+            store.insert(B256::random(), number, Bytes::from(vec![number as u8])).unwrap();
+        }
+
+        let first = stream.next().await.unwrap();
+        let second = stream.next().await.unwrap();
+
+        assert_eq!(first.block_number, 1);
+        assert_eq!(second.block_number, 2);
+    }
+
+    #[test]
+    fn cloned_store_shares_notification_channel() {
+        let store = InMemoryBalStore::default();
+        let clone = store.clone();
+        let hash = B256::random();
+        let block_number = 9;
+        let bal = Bytes::from_static(b"bal");
+        let mut notifications = clone.subscribe_to_bal();
+
+        store.insert(hash, block_number, bal.clone()).unwrap();
+
+        assert_eq!(
+            notifications.try_recv().unwrap(),
+            BalNotification::new(hash, block_number, bal)
+        );
+        assert!(matches!(notifications.try_recv(), Err(TryRecvError::Empty)));
     }
 }

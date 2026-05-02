@@ -2,6 +2,75 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
 
+#[cfg(feature = "std")]
+pub use self::subscriptions::{
+    BalNotification, BalNotificationSender, BalNotificationStream, BalNotifications,
+};
+
+#[cfg(feature = "std")]
+mod subscriptions {
+    use super::{BlockHash, BlockNumber, Bytes};
+    use core::{
+        pin::Pin,
+        task::{ready, Context, Poll},
+    };
+    use tokio::sync::broadcast;
+    use tokio_stream::{
+        wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
+        Stream,
+    };
+
+    /// Notification emitted when a new BAL is inserted into the store.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct BalNotification {
+        /// Hash of the block the BAL belongs to.
+        pub block_hash: BlockHash,
+        /// Number of the block the BAL belongs to.
+        pub block_number: BlockNumber,
+        /// Raw BAL RLP payload.
+        pub bal: Bytes,
+    }
+
+    impl BalNotification {
+        /// Creates a new [`BalNotification`].
+        pub const fn new(block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) -> Self {
+            Self { block_hash, block_number, bal }
+        }
+    }
+
+    /// Type alias for a receiver that receives [`BalNotification`] events.
+    pub type BalNotifications = broadcast::Receiver<BalNotification>;
+
+    /// Type alias for a sender that sends [`BalNotification`] events.
+    pub type BalNotificationSender = broadcast::Sender<BalNotification>;
+
+    /// A stream of [`BalNotification`]s.
+    #[derive(Debug)]
+    pub struct BalNotificationStream {
+        st: BroadcastStream<BalNotification>,
+    }
+
+    impl BalNotificationStream {
+        pub(crate) fn new(notifications: BalNotifications) -> Self {
+            Self { st: BroadcastStream::new(notifications) }
+        }
+    }
+
+    impl Stream for BalNotificationStream {
+        type Item = BalNotification;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            loop {
+                return match ready!(Pin::new(&mut self.st).poll_next(cx)) {
+                    Some(Ok(notification)) => Poll::Ready(Some(notification)),
+                    Some(Err(BroadcastStreamRecvError::Lagged(_))) => continue,
+                    None => Poll::Ready(None),
+                }
+            }
+        }
+    }
+}
+
 /// Store for Block Access Lists (BALs).
 ///
 /// This abstraction intentionally does not prescribe where BALs live. Implementations may keep
@@ -64,6 +133,19 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// Implementations may stop at the first gap and return the contiguous prefix.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>>;
+
+    /// Subscribes to BAL insert notifications.
+    ///
+    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
+    /// They do not imply canonicality.
+    #[cfg(feature = "std")]
+    fn subscribe_to_bal(&self) -> BalNotifications;
+
+    /// Convenience method to get a stream of [`BalNotification`]s.
+    #[cfg(feature = "std")]
+    fn bal_stream(&self) -> BalNotificationStream {
+        BalNotificationStream::new(self.subscribe_to_bal())
+    }
 }
 
 /// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
@@ -147,6 +229,20 @@ impl BalStoreHandle {
     pub fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>> {
         self.inner.get_by_range(start, count)
     }
+
+    /// Subscribes to BAL insert notifications.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn subscribe_to_bal(&self) -> BalNotifications {
+        self.inner.subscribe_to_bal()
+    }
+
+    /// Convenience method to get a stream of [`BalNotification`]s.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn bal_stream(&self) -> BalNotificationStream {
+        self.inner.bal_stream()
+    }
 }
 
 impl Default for BalStoreHandle {
@@ -208,12 +304,19 @@ impl BalStore for NoopBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
+
+    #[cfg(feature = "std")]
+    fn subscribe_to_bal(&self) -> BalNotifications {
+        tokio::sync::broadcast::channel(1).1
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    #[cfg(feature = "std")]
+    use tokio::sync::broadcast::error::TryRecvError;
 
     #[test]
     fn noop_store_returns_empty_results() {
@@ -248,5 +351,14 @@ mod tests {
         assert!(!size_limit_2mb.exceeds(1024 * 1024));
         assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn noop_store_subscription_is_empty() {
+        let store = BalStoreHandle::default();
+        let mut notifications = store.subscribe_to_bal();
+
+        assert!(matches!(notifications.try_recv(), Err(TryRecvError::Closed)));
     }
 }

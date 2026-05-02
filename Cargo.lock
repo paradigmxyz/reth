@@ -9600,6 +9600,7 @@ dependencies = [
  "strum",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
@@ -10253,6 +10254,8 @@ dependencies = [
  "reth-trie-common",
  "revm-database",
  "serde_json",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
