@@ -82,125 +82,197 @@ where
     pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
         self.inner.log_stream(filter)
     }
+}
 
-    /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
-    pub async fn handle_accepted(
+#[async_trait::async_trait]
+impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
+where
+    Eth: RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>>,
+{
+    /// Handler for `eth_subscribe`
+    async fn subscribe(
         &self,
-        accepted_sink: SubscriptionSink,
+        pending: PendingSubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> Result<(), ErrorObject<'static>> {
+    ) -> jsonrpsee::core::SubscriptionResult {
+        // Register the underlying listener BEFORE `pending.accept()`. After
+        // accept the client already has the subscription id and may begin
+        // observing events; the spawned task is only enqueued, so any events
+        // fired before the listener is wired up would otherwise be lost.
         #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
-                pipe_from_stream(accepted_sink, self.new_headers_stream()).await
+                let canon_state = self.inner.eth_api.provider().canonical_state_stream();
+                let inner = self.inner.clone();
+                let sink = pending.accept().await?;
+                self.inner.subscription_task_spawner.spawn_task(async move {
+                    let stream = canon_state.flat_map(move |new_chain| {
+                        let converter = inner.eth_api.converter();
+                        let headers = new_chain
+                            .committed()
+                            .blocks_iter()
+                            .filter_map(|block| {
+                                match converter
+                                    .convert_header(block.clone_sealed_header(), block.rlp_length())
+                                {
+                                    Ok(header) => Some(header),
+                                    Err(err) => {
+                                        error!(target = "rpc", %err, "Failed to convert header");
+                                        None
+                                    }
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        futures::stream::iter(headers)
+                    });
+                    let _ = pipe_from_stream(sink, stream).await;
+                });
             }
             SubscriptionKind::Logs => {
                 // if no params are provided, used default filter params
                 let filter = match params {
                     Some(Params::Logs(filter)) => *filter,
                     Some(Params::Bool(_)) => {
-                        return Err(invalid_params_rpc_err("Invalid params for logs"))
+                        pending.reject(invalid_params_rpc_err("Invalid params for logs")).await;
+                        return Ok(());
                     }
                     _ => Default::default(),
                 };
-                pipe_from_stream(accepted_sink, self.log_stream(filter)).await
+                let canon_state = self.inner.eth_api.provider().canonical_state_stream();
+                let sink = pending.accept().await?;
+                self.inner.subscription_task_spawner.spawn_task(async move {
+                    let stream = canon_state
+                        .map(move |canon_state| canon_state.block_receipts())
+                        .flat_map(futures::stream::iter)
+                        .flat_map(move |(block_receipts, removed)| {
+                            let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
+                                &filter,
+                                block_receipts.block,
+                                block_receipts.timestamp,
+                                block_receipts
+                                    .tx_receipts
+                                    .iter()
+                                    .map(|(tx, receipt)| (*tx, receipt)),
+                                removed,
+                            );
+                            futures::stream::iter(all_logs)
+                        });
+                    let _ = pipe_from_stream(sink, stream).await;
+                });
             }
-            SubscriptionKind::NewPendingTransactions => {
-                if let Some(params) = params {
-                    match params {
-                        Params::Bool(true) => {
-                            // full transaction objects requested
-                            let stream = self.full_pending_transaction_stream().filter_map(|tx| {
-                                let tx_value = match self
-                                    .inner
-                                    .eth_api
-                                    .converter()
-                                    .fill_pending(tx.transaction.to_consensus())
-                                {
-                                    Ok(tx) => Some(tx),
-                                    Err(err) => {
-                                        error!(target = "rpc",
-                                            %err,
-                                            "Failed to fill transaction with block context"
-                                        );
-                                        None
-                                    }
-                                };
-                                std::future::ready(tx_value)
-                            });
-                            return pipe_from_stream(accepted_sink, stream).await
-                        }
-                        Params::Bool(false) | Params::None => {
-                            // only hashes requested
-                        }
-                        _ => {
-                            return Err(invalid_params_rpc_err(
-                                "Invalid params for newPendingTransactions",
-                            ))
-                        }
-                    }
+            SubscriptionKind::NewPendingTransactions => match params {
+                Some(Params::Bool(true)) => {
+                    // full transaction objects requested
+                    let raw = self.inner.eth_api.pool().new_pending_pool_transactions_listener();
+                    let inner = self.inner.clone();
+                    let sink = pending.accept().await?;
+                    self.inner.subscription_task_spawner.spawn_task(async move {
+                        let stream = raw.filter_map(move |tx| {
+                            let tx_value = match inner
+                                .eth_api
+                                .converter()
+                                .fill_pending(tx.transaction.to_consensus())
+                            {
+                                Ok(tx) => Some(tx),
+                                Err(err) => {
+                                    error!(target = "rpc",
+                                        %err,
+                                        "Failed to fill transaction with block context"
+                                    );
+                                    None
+                                }
+                            };
+                            std::future::ready(tx_value)
+                        });
+                        let _ = pipe_from_stream(sink, stream).await;
+                    });
                 }
-
-                pipe_from_stream(accepted_sink, self.pending_transaction_hashes_stream()).await
-            }
+                Some(Params::Bool(false) | Params::None) | None => {
+                    // only hashes requested
+                    let rx = self.inner.eth_api.pool().pending_transactions_listener();
+                    let sink = pending.accept().await?;
+                    self.inner.subscription_task_spawner.spawn_task(async move {
+                        let stream = ReceiverStream::new(rx);
+                        let _ = pipe_from_stream(sink, stream).await;
+                    });
+                }
+                _ => {
+                    pending
+                        .reject(invalid_params_rpc_err("Invalid params for newPendingTransactions"))
+                        .await;
+                    return Ok(());
+                }
+            },
             SubscriptionKind::Syncing => {
-                // get new block subscription
-                let mut canon_state = BroadcastStream::new(
+                let canon_state = BroadcastStream::new(
                     self.inner.eth_api.provider().subscribe_to_canonical_state(),
                 );
-                // get current sync status
-                let mut initial_sync_status = self.inner.eth_api.network().is_syncing();
-                let current_sub_res = self.sync_status(initial_sync_status);
+                let pubsub = self.clone();
+                let sink = pending.accept().await?;
+                self.inner.subscription_task_spawner.spawn_task(async move {
+                    let mut canon_state = canon_state;
+                    let mut initial_sync_status = pubsub.inner.eth_api.network().is_syncing();
+                    let current_sub_res = pubsub.sync_status(initial_sync_status);
 
-                // send the current status immediately
-                let msg = SubscriptionMessage::new(
-                    accepted_sink.method_name(),
-                    accepted_sink.subscription_id(),
-                    &current_sub_res,
-                )
-                .map_err(SubscriptionSerializeError::new)?;
+                    // send the current status immediately
+                    let msg = match SubscriptionMessage::new(
+                        sink.method_name(),
+                        sink.subscription_id(),
+                        &current_sub_res,
+                    ) {
+                        Ok(msg) => msg,
+                        Err(_) => return,
+                    };
 
-                if accepted_sink.send(msg).await.is_err() {
-                    return Ok(())
-                }
+                    if sink.send(msg).await.is_err() {
+                        return;
+                    }
 
-                while canon_state.next().await.is_some() {
-                    let current_syncing = self.inner.eth_api.network().is_syncing();
-                    // Only send a new response if the sync status has changed
-                    if current_syncing != initial_sync_status {
-                        // Update the sync status on each new block
-                        initial_sync_status = current_syncing;
+                    while canon_state.next().await.is_some() {
+                        let current_syncing = pubsub.inner.eth_api.network().is_syncing();
+                        // Only send a new response if the sync status has changed
+                        if current_syncing != initial_sync_status {
+                            // Update the sync status on each new block
+                            initial_sync_status = current_syncing;
 
-                        // send a new message now that the status changed
-                        let sync_status = self.sync_status(current_syncing);
-                        let msg = SubscriptionMessage::new(
-                            accepted_sink.method_name(),
-                            accepted_sink.subscription_id(),
-                            &sync_status,
-                        )
-                        .map_err(SubscriptionSerializeError::new)?;
-
-                        if accepted_sink.send(msg).await.is_err() {
-                            break
+                            // send a new message now that the status changed
+                            let sync_status = pubsub.sync_status(current_syncing);
+                            let msg = match SubscriptionMessage::new(
+                                sink.method_name(),
+                                sink.subscription_id(),
+                                &sync_status,
+                            ) {
+                                Ok(msg) => msg,
+                                Err(_) => return,
+                            };
+                            if sink.send(msg).await.is_err() {
+                                break;
+                            }
                         }
                     }
-                }
-
-                Ok(())
+                });
             }
             SubscriptionKind::TransactionReceipts => {
                 let filter = match params {
                     Some(Params::TransactionReceipts(filter)) => filter,
                     None | Some(Params::None) => TransactionReceiptsParams::default(),
                     _ => {
-                        return Err(invalid_params_rpc_err("Invalid params for transactionReceipts"))
+                        pending
+                            .reject(invalid_params_rpc_err(
+                                "Invalid params for transactionReceipts",
+                            ))
+                            .await;
+                        return Ok(());
                     }
                 };
 
-                let converter = self.inner.eth_api.converter();
-                let stream = self.inner.eth_api.provider().canonical_state_stream().flat_map(
-                    move |new_chain| {
+                let canon_state = self.inner.eth_api.provider().canonical_state_stream();
+                let inner = self.inner.clone();
+                let sink = pending.accept().await?;
+                self.inner.subscription_task_spawner.spawn_task(async move {
+                    let stream = canon_state.flat_map(move |new_chain| {
+                        let converter = inner.eth_api.converter();
                         // for each block in the new chain, build RPC receipts
                         let results: Vec<_> = new_chain
                             .committed()
@@ -274,33 +346,15 @@ where
                             .collect();
 
                         futures::stream::iter(results)
-                    },
-                );
-
-                pipe_from_stream(accepted_sink, stream).await
+                    });
+                    let _ = pipe_from_stream(sink, stream).await;
+                });
             }
-            _ => Err(invalid_params_rpc_err("Unsupported subscription kind")),
+            _ => {
+                pending.reject(invalid_params_rpc_err("Unsupported subscription kind")).await;
+                return Ok(());
+            }
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
-where
-    Eth: RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>>,
-{
-    /// Handler for `eth_subscribe`
-    async fn subscribe(
-        &self,
-        pending: PendingSubscriptionSink,
-        kind: SubscriptionKind,
-        params: Option<Params>,
-    ) -> jsonrpsee::core::SubscriptionResult {
-        let sink = pending.accept().await?;
-        let pubsub = self.clone();
-        self.inner.subscription_task_spawner.spawn_task(async move {
-            let _ = pubsub.handle_accepted(sink, kind, params).await;
-        });
 
         Ok(())
     }
