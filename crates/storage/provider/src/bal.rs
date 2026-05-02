@@ -1,3 +1,4 @@
+use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_prune_types::PruneMode;
@@ -28,9 +29,6 @@ impl Default for InMemoryBalStore {
     }
 }
 
-/// Default in-memory BAL retention distance.
-pub const DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE: u64 = 100_000;
-
 /// Configuration for BAL storage.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BalConfig {
@@ -52,9 +50,7 @@ impl BalConfig {
 
 impl Default for BalConfig {
     fn default() -> Self {
-        Self::with_in_memory_retention(PruneMode::Distance(
-            DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE,
-        ))
+        Self::with_in_memory_retention(PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS))
     }
 }
 
@@ -221,12 +217,8 @@ mod tests {
         let tip_bal = Bytes::from_static(b"tip");
 
         store.insert(old_hash, 1, old_bal).unwrap();
-        store
-            .insert(retained_hash, DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE, retained_bal.clone())
-            .unwrap();
-        store
-            .insert(tip_hash, DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE + 2, tip_bal.clone())
-            .unwrap();
+        store.insert(retained_hash, BAL_RETENTION_PERIOD_SLOTS, retained_bal.clone()).unwrap();
+        store.insert(tip_hash, BAL_RETENTION_PERIOD_SLOTS + 2, tip_bal.clone()).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old_hash, retained_hash, tip_hash]).unwrap(),
@@ -243,9 +235,7 @@ mod tests {
         let tip_bal = Bytes::from_static(b"tip");
 
         store.insert(old_hash, 1, old_bal.clone()).unwrap();
-        store
-            .insert(tip_hash, DEFAULT_IN_MEMORY_BAL_RETENTION_DISTANCE + 1, tip_bal.clone())
-            .unwrap();
+        store.insert(tip_hash, BAL_RETENTION_PERIOD_SLOTS + 1, tip_bal.clone()).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old_hash, tip_hash]).unwrap(),
