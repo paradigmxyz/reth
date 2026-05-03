@@ -2,7 +2,7 @@ use crate::{Claims, JwtSecret};
 use http::{header::AUTHORIZATION, HeaderValue};
 use std::{
     task::{Context, Poll},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tower::{Layer, Service};
 
@@ -66,9 +66,7 @@ pub fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
         "Bearer {}",
         secret
             .encode(&Claims {
-                iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                    Duration::from_secs(60))
-                .as_secs(),
+                iat: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 exp: None,
             })
             .unwrap()
