@@ -130,13 +130,20 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings(factory, StorageSettings::base())
+    init_genesis_with_settings(factory, StorageSettings::base(), false)
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
+///
+/// `skip_genesis_validation`: when `true`, a chainspec/DB genesis-hash mismatch
+/// is logged via [`tracing::warn`] and the DB-resident hash is returned instead
+/// of an error. Intended for tools that direct-write the database (e.g.
+/// snapshot importers, state-actor) and want reth to trust the DB-resident
+/// genesis state rather than recomputing it from the chainspec's `alloc`.
 pub fn init_genesis_with_settings<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
+    skip_genesis_validation: bool,
 ) -> Result<B256, InitStorageError>
 where
     PF: DatabaseProviderFactory
@@ -196,6 +203,15 @@ where
                 return Ok(hash)
             }
 
+            if skip_genesis_validation {
+                warn!(
+                    target: "reth::storage",
+                    chainspec_hash = %hash,
+                    storage_hash = %block_hash,
+                    "Genesis hash mismatch with chainspec; trusting DB per --debug.skip-genesis-validation"
+                );
+                return Ok(block_hash)
+            }
             return Err(InitStorageError::GenesisHashMismatch {
                 chainspec_hash: hash,
                 storage_hash: block_hash,
