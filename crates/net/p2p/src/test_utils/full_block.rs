@@ -192,10 +192,7 @@ impl BlockAccessListsClient for TestFullBlockClient {
         let response = hashes
             .into_iter()
             .map(|hash| {
-                access_lists
-                    .get(&hash)
-                    .cloned()
-                    .unwrap_or_else(|| Bytes::from_static(&[0xc0]))
+                access_lists.get(&hash).cloned().unwrap_or_else(|| Bytes::from_static(&[0xc0]))
             })
             .collect();
         futures::future::ready(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(response))))

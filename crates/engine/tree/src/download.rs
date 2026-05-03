@@ -7,9 +7,7 @@ use alloy_primitives::{map::B256Set, B256};
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
-    full_block::{
-        FetchFullBlockRangeFuture, FetchFullBlockWithAccessListsFuture, FullBlockClient,
-    },
+    full_block::{FetchFullBlockRangeFuture, FetchFullBlockWithAccessListsFuture, FullBlockClient},
     BlockAccessLists, BlockAccessListsClient, BlockClient,
 };
 use reth_primitives_traits::{Block, SealedBlock};
@@ -357,12 +355,10 @@ impl<B: Block> From<OrderedDownloadedBlock<B>> for DownloadedBlock<B> {
 
 fn downloaded_block_with_decoded_access_list<B: Block>(
     block: SealedBlock<B>,
-    access_lists: BlockAccessLists,
+    access_lists: Option<BlockAccessLists>,
 ) -> DownloadedBlock<B> {
     let decoded_bal = access_lists
-        .0
-        .into_iter()
-        .next()
+        .and_then(|access_lists| access_lists.0.into_iter().next())
         .and_then(|raw| decode_block_access_list(&block, raw));
     DownloadedBlock::new(block, decoded_bal)
 }
@@ -569,9 +565,8 @@ mod tests {
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
         let mut block_downloader = BasicBlockDownloader::new(client, consensus);
-        block_downloader.on_action(DownloadAction::Download(DownloadRequest::single_block(
-            tip.hash(),
-        )));
+        block_downloader
+            .on_action(DownloadAction::Download(DownloadRequest::single_block(tip.hash())));
 
         let sync_future = poll_fn(|cx| block_downloader.poll(cx));
         let next_ready = sync_future.await;
@@ -636,8 +631,10 @@ mod tests {
         let block: SealedBlock<reth_ethereum_primitives::Block> =
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
-        let downloaded =
-            downloaded_block_with_decoded_access_list(block.clone(), BlockAccessLists(vec![raw]));
+        let downloaded = downloaded_block_with_decoded_access_list(
+            block.clone(),
+            Some(BlockAccessLists(vec![raw])),
+        );
 
         assert_eq!(downloaded.block(), &block);
         assert_eq!(downloaded.decoded_bal().as_ref().map(|bal| bal.hash()), Some(decoded.hash()));
@@ -650,7 +647,19 @@ mod tests {
         let block: SealedBlock<reth_ethereum_primitives::Block> =
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
-        let downloaded = downloaded_block_with_decoded_access_list(block, BlockAccessLists(vec![raw]));
+        let downloaded =
+            downloaded_block_with_decoded_access_list(block, Some(BlockAccessLists(vec![raw])));
+
+        assert!(downloaded.decoded_bal().is_none());
+    }
+
+    #[test]
+    fn leaves_downloaded_block_without_bal_when_access_lists_are_missing() {
+        let header = Header { block_access_list_hash: Some(B256::random()), ..Default::default() };
+        let block: SealedBlock<reth_ethereum_primitives::Block> =
+            SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
+
+        let downloaded = downloaded_block_with_decoded_access_list(block, None);
 
         assert!(downloaded.decoded_bal().is_none());
     }
