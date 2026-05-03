@@ -3,7 +3,7 @@
 use crate::PayloadBuilderError;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
@@ -80,6 +80,13 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
 
     /// Returns the total fees collected from all transactions in this block.
     fn fees(&self) -> U256;
+
+    /// Returns the EIP-7928 block access list included in this payload.
+    ///
+    /// Returns `None` for payloads that do not carry a block access list.
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
 
     /// Returns the complete execution result including state updates.
     ///

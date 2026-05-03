@@ -35,6 +35,7 @@ reth-static-file-types = { workspace = true, features = ["std"] }
 reth-fs-util.workspace = true
 
 # ethereum
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true

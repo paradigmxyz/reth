@@ -250,9 +250,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "407510740da514b694fecb44d8b3cebdc60d448f70cc5d24743e8ba273448a6e"
+checksum = "ec6ae911a2fc304a7cb80a79fb7bed6d1474aed4e7c203df1f8ff538f64fc78d"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -9557,6 +9557,7 @@ name = "reth-provider"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips 2.0.4",
  "alloy-genesis",
  "alloy-primitives",
