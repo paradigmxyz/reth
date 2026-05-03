@@ -1,8 +1,9 @@
+use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_storage_api::{
     BalNotification, BalNotificationStream, BalStore, BalStoreSubscriptions,
-    GetBlockAccessListLimit,
+    GetBlockAccessListLimit, SealedBal,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::EventSender;
@@ -27,14 +28,9 @@ impl Default for InMemoryBalStore {
 }
 
 impl BalStore for InMemoryBalStore {
-    fn insert(
-        &self,
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        bal: Bytes,
-    ) -> ProviderResult<()> {
-        self.entries.write().insert(block_hash, bal.clone());
-        self.notifications.notify(BalNotification::new(block_hash, block_number, bal));
+    fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
+        self.entries.write().insert(num_hash.hash, bal.clone_inner());
+        self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
     }
 
@@ -85,8 +81,12 @@ impl BalStoreSubscriptions for InMemoryBalStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_primitives::{keccak256, Sealed, B256};
     use tokio_stream::StreamExt;
+
+    fn sealed_bal(bal: Bytes) -> SealedBal {
+        Sealed::new_unchecked(bal.clone(), keccak256(&bal))
+    }
 
     #[test]
     fn insert_and_lookup_by_hash() {
@@ -95,7 +95,7 @@ mod tests {
         let missing = B256::random();
         let bal = Bytes::from_static(b"bal");
 
-        store.insert(hash, 1, bal.clone()).unwrap();
+        store.insert(NumHash::new(1, hash), sealed_bal(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
     }
@@ -117,9 +117,9 @@ mod tests {
         let bal1 = Bytes::from_static(&[0xc1, 0x02]);
         let bal2 = Bytes::from_static(&[0xc1, 0x03]);
 
-        store.insert(hash0, 1, bal0.clone()).unwrap();
-        store.insert(hash1, 2, bal1.clone()).unwrap();
-        store.insert(hash2, 3, bal2).unwrap();
+        store.insert(NumHash::new(1, hash0), sealed_bal(bal0.clone())).unwrap();
+        store.insert(NumHash::new(2, hash1), sealed_bal(bal1.clone())).unwrap();
+        store.insert(NumHash::new(3, hash2), sealed_bal(bal2)).unwrap();
 
         let limited = store
             .get_by_hashes_with_limit(
@@ -139,16 +139,23 @@ mod tests {
         let bal = Bytes::from_static(b"bal");
         let mut stream = store.bal_stream();
 
-        store.insert(hash, block_number, bal.clone()).unwrap();
+        let sealed_bal = sealed_bal(bal);
 
-        assert_eq!(stream.next().await.unwrap(), BalNotification::new(hash, block_number, bal));
+        store.insert(NumHash::new(block_number, hash), sealed_bal.clone()).unwrap();
+
+        assert_eq!(
+            stream.next().await.unwrap(),
+            BalNotification::new(NumHash::new(block_number, hash), sealed_bal)
+        );
     }
 
     #[test]
     fn insert_without_subscribers_still_succeeds() {
         let store = InMemoryBalStore::default();
 
-        assert!(store.insert(B256::random(), 1, Bytes::from_static(b"bal")).is_ok());
+        assert!(store
+            .insert(NumHash::new(1, B256::random()), sealed_bal(Bytes::from_static(b"bal")))
+            .is_ok());
     }
 
     #[tokio::test]
@@ -157,14 +164,19 @@ mod tests {
         let mut stream = store.bal_stream();
 
         for number in 0..=DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE as u64 {
-            store.insert(B256::random(), number, Bytes::from(vec![number as u8])).unwrap();
+            store
+                .insert(
+                    NumHash::new(number, B256::random()),
+                    sealed_bal(Bytes::from(vec![number as u8])),
+                )
+                .unwrap();
         }
 
         let first = stream.next().await.unwrap();
         let second = stream.next().await.unwrap();
 
-        assert_eq!(first.block_number, 1);
-        assert_eq!(second.block_number, 2);
+        assert_eq!(first.num_hash.number, 1);
+        assert_eq!(second.num_hash.number, 2);
     }
 
     #[tokio::test]
@@ -176,8 +188,13 @@ mod tests {
         let bal = Bytes::from_static(b"bal");
         let mut stream = clone.bal_stream();
 
-        store.insert(hash, block_number, bal.clone()).unwrap();
+        let sealed_bal = sealed_bal(bal);
 
-        assert_eq!(stream.next().await.unwrap(), BalNotification::new(hash, block_number, bal));
+        store.insert(NumHash::new(block_number, hash), sealed_bal.clone()).unwrap();
+
+        assert_eq!(
+            stream.next().await.unwrap(),
+            BalNotification::new(NumHash::new(block_number, hash), sealed_bal)
+        );
     }
 }

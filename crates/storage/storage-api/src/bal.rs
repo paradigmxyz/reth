@@ -1,22 +1,24 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_eips::NumHash;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
+
+/// Raw BAL RLP bytes sealed by the BAL hash.
+pub type SealedBal = Sealed<Bytes>;
 
 /// Notification emitted when a new BAL is inserted into the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BalNotification {
-    /// Hash of the block the BAL belongs to.
-    pub block_hash: BlockHash,
-    /// Number of the block the BAL belongs to.
-    pub block_number: BlockNumber,
-    /// Raw BAL RLP payload.
-    pub bal: Bytes,
+    /// Number and hash of the block the BAL belongs to.
+    pub num_hash: NumHash,
+    /// Raw BAL RLP payload sealed by the BAL hash.
+    pub bal: SealedBal,
 }
 
 impl BalNotification {
     /// Creates a new [`BalNotification`].
-    pub const fn new(block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) -> Self {
-        Self { block_hash, block_number, bal }
+    pub const fn new(num_hash: NumHash, bal: SealedBal) -> Self {
+        Self { num_hash, bal }
     }
 }
 
@@ -49,12 +51,7 @@ mod subscriptions {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
-    fn insert(
-        &self,
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        bal: Bytes,
-    ) -> ProviderResult<()>;
+    fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
 
     /// Fetch BALs for the given block hashes.
     ///
@@ -163,13 +160,8 @@ impl BalStoreHandle {
 
     /// Insert the BAL for the given block.
     #[inline]
-    pub fn insert(
-        &self,
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        bal: Bytes,
-    ) -> ProviderResult<()> {
-        self.inner.insert(block_hash, block_number, bal)
+    pub fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
+        self.inner.insert(num_hash, bal)
     }
 
     /// Fetch BALs for the given block hashes.
@@ -245,12 +237,7 @@ pub trait BalProvider {
 pub struct NoopBalStore;
 
 impl BalStore for NoopBalStore {
-    fn insert(
-        &self,
-        _block_hash: BlockHash,
-        _block_number: BlockNumber,
-        _bal: Bytes,
-    ) -> ProviderResult<()> {
+    fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
         Ok(())
     }
 
