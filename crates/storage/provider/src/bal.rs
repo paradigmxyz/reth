@@ -64,13 +64,15 @@ struct InMemoryBalStoreInner {
 impl InMemoryBalStoreInner {
     // Inserts a BAL and keeps the block-number index in sync.
     fn insert(&mut self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
-        if let Some(entry) = self.entries.insert(block_hash, BalEntry { block_number, bal }) {
-            if let Some(hashes) = self.hashes_by_number.get_mut(&entry.block_number) {
+        let empty_block_number =
+            self.entries.insert(block_hash, BalEntry { block_number, bal }).and_then(|entry| {
+                let hashes = self.hashes_by_number.get_mut(&entry.block_number)?;
                 hashes.retain(|hash| *hash != block_hash);
-                if hashes.is_empty() {
-                    self.hashes_by_number.remove(&entry.block_number);
-                }
-            }
+                hashes.is_empty().then_some(entry.block_number)
+            });
+
+        if let Some(block_number) = empty_block_number {
+            self.hashes_by_number.remove(&block_number);
         }
 
         self.hashes_by_number.entry(block_number).or_default().push(block_hash);
