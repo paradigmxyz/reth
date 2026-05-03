@@ -1,17 +1,18 @@
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_storage_api::{
-    BalNotification, BalNotificationSender, BalNotifications, BalStore, BalStoreSubscriptions,
+    BalNotification, BalNotificationStream, BalStore, BalStoreSubscriptions,
     GetBlockAccessListLimit,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_tokio_util::EventSender;
 use std::{collections::HashMap, sync::Arc};
 
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]
 pub struct InMemoryBalStore {
     entries: Arc<RwLock<HashMap<BlockHash, Bytes>>>,
-    notifications: BalNotificationSender,
+    notifications: EventSender<BalNotification>,
 }
 
 // Match the canonical state broadcast buffer so BAL subscriptions behave like the existing
@@ -20,10 +21,7 @@ const DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE: usize = 256;
 
 impl Default for InMemoryBalStore {
     fn default() -> Self {
-        // `broadcast::Sender` has no meaningful default because it must be tied to a channel with
-        // an explicit capacity, so the store cannot derive `Default`.
-        let (notifications, _) =
-            tokio::sync::broadcast::channel(DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE);
+        let notifications = EventSender::new(DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE);
         Self { entries: Default::default(), notifications }
     }
 }
@@ -36,7 +34,7 @@ impl BalStore for InMemoryBalStore {
         bal: Bytes,
     ) -> ProviderResult<()> {
         self.entries.write().insert(block_hash, bal.clone());
-        let _ = self.notifications.send(BalNotification::new(block_hash, block_number, bal));
+        self.notifications.notify(BalNotification::new(block_hash, block_number, bal));
         Ok(())
     }
 
@@ -79,8 +77,8 @@ impl BalStore for InMemoryBalStore {
 }
 
 impl BalStoreSubscriptions for InMemoryBalStore {
-    fn subscribe_to_bal(&self) -> BalNotifications {
-        self.notifications.subscribe()
+    fn bal_stream(&self) -> BalNotificationStream {
+        self.notifications.new_listener()
     }
 }
 
@@ -88,7 +86,6 @@ impl BalStoreSubscriptions for InMemoryBalStore {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use tokio::sync::broadcast::error::TryRecvError;
     use tokio_stream::StreamExt;
 
     #[test]
@@ -134,20 +131,17 @@ mod tests {
         assert_eq!(limited, vec![bal0, bal1]);
     }
 
-    #[test]
-    fn insert_notifies_subscribers() {
+    #[tokio::test]
+    async fn insert_notifies_subscribers() {
         let store = InMemoryBalStore::default();
         let hash = B256::random();
         let block_number = 7;
         let bal = Bytes::from_static(b"bal");
-        let mut notifications = store.subscribe_to_bal();
+        let mut stream = store.bal_stream();
 
         store.insert(hash, block_number, bal.clone()).unwrap();
 
-        assert_eq!(
-            notifications.try_recv().unwrap(),
-            BalNotification::new(hash, block_number, bal)
-        );
+        assert_eq!(stream.next().await.unwrap(), BalNotification::new(hash, block_number, bal));
     }
 
     #[test]
@@ -173,21 +167,17 @@ mod tests {
         assert_eq!(second.block_number, 2);
     }
 
-    #[test]
-    fn cloned_store_shares_notification_channel() {
+    #[tokio::test]
+    async fn cloned_store_shares_notification_channel() {
         let store = InMemoryBalStore::default();
         let clone = store.clone();
         let hash = B256::random();
         let block_number = 9;
         let bal = Bytes::from_static(b"bal");
-        let mut notifications = clone.subscribe_to_bal();
+        let mut stream = clone.bal_stream();
 
         store.insert(hash, block_number, bal.clone()).unwrap();
 
-        assert_eq!(
-            notifications.try_recv().unwrap(),
-            BalNotification::new(hash, block_number, bal)
-        );
-        assert!(matches!(notifications.try_recv(), Err(TryRecvError::Empty)));
+        assert_eq!(stream.next().await.unwrap(), BalNotification::new(hash, block_number, bal));
     }
 }

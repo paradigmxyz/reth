@@ -21,68 +21,23 @@ impl BalNotification {
 }
 
 #[cfg(feature = "std")]
-pub use self::subscriptions::{
-    BalNotificationSender, BalNotificationStream, BalNotifications, BalStoreSubscriptions,
-};
+pub use self::subscriptions::{BalNotificationStream, BalStoreSubscriptions};
 
 #[cfg(feature = "std")]
 mod subscriptions {
     use super::BalNotification;
-    use core::{
-        pin::Pin,
-        task::{ready, Context, Poll},
-    };
-    use tokio::sync::broadcast;
-    use tokio_stream::{
-        wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
-        Stream,
-    };
-
-    /// Type alias for a receiver that receives [`BalNotification`] events.
-    pub type BalNotifications = broadcast::Receiver<BalNotification>;
-
-    /// Type alias for a sender that sends [`BalNotification`] events.
-    pub type BalNotificationSender = broadcast::Sender<BalNotification>;
 
     /// A stream of [`BalNotification`]s.
-    #[derive(Debug)]
-    pub struct BalNotificationStream {
-        st: BroadcastStream<BalNotification>,
-    }
-
-    impl BalNotificationStream {
-        pub(crate) fn new(notifications: BalNotifications) -> Self {
-            Self { st: BroadcastStream::new(notifications) }
-        }
-    }
-
-    impl Stream for BalNotificationStream {
-        type Item = BalNotification;
-
-        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            loop {
-                return match ready!(Pin::new(&mut self.st).poll_next(cx)) {
-                    Some(Ok(notification)) => Poll::Ready(Some(notification)),
-                    Some(Err(BroadcastStreamRecvError::Lagged(_))) => continue,
-                    None => Poll::Ready(None),
-                }
-            }
-        }
-    }
+    pub type BalNotificationStream = reth_tokio_util::EventStream<BalNotification>;
 
     /// A type that allows registering BAL insert subscriptions.
     #[auto_impl::auto_impl(&, alloc::sync::Arc, Box)]
     pub trait BalStoreSubscriptions: Send + Sync + 'static {
-        /// Subscribes to BAL insert notifications.
+        /// Returns a stream of BAL insert notifications.
         ///
         /// Notifications are emitted only after a BAL has been successfully inserted into the
         /// store. They do not imply canonicality.
-        fn subscribe_to_bal(&self) -> BalNotifications;
-
-        /// Convenience method to get a stream of [`BalNotification`]s.
-        fn bal_stream(&self) -> BalNotificationStream {
-            BalNotificationStream::new(self.subscribe_to_bal())
-        }
+        fn bal_stream(&self) -> BalNotificationStream;
     }
 }
 
@@ -251,14 +206,7 @@ impl BalStoreHandle {
         self.inner.get_by_range(start, count)
     }
 
-    /// Subscribes to BAL insert notifications.
-    #[cfg(feature = "std")]
-    #[inline]
-    pub fn subscribe_to_bal(&self) -> BalNotifications {
-        self.inner.subscribe_to_bal()
-    }
-
-    /// Convenience method to get a stream of [`BalNotification`]s.
+    /// Returns a stream of BAL insert notifications.
     #[cfg(feature = "std")]
     #[inline]
     pub fn bal_stream(&self) -> BalNotificationStream {
@@ -268,8 +216,8 @@ impl BalStoreHandle {
 
 #[cfg(feature = "std")]
 impl BalStoreSubscriptions for BalStoreHandle {
-    fn subscribe_to_bal(&self) -> BalNotifications {
-        self.inner.subscribe_to_bal()
+    fn bal_stream(&self) -> BalNotificationStream {
+        self.inner.bal_stream()
     }
 }
 
@@ -336,8 +284,8 @@ impl BalStore for NoopBalStore {
 
 #[cfg(feature = "std")]
 impl BalStoreSubscriptions for NoopBalStore {
-    fn subscribe_to_bal(&self) -> BalNotifications {
-        tokio::sync::broadcast::channel(1).1
+    fn bal_stream(&self) -> BalNotificationStream {
+        reth_tokio_util::EventSender::new(1).new_listener()
     }
 }
 
@@ -346,7 +294,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     #[cfg(feature = "std")]
-    use tokio::sync::broadcast::error::TryRecvError;
+    use tokio_stream::StreamExt;
 
     #[test]
     fn noop_store_returns_empty_results() {
@@ -384,11 +332,11 @@ mod tests {
     }
 
     #[cfg(feature = "std")]
-    #[test]
-    fn noop_store_subscription_is_empty() {
+    #[tokio::test]
+    async fn noop_store_stream_is_empty() {
         let store = BalStoreHandle::default();
-        let mut notifications = store.subscribe_to_bal();
+        let mut stream = store.bal_stream();
 
-        assert!(matches!(notifications.try_recv(), Err(TryRecvError::Closed)));
+        assert!(stream.next().await.is_none());
     }
 }
