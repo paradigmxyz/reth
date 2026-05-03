@@ -1061,6 +1061,39 @@ mod tests {
     }
 
     #[test]
+    fn skip_genesis_validation_accepts_mismatched_db() {
+        // Same setup as fail_init_inconsistent_db: write Sepolia genesis,
+        // then re-init against Mainnet chainspec. Without the bypass this
+        // returns GenesisHashMismatch (locked by the test above). With
+        // skip_genesis_validation = true, init should return Ok and the
+        // returned hash should be the DB-resident (Sepolia) hash, NOT the
+        // chainspec (Mainnet) hash — that's the contract this test pins.
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+        let static_file_provider = factory.static_file_provider();
+        let rocksdb_provider = factory.rocksdb_provider();
+        init_genesis(&factory).unwrap();
+
+        let result = init_genesis_with_settings(
+            &ProviderFactory::<MockNodeTypesWithDB>::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                static_file_provider,
+                rocksdb_provider,
+                reth_tasks::Runtime::test(),
+            )
+            .unwrap(),
+            StorageSettings::base(),
+            true, // skip_genesis_validation
+        );
+
+        let returned = result.expect("skip_genesis_validation should suppress mismatch error");
+        assert_eq!(
+            returned, SEPOLIA_GENESIS_HASH,
+            "bypass returns the DB-resident hash, not the chainspec hash",
+        );
+    }
+
+    #[test]
     fn init_genesis_history() {
         let address_with_balance = Address::with_last_byte(1);
         let address_with_storage = Address::with_last_byte(2);
