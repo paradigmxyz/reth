@@ -4,12 +4,12 @@
 //! the consensus client.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::RequestsOrHash,
     BlockId, BlockNumberOrTag,
 };
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, BlockHash, Bytes, B128, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
@@ -324,6 +324,20 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>>;
+
+    /// Fetch blob cells for the consensus layer from the blob store.
+    ///
+    /// Returns a response of the same length as the request. Missing blobs are returned as `null`
+    /// elements; missing requested cells within an available blob are returned as `null` cell and
+    /// proof entries.
+    ///
+    /// Returns `null` if syncing.
+    #[method(name = "getBlobsV4")]
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>

@@ -80,6 +80,7 @@ Returns true if the peer was successfully removed.
 Returns all information known about the running node.
 
 These include general information about the node itself, as well as what protocols it participates in, its IP and ports.
+The `id` field is the keccak256 hash of the node's `enode` public key, encoded as 64 lowercase hex characters without a `0x` prefix.
 
 | Client | Method invocation              |
 | ------ | ------------------------------ |
@@ -94,7 +95,7 @@ These include general information about the node itself, as well as what protoco
     "id": 1,
     "result": {
         "enode": "enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@[::]:30303",
-            "id": "44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d",
+            "id": "8915d6ec2f53ede650d5b9bea77d7756f177092171648ee1d8cbc550d334fa7a",
             "ip": "::",
             "listenAddr": "[::]:30303",
             "name": "reth/v0.0.1/x86_64-unknown-linux-gnu",
@@ -117,6 +118,7 @@ These include general information about the node itself, as well as what protoco
 ## `admin_peers`
 
 Returns information about peers currently known to the node.
+For each peer, `id` is the keccak256 hash of the peer `enode` public key, encoded as 64 lowercase hex characters without a `0x` prefix.
 
 | Client | Method invocation              |
 | ------ | ------------------------------ |
@@ -128,7 +130,7 @@ Returns information about peers currently known to the node.
 // > {"jsonrpc":"2.0","id":1,"method":"admin_peers","params":[]}
 {"jsonrpc":"2.0","id":1,"result":[
   {
-    "id":"44826a5d6a55f88a18298bca4773fca...",
+    "id":"8915d6ec2f53ede650d5b9bea77d7756f177092171648ee1d8cbc550d334fa7a",
     "name":"reth/v0.0.1/x86_64-unknown-linux-gnu",
     "enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303",
     "enr":"enr:-IS4QHCYr...",
@@ -190,7 +192,7 @@ The subscription emits events with the following structure:
         "result": {
             "type": "add", // or "drop", "error"
             "peer": {
-                "id": "44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d",
+                "id": "8915d6ec2f53ede650d5b9bea77d7756f177092171648ee1d8cbc550d334fa7a",
                 "enode": "enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303",
                 "addr": "192.168.1.1:30303"
             },
@@ -208,7 +210,7 @@ The subscription emits events with the following structure:
 {"jsonrpc": "2.0", "id": 1, "result": "0xcd0c3e8af590364c09d0fa6a1210faf5"}
 
 // Example event when a peer connects
-{"jsonrpc":"2.0","method":"admin_subscription","params":{"subscription":"0xcd0c3e8af590364c09d0fa6a1210faf5","result":{"type":"add","peer":{"id":"44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d","enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303","addr":"192.168.1.1:30303"}}}}
+{"jsonrpc":"2.0","method":"admin_subscription","params":{"subscription":"0xcd0c3e8af590364c09d0fa6a1210faf5","result":{"type":"add","peer":{"id":"8915d6ec2f53ede650d5b9bea77d7756f177092171648ee1d8cbc550d334fa7a","enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303","addr":"192.168.1.1:30303"}}}}
 
 // Unsubscribe
 // > {"jsonrpc":"2.0","id":2,"method":"admin_peerEvents_unsubscribe","params":["0xcd0c3e8af590364c09d0fa6a1210faf5"]}

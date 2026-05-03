@@ -115,7 +115,9 @@ Networking:
           [default: 9200]
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
-          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set.
+
+          If not provided, discovery V5 defaults to same port as discovery V4 (--discovery.port).
 
           [default: 9200]
 
@@ -1090,7 +1092,7 @@ Engine:
           Disable BAL-driven parallel state root computation. When set, the BAL hashed post state is not sent to the multiproof task for early parallel state root computation
 
       --engine.disable-bal-batch-io
-          Disable BAL (Block Access List) batched IO during prewarming. When set, falls back to individual per-slot storage reads instead of batched cursor reads
+          Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
 ERA:
       --era.enable

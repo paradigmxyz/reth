@@ -2,7 +2,7 @@
 
 /// NetworkArg struct for configuring the network
 mod network;
-pub use network::{DefaultNetworkArgs, DiscoveryArgs, NetworkArgs};
+pub use network::{DefaultDiscoveryArgs, DefaultNetworkArgs, DiscoveryArgs, NetworkArgs};
 
 /// RpcServerArg struct for configuring the RPC
 mod rpc_server;
