@@ -1142,10 +1142,10 @@ mod tests {
     #[test]
     fn warn_storage_settings_mismatch() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
+        init_genesis_with_settings(&factory, StorageSettings::v1(), false).unwrap();
 
         // Request different settings - should warn but succeed
-        let result = init_genesis_with_settings(&factory, StorageSettings::v2());
+        let result = init_genesis_with_settings(&factory, StorageSettings::v2(), false);
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
@@ -1155,9 +1155,9 @@ mod tests {
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
         let settings = StorageSettings::v2();
-        init_genesis_with_settings(&factory, settings).unwrap();
+        init_genesis_with_settings(&factory, settings, false).unwrap();
 
-        let result = init_genesis_with_settings(&factory, settings);
+        let result = init_genesis_with_settings(&factory, settings, false);
 
         assert!(result.is_ok());
     }

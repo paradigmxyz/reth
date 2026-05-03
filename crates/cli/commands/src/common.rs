@@ -172,7 +172,10 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis_with_settings(&provider_factory, self.storage_settings())?;
+            // Subcommands using EnvironmentArgs (init-state, init-db, etc.)
+            // do not carry DebugArgs and write genesis into an empty DB, so
+            // the validation gate is never tripped — pass false unconditionally.
+            init_genesis_with_settings(&provider_factory, self.storage_settings(), false)?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })

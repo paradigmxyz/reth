@@ -660,13 +660,21 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())?;
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().storage_settings(),
+            self.node_config().debug.skip_genesis_validation,
+        )?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().storage_settings(),
+            self.node_config().debug.skip_genesis_validation,
+        )
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
