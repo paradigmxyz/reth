@@ -23,7 +23,7 @@ impl BalNotification {
 }
 
 #[cfg(feature = "std")]
-pub use self::subscriptions::{BalNotificationStream, BalStoreSubscriptions};
+pub use self::subscriptions::BalNotificationStream;
 
 #[cfg(feature = "std")]
 mod subscriptions {
@@ -31,16 +31,6 @@ mod subscriptions {
 
     /// A stream of [`BalNotification`]s.
     pub type BalNotificationStream = reth_tokio_util::EventStream<BalNotification>;
-
-    /// A type that allows registering BAL insert subscriptions.
-    #[auto_impl::auto_impl(&, alloc::sync::Arc, Box)]
-    pub trait BalStoreSubscriptions: Send + Sync + 'static {
-        /// Returns a stream of BAL insert notifications.
-        ///
-        /// Notifications are emitted only after a BAL has been successfully inserted into the
-        /// store. They do not imply canonicality.
-        fn bal_stream(&self) -> BalNotificationStream;
-    }
 }
 
 /// Store for Block Access Lists (BALs).
@@ -100,19 +90,14 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// Implementations may stop at the first gap and return the contiguous prefix.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>>;
+
+    /// Returns a stream of BAL insert notifications.
+    ///
+    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
+    /// They do not imply canonicality.
+    #[cfg(feature = "std")]
+    fn bal_stream(&self) -> BalNotificationStream;
 }
-
-#[cfg(feature = "std")]
-trait BalStoreDyn: BalStore + BalStoreSubscriptions {}
-
-#[cfg(feature = "std")]
-impl<T> BalStoreDyn for T where T: BalStore + BalStoreSubscriptions {}
-
-#[cfg(not(feature = "std"))]
-trait BalStoreDyn: BalStore {}
-
-#[cfg(not(feature = "std"))]
-impl<T> BalStoreDyn for T where T: BalStore {}
 
 /// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -137,18 +122,11 @@ impl GetBlockAccessListLimit {
 /// Clone-friendly façade around a BAL store implementation.
 #[derive(Clone)]
 pub struct BalStoreHandle {
-    inner: Arc<dyn BalStoreDyn>,
+    inner: Arc<dyn BalStore>,
 }
 
 impl BalStoreHandle {
     /// Creates a new [`BalStoreHandle`] from the given implementation.
-    #[cfg(feature = "std")]
-    pub fn new(inner: impl BalStore + BalStoreSubscriptions) -> Self {
-        Self { inner: Arc::new(inner) }
-    }
-
-    /// Creates a new [`BalStoreHandle`] from the given implementation.
-    #[cfg(not(feature = "std"))]
     pub fn new(inner: impl BalStore) -> Self {
         Self { inner: Arc::new(inner) }
     }
@@ -202,13 +180,6 @@ impl BalStoreHandle {
     #[cfg(feature = "std")]
     #[inline]
     pub fn bal_stream(&self) -> BalNotificationStream {
-        self.inner.bal_stream()
-    }
-}
-
-#[cfg(feature = "std")]
-impl BalStoreSubscriptions for BalStoreHandle {
-    fn bal_stream(&self) -> BalNotificationStream {
         self.inner.bal_stream()
     }
 }
@@ -267,10 +238,8 @@ impl BalStore for NoopBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
-}
 
-#[cfg(feature = "std")]
-impl BalStoreSubscriptions for NoopBalStore {
+    #[cfg(feature = "std")]
     fn bal_stream(&self) -> BalNotificationStream {
         reth_tokio_util::EventSender::new(1).new_listener()
     }

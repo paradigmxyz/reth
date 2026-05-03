@@ -2,8 +2,7 @@ use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, BalStoreSubscriptions,
-    GetBlockAccessListLimit, SealedBal,
+    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, SealedBal,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::EventSender;
@@ -70,9 +69,7 @@ impl BalStore for InMemoryBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
-}
 
-impl BalStoreSubscriptions for InMemoryBalStore {
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
