@@ -36,6 +36,9 @@ serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, default-features = false, features = ["sync"], optional = true }
 tokio-stream = { workspace = true, features = ["sync"], optional = true }
 
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+
 [features]
 default = ["std"]
 std = [

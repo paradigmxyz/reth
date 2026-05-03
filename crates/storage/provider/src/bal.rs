@@ -1,7 +1,8 @@
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_storage_api::{
-    BalNotification, BalNotificationSender, BalNotifications, BalStore, GetBlockAccessListLimit,
+    BalNotification, BalNotificationSender, BalNotifications, BalStore, BalStoreSubscriptions,
+    GetBlockAccessListLimit,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::HashMap, sync::Arc};
@@ -75,7 +76,9 @@ impl BalStore for InMemoryBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
+}
 
+impl BalStoreSubscriptions for InMemoryBalStore {
     fn subscribe_to_bal(&self) -> BalNotifications {
         self.notifications.subscribe()
     }

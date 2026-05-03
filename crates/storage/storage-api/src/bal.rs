@@ -2,14 +2,32 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
 
+/// Notification emitted when a new BAL is inserted into the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BalNotification {
+    /// Hash of the block the BAL belongs to.
+    pub block_hash: BlockHash,
+    /// Number of the block the BAL belongs to.
+    pub block_number: BlockNumber,
+    /// Raw BAL RLP payload.
+    pub bal: Bytes,
+}
+
+impl BalNotification {
+    /// Creates a new [`BalNotification`].
+    pub const fn new(block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) -> Self {
+        Self { block_hash, block_number, bal }
+    }
+}
+
 #[cfg(feature = "std")]
 pub use self::subscriptions::{
-    BalNotification, BalNotificationSender, BalNotificationStream, BalNotifications,
+    BalNotificationSender, BalNotificationStream, BalNotifications, BalStoreSubscriptions,
 };
 
 #[cfg(feature = "std")]
 mod subscriptions {
-    use super::{BlockHash, BlockNumber, Bytes};
+    use super::BalNotification;
     use core::{
         pin::Pin,
         task::{ready, Context, Poll},
@@ -19,24 +37,6 @@ mod subscriptions {
         wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
         Stream,
     };
-
-    /// Notification emitted when a new BAL is inserted into the store.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct BalNotification {
-        /// Hash of the block the BAL belongs to.
-        pub block_hash: BlockHash,
-        /// Number of the block the BAL belongs to.
-        pub block_number: BlockNumber,
-        /// Raw BAL RLP payload.
-        pub bal: Bytes,
-    }
-
-    impl BalNotification {
-        /// Creates a new [`BalNotification`].
-        pub const fn new(block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) -> Self {
-            Self { block_hash, block_number, bal }
-        }
-    }
 
     /// Type alias for a receiver that receives [`BalNotification`] events.
     pub type BalNotifications = broadcast::Receiver<BalNotification>;
@@ -67,6 +67,21 @@ mod subscriptions {
                     None => Poll::Ready(None),
                 }
             }
+        }
+    }
+
+    /// A type that allows registering BAL insert subscriptions.
+    #[auto_impl::auto_impl(&, alloc::sync::Arc, Box)]
+    pub trait BalStoreSubscriptions: Send + Sync + 'static {
+        /// Subscribes to BAL insert notifications.
+        ///
+        /// Notifications are emitted only after a BAL has been successfully inserted into the
+        /// store. They do not imply canonicality.
+        fn subscribe_to_bal(&self) -> BalNotifications;
+
+        /// Convenience method to get a stream of [`BalNotification`]s.
+        fn bal_stream(&self) -> BalNotificationStream {
+            BalNotificationStream::new(self.subscribe_to_bal())
         }
     }
 }
@@ -133,20 +148,19 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// Implementations may stop at the first gap and return the contiguous prefix.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>>;
-
-    /// Subscribes to BAL insert notifications.
-    ///
-    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
-    /// They do not imply canonicality.
-    #[cfg(feature = "std")]
-    fn subscribe_to_bal(&self) -> BalNotifications;
-
-    /// Convenience method to get a stream of [`BalNotification`]s.
-    #[cfg(feature = "std")]
-    fn bal_stream(&self) -> BalNotificationStream {
-        BalNotificationStream::new(self.subscribe_to_bal())
-    }
 }
+
+#[cfg(feature = "std")]
+trait BalStoreDyn: BalStore + BalStoreSubscriptions {}
+
+#[cfg(feature = "std")]
+impl<T> BalStoreDyn for T where T: BalStore + BalStoreSubscriptions {}
+
+#[cfg(not(feature = "std"))]
+trait BalStoreDyn: BalStore {}
+
+#[cfg(not(feature = "std"))]
+impl<T> BalStoreDyn for T where T: BalStore {}
 
 /// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -171,11 +185,18 @@ impl GetBlockAccessListLimit {
 /// Clone-friendly façade around a BAL store implementation.
 #[derive(Clone)]
 pub struct BalStoreHandle {
-    inner: Arc<dyn BalStore>,
+    inner: Arc<dyn BalStoreDyn>,
 }
 
 impl BalStoreHandle {
     /// Creates a new [`BalStoreHandle`] from the given implementation.
+    #[cfg(feature = "std")]
+    pub fn new(inner: impl BalStore + BalStoreSubscriptions) -> Self {
+        Self { inner: Arc::new(inner) }
+    }
+
+    /// Creates a new [`BalStoreHandle`] from the given implementation.
+    #[cfg(not(feature = "std"))]
     pub fn new(inner: impl BalStore) -> Self {
         Self { inner: Arc::new(inner) }
     }
@@ -245,6 +266,13 @@ impl BalStoreHandle {
     }
 }
 
+#[cfg(feature = "std")]
+impl BalStoreSubscriptions for BalStoreHandle {
+    fn subscribe_to_bal(&self) -> BalNotifications {
+        self.inner.subscribe_to_bal()
+    }
+}
+
 impl Default for BalStoreHandle {
     fn default() -> Self {
         Self::noop()
@@ -304,8 +332,10 @@ impl BalStore for NoopBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
+}
 
-    #[cfg(feature = "std")]
+#[cfg(feature = "std")]
+impl BalStoreSubscriptions for NoopBalStore {
     fn subscribe_to_bal(&self) -> BalNotifications {
         tokio::sync::broadcast::channel(1).1
     }
