@@ -957,9 +957,10 @@ where
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
+        // A per-block bounded queue avoids per-receipt linked-node allocations while still
+        // leaving enough room for the entire block's receipt stream.
         let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, receipt_rx) = crossbeam_channel::bounded(receipts_len.max(1));
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor
