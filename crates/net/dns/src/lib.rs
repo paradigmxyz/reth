@@ -418,6 +418,10 @@ mod tests {
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
 
+    fn entry_hash(entry_txt: &str) -> String {
+        BASE32_NOPAD.encode(&keccak256(entry_txt.as_bytes()).as_slice()[..16])
+    }
+
     #[test]
     fn test_convert_enr_node_record() {
         // rig
@@ -505,11 +509,9 @@ mod tests {
         let resolver = MapResolver::default();
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
-        root.sign(&secret_key).unwrap();
 
         let link =
             LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
-        resolver.insert(link.domain.clone(), root.to_string());
 
         let mut builder = Enr::builder();
         let fork_id = MAINNET.hardfork_fork_id(EthereumHardfork::Frontier).unwrap();
@@ -519,8 +521,13 @@ mod tests {
             .tcp4(30303)
             .add_value(b"eth", &EnrForkIdEntry::from(fork_id));
         let enr = builder.build(&secret_key).unwrap();
+        let enr_txt = enr.to_base64();
 
-        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+        root.enr_root = entry_hash(&enr_txt);
+        root.sign(&secret_key).unwrap();
+
+        resolver.insert(link.domain.clone(), root.to_string());
+        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr_txt);
 
         let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
 
@@ -584,12 +591,13 @@ mod tests {
 
         let mut new_root = root.clone();
         new_root.sequence_number = new_root.sequence_number.saturating_add(1);
-        new_root.enr_root = "NEW_ENR_ROOT".to_string();
-        new_root.sign(&secret_key).unwrap();
-        resolver.insert(link.domain.clone(), new_root.to_string());
 
         let enr = Enr::empty(&secret_key).unwrap();
-        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr.to_base64());
+        let enr_txt = enr.to_base64();
+        new_root.enr_root = entry_hash(&enr_txt);
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr_txt);
 
         let event = poll_fn(|cx| service.poll(cx)).await;
 
@@ -614,7 +622,7 @@ mod tests {
         let invalid_entry = "enrtree-branch:AAAAAAAAAAAAAAAAAAAA".to_string();
         let valid_entry = "enrtree-branch:YNEGZIWHOM7TOOSUATAPTM".to_string();
 
-        let hash = BASE32_NOPAD.encode(keccak256(valid_entry.as_bytes()).as_slice());
+        let hash = entry_hash(&valid_entry);
 
         let bad_link =
             LinkEntry { domain: "bad.example.org".to_string(), pubkey: secret_key.public() };

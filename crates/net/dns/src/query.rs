@@ -20,6 +20,11 @@ use std::{
     time::Duration,
 };
 
+/// Minimum number of bytes an abbreviated EIP-1459 content hash may contain.
+const MIN_HASH_BYTES: usize = 12;
+/// Maximum number of bytes an abbreviated EIP-1459 content hash may contain.
+const MAX_HASH_BYTES: usize = 32;
+
 /// The `QueryPool` provides an aggregate state machine for driving queries to completion.
 pub(crate) struct QueryPool<R: Resolver, K: EnrKeyUnambiguous> {
     /// The [Resolver] that's used to lookup queries.
@@ -167,10 +172,10 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     let mut resp = ResolveEntryResult { entry: None, link, hash, kind };
     match lookup_with_timeout::<R>(&resolver, &fqn, timeout).await {
         Ok(Some(entry)) => {
-            resp.entry = Some(
-                verify_entry_hash(&resp.hash, &entry)
-                    .and_then(|()| entry.parse::<DnsEntry<K>>().map_err(Into::into)),
-            )
+            resp.entry = Some(match verify_entry_hash(&resp.hash, &entry) {
+                Ok(()) => entry.parse::<DnsEntry<K>>().map_err(Into::into),
+                Err(err) => Err(err),
+            })
         }
         Err(err) => resp.entry = Some(Err(err)),
         Ok(None) => {}
@@ -178,12 +183,18 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     resp
 }
 
+/// Verifies that `entry_txt` belongs under the queried
+/// [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) hash label.
+///
+/// Entries resolved through `<hash>.<domain>` are stored below the base32 encoding of an
+/// abbreviated `keccak256` digest of their TXT content. The protocol accepts any prefix length in
+/// the valid hash range.
 fn verify_entry_hash(hash: &str, entry_txt: &str) -> LookupResult<()> {
     let expected =
         BASE32_NOPAD.decode(hash.as_bytes()).map_err(|_| LookupError::HashMismatch(hash.into()))?;
     let actual = keccak256(entry_txt.as_bytes());
 
-    if expected.is_empty() || expected.len() > actual.as_slice().len() {
+    if !(MIN_HASH_BYTES..=MAX_HASH_BYTES).contains(&expected.len()) {
         return Err(LookupError::HashMismatch(hash.into()))
     }
 
@@ -236,6 +247,10 @@ mod tests {
     use super::*;
     use crate::{resolver::TimeoutResolver, DnsDiscoveryConfig, MapResolver};
     use std::future::poll_fn;
+
+    fn entry_hash(entry_txt: &str) -> String {
+        BASE32_NOPAD.encode(&keccak256(entry_txt.as_bytes()).as_slice()[..16])
+    }
 
     #[tokio::test]
     async fn test_rate_limit() {
@@ -294,5 +309,44 @@ mod tests {
                 unreachable!()
             }
         }
+    }
+
+    #[test]
+    fn verify_entry_hash_accepts_eip_1459_vectors() {
+        let entries = [
+            (
+                "C7HRFPF3BLGF3YR4DY5KX3SMBE",
+                "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@morenodes.example.org",
+            ),
+            (
+                "JWXYDBPXYWG6FX3GMDIBFA6CJ4",
+                "enrtree-branch:2XS2367YHAXJFGLZHVAWLQD4ZY,H4FHT4B454P6UXFD7JCYQ5PWDY,MHTDO6TMUBRIA2XWG5LUDACK24",
+            ),
+            (
+                "2XS2367YHAXJFGLZHVAWLQD4ZY",
+                "enr:-HW4QOFzoVLaFJnNhbgMoDXPnOvcdVuj7pDpqRvh6BRDO68aVi5ZcjB3vzQRZH2IcLBGHzo8uUN3snqmgTiE56CH3AMBgmlkgnY0iXNlY3AyNTZrMaECC2_24YYkYHEgdzxlSNKQEnHhuNAbNlMlWJxrJxbAFvA",
+            ),
+        ];
+
+        for (hash, entry) in entries {
+            verify_entry_hash(hash, entry).unwrap();
+        }
+    }
+
+    #[test]
+    fn verify_entry_hash_rejects_mismatched_or_invalid_hashes() {
+        let entry = "enrtree-branch:YNEGZIWHOM7TOOSUATAPTM";
+        let hash = entry_hash(entry);
+        verify_entry_hash(&hash, entry).unwrap();
+
+        assert!(matches!(
+            verify_entry_hash(&hash, "enrtree-branch:AAAAAAAAAAAAAAAAAAAA"),
+            Err(LookupError::HashMismatch(_))
+        ));
+        assert!(matches!(
+            verify_entry_hash("NOT_BASE32!", entry),
+            Err(LookupError::HashMismatch(_))
+        ));
+        assert!(matches!(verify_entry_hash("AAAA", entry), Err(LookupError::HashMismatch(_))));
     }
 }
