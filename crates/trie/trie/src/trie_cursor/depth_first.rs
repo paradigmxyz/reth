@@ -20,6 +20,10 @@ pub fn cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
 pub struct DepthFirstTrieIterator<C: TrieCursor> {
     /// The underlying trie cursor.
     cursor: C,
+    /// The first lexicographical key to seek to.
+    lower_bound: Nibbles,
+    /// The exclusive upper bound for iteration, if any.
+    upper_bound: Option<Nibbles>,
     /// Set to true once the trie cursor has done its initial seek to the root node.
     initialized: bool,
     /// Stack of nodes which have been fetched. Each node's path is a prefix of the next's.
@@ -35,11 +39,20 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
     pub fn new(cursor: C) -> Self {
         Self {
             cursor,
+            lower_bound: Nibbles::new(),
+            upper_bound: None,
             initialized: false,
             stack: Default::default(),
             next: Default::default(),
             complete: false,
         }
+    }
+
+    /// Limit traversal to nodes whose paths start with the given prefix.
+    pub fn with_subtrie_prefix(mut self, subtrie_prefix: Nibbles) -> Self {
+        self.lower_bound = subtrie_prefix;
+        self.upper_bound = subtrie_prefix.next_without_prefix();
+        self
     }
 
     fn push(&mut self, path: Nibbles, node: BranchNodeCompact) {
@@ -80,7 +93,7 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                 self.cursor.next()?
             } else {
                 self.initialized = true;
-                self.cursor.seek(Nibbles::new())?
+                self.cursor.seek(self.lower_bound)?
             }) else {
                 // Record that the cursor is empty and yield the stack. The stack is in reverse
                 // order of what we want to yield, but `next` is popped from, so we don't have to
@@ -89,6 +102,12 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                 self.next = core::mem::take(&mut self.stack);
                 return Ok(())
             };
+
+            if self.upper_bound.as_ref().is_some_and(|upper_bound| &path >= upper_bound) {
+                self.complete = true;
+                self.next = core::mem::take(&mut self.stack);
+                return Ok(())
+            }
 
             trace!(
                 target: "trie::trie_cursor::depth_first",

@@ -1,5 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
+    prefix_set::{PrefixSetMut, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie::StateRoot,
     trie_cursor::{
@@ -15,6 +16,105 @@ use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
 use std::cmp::{Ordering, Reverse};
 use tracing::trace;
+
+fn state_root_prefix_sets(subtrie_prefix: Nibbles) -> TriePrefixSets {
+    if subtrie_prefix.is_empty() {
+        TriePrefixSets::default()
+    } else {
+        TriePrefixSets {
+            account_prefix_set: PrefixSetMut::from([subtrie_prefix]).freeze(),
+            ..Default::default()
+        }
+    }
+}
+
+fn nibbles_prefix_to_b256(prefix: &Nibbles) -> B256 {
+    B256::right_padding_from(&prefix.pack())
+}
+
+fn subtrie_account_bounds(subtrie_prefix: Nibbles) -> Option<(B256, Option<B256>)> {
+    (!subtrie_prefix.is_empty()).then(|| {
+        (
+            nibbles_prefix_to_b256(&subtrie_prefix),
+            subtrie_prefix.next_without_prefix().map(|prefix| nibbles_prefix_to_b256(&prefix)),
+        )
+    })
+}
+
+#[derive(Clone, Debug)]
+struct BoundedHashedCursorFactory<H> {
+    inner: H,
+    account_bounds: Option<(B256, Option<B256>)>,
+}
+
+impl<H> BoundedHashedCursorFactory<H> {
+    const fn new(inner: H, account_bounds: Option<(B256, Option<B256>)>) -> Self {
+        Self { inner, account_bounds }
+    }
+}
+
+impl<H: HashedCursorFactory> HashedCursorFactory for BoundedHashedCursorFactory<H> {
+    type AccountCursor<'a>
+        = BoundedHashedCursor<H::AccountCursor<'a>>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = H::StorageCursor<'a>
+    where
+        Self: 'a;
+
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        Ok(BoundedHashedCursor::new(self.inner.hashed_account_cursor()?, self.account_bounds))
+    }
+
+    fn hashed_storage_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        self.inner.hashed_storage_cursor(hashed_address)
+    }
+}
+
+#[derive(Debug)]
+struct BoundedHashedCursor<C> {
+    inner: C,
+    lower_bound: Option<B256>,
+    upper_bound: Option<B256>,
+}
+
+impl<C> BoundedHashedCursor<C> {
+    const fn new(inner: C, account_bounds: Option<(B256, Option<B256>)>) -> Self {
+        let (lower_bound, upper_bound) = if let Some((lower_bound, upper_bound)) = account_bounds {
+            (Some(lower_bound), upper_bound)
+        } else {
+            (None, None)
+        };
+        Self { inner, lower_bound, upper_bound }
+    }
+
+    fn filter_entry<V>(&self, entry: Option<(B256, V)>) -> Option<(B256, V)> {
+        entry.filter(|(key, _)| self.upper_bound.is_none_or(|upper_bound| *key < upper_bound))
+    }
+}
+
+impl<C: HashedCursor> HashedCursor for BoundedHashedCursor<C> {
+    type Value = C::Value;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        let key = self.lower_bound.map_or(key, |lower_bound| key.max(lower_bound));
+        let entry = self.inner.seek(key)?;
+        Ok(self.filter_entry(entry))
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        let entry = self.inner.next()?;
+        Ok(self.filter_entry(entry))
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
 
 /// Used by [`StateRootBranchNodesIter`] to iterate over branch nodes in a state root.
 #[derive(Debug)]
@@ -38,6 +138,8 @@ enum BranchNode {
 struct StateRootBranchNodesIter<T, H> {
     trie_cursor_factory: T,
     hashed_cursor_factory: H,
+    subtrie_prefix: Option<Nibbles>,
+    subtrie_account_bounds: Option<(B256, Option<B256>)>,
     account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     storage_tries: Vec<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
     curr_storage: Option<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
@@ -50,12 +152,20 @@ impl<T, H> StateRootBranchNodesIter<T, H> {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
+            subtrie_prefix: None,
+            subtrie_account_bounds: None,
             account_nodes: Default::default(),
             storage_tries: Default::default(),
             curr_storage: None,
             intermediate_state: None,
             complete: false,
         }
+    }
+
+    fn with_subtrie_prefix(mut self, subtrie_prefix: Nibbles) -> Self {
+        self.subtrie_prefix = Some(subtrie_prefix);
+        self.subtrie_account_bounds = subtrie_account_bounds(subtrie_prefix);
+        self
     }
 
     /// Sorts a Vec of updates such that it is ready to be yielded from the `next` method. We yield
@@ -107,8 +217,12 @@ impl<T: TrieCursorFactory + Clone, H: HashedCursorFactory + Clone> Iterator
 
             let state_root = StateRoot::new(
                 self.trie_cursor_factory.clone(),
-                self.hashed_cursor_factory.clone(),
+                BoundedHashedCursorFactory::new(
+                    self.hashed_cursor_factory.clone(),
+                    self.subtrie_account_bounds,
+                ),
             )
+            .with_prefix_sets(self.subtrie_prefix.map(state_root_prefix_sets).unwrap_or_default())
             .with_intermediate_state(self.intermediate_state.take().map(|s| *s));
 
             let updates = match state_root.root_with_progress() {
@@ -208,7 +322,10 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         trie_cursor: C,
         subtrie_prefix: Option<Nibbles>,
     ) -> Result<Self, DatabaseError> {
-        let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
+        let mut trie_iter = match subtrie_prefix {
+            Some(prefix) => DepthFirstTrieIterator::new(trie_cursor).with_subtrie_prefix(prefix),
+            None => DepthFirstTrieIterator::new(trie_cursor),
+        };
         let curr = trie_iter.next().transpose()?;
         Ok(Self { account, trie_iter, curr, subtrie_prefix, canonical_branch_nodes: Vec::new() })
     }
@@ -340,6 +457,7 @@ pub struct Verifier<'a, T: TrieCursorFactory, H> {
     trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
     subtrie_prefix: Nibbles,
+    subtrie_account_bounds: Option<(B256, Option<B256>)>,
     branch_node_iter: StateRootBranchNodesIter<NoopTrieCursorFactory, H>,
     outputs: Vec<Output>,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
@@ -354,14 +472,17 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         hashed_cursor_factory: H,
         subtrie_prefix: Nibbles,
     ) -> Result<Self, DatabaseError> {
+        let subtrie_account_bounds = subtrie_account_bounds(subtrie_prefix);
         Ok(Self {
             trie_cursor_factory,
             hashed_cursor_factory: hashed_cursor_factory.clone(),
             subtrie_prefix,
+            subtrie_account_bounds,
             branch_node_iter: StateRootBranchNodesIter::new(
                 NoopTrieCursorFactory,
                 hashed_cursor_factory,
-            ),
+            )
+            .with_subtrie_prefix(subtrie_prefix),
             outputs: Default::default(),
             account: SingleVerifier::new(
                 None,
@@ -380,7 +501,9 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
     }
 
     fn account_in_subtrie(&self, account: B256) -> bool {
-        Nibbles::unpack(account).starts_with(&self.subtrie_prefix)
+        self.subtrie_account_bounds.map_or(true, |(lower_bound, upper_bound)| {
+            account >= lower_bound && upper_bound.is_none_or(|upper_bound| account < upper_bound)
+        })
     }
 
     fn new_storage(
@@ -407,33 +530,44 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         start_inclusive: bool,
         end_inclusive: bool,
     ) -> Result<(), DatabaseError> {
-        let mut account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-        let mut account_seeked = false;
+        let seek_account = self
+            .subtrie_account_bounds
+            .map(|(lower_bound, _)| lower_bound.max(last_account))
+            .unwrap_or(last_account);
 
-        if !start_inclusive {
-            account_seeked = true;
-            account_cursor.seek(last_account)?;
+        if self.subtrie_account_bounds.is_some_and(|(_, upper_bound)| {
+            upper_bound.is_some_and(|upper_bound| seek_account >= upper_bound)
+        }) || seek_account > next_account ||
+            (!end_inclusive && seek_account == next_account)
+        {
+            return Ok(())
+        }
+
+        let mut account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+        let mut curr_account = account_cursor.seek(seek_account)?;
+
+        if !start_inclusive &&
+            curr_account.as_ref().is_some_and(|(account, _)| *account == last_account)
+        {
+            curr_account = account_cursor.next()?;
         }
 
         loop {
-            let Some((curr_account, _)) = (if account_seeked {
-                account_cursor.next()?
-            } else {
-                account_seeked = true;
-                account_cursor.seek(last_account)?
-            }) else {
+            let Some((curr_account_key, _)) = curr_account.take() else { return Ok(()) };
+
+            if self.subtrie_account_bounds.is_some_and(|(_, upper_bound)| {
+                upper_bound.is_some_and(|upper_bound| curr_account_key >= upper_bound)
+            }) {
                 return Ok(())
-            };
+            }
 
-            if curr_account < next_account || (end_inclusive && curr_account == next_account) {
-                if !self.account_in_subtrie(curr_account) {
-                    continue
-                }
-
-                trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
+            if curr_account_key < next_account ||
+                (end_inclusive && curr_account_key == next_account)
+            {
+                trace!(target: "trie::verify", account = ?curr_account_key, "Verifying account has empty storage");
 
                 let mut storage_cursor =
-                    self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
+                    self.trie_cursor_factory.storage_trie_cursor(curr_account_key)?;
                 let mut seeked = false;
                 while let Some((path, node)) = if seeked {
                     storage_cursor.next()?
@@ -441,8 +575,9 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
                     seeked = true;
                     storage_cursor.seek(Nibbles::new())?
                 } {
-                    self.outputs.push(Output::StorageExtra(curr_account, path, node));
+                    self.outputs.push(Output::StorageExtra(curr_account_key, path, node));
                 }
+                curr_account = account_cursor.next()?;
             } else {
                 return Ok(())
             }
@@ -540,6 +675,7 @@ mod tests {
     use super::*;
     use crate::{
         hashed_cursor::mock::MockHashedCursorFactory,
+        mock::{KeyVisit, KeyVisitType},
         trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory},
     };
     use alloy_primitives::{address, keccak256, map::B256Map, U256};
@@ -1129,5 +1265,163 @@ mod tests {
             Output::StorageWrong { account, .. } =>
                 Nibbles::unpack(*account).starts_with(&subtrie_prefix),
         }));
+    }
+
+    #[test]
+    fn test_single_verifier_subtrie_prefix_seeks_directly_to_prefix() {
+        let subtrie_prefix = Nibbles::from_nibbles([0x1]);
+        let in_prefix_parent = Nibbles::from_nibbles([0x1]);
+        let in_prefix_child = Nibbles::from_nibbles([0x1, 0x1]);
+        let first_out_of_prefix = Nibbles::from_nibbles([0x2]);
+        let later_out_of_prefix = Nibbles::from_nibbles([0x3]);
+
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::from([
+                (Nibbles::new(), test_branch_node(0b1110, 0, 0b1110, vec![])),
+                (in_prefix_parent, test_branch_node(0b0010, 0, 0b0010, vec![])),
+                (in_prefix_child, test_branch_node(0b0001, 0, 0b0001, vec![])),
+                (first_out_of_prefix, test_branch_node(0b0001, 0, 0b0001, vec![])),
+                (later_out_of_prefix, test_branch_node(0b0001, 0, 0b0001, vec![])),
+            ]),
+            B256Map::default(),
+        );
+
+        let mut verifier = SingleVerifier::new(
+            None,
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            Some(subtrie_prefix),
+        )
+        .unwrap();
+        let mut outputs = Vec::new();
+
+        verifier
+            .next(&mut outputs, in_prefix_child, test_branch_node(0b0001, 0, 0b0001, vec![]))
+            .unwrap();
+        verifier
+            .next(&mut outputs, in_prefix_parent, test_branch_node(0b0010, 0, 0b0010, vec![]))
+            .unwrap();
+        let _ = verifier.finalize(&mut outputs).unwrap();
+
+        assert!(outputs.is_empty());
+        assert_eq!(
+            *trie_cursor_factory.visited_account_keys(),
+            vec![
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(subtrie_prefix),
+                    visited_key: Some(in_prefix_parent),
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(in_prefix_child) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(first_out_of_prefix) },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_state_root_branch_nodes_iter_subtrie_prefix_seeks_hashed_accounts_to_prefix() {
+        let before_prefix = B256::right_padding_from(&[0x00]);
+        let first_in_prefix = B256::right_padding_from(&[0x10]);
+        let second_in_prefix = B256::right_padding_from(&[0x11]);
+        let first_out_of_prefix = B256::right_padding_from(&[0x20]);
+        let later_out_of_prefix = B256::right_padding_from(&[0x30]);
+
+        let empty_account = Account::default();
+        let factory = MockHashedCursorFactory::new(
+            BTreeMap::from([
+                (before_prefix, empty_account),
+                (first_in_prefix, empty_account),
+                (second_in_prefix, empty_account),
+                (first_out_of_prefix, empty_account),
+                (later_out_of_prefix, empty_account),
+            ]),
+            [
+                (before_prefix, BTreeMap::default()),
+                (first_in_prefix, BTreeMap::default()),
+                (second_in_prefix, BTreeMap::default()),
+                (first_out_of_prefix, BTreeMap::default()),
+                (later_out_of_prefix, BTreeMap::default()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let iter = StateRootBranchNodesIter::new(NoopTrieCursorFactory, factory.clone())
+            .with_subtrie_prefix(Nibbles::from_nibbles([0x1]));
+
+        let outputs = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert!(outputs.iter().all(|node| match node {
+            BranchNode::Account(path, _) => path.starts_with(&Nibbles::from_nibbles([0x1])),
+            BranchNode::Storage(account, _, _) =>
+                Nibbles::unpack(*account).starts_with(&Nibbles::from_nibbles([0x1])),
+        }));
+
+        let visits = factory.visited_account_keys().clone();
+        assert!(visits.iter().any(|visit| visit.visited_key == Some(first_in_prefix)));
+        assert!(visits.iter().any(|visit| visit.visited_key == Some(second_in_prefix)));
+        assert!(!visits.iter().any(|visit| visit.visited_key == Some(before_prefix)));
+        assert!(!visits.iter().any(|visit| visit.visited_key == Some(later_out_of_prefix)));
+    }
+
+    #[test]
+    fn test_verifier_subtrie_prefix_bounds_empty_storage_scan() {
+        let subtrie_prefix = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let before_prefix = B256::right_padding_from(&[0x12, 0x20]);
+        let first_in_prefix = B256::right_padding_from(&[0x12, 0x30]);
+        let second_in_prefix = B256::right_padding_from(&[0x12, 0x3f]);
+        let first_out_of_prefix = B256::right_padding_from(&[0x12, 0x40]);
+        let later_out_of_prefix = B256::right_padding_from(&[0x20]);
+
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::default(),
+            [
+                (before_prefix, BTreeMap::default()),
+                (first_in_prefix, BTreeMap::default()),
+                (second_in_prefix, BTreeMap::default()),
+                (first_out_of_prefix, BTreeMap::default()),
+                (later_out_of_prefix, BTreeMap::default()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
+            BTreeMap::from([
+                (before_prefix, Account::default()),
+                (first_in_prefix, Account::default()),
+                (second_in_prefix, Account::default()),
+                (first_out_of_prefix, Account::default()),
+                (later_out_of_prefix, Account::default()),
+            ]),
+            [
+                (before_prefix, BTreeMap::default()),
+                (first_in_prefix, BTreeMap::default()),
+                (second_in_prefix, BTreeMap::default()),
+                (first_out_of_prefix, BTreeMap::default()),
+                (later_out_of_prefix, BTreeMap::default()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let mut verifier =
+            Verifier::new(&trie_cursor_factory, hashed_cursor_factory.clone(), subtrie_prefix)
+                .unwrap();
+        verifier.branch_node_iter.complete = true;
+
+        let outputs = verifier.collect::<Result<Vec<_>, _>>().unwrap();
+        assert!(outputs.is_empty());
+        assert_eq!(
+            *hashed_cursor_factory.visited_account_keys(),
+            vec![
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(first_in_prefix),
+                    visited_key: Some(first_in_prefix),
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(second_in_prefix) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(first_out_of_prefix) },
+            ]
+        );
+        assert!(trie_cursor_factory.visited_storage_keys(before_prefix).is_empty());
+        assert_eq!(trie_cursor_factory.visited_storage_keys(first_in_prefix).len(), 1);
+        assert_eq!(trie_cursor_factory.visited_storage_keys(second_in_prefix).len(), 1);
+        assert!(trie_cursor_factory.visited_storage_keys(first_out_of_prefix).is_empty());
+        assert!(trie_cursor_factory.visited_storage_keys(later_out_of_prefix).is_empty());
     }
 }
