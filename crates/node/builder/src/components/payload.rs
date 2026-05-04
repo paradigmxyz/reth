@@ -105,7 +105,10 @@ where
             payload_builder,
         );
         let (payload_service, payload_service_handle) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+            PayloadBuilderService::<_, _, <Node::Types as NodeTypes>::Payload>::new(
+                payload_generator,
+                ctx.provider().canonical_state_stream(),
+            );
 
         ctx.task_executor().spawn_critical_task("payload builder service", payload_service);
 

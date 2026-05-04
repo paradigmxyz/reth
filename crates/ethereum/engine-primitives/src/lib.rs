@@ -34,14 +34,15 @@ pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
     _marker: core::marker::PhantomData<T>,
 }
 
-impl<
-        T: PayloadTypes<
-            ExecutionData = ExecutionData,
-            BuiltPayload: BuiltPayload<
-                Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
-            >,
+impl<T> PayloadTypes for EthEngineTypes<T>
+where
+    T: PayloadTypes<
+        ExecutionData = ExecutionData,
+        BuiltPayload: BuiltPayload<
+            Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
         >,
-    > PayloadTypes for EthEngineTypes<T>
+    >,
+    ExecutionData: From<T::BuiltPayload>,
 {
     type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
@@ -59,6 +60,7 @@ impl<
 impl<T> EngineTypes for EthEngineTypes<T>
 where
     T: PayloadTypes<ExecutionData = ExecutionData>,
+    ExecutionData: From<T::BuiltPayload>,
     T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>>
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>

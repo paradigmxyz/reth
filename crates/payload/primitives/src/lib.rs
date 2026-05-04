@@ -38,7 +38,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
     ///
     /// This type represents the canonical format for block data that includes
     /// all necessary information for execution and validation.
-    type ExecutionData: ExecutionPayload;
+    type ExecutionData: ExecutionPayload + From<Self::BuiltPayload>;
     /// The type representing a successfully built payload/block.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 
