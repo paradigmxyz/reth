@@ -494,8 +494,9 @@ wait_for_persistence_marker() {
     local elapsed=0
 
     while (( elapsed <= timeout )); do
-        if tail -n "+${start_line}" "$log_file" | \
-            grep -E -m1 'save_blocks step plan|save_blocks trie paths|write_trie_updates|Persisting canonical chain' \
+        if grep -E -m1 \
+            'save_blocks step plan|save_blocks trie paths|write_trie_updates|Persisting canonical chain|Appended block data range' \
+            < <(tail -n "+${start_line}" "$log_file") \
             >/dev/null 2>&1; then
             return 0
         fi
@@ -709,7 +710,10 @@ BENCH_PID=$!
 
 HEAD_AT_CRASH=$(wait_for_target_head "$NODE1_PID" "$TARGET_BLOCK" "$TARGET_TIMEOUT") || exit 2
 printf '%s\n' "$HEAD_AT_CRASH" >"${ARTIFACTS_DIR}/current_head_at_crash.txt"
-POST_TARGET_LINE=$(( $(wc -l <"$NODE1_LOG") + 1 ))
+# Allow for a small race where the target-head poll returns after the relevant
+# persistence logs were already emitted.
+POST_TARGET_LINE=$(( $(wc -l <"$NODE1_LOG") - 50 ))
+(( POST_TARGET_LINE < 1 )) && POST_TARGET_LINE=1
 
 log "Target head ${TARGET_BLOCK} reached; sending SIGTERM to trigger the final persistence flush"
 stop_pid "$NODE1_PID" TERM "reth crash node"
