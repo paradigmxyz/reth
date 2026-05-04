@@ -276,6 +276,17 @@ where
         + DbDupCursorRO<A::StorageTrieTable>
         + DbDupCursorRW<A::StorageTrieTable>,
 {
+    fn current_value(&mut self) -> Result<Option<A::StorageValue>, DatabaseError> {
+        Ok(self
+            .cursor
+            .current()?
+            .and_then(|(key, value)| (key == self.hashed_address).then_some(value)))
+    }
+
+    fn next_value(&mut self) -> Result<Option<A::StorageValue>, DatabaseError> {
+        Ok(self.cursor.next_dup()?.map(|(_, value)| value))
+    }
+
     /// Writes storage updates that are already sorted
     pub fn write_storage_trie_updates_sorted(
         &mut self,
@@ -286,25 +297,37 @@ where
             self.cursor.delete_current_duplicates()?;
         }
 
+        let mut current: Option<A::StorageValue> = None;
         let mut num_entries = 0;
         for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
+
+            let needs_seek = match current.as_ref() {
+                Some(entry) => entry.nibbles() > &nibbles,
+                None => true,
+            };
+
+            if needs_seek {
+                current = self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())?;
+            } else {
+                while current.as_ref().is_some_and(|entry| entry.nibbles() < &nibbles) {
+                    current = self.next_value()?;
+                }
+            }
+
             // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
-            {
+            if current.as_ref().is_some_and(|entry| *entry.nibbles() == nibbles) {
                 self.cursor.delete_current()?;
+                current = self.current_value()?;
             }
 
             // There is an updated version of this node, insert new entry.
             if let Some(node) = maybe_updated {
-                self.cursor
-                    .upsert(self.hashed_address, &A::StorageValue::new(nibbles, node.clone()))?;
+                let updated = A::StorageValue::new(nibbles.clone(), node.clone());
+                self.cursor.upsert(self.hashed_address, &updated)?;
+                current = Some(updated);
             }
         }
 

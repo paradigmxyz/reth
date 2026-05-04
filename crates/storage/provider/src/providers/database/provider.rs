@@ -4364,6 +4364,16 @@ mod tests {
                     )),
                 ),
                 (Nibbles::from_nibbles([0x2, 0x0]), None), // Deletion of existing node
+                (
+                    Nibbles::from_nibbles([0x3, 0x0]),
+                    Some(BranchNodeCompact::new(
+                        0b0000_1111_0000_1111,
+                        0b0000_0000_0000_0000,
+                        0b0000_0000_0000_0000,
+                        vec![],
+                        None,
+                    )),
+                ),
             ],
         };
 
@@ -4381,9 +4391,9 @@ mod tests {
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
-        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
-        // storage deletion = 5
-        assert_eq!(num_entries, 5);
+        // We should have 2 account insertions + 1 account deletion + 2 storage insertions + 1
+        // storage deletion = 6
+        assert_eq!(num_entries, 6);
 
         // Verify account trie updates were written correctly
         let tx = provider_rw.tx_ref();
@@ -4421,13 +4431,23 @@ mod tests {
             .unwrap();
         assert_eq!(
             storage_entries1.len(),
-            1,
-            "Storage address1 should have 1 entry after deletion"
+            2,
+            "Storage address1 should have 2 entries after the update batch"
         );
         assert_eq!(
             storage_entries1[0].1.nibbles.0,
             Nibbles::from_nibbles([0x1, 0x0]),
             "Remaining entry should be [0x1, 0x0]"
+        );
+        assert_eq!(
+            storage_entries1[1].1.nibbles.0,
+            Nibbles::from_nibbles([0x3, 0x0]),
+            "New entry should be [0x3, 0x0]"
+        );
+        assert_eq!(
+            storage_entries1[1].1.node.state_mask,
+            reth_trie::TrieMask::new(0b0000_1111_0000_1111),
+            "New entry should have the inserted state_mask"
         );
 
         // Check storage for address2 was wiped
