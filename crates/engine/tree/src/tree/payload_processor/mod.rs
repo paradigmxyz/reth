@@ -250,6 +250,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        state_root_handle: Option<StateRootHandle>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -265,13 +266,17 @@ where
 
         let span = Span::current();
 
-        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let state_root_handle = self.spawn_state_root(
-            multiproof_provider_factory,
-            env.parent_state_root,
-            halve_workers,
-            config,
-        );
+        let state_root_handle = state_root_handle.unwrap_or_else(|| {
+            let halve_workers =
+                env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+            self.spawn_state_root(
+                multiproof_provider_factory,
+                env.parent_state_root,
+                halve_workers,
+                config,
+            )
+        });
+
         let install_state_hook = env.decoded_bal.is_none();
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -805,9 +810,27 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
             .flatten()
     }
 
+    /// Returns a state hook that streams execution state updates to the sparse trie cache task
+    /// without sending [`StateRootMessage::FinishedStateUpdates`] when the hook is dropped.
+    ///
+    /// Returns `None` when execution should not send state updates, such as BAL-driven execution.
+    pub fn state_hook_persistent(&self) -> Option<impl OnStateHook> {
+        self.install_state_hook
+            .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook_persistent()))
+            .flatten()
+    }
+
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
+    }
+
+    /// Takes the [`StateRootHandle`] out of this [`PayloadHandle`].
+    ///
+    /// Returns `None` when this handle was created without a state root pipeline (e.g. via
+    /// [`PayloadProcessor::spawn_cache_exclusive`]) or when the handle has already been taken.
+    pub fn take_state_root_handle(&mut self) -> Option<StateRootHandle> {
+        self.state_root_handle.take()
     }
 
     /// Returns engine cache metrics if a cache exists for prewarming.
@@ -1255,6 +1278,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
+            None,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
