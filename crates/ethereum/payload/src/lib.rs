@@ -8,18 +8,18 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    is_better_payload, BuildArguments, BuildOutcome, HeaderForPayload, MissingPayloadBehaviour,
+    PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
-use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
     block::TxResult,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
@@ -30,7 +30,7 @@ use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedS
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, NodePrimitives};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -80,17 +80,20 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    EvmConfig: ConfigureEvm<
+        Primitives: NodePrimitives<SignedTx = TransactionSigned>,
+        NextBlockEnvCtx = NextBlockEnvAttributes,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadAttributes;
-    type BuiltPayload = EthBuiltPayload;
+    type BuiltPayload = EthBuiltPayload<EvmConfig::Primitives>;
 
     fn try_build(
         &self,
-        args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
-    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
+        args: BuildArguments<EthPayloadAttributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
@@ -114,8 +117,8 @@ where
 
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes>,
-    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments::new(
             Default::default(),
             Default::default(),
@@ -143,17 +146,25 @@ where
 /// Given build arguments including an Ethereum client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
+///
+/// Generic over the node primitives so downstream chains that share the Ethereum
+/// transaction envelope (e.g. `TransactionSigned`) but use a different block/header
+/// type can reuse this builder by parameterising `EvmConfig` with their own
+/// `NodePrimitives`.
 #[inline]
 pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
     client: Client,
     pool: Pool,
     builder_config: EthereumBuilderConfig,
-    args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
+    args: BuildArguments<EthPayloadAttributes, EthBuiltPayload<EvmConfig::Primitives>>,
     best_txs: F,
-) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
+) -> Result<BuildOutcome<EthBuiltPayload<EvmConfig::Primitives>>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    EvmConfig: ConfigureEvm<
+        Primitives: NodePrimitives<SignedTx = TransactionSigned>,
+        NextBlockEnvCtx = NextBlockEnvAttributes,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
@@ -195,7 +206,7 @@ where
                 timestamp: attributes.timestamp(),
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
                 prev_randao: attributes.prev_randao,
-                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+                gas_limit: builder_config.gas_limit(parent_header.gas_limit()),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: attributes.withdrawals.clone().map(Into::into),
                 extra_data: builder_config.extra_data,
@@ -204,7 +215,7 @@ where
         )
         .map_err(PayloadBuilderError::other)?;
 
-    debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
+    debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number(), "building new payload");
     let mut cumulative_tx_gas_used = 0;
     let mut block_regular_gas_used = 0;
     let mut block_state_gas_used = 0;
@@ -486,9 +497,10 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    let payload =
+        EthBuiltPayload::<EvmConfig::Primitives>::new(sealed_block, total_fees, requests, None)
+            // add blob sidecars from the executed txs
+            .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
