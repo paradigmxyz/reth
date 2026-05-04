@@ -141,13 +141,19 @@ where
 
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
+            let eager_init_threshold = pool.current_num_threads().saturating_mul(2);
 
             let mut tx_count = 0usize;
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
             pool.in_place_scope(|s| {
-                s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
-                });
+                // Large batches usually fan out across the whole pool, so eagerly priming each
+                // worker still pays off. Smaller batches rely on the existing lazy get_or_init
+                // path and avoid paying the broadcast cost up front.
+                if ctx.env.transaction_count >= eager_init_threshold {
+                    s.spawn(|_| {
+                        pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    });
+                }
 
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
