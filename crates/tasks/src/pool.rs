@@ -6,10 +6,7 @@ use std::{
     future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, OnceLock,
-    },
+    sync::{Arc, OnceLock},
     task::{ready, Context, Poll},
     thread,
 };
@@ -228,23 +225,12 @@ impl WorkerPool {
                 WORKER.with_borrow_mut(|worker| f(worker));
             });
         } else {
-            let remaining = AtomicUsize::new(num_threads);
-            self.pool().broadcast(|_| {
-                // Atomically claim a slot; threads that can't decrement skip the closure.
-                let mut current = remaining.load(Ordering::Relaxed);
-                loop {
-                    if current == 0 {
-                        return;
-                    }
-                    match remaining.compare_exchange_weak(
-                        current,
-                        current - 1,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break,
-                        Err(actual) => current = actual,
-                    }
+            self.pool().broadcast(|ctx| {
+                // Rayon already assigns each broadcast invocation a stable worker index, so we can
+                // select the first `num_threads` workers directly instead of contending on a shared
+                // atomic counter.
+                if ctx.index() >= num_threads {
+                    return;
                 }
                 WORKER.with_borrow_mut(|worker| f(worker));
             });
