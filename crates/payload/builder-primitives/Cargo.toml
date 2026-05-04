@@ -18,7 +18,7 @@ reth-payload-primitives.workspace = true
 # async
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 
 # misc
 tracing.workspace = true
