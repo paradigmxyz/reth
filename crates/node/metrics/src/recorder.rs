@@ -94,7 +94,8 @@ impl PrometheusRecorder {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                handle.run_upkeep();
+                let handle = handle.clone();
+                let _ = tokio::task::spawn_blocking(move || handle.run_upkeep()).await;
             }
         });
     }
