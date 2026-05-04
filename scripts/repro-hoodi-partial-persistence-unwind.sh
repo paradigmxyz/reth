@@ -25,6 +25,8 @@ Options:
                               (default: 2613963)
   --target-block N            Last block to replay before crashing
                               (default: 2614300)
+  --randomize-target-block    Pick a random crash target between
+                              --start-block and --target-block
   --artifacts-dir PATH        Directory for logs and summary output
                               (default: /tmp/reth-hoodi-unwind-<timestamp>)
   --start-timeout SECONDS     Seconds to wait for node RPC startup
@@ -130,6 +132,9 @@ write_summary() {
         printf 'expected_head=%s\n' "$EXPECTED_HEAD"
         printf 'start_block=%s\n' "$START_BLOCK"
         printf 'target_block=%s\n' "$TARGET_BLOCK"
+        printf 'target_block_mode=%s\n' "$TARGET_BLOCK_MODE"
+        printf 'target_block_lower_bound=%s\n' "$TARGET_BLOCK_LOWER_BOUND"
+        printf 'target_block_upper_bound=%s\n' "$TARGET_BLOCK_UPPER_BOUND"
         printf 'advance=%s\n' "${ADVANCE:-unknown}"
         printf 'head_before=%s\n' "${HEAD_BEFORE:-unknown}"
         printf 'head_after_crash=%s\n' "${HEAD_AT_CRASH:-unknown}"
@@ -176,6 +181,7 @@ REMOTE_RPC_URL="https://rpc.hoodi.ethpandaops.io"
 EXPECTED_HEAD=2613962
 START_BLOCK=2613963
 TARGET_BLOCK=2614300
+RANDOMIZE_TARGET_BLOCK=0
 START_TIMEOUT=180
 TARGET_TIMEOUT=900
 PERSISTENCE_TIMEOUT=300
@@ -186,6 +192,9 @@ CHAIN="hoodi"
 MERKLE_TRACE_FILTER='info'
 RESULT="script_error"
 ADVANCE=""
+TARGET_BLOCK_MODE="fixed"
+TARGET_BLOCK_LOWER_BOUND="$TARGET_BLOCK"
+TARGET_BLOCK_UPPER_BOUND="$TARGET_BLOCK"
 HEAD_BEFORE=""
 HEAD_AT_CRASH=""
 HEAD_AFTER_RESTART=""
@@ -228,6 +237,10 @@ while (($# > 0)); do
         --target-block)
             TARGET_BLOCK="$2"
             shift 2
+            ;;
+        --randomize-target-block)
+            RANDOMIZE_TARGET_BLOCK=1
+            shift
             ;;
         --artifacts-dir)
             ARTIFACTS_DIR="$2"
@@ -683,6 +696,24 @@ if (( HEAD_BEFORE + 1 != START_BLOCK )); then
     exit 2
 fi
 
+if (( RANDOMIZE_TARGET_BLOCK == 1 )); then
+    TARGET_BLOCK_MODE="randomized"
+    TARGET_BLOCK_LOWER_BOUND="$START_BLOCK"
+    TARGET_BLOCK_UPPER_BOUND="$TARGET_BLOCK"
+
+    if (( TARGET_BLOCK_UPPER_BOUND < TARGET_BLOCK_LOWER_BOUND )); then
+        log "Randomized target range ${TARGET_BLOCK_LOWER_BOUND}-${TARGET_BLOCK_UPPER_BOUND} is invalid"
+        exit 2
+    fi
+
+    TARGET_BLOCK=$((TARGET_BLOCK_LOWER_BOUND + RANDOM % (TARGET_BLOCK_UPPER_BOUND - TARGET_BLOCK_LOWER_BOUND + 1)))
+    log "Randomized crash target block ${TARGET_BLOCK} (range ${TARGET_BLOCK_LOWER_BOUND}-${TARGET_BLOCK_UPPER_BOUND})"
+else
+    TARGET_BLOCK_MODE="fixed"
+    TARGET_BLOCK_LOWER_BOUND="$TARGET_BLOCK"
+    TARGET_BLOCK_UPPER_BOUND="$TARGET_BLOCK"
+fi
+
 ADVANCE=$((TARGET_BLOCK - HEAD_BEFORE))
 if (( ADVANCE <= 0 )); then
     log "Target block ${TARGET_BLOCK} must be greater than restored head ${HEAD_BEFORE}"
@@ -697,7 +728,7 @@ capture_command reth_bench "$BENCH_BIN" -vvv new-payload-fcu \
     --local-rpc-url http://127.0.0.1:8545 \
     --ws-rpc-url ws://127.0.0.1:8546
 
-log "Running reth-bench with --advance ${ADVANCE} so replay begins at block ${START_BLOCK}"
+log "Running reth-bench with --advance ${ADVANCE} so replay begins at block ${START_BLOCK} and crashes at ${TARGET_BLOCK}"
 "$BENCH_BIN" -vvv new-payload-fcu \
     --rpc-url "$REMOTE_RPC_URL" \
     --advance "$ADVANCE" \
