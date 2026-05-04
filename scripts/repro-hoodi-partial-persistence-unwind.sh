@@ -183,8 +183,7 @@ RESTART_TIMEOUT=180
 RETH_BIN="/repos/reth/target/profiling/reth"
 BENCH_BIN="/repos/reth/target/profiling/reth-bench"
 CHAIN="hoodi"
-MERKLE_TRACE_FILTER='info,sync::pipeline=debug,reth::cli=info,trie::node_iter=trace,trie::state_root=trace,trie::storage_root=trace'
-MERKLE_TRACE_CAPTURE_PATTERN='trie::node_iter: return=Ok\(Some\(Leaf\(|trie::state_root: calculated state root|trie::storage_root: calculated storage root'
+MERKLE_TRACE_FILTER='trace'
 RESULT="script_error"
 ADVANCE=""
 HEAD_BEFORE=""
@@ -583,7 +582,7 @@ run_post_drop_merkle() {
     local target="$1"
     local merkle_pid
 
-    log "Rebuilding the Merkle stage with filtered trace logs piped to ${POST_DROP_MERKLE_RUN_TRACE_LOG}"
+    log "Rebuilding the Merkle stage with full trace logs piped to ${POST_DROP_MERKLE_RUN_TRACE_LOG}"
     (
         "$RETH_BIN" stage run \
             --datadir "$DATADIR" \
@@ -597,7 +596,6 @@ run_post_drop_merkle() {
             --log.stdout.filter "$MERKLE_TRACE_FILTER" \
             --color never \
             merkle 2>&1 | \
-            rg --line-buffered "$MERKLE_TRACE_CAPTURE_PATTERN" | \
             tee "$POST_DROP_MERKLE_RUN_TRACE_LOG" >"$POST_DROP_MERKLE_RUN_LOG"
     ) &
     merkle_pid=$!
