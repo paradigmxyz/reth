@@ -207,8 +207,10 @@ impl PrefixSet {
             return true
         }
 
-        while self.index > 0 && &self.keys[self.index] > prefix {
-            self.index -= 1;
+        if self.index > 0 && &self.keys[self.index] > prefix {
+            self.index = self.keys[..=self.index]
+                .partition_point(|key| key <= prefix)
+                .saturating_sub(1);
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
@@ -237,8 +239,10 @@ impl PrefixSet {
             return true
         }
 
-        while self.index > 0 && &self.keys[self.index] >= range.end {
-            self.index -= 1;
+        if self.index > 0 && &self.keys[self.index] >= range.end {
+            self.index = self.keys[..=self.index]
+                .partition_point(|key| key < range.end)
+                .saturating_sub(1);
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
@@ -348,5 +352,43 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_contains_rewinds_to_earlier_prefix() {
+        let mut prefix_set = PrefixSetMut::from([
+            Nibbles::from_nibbles([0x1, 0x0]),
+            Nibbles::from_nibbles([0x2, 0x0]),
+            Nibbles::from_nibbles([0x7, 0x0]),
+            Nibbles::from_nibbles([0x9, 0x0]),
+        ])
+        .freeze();
+
+        assert!(prefix_set.contains(&Nibbles::from_nibbles([0x9])));
+        assert_eq!(prefix_set.index, 3);
+
+        assert!(prefix_set.contains(&Nibbles::from_nibbles([0x2])));
+        assert_eq!(prefix_set.index, 1);
+    }
+
+    #[test]
+    fn test_contains_range_rewinds_to_earlier_window() {
+        let mut prefix_set = PrefixSetMut::from([
+            Nibbles::from_nibbles([0x1, 0x0]),
+            Nibbles::from_nibbles([0x3, 0x0]),
+            Nibbles::from_nibbles([0x6, 0x0]),
+            Nibbles::from_nibbles([0x9, 0x0]),
+        ])
+        .freeze();
+
+        assert!(prefix_set.contains_range(
+            &Nibbles::from_nibbles([0x9])..&Nibbles::from_nibbles([0xa])
+        ));
+        assert_eq!(prefix_set.index, 3);
+
+        assert!(prefix_set.contains_range(
+            &Nibbles::from_nibbles([0x3])..&Nibbles::from_nibbles([0x4])
+        ));
+        assert_eq!(prefix_set.index, 1);
     }
 }
