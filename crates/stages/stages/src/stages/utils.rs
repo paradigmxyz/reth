@@ -20,11 +20,14 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
+use smallvec::SmallVec;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+
+type BlockNumberBuffer = SmallVec<[u64; 1]>;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -179,13 +182,13 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: HashMap<AddressStorageKey, BlockNumberBuffer> = HashMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
+    let mut insert_fn = |key: AddressStorageKey, indices: BlockNumberBuffer| {
         let last = indices.last().expect("qed");
         collector.insert(
             StorageShardedKey::new(key.0 .0, key.0 .1, *last),
-            BlockNumberList::new_pre_sorted(indices),
+            BlockNumberList::new_pre_sorted(indices.into_vec()),
         )?;
         Ok::<(), StageError>(())
     };
@@ -215,12 +218,16 @@ where
                 current_block = current_block_number,
                 "Collecting indices"
             );
-            collect_indices(cache.drain(), &mut insert_fn)?;
+            for (key, indices) in cache.drain() {
+                insert_fn(key, indices)?;
+            }
             flush_counter = 0;
         }
     }
 
-    collect_indices(cache.into_iter(), insert_fn)?;
+    for (key, indices) in cache {
+        insert_fn(key, indices)?;
+    }
 
     Ok(collector)
 }
