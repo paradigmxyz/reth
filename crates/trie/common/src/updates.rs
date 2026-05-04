@@ -717,7 +717,8 @@ impl TrieUpdatesSorted {
     /// Account trie nodes are masked at the top level, while storage trie entries are only masked
     /// at the node level unless the mask deletes the entire storage trie. For duplicate keys in
     /// the batch, later items take precedence over earlier ones. The order of the mask does not
-    /// matter.
+    /// matter. Overlapping nodes are preserved when any masked value for a key is equivalent to
+    /// the merged batch value for that same key.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
         let account_nodes = merge_masked_trie_nodes_preserving_ancestors(
             batch.iter().rev().map(|item| item.account_nodes.as_slice()),
@@ -808,26 +809,50 @@ fn merge_masked_trie_nodes_preserving_ancestors<'a>(
     mask_slices: impl IntoIterator<Item = &'a [(Nibbles, Option<BranchNodeCompact>)]>,
 ) -> Vec<(Nibbles, Option<BranchNodeCompact>)> {
     let merged_batch_nodes = kway_merge_sorted(batch_slices);
-    let masked_node_keys = mask_slices
+    let merged_masked_nodes = mask_slices
         .into_iter()
         .filter(|slice| !slice.is_empty())
-        .map(|slice| slice.iter().map(|(key, _)| key))
-        .kmerge()
-        .dedup()
-        .cloned()
+        .map(|slice| slice.iter())
+        .kmerge_by(|(left_key, _), (right_key, _)| left_key < right_key)
         .collect::<Vec<_>>();
-    let directly_unmasked_node_keys = merged_batch_nodes
+    let mut masked_node_index = 0;
+    let directly_kept_node_keys = merged_batch_nodes
         .iter()
-        .filter(|(key, _)| masked_node_keys.binary_search(key).is_err())
-        .map(|(key, _)| key.clone())
+        .filter_map(|(key, batch_value)| {
+            while let Some((masked_key, _)) = merged_masked_nodes.get(masked_node_index).copied() {
+                if masked_key < key {
+                    masked_node_index += 1;
+                    continue;
+                }
+
+                if masked_key > key {
+                    return Some(key.clone())
+                }
+
+                let mut has_equivalent_value = false;
+                while let Some((masked_key, masked_value)) =
+                    merged_masked_nodes.get(masked_node_index).copied()
+                {
+                    if masked_key != key {
+                        break;
+                    }
+                    has_equivalent_value |= masked_value == batch_value;
+                    masked_node_index += 1;
+                }
+
+                return has_equivalent_value.then(|| key.clone())
+            }
+
+            Some(key.clone())
+        })
         .collect::<Vec<_>>();
 
     merged_batch_nodes
         .into_iter()
         .filter(|(key, _)| {
-            masked_node_keys.binary_search(key).is_err() ||
-                directly_unmasked_node_keys
-                    .get(directly_unmasked_node_keys.partition_point(|candidate| candidate <= key))
+            directly_kept_node_keys.binary_search(key).is_ok() ||
+                directly_kept_node_keys
+                    .get(directly_kept_node_keys.partition_point(|candidate| candidate <= key))
                     .is_some_and(|candidate| candidate.starts_with(key))
         })
         .collect()
@@ -1214,6 +1239,87 @@ mod tests {
 
         assert!(result.account_nodes.is_empty());
         assert!(result.storage_tries.is_empty());
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_equivalent_overlapping_nodes() {
+        fn branch(mask: u16) -> BranchNodeCompact {
+            BranchNodeCompact::new(mask, 0, 0, vec![], None)
+        }
+
+        let overlapping_node = Nibbles::from_nibbles_unchecked([0x03]);
+        let overlapping_storage = B256::from([5; 32]);
+        let slot = Nibbles::from_nibbles_unchecked([0x0c]);
+        let node = branch(0b1010_0101);
+        let storage_node = branch(0b0011_1100);
+
+        let batch = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(node.clone()))],
+            B256Map::from_iter([(
+                overlapping_storage,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(slot, Some(storage_node.clone()))],
+                },
+            )]),
+        );
+
+        let mask = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(node.clone()))],
+            B256Map::from_iter([(
+                overlapping_storage,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(slot, Some(storage_node.clone()))],
+                },
+            )]),
+        );
+
+        let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
+
+        assert_eq!(result.account_nodes, vec![(overlapping_node, Some(node))]);
+        assert_eq!(
+            result.storage_tries.get(&overlapping_storage),
+            Some(&StorageTrieUpdatesSorted {
+                is_deleted: false,
+                storage_nodes: vec![(slot, Some(storage_node))],
+            })
+        );
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_node_if_any_masked_value_matches() {
+        fn branch(mask: u16) -> BranchNodeCompact {
+            BranchNodeCompact::new(mask, 0, 0, vec![], None)
+        }
+
+        let overlapping_node = Nibbles::from_nibbles_unchecked([0x04]);
+        let node = branch(0b1010_0101);
+
+        let batch = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(node.clone()))],
+            B256Map::default(),
+        );
+        let equivalent_mask = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(node.clone()))],
+            B256Map::default(),
+        );
+        let different_mask = TrieUpdatesSorted::new(
+            vec![(overlapping_node, Some(branch(0b0101_1010)))],
+            B256Map::default(),
+        );
+
+        let result = TrieUpdatesSorted::disjointed_merge_batch(
+            vec![&batch],
+            vec![&different_mask, &equivalent_mask],
+        );
+        let reversed = TrieUpdatesSorted::disjointed_merge_batch(
+            vec![&batch],
+            vec![&equivalent_mask, &different_mask],
+        );
+
+        assert_eq!(result.account_nodes, vec![(overlapping_node, Some(node.clone()))]);
+        assert_eq!(reversed.account_nodes, vec![(overlapping_node, Some(node))]);
     }
 
     #[test]
