@@ -5,7 +5,7 @@
 //! and saves the result to disk as a [`BigBlockPayload`] JSON file containing the merged
 //! [`ExecutionData`] and environment switches at each block boundary.
 
-use alloy_consensus::{TxEnvelope};
+use alloy_consensus::TxEnvelope;
 use alloy_eips::{
     eip1559::BaseFeeParams,
     eip7840::BlobParams,
