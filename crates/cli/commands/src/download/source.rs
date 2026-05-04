@@ -1,4 +1,6 @@
-use super::{manifest::SnapshotManifest, progress::DownloadProgress, DownloadDefaults};
+use super::{
+    download_command, manifest::SnapshotManifest, progress::DownloadProgress, DownloadDefaults,
+};
 use eyre::{Result, WrapErr};
 use reqwest::Client;
 use reth_fs_util as fs;
@@ -37,6 +39,7 @@ impl SnapshotApiEntry {
 pub(crate) async fn discover_manifest_url(chain_id: u64) -> Result<String> {
     let defaults = DownloadDefaults::get_global();
     let api_url = &*defaults.snapshot_api_url;
+    let snapshot_source_url = defaults.snapshot_source_url();
 
     info!(target: "reth::cli", %api_url, %chain_id, "Discovering latest snapshot manifest");
 
@@ -50,7 +53,7 @@ pub(crate) async fn discover_manifest_url(chain_id: u64) -> Result<String> {
              use a direct snapshot URL with -u from:\n\
              \t- {}\n\n\
              Use --list to see all available snapshots.",
-                api_url.trim_end_matches("/api/snapshots"),
+                snapshot_source_url,
             )
         })?;
 
@@ -101,11 +104,8 @@ pub(crate) async fn fetch_snapshot_api_entries(chain_id: u64) -> Result<Vec<Snap
 pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64) {
     let modular: Vec<_> = entries.iter().filter(|entry| entry.is_modular()).collect();
 
-    let api_url = &*DownloadDefaults::get_global().snapshot_api_url;
-    println!(
-        "Available snapshots for chain {chain_id} ({}):\n",
-        api_url.trim_end_matches("/api/snapshots"),
-    );
+    let snapshot_source_url = DownloadDefaults::get_global().snapshot_source_url();
+    println!("Available snapshots for chain {chain_id} ({}):\n", snapshot_source_url,);
     println!("{:<12}  {:>10}  {:<10}  {:>10}  MANIFEST URL", "DATE", "BLOCK", "PROFILE", "SIZE");
     println!("{}", "-".repeat(100));
 
@@ -130,7 +130,8 @@ pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64
 
     println!(
         "\nTo download a specific snapshot, copy its manifest URL and run:\n  \
-         reth download --manifest-url <URL>"
+         {} --manifest-url <URL>",
+        download_command()
     );
 }
 
@@ -155,8 +156,9 @@ pub(crate) async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotM
                             "Failed to fetch snapshot manifest from {source}\n\n\
                              The manifest endpoint may not be available for this snapshot source.\n\
                              You can use a direct snapshot URL instead:\n\n\
-                             \treth download -u <snapshot-url>\n\n\
-                             Available snapshot sources:\n{sources}"
+                             \t{} -u <snapshot-url>\n\n\
+                             Available snapshot sources:\n{sources}",
+                            download_command()
                         )
                     })?;
                 Ok(response.json().await?)
