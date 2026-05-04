@@ -60,6 +60,10 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Most recently written finalized block marker.
+    last_finalized_block: Option<u64>,
+    /// Most recently written safe block marker.
+    last_safe_block: Option<u64>,
 }
 
 impl<N> PersistenceService<N>
@@ -81,6 +85,8 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            last_finalized_block: None,
+            last_safe_block: None,
         }
     }
 }
@@ -129,7 +135,7 @@ where
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
-        &self,
+        &mut self,
         new_tip_num: u64,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
@@ -139,6 +145,9 @@ where
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
+
+        self.last_finalized_block = self.last_finalized_block.filter(|block| *block <= new_tip_num);
+        self.last_safe_block = self.last_safe_block.filter(|block| *block <= new_tip_num);
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -166,13 +175,21 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
+                let finalized_to_save = finalized.min(last.number);
+                if self.last_finalized_block != Some(finalized_to_save) {
+                    provider_rw.save_finalized_block_number(finalized_to_save)?;
+                    self.last_finalized_block = Some(finalized_to_save);
+                }
                 if finalized > last.number {
                     self.pending_finalized_block = Some(finalized);
                 }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last.number))?;
+                let safe_to_save = safe.min(last.number);
+                if self.last_safe_block != Some(safe_to_save) {
+                    provider_rw.save_safe_block_number(safe_to_save)?;
+                    self.last_safe_block = Some(safe_to_save);
+                }
                 if safe > last.number {
                     self.pending_safe_block = Some(safe);
                 }
