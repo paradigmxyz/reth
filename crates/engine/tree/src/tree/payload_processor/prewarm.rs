@@ -131,7 +131,7 @@ where
         let ctx = self.ctx.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking_named("prewarm-txs", move || {
+        self.executor.spawn_blocking_named_detached("prewarm-txs", move || {
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 parent: &span,

@@ -185,10 +185,10 @@ where
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
         let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
-        self.executor.spawn_blocking_named("wait-exec-cache", move || {
+        self.executor.spawn_blocking_named_detached("wait-exec-cache", move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
-        self.executor.spawn_blocking_named("wait-sparse-tri", move || {
+        self.executor.spawn_blocking_named_detached("wait-sparse-tri", move || {
             let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
         });
 
@@ -506,7 +506,7 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
-            self.executor.spawn_blocking_named("prewarm", move || {
+            self.executor.spawn_blocking_named_detached("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
                 } else if let Some(decoded_bal) =
@@ -567,7 +567,7 @@ where
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking_named("sparse-trie", move || {
+        self.executor.spawn_blocking_named_detached("sparse-trie", move || {
             reth_tasks::once!(increase_thread_priority);
 
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")

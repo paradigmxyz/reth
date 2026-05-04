@@ -1512,7 +1512,7 @@ where
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
         if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
-            self.runtime.spawn_blocking_named("prepare-overlay", move || {
+            self.runtime.spawn_blocking_named_detached("prepare-overlay", move || {
                 let _ = prepared.overlay.get(prepared.anchor_hash);
             });
         }
@@ -1681,7 +1681,7 @@ where
                                     if let Some((rx, start_time, _action)) = pending_persistence {
                                         let (persistence_tx, persistence_rx) =
                                             std::sync::mpsc::channel();
-                                        self.runtime.spawn_blocking_named(
+                                        self.runtime.spawn_blocking_named_detached(
                                             "wait-persist",
                                             move || {
                                                 let start = Instant::now();

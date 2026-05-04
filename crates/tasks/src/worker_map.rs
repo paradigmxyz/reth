@@ -76,6 +76,18 @@ impl WorkerMap {
 
         result_rx
     }
+
+    /// Spawns a closure on the dedicated worker thread for the given name without allocating a
+    /// result channel.
+    pub(crate) fn spawn_on_detached<F>(&self, name: &'static str, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let task: BoxedTask = Box::new(f);
+
+        let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
+        let _ = worker.tx.send(task);
+    }
 }
 
 impl Drop for WorkerMap {
@@ -99,6 +111,7 @@ impl std::fmt::Debug for WorkerMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn worker_map_basic() {
@@ -162,5 +175,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name, "custom-worker");
+    }
+
+    #[tokio::test]
+    async fn worker_map_detached_executes() {
+        let map = WorkerMap::new();
+        let (tx, rx) = oneshot::channel();
+
+        map.spawn_on_detached("detached-worker", move || {
+            let _ = tx.send(thread::current().name().unwrap().to_string());
+        });
+
+        let name = rx.await.unwrap();
+        assert_eq!(name, "detached-worker");
     }
 }

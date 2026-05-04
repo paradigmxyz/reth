@@ -500,7 +500,7 @@ impl Runtime {
     /// and should not block the current task. Uses a persistent named thread (`"drop"`)
     /// to avoid thread creation overhead on hot paths.
     pub fn spawn_drop<T: Send + 'static>(&self, value: T) {
-        self.spawn_blocking_named("drop", move || drop(value));
+        self.spawn_blocking_named_detached("drop", move || drop(value));
     }
 
     /// Spawns a blocking closure on a dedicated, named OS thread.
@@ -520,6 +520,17 @@ impl Runtime {
         R: Send + 'static,
     {
         crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
+    }
+
+    /// Spawns a blocking closure on a dedicated, named OS thread without creating a result handle.
+    ///
+    /// Use this for fire-and-forget work that already reports completion through some other
+    /// channel or side effect.
+    pub fn spawn_blocking_named_detached<F>(&self, name: &'static str, func: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.0.worker_map.spawn_on_detached(name, func)
     }
 
     /// Spawns the task onto the runtime.

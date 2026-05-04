@@ -964,7 +964,7 @@ where
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor
             .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+            .spawn_blocking_named_detached("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
