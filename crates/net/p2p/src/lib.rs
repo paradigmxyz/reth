@@ -65,6 +65,7 @@ use reth_primitives_traits::Block;
 pub trait BlockClient:
     HeadersClient<Header = <Self::Block as Block>::Header>
     + BodiesClient<Body = <Self::Block as Block>::Body>
+    + BlockAccessListsClient
     + Unpin
     + Clone
 {

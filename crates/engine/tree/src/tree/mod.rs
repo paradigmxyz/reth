@@ -2917,10 +2917,7 @@ where
             TreeCtx<'_, N>,
         )
             -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
-        convert_to_downloaded_block: impl FnOnce(
-            &mut Self,
-            Input,
-        ) -> Result<DownloadedBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<DownloadedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -2931,7 +2928,7 @@ where
 
         // Check if block already exists - first in memory, then DB only if it could be persisted
         if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-            convert_to_downloaded_block(self, input)?;
+            convert_to_block(self, input)?;
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
         }
 
@@ -2940,11 +2937,11 @@ where
         if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
-                    let block = convert_to_downloaded_block(self, input)?;
+                    let block = convert_to_block(self, input)?;
                     return Err(InsertBlockError::new(block.into_block(), err.into()).into());
                 }
                 Ok(Some(_)) => {
-                    convert_to_downloaded_block(self, input)?;
+                    convert_to_block(self, input)?;
                     return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
                 }
                 Ok(None) => {}
@@ -2954,11 +2951,11 @@ where
         // Ensure that the parent state is available.
         match self.state_provider_builder(block_id.parent) {
             Err(err) => {
-                let block = convert_to_downloaded_block(self, input)?;
+                let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block.into_block(), err.into()).into());
             }
             Ok(None) => {
-                let block = convert_to_downloaded_block(self, input)?;
+                let block = convert_to_block(self, input)?;
 
                 // we don't have the state required to execute this block, buffering it and find the
                 // missing parent block

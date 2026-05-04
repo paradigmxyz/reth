@@ -7,8 +7,11 @@ use alloy_primitives::{map::B256Set, B256};
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
-    full_block::{FetchFullBlockRangeFuture, FetchFullBlockWithAccessListsFuture, FullBlockClient},
-    BlockAccessLists, BlockAccessListsClient, BlockClient,
+    full_block::{
+        BlockWithOptionalAccessLists, FetchFullBlockRangeFuture,
+        FetchFullBlockWithAccessListsFuture, FullBlockClient,
+    },
+    BlockClient,
 };
 use reth_primitives_traits::{Block, SealedBlock};
 use std::{
@@ -114,7 +117,7 @@ impl<B: Block> From<SealedBlock<B>> for DownloadedBlock<B> {
 #[expect(missing_debug_implementations)]
 pub struct BasicBlockDownloader<Client, B: Block>
 where
-    Client: BlockClient + BlockAccessListsClient + 'static,
+    Client: BlockClient + 'static,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -133,7 +136,7 @@ where
 
 impl<Client, B> BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Block = B> + BlockAccessListsClient + 'static,
+    Client: BlockClient<Block = B> + 'static,
     B: Block,
 {
     /// Create a new instance
@@ -246,7 +249,7 @@ where
 
 impl<Client, B> BlockDownloader for BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Block = B> + BlockAccessListsClient,
+    Client: BlockClient<Block = B>,
     B: Block,
 {
     type Block = B;
@@ -268,11 +271,10 @@ where
         // advance all full block requests
         for idx in (0..self.inflight_full_block_requests.len()).rev() {
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
-            if let Poll::Ready((block, access_lists)) = request.poll_unpin(cx) {
-                trace!(target: "engine::download", block=?block.num_hash(), "Received single full block, buffering");
-                self.set_buffered_blocks.push(Reverse(
-                    downloaded_block_with_decoded_access_list(block, access_lists).into(),
-                ));
+            if let Poll::Ready(block) = request.poll_unpin(cx) {
+                trace!(target: "engine::download", block=?block.block().num_hash(), "Received single full block, buffering");
+                self.set_buffered_blocks
+                    .push(Reverse(downloaded_block_with_decoded_access_list(block).into()));
             } else {
                 // still pending
                 self.inflight_full_block_requests.push(request);
@@ -354,9 +356,9 @@ impl<B: Block> From<OrderedDownloadedBlock<B>> for DownloadedBlock<B> {
 }
 
 fn downloaded_block_with_decoded_access_list<B: Block>(
-    block: SealedBlock<B>,
-    access_lists: Option<BlockAccessLists>,
+    block: BlockWithOptionalAccessLists<B>,
 ) -> DownloadedBlock<B> {
+    let (block, access_lists) = block.into_parts();
     let decoded_bal = access_lists
         .and_then(|access_lists| access_lists.0.into_iter().next())
         .and_then(|raw| decode_block_access_list(&block, raw));
@@ -422,7 +424,7 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::BlockBody;
-    use reth_network_p2p::test_utils::TestFullBlockClient;
+    use reth_network_p2p::{test_utils::TestFullBlockClient, BlockAccessLists};
     use reth_primitives_traits::SealedHeader;
     use std::{future::poll_fn, sync::Arc};
 
@@ -632,8 +634,7 @@ mod tests {
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
         let downloaded = downloaded_block_with_decoded_access_list(
-            block.clone(),
-            Some(BlockAccessLists(vec![raw])),
+            BlockWithOptionalAccessLists::new(block.clone(), Some(BlockAccessLists(vec![raw]))),
         );
 
         assert_eq!(downloaded.block(), &block);
@@ -647,8 +648,9 @@ mod tests {
         let block: SealedBlock<reth_ethereum_primitives::Block> =
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
-        let downloaded =
-            downloaded_block_with_decoded_access_list(block, Some(BlockAccessLists(vec![raw])));
+        let downloaded = downloaded_block_with_decoded_access_list(
+            BlockWithOptionalAccessLists::new(block, Some(BlockAccessLists(vec![raw]))),
+        );
 
         assert!(downloaded.decoded_bal().is_none());
     }
@@ -659,7 +661,9 @@ mod tests {
         let block: SealedBlock<reth_ethereum_primitives::Block> =
             SealedBlock::from_parts_unchecked(header, BlockBody::default(), B256::random());
 
-        let downloaded = downloaded_block_with_decoded_access_list(block, None);
+        let downloaded = downloaded_block_with_decoded_access_list(
+            BlockWithOptionalAccessLists::new(block, None),
+        );
 
         assert!(downloaded.decoded_bal().is_none());
     }

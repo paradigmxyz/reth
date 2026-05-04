@@ -70,7 +70,12 @@ impl<B: Block> BlockBuffer<B> {
         let hash = block.block().hash();
 
         match self.blocks.entry(hash) {
-            std::collections::hash_map::Entry::Occupied(_) => return,
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if entry.get().decoded_bal().is_none() && block.decoded_bal().is_some() {
+                    entry.insert(block);
+                }
+                return
+            }
             std::collections::hash_map::Entry::Vacant(entry) => {
                 self.parent_to_child.entry(block.block().parent_hash()).or_default().insert(hash);
                 self.earliest_blocks.entry(block.block().number()).or_default().insert(hash);
@@ -261,6 +266,29 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(1);
         buffer.insert_block(downloaded);
+
+        let blocks = buffer.remove_block_with_children(&parent);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].block(), &block);
+        assert_eq!(
+            blocks[0].decoded_bal().as_ref().map(|bal| bal.hash()),
+            Some(decoded_bal.hash())
+        );
+    }
+
+    #[test]
+    fn updates_buffered_duplicate_with_decoded_bal() {
+        let mut rng = generators::rng();
+
+        let raw = alloy_primitives::Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+        let decoded_bal =
+            std::sync::Arc::new(alloy_eip7928::bal::DecodedBal::from_rlp_bytes(raw).unwrap());
+        let parent = rng.random();
+        let block = create_block(&mut rng, 10, parent);
+
+        let mut buffer = BlockBuffer::new(1);
+        buffer.insert_block(block.clone());
+        buffer.insert_block(DownloadedBlock::new(block.clone(), Some(decoded_bal.clone())));
 
         let blocks = buffer.remove_block_with_children(&parent);
         assert_eq!(blocks.len(), 1);

@@ -6,12 +6,13 @@ use futures::Future;
 use itertools::{Either, Itertools};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
+    block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
-    error::RequestError,
+    error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
-    BlockClient,
+    BlockAccessLists, BlockClient,
 };
 use reth_network_peers::PeerId;
 use reth_primitives_traits::{Block, BlockBody, FullBlock, SealedBlock, SealedHeader};
@@ -403,6 +404,19 @@ impl<B: FullBlock> DownloadClient for FileClient<B> {
     fn num_connected_peers(&self) -> usize {
         // no such thing as connected peers when we are just using a file
         1
+    }
+}
+
+impl<B: FullBlock> BlockAccessListsClient for FileClient<B> {
+    type Output = futures::future::Ready<PeerRequestResult<BlockAccessLists>>;
+
+    fn get_block_access_lists_with_priority_and_requirement(
+        &self,
+        _hashes: Vec<B256>,
+        _priority: Priority,
+        _requirement: BalRequirement,
+    ) -> Self::Output {
+        futures::future::ready(Err(RequestError::UnsupportedCapability))
     }
 }
 

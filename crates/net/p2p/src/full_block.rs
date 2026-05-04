@@ -17,7 +17,7 @@ use reth_eth_wire_types::{
     BlockAccessLists, EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives_traits::{SealedBlock, SealedHeader};
+use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
@@ -33,6 +33,46 @@ use tracing::debug;
 /// Response returned by [`FetchFullBlockRangeWithOptionalAccessListsFuture`].
 pub type FullBlockRangeWithOptionalAccessListsResponse<B> =
     (Vec<SealedBlock<B>>, Option<BlockAccessLists>);
+
+/// A full block with optional raw block access-list data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockWithOptionalAccessLists<B: Block> {
+    block: SealedBlock<B>,
+    access_lists: Option<BlockAccessLists>,
+}
+
+impl<B: Block> BlockWithOptionalAccessLists<B> {
+    /// Creates a full block response with optional block access-list data.
+    pub const fn new(block: SealedBlock<B>, access_lists: Option<BlockAccessLists>) -> Self {
+        Self { block, access_lists }
+    }
+
+    /// Creates a full block response without block access-list data.
+    pub const fn without_access_lists(block: SealedBlock<B>) -> Self {
+        Self::new(block, None)
+    }
+
+    /// Returns the downloaded block.
+    pub const fn block(&self) -> &SealedBlock<B> {
+        &self.block
+    }
+
+    /// Returns the optional raw block access-list data.
+    pub const fn access_lists(&self) -> Option<&BlockAccessLists> {
+        self.access_lists.as_ref()
+    }
+
+    /// Consumes the wrapper and returns its parts.
+    pub fn into_parts(self) -> (SealedBlock<B>, Option<BlockAccessLists>) {
+        (self.block, self.access_lists)
+    }
+}
+
+impl<B: Block> From<SealedBlock<B>> for BlockWithOptionalAccessLists<B> {
+    fn from(block: SealedBlock<B>) -> Self {
+        Self::without_access_lists(block)
+    }
+}
 
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
@@ -107,7 +147,7 @@ where
 
 impl<Client> FullBlockClient<Client>
 where
-    Client: BlockClient + BlockAccessListsClient,
+    Client: BlockClient,
 {
     /// Returns a future that fetches the [`SealedBlock`] and optionally its [`BlockAccessLists`]
     /// for the given hash.
@@ -315,7 +355,7 @@ where
 #[must_use = "futures do nothing unless polled"]
 pub struct FetchFullBlockWithAccessListsFuture<Client>
 where
-    Client: BlockClient + BlockAccessListsClient,
+    Client: BlockClient,
 {
     block: FetchFullBlockFuture<Client>,
     block_result: Option<SealedBlock<Client::Block>>,
@@ -324,7 +364,7 @@ where
 
 impl<Client> FetchFullBlockWithAccessListsFuture<Client>
 where
-    Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
+    Client: BlockClient<Header: BlockHeader>,
 {
     /// Returns the hash of the block being requested.
     pub const fn hash(&self) -> &B256 {
@@ -334,7 +374,7 @@ where
 
 impl<Client> FetchFullBlockWithAccessListsFuture<Client>
 where
-    Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
+    Client: BlockClient<Header: BlockHeader + Sealable> + 'static,
 {
     /// If the header request is already complete, this returns the block number.
     pub fn block_number(&self) -> Option<u64> {
@@ -381,25 +421,21 @@ where
 
     fn take_block_and_access_lists(
         &mut self,
-    ) -> Option<(SealedBlock<Client::Block>, Option<BlockAccessLists>)> {
-        if self.block_result.is_some() && self.bal_request_state.is_ready() {
-            let block = self.block_result.take().expect("block result should exist");
-            let access_lists = match &mut self.bal_request_state {
-                BalRequestState::Ready(access_lists) => access_lists.take(),
-                BalRequestState::Pending(_) => unreachable!("access lists should be ready"),
-            };
-            return Some((block, access_lists))
-        }
-
-        None
+    ) -> Option<BlockWithOptionalAccessLists<Client::Block>> {
+        let block = self.block_result.take()?;
+        let access_lists = match &mut self.bal_request_state {
+            BalRequestState::Ready(access_lists) => access_lists.take(),
+            BalRequestState::Pending(_) => None,
+        };
+        Some(BlockWithOptionalAccessLists::new(block, access_lists))
     }
 }
 
 impl<Client> Future for FetchFullBlockWithAccessListsFuture<Client>
 where
-    Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
+    Client: BlockClient<Header: BlockHeader + Sealable> + 'static,
 {
-    type Output = (SealedBlock<Client::Block>, Option<BlockAccessLists>);
+    type Output = BlockWithOptionalAccessLists<Client::Block>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -422,7 +458,7 @@ where
 
 impl<Client> Debug for FetchFullBlockWithAccessListsFuture<Client>
 where
-    Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
+    Client: BlockClient<Header: BlockHeader>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FetchFullBlockWithAccessListsFuture")
@@ -455,7 +491,7 @@ impl<Req> BalRequestState<Req> {
 #[expect(missing_debug_implementations)]
 pub struct FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
 where
-    Client: BlockClient + BlockAccessListsClient,
+    Client: BlockClient,
 {
     blocks: FetchFullBlockRangeFuture<Client>,
     client: Client,
@@ -465,8 +501,7 @@ where
 
 impl<Client> FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
 where
-    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>
-        + BlockAccessListsClient,
+    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>,
 {
     fn start_access_lists_request_if_possible(&mut self) {
         if !matches!(self.access_lists, OptionalBlockAccessListsState::WaitingForBlocks) {
@@ -548,9 +583,7 @@ where
 
 impl<Client> Future for FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
 where
-    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>
-        + BlockAccessListsClient
-        + 'static,
+    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq> + 'static,
 {
     type Output = FullBlockRangeWithOptionalAccessListsResponse<Client::Block>;
 
@@ -1150,11 +1183,10 @@ mod tests {
         let request_count = Arc::clone(&client.access_list_requests);
         let client = FullBlockClient::test_client(client);
 
-        let (received_block, received_access_lists) =
-            client.get_full_block_with_access_lists(header.hash()).await;
+        let received = client.get_full_block_with_access_lists(header.hash()).await;
 
-        assert_eq!(received_block, SealedBlock::from_sealed_parts(header, body));
-        assert_eq!(received_access_lists, Some(BlockAccessLists(vec![access_list])));
+        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(received.access_lists(), Some(&BlockAccessLists(vec![access_list])));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
 
@@ -1172,13 +1204,13 @@ mod tests {
         let bad_messages = Arc::clone(&client.bad_messages);
         let client = FullBlockClient::test_client(client);
 
-        let (received_block, received_access_lists) =
+        let received =
             timeout(Duration::from_secs(1), client.get_full_block_with_access_lists(header.hash()))
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received_block, SealedBlock::from_sealed_parts(header, body));
-        assert!(received_access_lists.is_none());
+        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert!(received.access_lists().is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(bad_messages.load(Ordering::SeqCst), 0);
     }
@@ -1197,13 +1229,13 @@ mod tests {
         let requirement = Arc::clone(&client.last_access_list_requirement);
         let client = FullBlockClient::test_client(client);
 
-        let (received_block, received_access_lists) =
+        let received =
             timeout(Duration::from_secs(1), client.get_full_block_with_access_lists(header.hash()))
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received_block, SealedBlock::from_sealed_parts(header, body));
-        assert!(received_access_lists.is_none());
+        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert!(received.access_lists().is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(
             *requirement.lock(),
@@ -1441,6 +1473,23 @@ mod tests {
             }
 
             self.inner.get_block_bodies_with_priority_and_range_hint(hashes, priority, range_hint)
+        }
+    }
+
+    impl BlockAccessListsClient for FailingBodiesClient {
+        type Output = <TestFullBlockClient as BlockAccessListsClient>::Output;
+
+        fn get_block_access_lists_with_priority_and_requirement(
+            &self,
+            hashes: Vec<B256>,
+            priority: Priority,
+            requirement: BalRequirement,
+        ) -> Self::Output {
+            self.inner.get_block_access_lists_with_priority_and_requirement(
+                hashes,
+                priority,
+                requirement,
+            )
         }
     }
 
