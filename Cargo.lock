@@ -7611,7 +7611,6 @@ dependencies = [
  "reth-cli-util",
  "reth-engine-primitives",
  "reth-ethereum-cli",
- "reth-ethereum-primitives",
  "reth-fs-util",
  "reth-node-api",
  "reth-node-core",
