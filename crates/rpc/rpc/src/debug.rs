@@ -71,10 +71,10 @@ where
         // Spawn a task caching bad blocks
         executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
-                if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                if let ConsensusEngineEvent::InvalidBlock { block, error } = event &&
                     let Ok(recovered) = RecoveredBlock::try_recover_sealed(*block)
                 {
-                    bad_block_store.insert(recovered);
+                    bad_block_store.insert(recovered, error);
                 }
             }
         });
@@ -697,21 +697,23 @@ where
 
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>> {
-        let blocks = self.inner.bad_block_store.all();
-        let mut bad_blocks = Vec::with_capacity(blocks.len());
+        let entries = self.inner.bad_block_store.all();
+        let mut bad_blocks = Vec::with_capacity(entries.len());
 
         #[derive(Serialize, Deserialize)]
         struct BadBlockSerde<T> {
             block: T,
             hash: B256,
             rlp: Bytes,
+            reason: String,
         }
 
-        for block in blocks {
-            let rlp = alloy_rlp::encode(block.sealed_block()).into();
-            let hash = block.hash();
+        for entry in entries {
+            let rlp = alloy_rlp::encode(entry.block.sealed_block()).into();
+            let hash = entry.block.hash();
 
-            let block = block
+            let block = entry
+                .block
                 .clone_into_rpc_block(
                     BlockTransactionsKind::Full,
                     |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
@@ -719,8 +721,9 @@ where
                 )
                 .map_err(|err| Eth::Error::from(err).into())?;
 
-            let bad_block = serde_json::to_value(BadBlockSerde { block, hash, rlp })
-                .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
+            let bad_block =
+                serde_json::to_value(BadBlockSerde { block, hash, rlp, reason: entry.reason })
+                    .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
 
             bad_blocks.push(bad_block);
         }
@@ -1068,7 +1071,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        let block = self
+        let entry = self
             .inner
             .bad_block_store
             .get(block_hash)
@@ -1077,12 +1080,12 @@ where
         let evm_env = self
             .eth_api()
             .evm_config()
-            .evm_env(block.header())
+            .evm_env(entry.block.header())
             .map_err(RethError::other)
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(block, evm_env, opts).await.map_err(Into::into)
+        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
     }
 
     async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
@@ -1130,8 +1133,15 @@ struct DebugApiInner<Eth: RpcNodeCore> {
 /// A bounded, deduplicating store of recently observed bad blocks.
 #[derive(Clone, Debug)]
 struct BadBlockStore<B: BlockTrait> {
-    inner: Arc<RwLock<VecDeque<Arc<RecoveredBlock<B>>>>>,
+    inner: Arc<RwLock<VecDeque<BadBlockEntry<B>>>>,
     limit: usize,
+}
+
+/// A cached bad block paired with the reason it was rejected.
+#[derive(Clone, Debug)]
+struct BadBlockEntry<B: BlockTrait> {
+    block: Arc<RecoveredBlock<B>>,
+    reason: String,
 }
 
 impl<B: BlockTrait> BadBlockStore<B> {
@@ -1140,33 +1150,33 @@ impl<B: BlockTrait> BadBlockStore<B> {
         Self { inner: Arc::new(RwLock::new(VecDeque::with_capacity(limit))), limit }
     }
 
-    /// Inserts a recovered block, keeping only the most recent `limit` entries and deduplicating
-    /// by block hash.
-    fn insert(&self, block: RecoveredBlock<B>) {
+    /// Inserts a recovered block with its rejection reason, keeping only the most recent `limit`
+    /// entries and deduplicating by block hash.
+    fn insert(&self, block: RecoveredBlock<B>, reason: String) {
         let hash = block.hash();
         let mut guard = self.inner.write();
 
         // skip if we already recorded this bad block , and keep original ordering
-        if guard.iter().any(|b| b.hash() == hash) {
+        if guard.iter().any(|entry| entry.block.hash() == hash) {
             return;
         }
-        guard.push_back(Arc::new(block));
+        guard.push_back(BadBlockEntry { block: Arc::new(block), reason });
 
         while guard.len() > self.limit {
             guard.pop_front();
         }
     }
 
-    /// Returns all cached bad blocks ordered from newest to oldest.
-    fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
+    /// Returns all cached bad block entries ordered from newest to oldest.
+    fn all(&self) -> Vec<BadBlockEntry<B>> {
         let guard = self.inner.read();
         guard.iter().rev().cloned().collect()
     }
 
-    /// Returns the bad block with the given hash, if cached.
-    fn get(&self, hash: B256) -> Option<Arc<RecoveredBlock<B>>> {
+    /// Returns the bad block entry with the given hash, if cached.
+    fn get(&self, hash: B256) -> Option<BadBlockEntry<B>> {
         let guard = self.inner.read();
-        guard.iter().find(|b| b.hash() == hash).cloned()
+        guard.iter().find(|entry| entry.block.hash() == hash).cloned()
     }
 }
 
