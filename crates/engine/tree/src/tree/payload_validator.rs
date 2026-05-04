@@ -73,7 +73,8 @@ use reth_evm::{
 };
 use reth_execution_cache::{CacheStats, SavedCache};
 use reth_payload_primitives::{
-    BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
+    BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
+    PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
@@ -837,9 +838,9 @@ where
             ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
 
         let executed_block = self.spawn_deferred_trie_task(
-            block,
+            Arc::new(block),
             output,
-            &ctx,
+            ctx.state(),
             hashed_state,
             trie_output,
             changeset_provider,
@@ -1616,16 +1617,15 @@ where
     /// from the completed task or via fallback computation.
     fn spawn_deferred_trie_task(
         &self,
-        block: RecoveredBlock<N::Block>,
+        block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
-        ctx: &TreeCtx<'_, N>,
+        state: &EngineApiTreeState<N>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
         changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
-        let (anchor_hash, overlay_blocks) = ctx
-            .state()
+        let (anchor_hash, overlay_blocks) = state
             .tree_state
             .blocks_by_hash(block.parent_hash())
             .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
@@ -1732,11 +1732,7 @@ where
             .executor()
             .spawn_blocking_named("trie-input", compute_trie_input_task);
 
-        ExecutedBlock::with_deferred_trie_data(
-            Arc::new(block),
-            execution_outcome,
-            deferred_trie_data,
-        )
+        ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
 
     fn calculate_timing_stats(
@@ -1940,7 +1936,11 @@ pub trait EngineValidator<
     ///
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
-    fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+    fn on_inserted_executed_block(
+        &self,
+        block: BuiltPayloadExecutedBlock<N>,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<ExecutedBlock<N>>;
 
     /// Returns [`SavedCache`] for the given block hash.
     fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
@@ -2009,11 +2009,33 @@ where
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
     }
 
-    fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
+    fn on_inserted_executed_block(
+        &self,
+        block: BuiltPayloadExecutedBlock<N>,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+
+        let (lazy_overlay, anchor_hash) =
+            Self::get_parent_lazy_overlay(block.recovered_block.parent_hash(), state);
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
+                .with_lazy_overlay(lazy_overlay),
+        );
+        let changeset_provider = overlay_factory.database_provider_ro()?;
+
+        Ok(self.spawn_deferred_trie_task(
+            block.recovered_block,
+            block.execution_output,
+            state,
+            LazyHashedPostState::ready(Arc::unwrap_or_clone(block.hashed_state)),
+            block.trie_updates,
+            changeset_provider,
+        ))
     }
 
     fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
