@@ -183,7 +183,7 @@ RESTART_TIMEOUT=180
 RETH_BIN="/repos/reth/target/profiling/reth"
 BENCH_BIN="/repos/reth/target/profiling/reth-bench"
 CHAIN="hoodi"
-MERKLE_TRACE_FILTER='trace'
+MERKLE_TRACE_FILTER='info'
 RESULT="script_error"
 ADVANCE=""
 HEAD_BEFORE=""
@@ -275,7 +275,7 @@ RESTART_TRACE_LOG="${ARTIFACTS_DIR}/restart-trace.log"
 DROP_MERKLE_LOG="${ARTIFACTS_DIR}/drop-merkle.log"
 POST_DROP_UNWIND_LOG="${ARTIFACTS_DIR}/post-drop-unwind.log"
 POST_DROP_MERKLE_RUN_LOG="${ARTIFACTS_DIR}/post-drop-merkle-run.log"
-POST_DROP_MERKLE_RUN_TRACE_LOG="${ARTIFACTS_DIR}/post-drop-merkle-run-trace.log"
+POST_DROP_MERKLE_RUN_TRACE_LOG="not_captured"
 
 trap cleanup EXIT
 
@@ -582,7 +582,7 @@ run_post_drop_merkle() {
     local target="$1"
     local merkle_pid
 
-    log "Rebuilding the Merkle stage with full trace logs piped to ${POST_DROP_MERKLE_RUN_TRACE_LOG}"
+    log "Rebuilding the Merkle stage without trace capture in ${POST_DROP_MERKLE_RUN_LOG}"
     (
         "$RETH_BIN" stage run \
             --datadir "$DATADIR" \
@@ -595,8 +595,8 @@ run_post_drop_merkle() {
             --disable-discovery \
             --log.stdout.filter "$MERKLE_TRACE_FILTER" \
             --color never \
-            merkle 2>&1 | \
-            tee "$POST_DROP_MERKLE_RUN_TRACE_LOG" >"$POST_DROP_MERKLE_RUN_LOG"
+            merkle \
+            >"$POST_DROP_MERKLE_RUN_LOG" 2>&1
     ) &
     merkle_pid=$!
 
