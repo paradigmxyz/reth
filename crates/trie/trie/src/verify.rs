@@ -363,6 +363,27 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         }
     }
 
+    fn retain_canonical_branch_node(&mut self, path: Nibbles, node: &BranchNodeCompact) {
+        let mut replaced_descendants = false;
+        self.canonical_branch_nodes.retain(|(existing_path, _)| {
+            let keep = !existing_path.starts_with(&path);
+            replaced_descendants |= !keep;
+            keep
+        });
+
+        if replaced_descendants {
+            self.canonical_branch_nodes.push((path, node.clone()));
+            return
+        }
+
+        let has_retained_ancestor = self.canonical_branch_nodes.iter().any(|(existing_path, _)| {
+            self.subtrie_prefix != Some(*existing_path) && path.starts_with(existing_path)
+        });
+        if !has_retained_ancestor {
+            self.canonical_branch_nodes.push((path, node.clone()));
+        }
+    }
+
     /// Called with the next path and node in the canonical sequence of stored trie nodes. Will
     /// append to the given `outputs` Vec if walking the trie cursor produces data
     /// inconsistent with that given.
@@ -374,17 +395,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         path: Nibbles,
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError> {
-        match self.canonical_branch_nodes.first() {
-            Some((first_path, _)) if path.len() < first_path.len() => {
-                self.canonical_branch_nodes.clear();
-                self.canonical_branch_nodes.push((path, node.clone()));
-            }
-            Some((first_path, _)) if path.len() == first_path.len() => {
-                self.canonical_branch_nodes.push((path, node.clone()));
-            }
-            None => self.canonical_branch_nodes.push((path, node.clone())),
-            Some(_) => {}
-        }
+        self.retain_canonical_branch_node(path, &node);
 
         loop {
             // `curr` is None only if the end of the iterator has been reached. Any further nodes
@@ -1038,6 +1049,38 @@ mod tests {
         );
         assert_eq!(
             canonical_branch_nodes,
+            vec![(Nibbles::from_nibbles([0x1]), node1), (Nibbles::from_nibbles([0x2]), node2),]
+        );
+    }
+
+    #[test]
+    fn test_single_verifier_finalize_replaces_only_descendants() {
+        let node_root = test_branch_node(0b0110, 0, 0b0110, vec![]);
+        let node1 = test_branch_node(0b0110, 0, 0b0110, vec![]);
+        let node11 = test_branch_node(0b0001, 0, 0b0001, vec![]);
+        let node12 = test_branch_node(0b0010, 0, 0b0010, vec![]);
+        let node2 = test_branch_node(0b0100, 0, 0b0100, vec![]);
+
+        let trie_nodes = BTreeMap::from([
+            (Nibbles::new(), node_root.clone()),
+            (Nibbles::from_nibbles([0x1]), node1.clone()),
+            (Nibbles::from_nibbles([0x1, 0x1]), node11.clone()),
+            (Nibbles::from_nibbles([0x1, 0x2]), node12.clone()),
+            (Nibbles::from_nibbles([0x2]), node2.clone()),
+        ]);
+
+        let cursor = create_mock_cursor(trie_nodes);
+        let mut verifier = SingleVerifier::new(None, cursor, None).unwrap();
+        let mut outputs = Vec::new();
+
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1.clone()).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2.clone()).unwrap();
+
+        assert!(outputs.is_empty());
+        assert_eq!(
+            verifier.canonical_branch_nodes,
             vec![(Nibbles::from_nibbles([0x1]), node1), (Nibbles::from_nibbles([0x2]), node2),]
         );
     }
