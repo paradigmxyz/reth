@@ -53,8 +53,14 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if let Some(metrics) = self.metrics.clone() {
-            metrics[operation.index()].record(value_size, || f(self))
+        if let Some(metric) = self
+            .metrics
+            .as_ref()
+            .map(|metrics| std::ptr::from_ref(&metrics[operation.index()]))
+        {
+            // `metric` points into the cursor's shared metric handle array, which stays alive for
+            // the duration of this call because `self` retains ownership of the `Arc`.
+            unsafe { (*metric).record(value_size, || f(self)) }
         } else {
             f(self)
         }
