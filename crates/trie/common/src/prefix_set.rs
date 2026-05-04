@@ -1,4 +1,4 @@
-use crate::Nibbles;
+use crate::{Nibbles, TrieMask};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256Map, B256Set};
 use core::ops::Range;
@@ -226,6 +226,52 @@ impl PrefixSet {
         false
     }
 
+    /// Returns the mask of immediate child nibbles that contain changed keys under `prefix`.
+    ///
+    /// Like [`Self::contains`], this method maintains the internal index for sequential access
+    /// optimization.
+    #[inline]
+    pub fn child_mask(&mut self, prefix: &Nibbles) -> TrieMask {
+        if self.all {
+            return TrieMask::new(u16::MAX)
+        }
+
+        while self.index > 0 && &self.keys[self.index] > prefix {
+            self.index -= 1;
+        }
+
+        let mut first_match = None;
+        let mut child_mask = TrieMask::default();
+
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key.starts_with(prefix) {
+                first_match.get_or_insert(idx);
+
+                if key.len() > prefix.len() {
+                    child_mask.set_bit(key.get_unchecked(prefix.len()));
+                }
+
+                if child_mask.get() == u16::MAX {
+                    self.index += first_match.expect("matching key was just observed");
+                    return child_mask
+                }
+
+                continue;
+            }
+
+            if key > prefix {
+                self.index += first_match.unwrap_or(idx);
+                return child_mask
+            }
+        }
+
+        if let Some(first_match) = first_match {
+            self.index += first_match;
+        }
+
+        child_mask
+    }
+
     /// Returns `true` if any key in the set falls within the given half-open range
     /// `[start, end)`.
     ///
@@ -348,5 +394,48 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_child_mask_collects_immediate_children() {
+        let mut prefix_set = PrefixSetMut::from([
+            Nibbles::from_nibbles([1, 2]),
+            Nibbles::from_nibbles([1, 2, 3]),
+            Nibbles::from_nibbles([1, 2, 4, 5]),
+            Nibbles::from_nibbles([1, 9, 0]),
+        ])
+        .freeze();
+
+        let mask = prefix_set.child_mask(&Nibbles::from_nibbles([1, 2]));
+
+        assert!(mask.is_bit_set(3));
+        assert!(mask.is_bit_set(4));
+        assert!(!mask.is_bit_set(9));
+    }
+
+    #[test]
+    fn test_child_mask_tracks_cursor_across_sequential_calls() {
+        let mut prefix_set = PrefixSetMut::from([
+            Nibbles::from_nibbles([1, 2, 3]),
+            Nibbles::from_nibbles([1, 2, 4]),
+            Nibbles::from_nibbles([1, 9, 1]),
+            Nibbles::from_nibbles([2, 0, 1]),
+        ])
+        .freeze();
+
+        let first = prefix_set.child_mask(&Nibbles::from_nibbles([1, 2]));
+        assert!(first.is_bit_set(3));
+        assert!(first.is_bit_set(4));
+
+        let second = prefix_set.child_mask(&Nibbles::from_nibbles([1, 9]));
+        assert!(second.is_bit_set(1));
+        assert_eq!(second.count_ones(), 1);
+
+        let third = prefix_set.child_mask(&Nibbles::from_nibbles([1, 8]));
+        assert!(third.is_empty());
+
+        let fourth = prefix_set.child_mask(&Nibbles::from_nibbles([2, 0]));
+        assert!(fourth.is_bit_set(1));
+        assert_eq!(fourth.count_ones(), 1);
     }
 }
