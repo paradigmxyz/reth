@@ -281,16 +281,18 @@ impl ArenaSparseSubtrie {
                 let mut child_path = branch_logical_path;
                 child_path.push(nibble);
 
-                // Child's full prefix for the retention check.
                 let child_short_key = match &self.arena[old_child_idx] {
                     ArenaSparseNode::Branch(b) => &b.short_key,
                     ArenaSparseNode::Leaf { key, .. } => key,
                     other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
                 };
-                let mut child_prefix = child_path;
-                child_prefix.extend(child_short_key);
 
-                if has_prefix(retained_leaves, &child_prefix) {
+                let child_path_len = child_path.len();
+                child_path.extend(child_short_key);
+                let retain_child = has_prefix(retained_leaves, &child_path);
+                child_path.truncate(child_path_len);
+
+                if retain_child {
                     // Retained — move child to new arena.
                     let child_node = self.arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
