@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+mod execution_witness;
+pub use execution_witness::ExecutionWitnessMode;
+
 /// Lazy initialization wrapper for trie data.
 mod lazy;
 pub use lazy::{LazyTrieData, SortedTrieData};
@@ -32,6 +35,10 @@ pub use constants::*;
 
 mod account;
 pub use account::TrieAccount;
+
+/// V2 proof targets and chunking.
+pub mod target_v2;
+pub use target_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target};
 
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};

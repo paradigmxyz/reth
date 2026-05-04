@@ -28,7 +28,7 @@ reth-era.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
-reth-primitives-traits = { workspace = true, features = ["serde-bincode-compat"] }
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-ethereum-primitives = { workspace = true, optional = true }
@@ -48,6 +48,7 @@ reth-testing-utils = { workspace = true, optional = true }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -63,7 +64,6 @@ rayon.workspace = true
 page_size.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
-bincode.workspace = true
 reqwest.workspace = true
 eyre.workspace = true
 
@@ -87,7 +87,6 @@ reth-network-peers.workspace = true
 
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
-alloy-rlp.workspace = true
 reth-db-common.workspace = true
 reth-tracing.workspace = true
 
@@ -96,9 +95,6 @@ assert_matches.workspace = true
 rand.workspace = true
 paste.workspace = true
 tempfile.workspace = true
-
-# Stage benchmarks
-criterion = { workspace = true, features = ["async_tokio"] }
 
 [features]
 test-utils = [
@@ -124,10 +120,3 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
 ]
-rocksdb = ["reth-provider/rocksdb", "reth-db-common/rocksdb"]
-edge = ["rocksdb"]
-
-[[bench]]
-name = "criterion"
-harness = false
-required-features = ["test-utils"]

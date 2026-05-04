@@ -35,7 +35,9 @@ reth-static-file-types = { workspace = true, features = ["std"] }
 reth-fs-util.workspace = true
 
 # ethereum
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
@@ -55,17 +57,16 @@ notify = { workspace = true, default-features = false, features = ["macos_fseven
 parking_lot.workspace = true
 strum.workspace = true
 eyre.workspace = true
+reth-tokio-util.workspace = true
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync"], optional = true }
 
 # parallel utils
 rayon.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-# rocksdb: jemalloc is recommended production workload
-rocksdb = { workspace = true, features = ["jemalloc"], optional = true }
+rocksdb.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -85,10 +86,10 @@ assert_matches.workspace = true
 rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
-rocksdb = ["reth-storage-api/rocksdb", "dep:rocksdb"]
-edge = ["rocksdb"]
+jemalloc = ["rocksdb/jemalloc"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
@@ -104,6 +105,6 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "revm-state",
-    "tokio",
     "reth-tasks/test-utils",
+    "dep:tokio",
 ]

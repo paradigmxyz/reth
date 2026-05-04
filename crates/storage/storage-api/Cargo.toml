@@ -33,11 +33,15 @@ alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
 serde_json = { workspace = true, optional = true }
+reth-tokio-util = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+tokio-stream.workspace = true
 
 [features]
 default = ["std"]
-rocksdb = ["reth-db-api/rocksdb"]
-edge = ["rocksdb"]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",
@@ -54,6 +58,7 @@ std = [
     "reth-db-models/std",
     "reth-trie-common/std",
     "serde_json?/std",
+    "dep:reth-tokio-util",
 ]
 
 db-api = [
@@ -78,9 +83,7 @@ serde = [
 
 serde-bincode-compat = [
     "reth-execution-types/serde-bincode-compat",
-    "reth-primitives-traits/serde-bincode-compat",
     "reth-trie-common/serde-bincode-compat",
-    "reth-ethereum-primitives/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
 ]

@@ -3,13 +3,13 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, InMemoryBalStore,
+    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -50,6 +50,8 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    /// Store for BALs associated with this provider view.
+    pub(crate) bal_store: BalStoreHandle,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
@@ -57,6 +59,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
         Self {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            bal_store: self.bal_store.clone(),
         }
     }
 }
@@ -108,6 +111,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
+            bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
         })
     }
 
@@ -133,20 +137,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(state.state_provider(latest_historical))
     }
-
-    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
-    ///
-    /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
-    pub fn get_state(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
-        self.consistent_provider()?.get_state(range)
-    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
+}
+
+impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
+    }
 }
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
@@ -182,12 +182,10 @@ impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
         self.database.rocksdb_provider()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::commit_pending_rocksdb_batches instead")
     }
@@ -557,7 +555,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         let provider = self.consistent_provider()?;
-        provider.ensure_canonical_block(block_number)?;
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -732,10 +729,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.storage_changeset_count()
-    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
@@ -759,10 +752,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         self.consistent_provider()?.account_changesets_range(range)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.account_changeset_count()
     }
 }
 
@@ -789,7 +778,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        StateReader::get_state(&self.consistent_provider()?, block)
+        self.consistent_provider()?.get_state(block)
     }
 }
 

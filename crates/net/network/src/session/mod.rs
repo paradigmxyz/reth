@@ -42,14 +42,15 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc, mpsc::error::TrySendError, oneshot},
+    sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
-use crate::session::active::RANGE_UPDATE_INTERVAL;
+use crate::session::active::{BroadcastItemCounter, RANGE_UPDATE_INTERVAL};
 pub use conn::EthRlpxConnection;
+use handle::SessionCommandSender;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
@@ -117,9 +118,14 @@ pub struct SessionManager<N: NetworkPrimitives> {
     metrics: SessionManagerMetrics,
     /// The [`EthRlpxHandshake`] is used to perform the initial handshake with the peer.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    eth_max_message_size: usize,
     /// Shared local range information that gets propagated to active sessions.
     /// This represents the range of blocks that this node can serve to other peers.
     local_range_info: BlockRangeInfo,
+    /// When true, block announcement messages (`NewBlock`, `NewBlockHashes`) are rejected before
+    /// RLP decoding on new sessions to avoid memory amplification.
+    reject_block_announcements: bool,
 }
 
 // === impl SessionManager ===
@@ -136,6 +142,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
+        eth_max_message_size: usize,
+        reject_block_announcements: bool,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -170,7 +178,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             disconnections_counter: Default::default(),
             metrics: Default::default(),
             handshake,
+            eth_max_message_size,
             local_range_info,
+            reject_block_announcements,
         }
     }
 
@@ -281,6 +291,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             pending_events.clone(),
             start_pending_incoming_session(
                 self.handshake.clone(),
+                self.eth_max_message_size,
                 disconnect_rx,
                 session_id,
                 stream,
@@ -323,6 +334,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 pending_events.clone(),
                 start_pending_outbound_session(
                     self.handshake.clone(),
+                    self.eth_max_message_size,
                     disconnect_rx,
                     pending_events,
                     session_id,
@@ -372,21 +384,17 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
-    /// Sends a message to the peer's session
+    /// Sends a message to the peer's session.
+    ///
+    /// Broadcast messages use size-based backpressure: the total number of in-flight broadcast
+    /// items (across the command channel, overflow channel, and session outgoing queue) is tracked
+    /// by a shared atomic counter. If the bounded command channel is full but the broadcast limit
+    /// hasn't been reached, the message overflows to a dedicated unbounded channel.
     pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
-        if let Some(session) = self.active_sessions.get(peer_id) {
-            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
-                |e| {
-                    if let TrySendError::Full(_) = e {
-                        debug!(
-                            target: "net::session",
-                            ?peer_id,
-                            "session command buffer full, dropping message"
-                        );
-                        self.metrics.total_outgoing_peer_messages_dropped.increment(1);
-                    }
-                },
-            );
+        if let Some(session) = self.active_sessions.get(peer_id) &&
+            !session.commands.send_message(msg)
+        {
+            self.metrics.total_outgoing_peer_messages_dropped.increment(1);
         }
     }
 
@@ -493,7 +501,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 local_addr,
                 peer_id,
                 capabilities,
-                conn,
+                mut conn,
                 status,
                 direction,
                 client_id,
@@ -525,7 +533,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     })
                 }
 
-                let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
+                let (commands_tx, commands_rx) = mpsc::channel(self.session_command_buffer);
+                let (unbounded_tx, unbounded_rx) = mpsc::unbounded_channel();
 
                 let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
 
@@ -549,6 +558,20 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     interval
                 });
 
+                // Shared counter of in-flight broadcast items. The session task must decrement
+                // this when it pops messages from the outgoing queue, and the
+                // `SessionCommandSender` increments it before enqueuing. This invariant ensures
+                // the `SessionManager` always has an accurate view of total buffered broadcast
+                // pressure for a peer.
+                let broadcast_items = BroadcastItemCounter::new();
+                let remote_range_info = status.block_range_update().map(|update| {
+                    BlockRangeInfo::new(update.earliest, update.latest, update.latest_hash)
+                });
+
+                if self.reject_block_announcements {
+                    conn.set_reject_block_announcements(true);
+                }
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -556,6 +579,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     remote_capabilities: Arc::clone(&capabilities),
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
+                    unbounded_rx,
+                    unbounded_broadcast_msgs: self.metrics.total_unbounded_broadcast_msgs.clone(),
                     to_session_manager: self.active_session_tx.clone(),
                     pending_message_to_session: None,
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
@@ -563,6 +588,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     conn,
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
+                        broadcast_items.clone(),
                     ),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
@@ -571,7 +597,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
-                    range_info: None,
+                    range_info: remote_range_info.clone(),
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
@@ -588,7 +614,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     version,
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
-                    commands_to_session,
+                    commands: SessionCommandSender::new(commands_tx, unbounded_tx, broadcast_items),
                     client_version: Arc::clone(&client_version),
                     remote_addr,
                     local_addr,
@@ -611,7 +637,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
-                    range_info: None,
+                    range_info: remote_range_info,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -879,6 +905,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 #[expect(clippy::too_many_arguments)]
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: TcpStream,
@@ -892,6 +919,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 ) {
     authenticate(
         handshake,
+        eth_max_message_size,
         disconnect_rx,
         events,
         stream,
@@ -912,6 +940,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 #[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     session_id: SessionId,
@@ -944,6 +973,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     };
     authenticate(
         handshake,
+        eth_max_message_size,
         disconnect_rx,
         events,
         stream,
@@ -963,6 +993,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 #[expect(clippy::too_many_arguments)]
 async fn authenticate<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
@@ -995,6 +1026,7 @@ async fn authenticate<N: NetworkPrimitives>(
 
     let auth = authenticate_stream(
         handshake,
+        eth_max_message_size,
         unauthed,
         session_id,
         remote_addr,
@@ -1048,6 +1080,7 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 #[expect(clippy::too_many_arguments)]
 async fn authenticate_stream<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
@@ -1126,7 +1159,8 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             .await
         {
             Ok(their_status) => {
-                let eth_stream = EthStream::new(eth_version, p2p_stream);
+                let eth_stream =
+                    EthStream::with_max_message_size(eth_version, p2p_stream, eth_max_message_size);
                 (eth_stream.into(), their_status)
             }
             Err(err) => {
@@ -1155,7 +1189,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
 
         let (multiplex_stream, their_status) = match multiplex_stream
-            .into_eth_satellite_stream(status, fork_filter, handshake)
+            .into_eth_satellite_stream(status, fork_filter, handshake, eth_max_message_size)
             .await
         {
             Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),

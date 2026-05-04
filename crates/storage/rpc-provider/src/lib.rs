@@ -1166,7 +1166,7 @@ where
     Node: NodeTypes,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> Result<B256, ProviderError> {
-        self.state_root_from_nodes(TrieInput::from_state(hashed_state))
+        self.state_root_with_updates(hashed_state).map(|(root, _)| root)
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> Result<B256, ProviderError> {
@@ -1303,6 +1303,7 @@ where
         &self,
         _input: TrieInput,
         _target: HashedPostState,
+        _mode: reth_trie::ExecutionWitnessMode,
     ) -> Result<Vec<alloy_primitives::Bytes>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1756,10 +1757,6 @@ where
         &self,
         _range: impl std::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, reth_db_api::models::AccountBeforeTx)>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

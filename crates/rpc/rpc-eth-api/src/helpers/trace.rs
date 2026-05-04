@@ -265,16 +265,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         async move {
-            let block = async {
-                if block.is_some() {
-                    return Ok(block)
-                }
-                self.recovered_block(block_id).await
-            };
-
-            let ((evm_env, _), block) = futures::try_join!(self.evm_env_at(block_id), block)?;
+            let block =
+                if block.is_some() { block } else { self.recovered_block(block_id).await? };
 
             let Some(block) = block else { return Ok(None) };
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             if block.body().transactions().is_empty() {
                 // nothing to trace
@@ -288,6 +283,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let block_hash = block.hash();
 
                 let block_number = evm_env.block_env.number().saturating_to();
+                let block_timestamp = evm_env.block_env.timestamp().saturating_to();
                 let base_fee = evm_env.block_env.basefee();
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
@@ -309,14 +305,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
                     .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
-                        #[allow(clippy::needless_update)]
                         let tx_info = TransactionInfo {
                             hash: Some(*ctx.tx.tx_hash()),
                             index: Some(idx),
                             block_hash: Some(block_hash),
                             block_number: Some(block_number),
+                            block_timestamp: Some(block_timestamp),
                             base_fee: Some(base_fee),
-                            ..Default::default()
                         };
                         idx += 1;
 

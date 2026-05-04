@@ -400,7 +400,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // Step 2: Validate sidecar offsets against actual NippyJar state
         let valid_blocks = if actual_sidecar_blocks > 0 {
-            let mut reader = ChangesetOffsetReader::new(&csoff_path, actual_sidecar_blocks)
+            let reader = ChangesetOffsetReader::new(&csoff_path, actual_sidecar_blocks)
                 .map_err(ProviderError::other)?;
 
             // Find last block where offset + num_changes <= actual_nippy_rows
@@ -696,14 +696,15 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Updates the `self.reader` internal index.
     fn update_index(&self) -> ProviderResult<()> {
+        let segment = self.writer.user_header().segment();
+
         // We find the maximum block of the segment by checking this writer's last block.
         //
         // However if there's no block range (because there's no data), we try to calculate it by
         // subtracting 1 from the expected block start, resulting on the last block of the
-        // previous file.
-        //
-        // If that expected block start is 0, then it means that there's no actual block data, and
-        // there's no block data in static files.
+        // previous file — but only if that file actually exists. If the previous file doesn't
+        // exist (e.g. first-ever file for a segment starting past range boundary), there's
+        // nothing to index.
         let segment_max_block = self
             .writer
             .user_header()
@@ -711,12 +712,18 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .as_ref()
             .map(|block_range| block_range.end())
             .or_else(|| {
-                (self.writer.user_header().expected_block_start() >
-                    self.reader().genesis_block_number())
-                .then(|| self.writer.user_header().expected_block_start() - 1)
+                let expected_start = self.writer.user_header().expected_block_start();
+                if expected_start <= self.reader().genesis_block_number() {
+                    return None;
+                }
+
+                let prev_block = expected_start - 1;
+                let prev_range = self.reader().find_fixed_range(segment, prev_block);
+                let prev_path = self.reader().directory().join(segment.filename(&prev_range));
+                prev_path.exists().then_some(prev_block)
             });
 
-        self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
+        self.reader().update_index(segment, segment_max_block)
     }
 
     /// Ensures that the writer is positioned at the specified block number.
@@ -896,7 +903,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             // Read offset for the block after last_block from sidecar.
             // Use committed length from header, ignoring any uncommitted records
             // that may exist in the file after a crash.
-            let mut reader = ChangesetOffsetReader::new(&csoff_path, changeset_offsets_len)
+            let reader = ChangesetOffsetReader::new(&csoff_path, changeset_offsets_len)
                 .map_err(ProviderError::other)?;
             if let Some(next_offset) = reader.get(blocks_to_keep).map_err(ProviderError::other)? {
                 next_offset.offset()

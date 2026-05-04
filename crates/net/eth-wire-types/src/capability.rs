@@ -1,6 +1,6 @@
 //! All capability related types
 
-use crate::{EthMessageID, EthVersion};
+use crate::{EthMessageID, EthVersion, SnapVersion};
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use alloy_primitives::bytes::Bytes;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -85,6 +85,11 @@ impl Capability {
         Self::new_static("eth", version as usize)
     }
 
+    /// Returns the corresponding snap capability for the given version.
+    pub const fn snap(version: SnapVersion) -> Self {
+        Self::new_static("snap", version as usize)
+    }
+
     /// Returns the [`EthVersion::Eth66`] capability.
     pub const fn eth_66() -> Self {
         Self::eth(EthVersion::Eth66)
@@ -113,6 +118,16 @@ impl Capability {
     /// Returns the [`EthVersion::Eth71`] capability.
     pub const fn eth_71() -> Self {
         Self::eth(EthVersion::Eth71)
+    }
+
+    /// Returns the `snap/1` capability.
+    pub const fn snap_1() -> Self {
+        Self::snap(SnapVersion::V1)
+    }
+
+    /// Returns the `snap/2` capability.
+    pub const fn snap_2() -> Self {
+        Self::snap(SnapVersion::V2)
     }
 
     /// Whether this is eth v66 protocol.
@@ -211,6 +226,36 @@ impl Capabilities {
             inner: value,
         }
     }
+
+    /// Returns true if this peer advertises an eth protocol version that is `>= version`.
+    ///
+    /// This is **not** an exact-match check: a peer advertising only `eth/71` will return
+    /// `true` for any of `Eth66..=Eth71`, because eth versions are additive — a newer version
+    /// implies support for the messages of all earlier versions.
+    ///
+    /// Use this to gate requests on a minimum protocol version (e.g. BAL requires `eth/71`),
+    /// not to check whether a peer advertises a specific version verbatim. For exact-version
+    /// checks use the `supports_eth_vXX` helpers (e.g. [`Self::supports_eth_v71`]).
+    pub const fn supports_eth_at_least(&self, version: &EthVersion) -> bool {
+        match version {
+            EthVersion::Eth66 => {
+                self.eth_66 ||
+                    self.eth_67 ||
+                    self.eth_68 ||
+                    self.eth_69 ||
+                    self.eth_70 ||
+                    self.eth_71
+            }
+            EthVersion::Eth67 => {
+                self.eth_67 || self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71
+            }
+            EthVersion::Eth68 => self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71,
+            EthVersion::Eth69 => self.eth_69 || self.eth_70 || self.eth_71,
+            EthVersion::Eth70 => self.eth_70 || self.eth_71,
+            EthVersion::Eth71 => self.eth_71,
+        }
+    }
+
     /// Returns all capabilities.
     #[inline]
     pub fn capabilities(&self) -> &[Capability] {

@@ -85,6 +85,10 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db get static-file",
                             link: "/cli/reth/db/get/static-file"
+                        },
+                        {
+                            text: "reth db get rocksdb",
+                            link: "/cli/reth/db/get/rocksdb"
                         }
                     ]
                 },
@@ -193,12 +197,20 @@ export const rethCliSidebar: SidebarItem = {
                 {
                     text: "reth db state",
                     link: "/cli/reth/db/state"
+                },
+                {
+                    text: "reth db migrate-v2",
+                    link: "/cli/reth/db/migrate-v2"
                 }
             ]
         },
         {
             text: "reth download",
             link: "/cli/reth/download"
+        },
+        {
+            text: "reth snapshot-manifest",
+            link: "/cli/reth/snapshot-manifest"
         },
         {
             text: "reth stage",

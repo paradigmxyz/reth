@@ -1,15 +1,27 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use alloy_rlp::{Decodable, RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -24,6 +36,12 @@ where
 {
     fn from(hashes: Vec<T>) -> Self {
         Self(hashes.into_iter().map(|h| h.into()).collect())
+    }
+}
+
+impl InMemorySize for GetPooledTransactions {
+    fn size(&self) -> usize {
+        self.0.len() * core::mem::size_of::<B256>()
     }
 }
 
@@ -52,10 +70,22 @@ pub struct PooledTransactions<T = PooledTransaction>(
     pub Vec<T>,
 );
 
+impl<T: Decodable + InMemorySize> PooledTransactions<T> {
+    /// Decodes the RLP list of transactions, stopping once the cumulative
+    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
+    /// Any remaining transactions in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
+
 impl<T: Encodable2718> PooledTransactions<T> {
     /// Returns an iterator over the transaction hashes in this response.
     pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
-        self.0.iter().map(|tx| tx.trie_hash())
+        self.iter().map(|tx| tx.trie_hash())
     }
 }
 

@@ -24,6 +24,7 @@ snap.workspace = true
 # ssz encoding and decoding
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true

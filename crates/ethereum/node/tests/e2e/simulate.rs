@@ -17,7 +17,6 @@ use std::sync::Arc;
 ///
 /// Reproduces <https://github.com/paradigmxyz/reth/issues/21809>
 #[tokio::test]
-#[ignore = "depends on alloy-rs/alloy#3651"]
 async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -76,6 +75,46 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     assert_eq!(result[0].calls.len(), 1, "expected exactly 1 call result");
     assert!(result[0].calls[0].status, "expected call to succeed");
     assert!(result[0].calls[0].error.is_none(), "expected no error");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let payload: SimulatePayload<TransactionRequest> =
+        (0..257).fold(SimulatePayload::default(), |payload, _| payload.extend(SimBlock::default()));
+
+    let err = provider
+        .raw_request::<_, Vec<SimulatedBlock>>("eth_simulateV1".into(), (&payload, "latest"))
+        .await
+        .unwrap_err();
+    let err = err.as_error_resp().expect("expected JSON-RPC error response");
+
+    assert_eq!(err.code, -38026);
+    assert_eq!(err.message, "too many blocks");
 
     Ok(())
 }

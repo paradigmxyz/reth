@@ -404,8 +404,7 @@ fn account_and_storage_trie() {
         if hashed_storage_cursor
             .seek_by_key_subkey(key3, hashed_slot)
             .unwrap()
-            .filter(|e| e.key == hashed_slot)
-            .is_some()
+            .is_some_and(|e| e.key == hashed_slot)
         {
             hashed_storage_cursor.delete_current().unwrap();
         }

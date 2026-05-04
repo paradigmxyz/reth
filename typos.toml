@@ -6,6 +6,7 @@ extend-exclude = [
     "Cargo.toml",
     "Cargo.lock",
     "testing/ef-tests",
+    "arena.txt",
 ]
 
 [default]
@@ -40,3 +41,4 @@ Pn = "Pn" # Part of UPnP (Universal Plug and Play)
 BA = "BA" # Part of BAL - Block Access List (EIP-7928)
 consts = "consts" # std::env::consts is a valid Rust module
 Consts = "Consts" # Valid identifier suffix (e.g., RethCliVersionConsts)
+writeable = "writeable"

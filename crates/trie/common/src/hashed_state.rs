@@ -46,33 +46,6 @@ impl HashedPostState {
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
     #[inline]
-    #[cfg(feature = "rayon")]
-    pub fn from_bundle_state<'a, KH: KeyHasher>(
-        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
-    ) -> Self {
-        state
-            .into_par_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
-
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
-    }
-
-    /// Initialize [`HashedPostState`] from bundle state.
-    /// Hashes all changed accounts and storage entries that are currently stored in the bundle
-    /// state.
-    #[cfg(not(feature = "rayon"))]
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
@@ -641,16 +614,29 @@ impl HashedPostStateSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
+        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        match items.len() {
+            0 => Self::default().into(),
+            1 => items.into_iter().next().expect("len == 1"),
+            _ => Self::merge_slice(&items).into(),
+        }
+    }
+
+    /// Batch-merge sorted hashed post states from a slice. Slice is **newest to oldest**.
+    ///
+    /// This variant takes a slice reference directly, avoiding iterator collection overhead.
+    /// For small batches, uses `extend_ref_and_sort` loop.
+    /// For large batches, uses k-way merge for O(n log k) complexity.
+    pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
         const THRESHOLD: usize = 30;
 
-        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
         let k = items.len();
 
         if k == 0 {
-            return Self::default().into();
+            return Self::default();
         }
         if k == 1 {
-            return items.into_iter().next().expect("k == 1");
+            return items[0].as_ref().clone();
         }
 
         if k < THRESHOLD {
@@ -660,7 +646,7 @@ impl HashedPostStateSorted {
             for next in iter {
                 acc.extend_ref_and_sort(next.as_ref());
             }
-            return acc.into();
+            return acc;
         }
 
         // Large k: k-way merge.
@@ -674,7 +660,7 @@ impl HashedPostStateSorted {
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
-        for item in &items {
+        for item in items {
             for (addr, storage) in &item.as_ref().storages {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     wiped: false,
@@ -702,7 +688,7 @@ impl HashedPostStateSorted {
             })
             .collect();
 
-        Self { accounts, storages }.into()
+        Self { accounts, storages }
     }
 
     /// Clears all accounts and storage data.

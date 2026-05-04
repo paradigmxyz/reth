@@ -6,9 +6,7 @@ use eyre::OptionExt;
 use futures_util::{stream::Fuse, Stream, StreamExt};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
-};
+use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{HeaderTy, SealedHeaderFor};
 use reth_storage_api::BlockReader;
 use reth_transaction_pool::TransactionPool;
@@ -143,6 +141,11 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     last_header: SealedHeaderFor<<T::BuiltPayload as BuiltPayload>::Primitives>,
     /// Stores latest mined blocks.
     last_block_hashes: VecDeque<B256>,
+    /// Optional sleep duration between initiating payload building and resolving.
+    ///
+    /// When set, the miner sleeps after `fork_choice_updated` before calling
+    /// `resolve_kind`, giving the payload job time for multiple rebuild attempts.
+    payload_wait_time: Option<Duration>,
 }
 
 impl<T, B, Pool> LocalMiner<T, B, Pool>
@@ -172,7 +175,14 @@ where
             payload_builder,
             last_block_hashes: VecDeque::from([last_header.hash()]),
             last_header,
+            payload_wait_time: None,
         }
+    }
+
+    /// Sets the payload wait time, if any.
+    pub const fn with_payload_wait_time_opt(mut self, wait_time: Option<Duration>) -> Self {
+        self.payload_wait_time = wait_time;
+        self
     }
 
     /// Runs the [`LocalMiner`] in a loop, polling the miner and building payloads.
@@ -214,10 +224,7 @@ where
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
         let state = self.forkchoice_state();
-        let res = self
-            .to_engine
-            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
-            .await?;
+        let res = self.to_engine.fork_choice_updated(state, None).await?;
 
         if !res.is_valid() {
             eyre::bail!("Invalid fork choice update {state:?}: {res:?}")
@@ -234,7 +241,6 @@ where
             .fork_choice_updated(
                 self.forkchoice_state(),
                 Some(self.payload_attributes_builder.build(&self.last_header)),
-                EngineApiMessageVersion::default(),
             )
             .await?;
 
@@ -244,6 +250,10 @@ where
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
 
+        if let Some(wait_time) = self.payload_wait_time {
+            tokio::time::sleep(wait_time).await;
+        }
+
         let Some(Ok(payload)) =
             self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await
         else {
@@ -251,8 +261,7 @@ where
         };
 
         let header = payload.block().sealed_header().clone();
-        let payload = T::block_to_payload(payload.block().clone());
-        let res = self.to_engine.new_payload(payload).await?;
+        let res = self.to_engine.new_payload(payload.into()).await?;
 
         if !res.is_valid() {
             eyre::bail!("Invalid payload")

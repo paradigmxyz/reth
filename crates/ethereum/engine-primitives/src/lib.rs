@@ -12,7 +12,7 @@
 extern crate alloc;
 
 mod payload;
-pub use payload::{payload_id, BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use payload::{BlobSidecars, EthBuiltPayload};
 
 mod error;
 pub use error::*;
@@ -34,19 +34,19 @@ pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
     _marker: core::marker::PhantomData<T>,
 }
 
-impl<
-        T: PayloadTypes<
-            ExecutionData = ExecutionData,
-            BuiltPayload: BuiltPayload<
-                Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
-            >,
+impl<T> PayloadTypes for EthEngineTypes<T>
+where
+    T: PayloadTypes<
+        ExecutionData = ExecutionData,
+        BuiltPayload: BuiltPayload<
+            Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
         >,
-    > PayloadTypes for EthEngineTypes<T>
+    >,
+    ExecutionData: From<T::BuiltPayload>,
 {
     type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
-    type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -60,6 +60,7 @@ impl<
 impl<T> EngineTypes for EthEngineTypes<T>
 where
     T: PayloadTypes<ExecutionData = ExecutionData>,
+    ExecutionData: From<T::BuiltPayload>,
     T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>>
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
@@ -84,7 +85,6 @@ pub struct EthPayloadTypes;
 impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
-    type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
     type ExecutionData = ExecutionData;
 
     fn block_to_payload(

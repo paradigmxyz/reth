@@ -1,8 +1,8 @@
 use futures_util::StreamExt;
-use reth_node_api::{BlockBody, PayloadKind};
+use reth_node_api::{PayloadAttributes, PayloadKind};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use reth_payload_builder_primitives::Events;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
@@ -12,14 +12,14 @@ pub struct PayloadTestContext<T: PayloadTypes> {
     payload_builder: PayloadBuilderHandle<T>,
     pub timestamp: u64,
     #[debug(skip)]
-    attributes_generator: Box<dyn Fn(u64) -> T::PayloadBuilderAttributes + Send + Sync>,
+    attributes_generator: Box<dyn Fn(u64) -> T::PayloadAttributes + Send + Sync>,
 }
 
 impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Creates a new payload helper
     pub async fn new(
         payload_builder: PayloadBuilderHandle<T>,
-        attributes_generator: impl Fn(u64) -> T::PayloadBuilderAttributes + Send + Sync + 'static,
+        attributes_generator: impl Fn(u64) -> T::PayloadAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
@@ -32,19 +32,14 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         })
     }
 
-    /// Creates a new payload job from static attributes
-    pub async fn new_payload(&mut self) -> eyre::Result<T::PayloadBuilderAttributes> {
+    /// Generates the next payload attributes
+    pub fn next_attributes(&mut self) -> T::PayloadAttributes {
         self.timestamp += 1;
-        let attributes = (self.attributes_generator)(self.timestamp);
-        self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
-        Ok(attributes)
+        (self.attributes_generator)(self.timestamp)
     }
 
     /// Asserts that the next event is a payload attributes event
-    pub async fn expect_attr_event(
-        &mut self,
-        attrs: T::PayloadBuilderAttributes,
-    ) -> eyre::Result<()> {
+    pub async fn expect_attr_event(&mut self, attrs: T::PayloadAttributes) -> eyre::Result<()> {
         let first_event = self.payload_event_stream.next().await.unwrap()?;
         if let Events::Attributes(attr) = first_event {
             assert_eq!(attrs.timestamp(), attr.timestamp());
@@ -58,27 +53,11 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     ///
     /// Panics if the payload builder does not produce a non-empty payload within 30 seconds.
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
-        let start = std::time::Instant::now();
-        loop {
-            let payload =
-                self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
-            if payload.is_none_or(|p| p.block().body().transactions().is_empty()) {
-                assert!(
-                    start.elapsed() < std::time::Duration::from_secs(30),
-                    "timed out waiting for a non-empty payload for {payload_id} — \
-                     check that the chain spec supports all generated tx types"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                continue
-            }
-            // Resolve payload once its built
-            self.payload_builder
-                .resolve_kind(payload_id, PayloadKind::Earliest)
-                .await
-                .unwrap()
-                .unwrap();
-            break;
-        }
+        self.payload_builder
+            .resolve_kind(payload_id, PayloadKind::WaitForPending)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     /// Expects the next event to be a built payload event or panics
