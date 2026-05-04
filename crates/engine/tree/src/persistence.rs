@@ -113,6 +113,7 @@ where
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
+                        self.maybe_run_pruner(block_number)?;
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -179,21 +180,6 @@ where
 
             provider_rw.commit()?;
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
-
-            // Run the pruner in a separate provider so it reads committed RocksDB state
-            // that includes the history entries written by save_blocks above.
-            //
-            // The pruner reads the indices from rocksdb, filters it, and writes to indices, so it
-            // must be able to read anything written by save_blocks.
-            if self.pruner.is_pruning_needed(last.number) {
-                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
-                let prune_start = Instant::now();
-                let provider_rw = self.provider.database_provider_rw()?;
-                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
-                provider_rw.commit()?;
-                debug!(target: "engine::persistence", tip=?last.number, "Finished pruning after saving blocks");
-                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
-            }
         }
 
         let elapsed = start_time.elapsed();
@@ -201,6 +187,22 @@ where
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
+    }
+
+    fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
+        // The durable save is already committed at this point, so pruning can happen after we
+        // acknowledge the save without extending the synchronous persistence wait.
+        if self.pruner.is_pruning_needed(block_number) {
+            debug!(target: "engine::persistence", block_num=?block_number, "Running pruner");
+            let prune_start = Instant::now();
+            let provider_rw = self.provider.database_provider_rw()?;
+            let _ = self.pruner.run_with_provider(&provider_rw, block_number)?;
+            provider_rw.commit()?;
+            debug!(target: "engine::persistence", tip=?block_number, "Finished pruning after saving blocks");
+            self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+        }
+
+        Ok(())
     }
 }
 

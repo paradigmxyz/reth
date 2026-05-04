@@ -9591,6 +9591,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-tasks",
  "reth-testing-utils",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
@@ -9601,6 +9602,7 @@ dependencies = [
  "strum",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
@@ -10251,9 +10253,12 @@ dependencies = [
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-errors",
+ "reth-tokio-util",
  "reth-trie-common",
  "revm-database",
  "serde_json",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

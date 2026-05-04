@@ -25,7 +25,7 @@ impl InMemoryBlobStore {
     ) -> Vec<Option<BlobAndProofV2>> {
         let mut result = vec![None; versioned_hashes.len()];
         let mut missing_count = result.len();
-        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
+        for blob_sidecar in self.inner.store.read().values() {
             if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
@@ -181,7 +181,7 @@ impl BlobStore for InMemoryBlobStore {
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         let mut result = vec![None; versioned_hashes.len()];
-        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
+        for blob_sidecar in self.inner.store.read().values() {
             if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)

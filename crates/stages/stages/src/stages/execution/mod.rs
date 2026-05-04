@@ -357,7 +357,9 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result, None) {
+            if let Err(err) =
+                self.consensus.validate_block_post_execution(&block, &result, None, None)
+            {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),

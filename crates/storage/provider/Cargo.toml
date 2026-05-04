@@ -57,10 +57,11 @@ notify = { workspace = true, default-features = false, features = ["macos_fseven
 parking_lot.workspace = true
 strum.workspace = true
 eyre.workspace = true
+reth-tokio-util.workspace = true
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync"], optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -85,6 +86,7 @@ assert_matches.workspace = true
 rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
@@ -103,6 +105,6 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "revm-state",
-    "tokio",
     "reth-tasks/test-utils",
+    "dep:tokio",
 ]

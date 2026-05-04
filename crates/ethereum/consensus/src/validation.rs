@@ -13,6 +13,7 @@ use reth_primitives_traits::{
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
+/// - Compares the computed Block Access List Hash to the value in the header if Amsterdam is active
 ///
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
@@ -21,6 +22,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     chain_spec: &ChainSpec,
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
+    block_access_list_hash: Option<B256>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -75,6 +77,19 @@ where
         if requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
+            ))
+        }
+    }
+
+    // Validate that the header block access list hash matches the calculated block access list hash
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
+        let Some(block_access_list_hash) = block_access_list_hash
+    {
+        let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
+
+        if block_access_list_hash != block_bal_hash {
+            return Err(ConsensusError::BlockAccessListHashMismatch(
+                GotExpected::new(block_access_list_hash, block_bal_hash).into(),
             ))
         }
     }
