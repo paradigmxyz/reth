@@ -109,7 +109,7 @@ pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
     Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
-type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
+type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
 /// Result type for block validation with optional timing stats.
 type InsertPayloadResult<N> = Result<
@@ -600,7 +600,7 @@ where
                     "hashed_post_state",
                 )
                 .entered();
-                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+                Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
             });
 
         let block = convert_to_block(input)?;
@@ -1125,7 +1125,7 @@ where
         state_provider: StateProviderBox,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        state_provider.state_root_with_updates(hashed_state.get().clone())
+        state_provider.state_root_with_updates(hashed_state.get().as_ref().clone())
     }
 
     /// Awaits the state root from the background task, with an optional timeout fallback.
@@ -1639,8 +1639,8 @@ where
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
         // already been computed and used for state root verification, so .get() returns instantly.
         let hashed_state = match hashed_state.try_into_inner() {
-            Ok(state) => Arc::new(state),
-            Err(handle) => Arc::new(handle.get().clone()),
+            Ok(state) => state,
+            Err(handle) => handle.get().clone(),
         };
         let deferred_trie_data =
             DeferredTrieData::pending(hashed_state, trie_output, anchor_hash, ancestors);
@@ -2032,7 +2032,7 @@ where
             block.recovered_block,
             block.execution_output,
             state,
-            LazyHashedPostState::ready(Arc::unwrap_or_clone(block.hashed_state)),
+            LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
             changeset_provider,
         ))
