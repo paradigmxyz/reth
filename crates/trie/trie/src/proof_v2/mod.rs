@@ -238,16 +238,32 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
-                            .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
+                if !check_min_len {
+                    return true
+                }
+
+                if let Some(min_len) = targets.cached_min_len(path) {
+                    return path.len() >= min_len as usize
+                }
+
+                let mut min_len = lower.min_len;
+                for target in targets
+                    .skip_iter()
+                    .take_while(|target| target.key_nibbles.starts_with(path))
+                    .chain(
                         targets
                             .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                            .take_while(|target| target.key_nibbles.starts_with(path)),
+                    )
+                {
+                    min_len = min_len.min(target.min_len);
+                    if min_len == 0 {
+                        break;
+                    }
+                }
+
+                targets.cache_min_len(*path, min_len);
+                return path.len() >= min_len as usize
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -1690,6 +1706,7 @@ where
 struct TargetsCursor<'a> {
     targets: &'a [ProofV2Target],
     i: usize,
+    retain_cache: Option<TargetsRetainCache>,
 }
 
 impl<'a> TargetsCursor<'a> {
@@ -1700,7 +1717,7 @@ impl<'a> TargetsCursor<'a> {
     /// Will panic in debug mode if called with an empty slice.
     fn new(targets: &'a [ProofV2Target]) -> Self {
         debug_assert!(!targets.is_empty());
-        Self { targets, i: 0 }
+        Self { targets, i: 0, retain_cache: None }
     }
 
     /// Returns the current and next [`ProofV2Target`] that the cursor is pointed at.
@@ -1729,6 +1746,20 @@ impl<'a> TargetsCursor<'a> {
     fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[..self.i].iter().rev()
     }
+
+    fn cached_min_len(&self, path: &Nibbles) -> Option<u8> {
+        self.retain_cache.filter(|cache| cache.path == *path).map(|cache| cache.min_len)
+    }
+
+    fn cache_min_len(&mut self, path: Nibbles, min_len: u8) {
+        self.retain_cache = Some(TargetsRetainCache { path, min_len });
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TargetsRetainCache {
+    path: Nibbles,
+    min_len: u8,
 }
 
 /// Used to track the state of the trie cursor, allowing us to differentiate between a branch having
