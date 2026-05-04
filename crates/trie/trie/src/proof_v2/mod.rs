@@ -238,16 +238,7 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
-                            .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
-                        targets
-                            .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                return !check_min_len || targets.any_matching_min_len(path)
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -1719,15 +1710,42 @@ impl<'a> TargetsCursor<'a> {
         self.current()
     }
 
-    // Iterate forwards over the slice, starting from the [`ProofV2Target`] after the current.
-    fn skip_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
-        self.targets[self.i + 1..].iter()
-    }
+    /// Returns `true` if any target around the current cursor position matches `path` and its
+    /// minimum retained path length.
+    fn any_matching_min_len(&self, path: &Nibbles) -> bool {
+        let path_len = path.len();
 
-    /// Iterated backwards over the slice, starting from the [`ProofV2Target`] previous to the
-    /// current.
-    fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
-        self.targets[..self.i].iter().rev()
+        if path_len >= self.targets[self.i].min_len as usize {
+            return true
+        }
+
+        let mut idx = self.i;
+        while idx > 0 {
+            idx -= 1;
+            let target = &self.targets[idx];
+            if !target.key_nibbles.starts_with(path) {
+                break
+            }
+
+            if path_len >= target.min_len as usize {
+                return true
+            }
+        }
+
+        let mut idx = self.i + 1;
+        while let Some(target) = self.targets.get(idx) {
+            if !target.key_nibbles.starts_with(path) {
+                break
+            }
+
+            if path_len >= target.min_len as usize {
+                return true
+            }
+
+            idx += 1;
+        }
+
+        false
     }
 }
 
