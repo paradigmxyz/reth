@@ -125,6 +125,8 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
 struct ArenaTrieBuffers {
     /// Reusable cursor for trie traversals.
     cursor: ArenaCursor,
+    /// Reusable scratch buffer for sorted leaf updates in the top-level trie.
+    sorted_updates: Vec<(B256, Nibbles, LeafUpdate)>,
     /// Trie updates built up directly during hashing and structural changes. `Some` when
     /// tracking updates, `None` otherwise. Initialized alongside `updates` in `set_updates`.
     updates: Option<SparseTrieUpdates>,
@@ -136,6 +138,7 @@ struct ArenaTrieBuffers {
 
 impl ArenaTrieBuffers {
     fn clear(&mut self) {
+        self.sorted_updates.clear();
         if let Some(updates) = self.updates.as_mut() {
             updates.clear();
         }
@@ -2803,8 +2806,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
         // Drain and sort updates lexicographically by nibbles path.
-        let mut sorted: Vec<_> =
-            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
+        let mut sorted = mem::take(&mut self.buffers.sorted_updates);
+        sorted.clear();
+        sorted.reserve(updates.len());
+        sorted.extend(updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)));
         sorted.sort_unstable_by_key(|entry| entry.1);
 
         let threshold = self.parallelism_thresholds.min_updates;
@@ -3004,6 +3009,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
+            sorted.clear();
+            self.buffers.sorted_updates = sorted;
+
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
 
@@ -3086,6 +3094,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             cursor.drain(&mut self.upper_arena);
             self.buffers.cursor = cursor;
         }
+
+        sorted.clear();
+        self.buffers.sorted_updates = sorted;
 
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
@@ -3257,6 +3268,48 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    #[test]
+    fn test_update_leaves_restores_sorted_updates_buffer() {
+        fn key(path: [u8; 4]) -> B256 {
+            ArenaParallelSparseTrie::nibbles_to_padded_b256(&Nibbles::from_nibbles(path))
+        }
+
+        let initial = BTreeMap::from([
+            (key([0x0, 0x0, 0x0, 0x1]), U256::from(1)),
+            (key([0x0, 0x1, 0x0, 0x1]), U256::from(2)),
+            (key([0x1, 0x0, 0x0, 0x1]), U256::from(3)),
+            (key([0x1, 0x1, 0x0, 0x1]), U256::from(4)),
+        ]);
+
+        let mut harness = ArenaTrieTestHarness::new(initial);
+        let root_node = harness.root_node();
+        let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: usize::MAX,
+                min_leaves_for_prune: 1,
+            },
+        );
+        apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+        let fast_path_changes = BTreeMap::from([(key([0x0, 0x0, 0x0, 0x1]), U256::from(11))]);
+        harness.assert_changes(&mut apst, fast_path_changes.clone());
+        let fast_path_capacity = apst.buffers.sorted_updates.capacity();
+        assert!(fast_path_capacity >= fast_path_changes.len());
+
+        harness.apply_changeset(fast_path_changes);
+        apst.parallelism_thresholds.min_updates = 1;
+
+        let taken_subtrie_changes = BTreeMap::from([
+            (key([0x0, 0x1, 0x0, 0x1]), U256::from(22)),
+            (key([0x1, 0x0, 0x0, 0x1]), U256::from(33)),
+        ]);
+        harness.assert_changes(&mut apst, taken_subtrie_changes.clone());
+        assert!(apst.buffers.sorted_updates.capacity() >= taken_subtrie_changes.len());
+        assert!(apst.buffers.sorted_updates.capacity() >= fast_path_capacity);
     }
 
     proptest! {
