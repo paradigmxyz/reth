@@ -251,6 +251,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         state_root_handle: Option<StateRootHandle>,
+        finalize_sparse_trie_task: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -283,6 +284,7 @@ where
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
+            finalize_sparse_trie_task,
         );
 
         PayloadHandle {
@@ -309,7 +311,8 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -475,6 +478,7 @@ where
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        finalize_sparse_trie_task: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -521,7 +525,7 @@ where
                 } else {
                     PrewarmMode::Transactions(transactions)
                 };
-                prewarm_task.run(mode, to_prewarm_task);
+                prewarm_task.run(mode, to_prewarm_task, finalize_sparse_trie_task);
             });
         }
 
@@ -1279,6 +1283,7 @@ mod tests {
             ),
             &TreeConfig::default(),
             None,
+            false,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");

@@ -333,10 +333,13 @@ where
         &self,
         decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+        finalize_sparse_trie_task: bool,
     ) {
         let bal = decoded_bal.as_bal();
         if bal.is_empty() {
-            if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
+            if finalize_sparse_trie_task &&
+                let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref()
+            {
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
             }
             let _ =
@@ -391,7 +394,9 @@ where
                     },
                 );
 
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                if finalize_sparse_trie_task {
+                    let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                }
                 let _ = stream_tx.send(());
             });
         } else {
@@ -452,8 +457,12 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
-    where
+    pub fn run<Tx>(
+        self,
+        mode: PrewarmMode<Tx>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+        finalize_sparse_trie_task: bool,
+    ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         // Spawn execution tasks based on mode
@@ -462,7 +471,7 @@ where
                 self.spawn_txs_prewarm(pending, actions_tx, self.to_sparse_trie_task.clone());
             }
             PrewarmMode::BlockAccessList(bal) => {
-                self.run_bal_prewarm(bal, actions_tx);
+                self.run_bal_prewarm(bal, actions_tx, finalize_sparse_trie_task);
             }
             PrewarmMode::Skipped => {
                 let _ = actions_tx

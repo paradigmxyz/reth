@@ -1469,6 +1469,7 @@ where
                     overlay_factory,
                     &self.config,
                     None,
+                    true,
                 );
 
                 // record prewarming initialization duration
