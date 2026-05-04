@@ -16,10 +16,10 @@ use crate::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use std::{marker::PhantomData, sync::Arc};
@@ -378,6 +378,14 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_blobs_for_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        _indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
     }
 }

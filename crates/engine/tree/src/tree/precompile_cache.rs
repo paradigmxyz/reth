@@ -13,7 +13,7 @@ use std::{hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`]
-const MAX_CACHE_SIZE: u32 = 10_000;
+const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -54,6 +54,9 @@ where
             moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
                 .initial_capacity(MAX_CACHE_SIZE as usize)
                 .eviction_policy(EvictionPolicy::lru())
+                .weigher(|key: &Bytes, value: &CacheEntry<S>| {
+                    (key.len() + value.output.bytes.len()) as u32
+                })
                 .build_with_hasher(Default::default()),
         )
     }

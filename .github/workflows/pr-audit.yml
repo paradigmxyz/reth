@@ -4,27 +4,36 @@ on:
   pull_request:
     types: [labeled]
 
+permissions: {}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     if: github.event.label.name == 'cyclops'
+    permissions: {}
     steps:
       - name: Publish event
+        env:
+          EVENTS_KEY: ${{ secrets.EVENTS_KEY }}
+          EVENTS_CERT: ${{ secrets.EVENTS_CERT }}
+          EVENTS_ARGS: ${{ secrets.EVENTS_ARGS }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
 
-          echo "${{ secrets.EVENTS_KEY }}" > ${{ runner.temp }}/key
-          echo "${{ secrets.EVENTS_CERT }}" > ${{ runner.temp }}/cert
+          echo "$EVENTS_KEY" > "${{ runner.temp }}/key"
+          echo "$EVENTS_CERT" > "${{ runner.temp }}/cert"
 
-          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
+          curl -sf -o /dev/null -X POST $EVENTS_ARGS \
             -H "Content-Type: application/json" \
-            --key ${{ runner.temp }}/key \
-            --cert ${{ runner.temp }}/cert \
+            --key "${{ runner.temp }}/key" \
+            --cert "${{ runner.temp }}/cert" \
             -d '{
               "repository": "${{ github.repository }}",
               "event": "pr_audit",
               "data": {
-                "pr_number": ${{ github.event.pull_request.number }},
-                "sha": "${{ github.event.pull_request.head.sha }}"
+                "pr_number": '"$PR_NUMBER"',
+                "sha": "'"$PR_SHA"'"
               }
             }'

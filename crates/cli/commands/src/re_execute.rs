@@ -20,7 +20,10 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{states::reverts::AccountInfoRevert, BundleState},
+    db::{
+        states::reverts::{AccountInfoRevert, RevertToSlot},
+        BundleState,
+    },
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
@@ -425,14 +428,19 @@ where
             let mut cs_slots = cs_storage.get_mut(addr);
             for (slot_key, revert_slot) in &revert.storage {
                 let b256_key = B256::from(*slot_key);
-                match cs_slots.as_mut().and_then(|s| s.remove(&b256_key)) {
-                    Some(cs_value) => eyre::ensure!(
-                        revert_slot.to_previous_value() == cs_value,
+                let cs_value = cs_slots.as_mut().and_then(|s| s.remove(&b256_key));
+                match (revert_slot, cs_value) {
+                    // When a contract is selfdestructed and re-created at the same address
+                    // within the same block, revm marks slots touched by the new contract
+                    // as `Destroyed` and never reads the original DB value, so
+                    // `to_previous_value()` would resolve to zero, which might be wrong.
+                    (RevertToSlot::Destroyed, _) => {}
+                    (RevertToSlot::Some(prev), Some(cs_value)) => eyre::ensure!(
+                        *prev == cs_value,
                         "Block {block_number}: {addr} slot {b256_key} mismatch: \
-                         revert={} cs={cs_value}",
-                        revert_slot.to_previous_value(),
+                         revert={prev} cs={cs_value}",
                     ),
-                    None => eyre::ensure!(
+                    (RevertToSlot::Some(_), None) => eyre::ensure!(
                         revert.wipe_storage,
                         "Block {block_number}: {addr} slot {b256_key} in reverts but not in changeset",
                     ),

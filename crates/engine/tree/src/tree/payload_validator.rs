@@ -527,8 +527,7 @@ where
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
         let provider_factory = self.provider.clone();
-        let overlay_builder = OverlayBuilder::new(self.changeset_cache.clone())
-            .with_block_hash(Some(anchor_hash))
+        let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_lazy_overlay(lazy_overlay);
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
@@ -1100,7 +1099,7 @@ where
     fn compute_state_root_parallel(
         &self,
         provider_factory: P,
-        overlay_builder: OverlayBuilder,
+        overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
@@ -1245,7 +1244,7 @@ where
         &self,
         state_provider_builder: StateProviderBuilder<N, P>,
         provider_factory: P,
-        overlay_builder: OverlayBuilder,
+        overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
@@ -1448,7 +1447,7 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: StateRootStrategy,
     ) -> Result<
         PayloadHandle<
@@ -1568,7 +1567,7 @@ where
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> (Option<LazyOverlay>, B256) {
+    ) -> (Option<LazyOverlay<N>>, B256) {
         // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
@@ -1596,10 +1595,7 @@ where
             "Creating lazy overlay for in-memory blocks"
         );
 
-        // Extract deferred trie data handles (non-blocking)
-        let handles: Vec<DeferredTrieData> = blocks.iter().map(|b| b.trie_data_handle()).collect();
-
-        (Some(LazyOverlay::new(anchor_hash, handles)), anchor_hash)
+        (Some(LazyOverlay::new(blocks)), anchor_hash)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -2033,8 +2029,7 @@ where
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            OverlayBuilder::new(self.changeset_cache.clone())
-                .with_block_hash(Some(anchor_hash))
+            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
                 .with_lazy_overlay(lazy_overlay),
         );
 

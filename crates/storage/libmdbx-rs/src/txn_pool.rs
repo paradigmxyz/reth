@@ -3,8 +3,8 @@ use crossbeam_queue::ArrayQueue;
 
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
-/// With `MDBX_NOTLS` (which reth always sets), every `mdbx_txn_begin_ex` for a read transaction
-/// calls `mvcc_bind_slot`, which acquires `lck_rdt_lock` — a pthread mutex. Under high
+/// With `MDBX_NOSTICKYTHREADS` (which reth always sets), every `mdbx_txn_begin_ex` for a read
+/// transaction calls `mvcc_bind_slot`, which acquires `lck_rdt_lock` — a pthread mutex. Under high
 /// concurrency (e.g., prewarming), this becomes a contention point.
 ///
 /// This pool caches transaction handles that have been reset via `mdbx_txn_reset`. A reset handle

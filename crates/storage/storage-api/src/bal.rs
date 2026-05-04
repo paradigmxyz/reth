@@ -1,6 +1,37 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_eips::NumHash;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
+
+/// Raw BAL RLP bytes sealed by the BAL hash.
+pub type SealedBal = Sealed<Bytes>;
+
+/// Notification emitted when a new BAL is inserted into the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BalNotification {
+    /// Number and hash of the block the BAL belongs to.
+    pub num_hash: NumHash,
+    /// Raw BAL RLP payload sealed by the BAL hash.
+    pub bal: SealedBal,
+}
+
+impl BalNotification {
+    /// Creates a new [`BalNotification`].
+    pub const fn new(num_hash: NumHash, bal: SealedBal) -> Self {
+        Self { num_hash, bal }
+    }
+}
+
+#[cfg(feature = "std")]
+pub use self::subscriptions::BalNotificationStream;
+
+#[cfg(feature = "std")]
+mod subscriptions {
+    use super::BalNotification;
+
+    /// A stream of [`BalNotification`]s.
+    pub type BalNotificationStream = reth_tokio_util::EventStream<BalNotification>;
+}
 
 /// Store for Block Access Lists (BALs).
 ///
@@ -10,12 +41,7 @@ use reth_storage_errors::provider::ProviderResult;
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
-    fn insert(
-        &self,
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        bal: Bytes,
-    ) -> ProviderResult<()>;
+    fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
 
     /// Fetch BALs for the given block hashes.
     ///
@@ -64,6 +90,13 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// Implementations may stop at the first gap and return the contiguous prefix.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>>;
+
+    /// Returns a stream of BAL insert notifications.
+    ///
+    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
+    /// They do not imply canonicality.
+    #[cfg(feature = "std")]
+    fn bal_stream(&self) -> BalNotificationStream;
 }
 
 /// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
@@ -105,13 +138,8 @@ impl BalStoreHandle {
 
     /// Insert the BAL for the given block.
     #[inline]
-    pub fn insert(
-        &self,
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        bal: Bytes,
-    ) -> ProviderResult<()> {
-        self.inner.insert(block_hash, block_number, bal)
+    pub fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
+        self.inner.insert(num_hash, bal)
     }
 
     /// Fetch BALs for the given block hashes.
@@ -147,6 +175,13 @@ impl BalStoreHandle {
     pub fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>> {
         self.inner.get_by_range(start, count)
     }
+
+    /// Returns a stream of BAL insert notifications.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn bal_stream(&self) -> BalNotificationStream {
+        self.inner.bal_stream()
+    }
 }
 
 impl Default for BalStoreHandle {
@@ -173,12 +208,7 @@ pub trait BalProvider {
 pub struct NoopBalStore;
 
 impl BalStore for NoopBalStore {
-    fn insert(
-        &self,
-        _block_hash: BlockHash,
-        _block_number: BlockNumber,
-        _bal: Bytes,
-    ) -> ProviderResult<()> {
+    fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -208,12 +238,19 @@ impl BalStore for NoopBalStore {
     fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
+
+    #[cfg(feature = "std")]
+    fn bal_stream(&self) -> BalNotificationStream {
+        reth_tokio_util::EventSender::new(1).new_listener()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    #[cfg(feature = "std")]
+    use tokio_stream::StreamExt;
 
     #[test]
     fn noop_store_returns_empty_results() {
@@ -248,5 +285,14 @@ mod tests {
         assert!(!size_limit_2mb.exceeds(1024 * 1024));
         assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
+    }
+
+    #[cfg(feature = "std")]
+    #[tokio::test]
+    async fn noop_store_stream_is_empty() {
+        let store = BalStoreHandle::default();
+        let mut stream = store.bal_stream();
+
+        assert!(stream.next().await.is_none());
     }
 }

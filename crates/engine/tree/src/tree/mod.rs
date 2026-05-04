@@ -1511,9 +1511,9 @@ where
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get();
+                let _ = prepared.overlay.get(prepared.anchor_hash);
             });
         }
 
@@ -1917,7 +1917,35 @@ where
             self.on_canonical_chain_update(chain_update);
         }
 
+        self.on_canonicalized_sync_target(target);
+
         Ok(())
+    }
+
+    /// Applies the tracked forkchoice state once its sync target head becomes canonical.
+    fn on_canonicalized_sync_target(&mut self, target: B256) {
+        let Some(sync_target_state) = self
+            .state
+            .forkchoice_state_tracker
+            .sync_target_state()
+            .filter(|state| state.head_block_hash == target)
+        else {
+            return;
+        };
+
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(sync_target_state) {
+            debug!(
+                target: "engine::tree",
+                head = %sync_target_state.head_block_hash,
+                safe = %sync_target_state.safe_block_hash,
+                finalized = %sync_target_state.finalized_block_hash,
+                ?outcome,
+                "Canonicalized sync target head before safe/finalized could be applied"
+            );
+            return;
+        }
+
+        self.state.forkchoice_state_tracker.promote_sync_target_to_valid(sync_target_state);
     }
 
     /// Convenience function to handle an optional tree event.

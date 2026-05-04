@@ -9,13 +9,14 @@ on:
   workflow_dispatch:
     # Needed so we can run it manually
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   update:
     if: github.repository == 'paradigmxyz/reth'
+    permissions:
+      contents: write
+      pull-requests: write
     uses: tempoxyz/ci/.github/workflows/cargo-update-pr.yml@main
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}

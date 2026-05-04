@@ -55,7 +55,7 @@ where
         block_number_or_tag: BlockNumberOrTag,
     ) -> eyre::Result<PrimitiveBlock> {
         let tag = match block_number_or_tag {
-            BlockNumberOrTag::Number(num) => format!("{num:#02x}"),
+            BlockNumberOrTag::Number(num) => format!("{num:#x}"),
             tag => tag.to_string(),
         };
 

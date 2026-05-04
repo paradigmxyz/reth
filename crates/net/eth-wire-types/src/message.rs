@@ -28,6 +28,15 @@ use core::fmt::Debug;
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
 pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
+/// Multiplier applied to `max_message_size` to derive the in-memory budget for decoding
+/// `Transactions` and `PooledTransactions` messages.
+///
+/// Decoded transactions expand relative to their RLP encoding due to struct overhead and heap
+/// allocations. With many peers in flight this can cause significant memory pressure, so we
+/// stop decoding once the cumulative in-memory size of decoded transactions exceeds
+/// `max_message_size * TX_MEMORY_BUDGET_MULTIPLIER`. Remaining transactions are silently dropped.
+pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = 2;
+
 /// Error when sending/receiving a message
 #[derive(thiserror::Error, Debug)]
 pub enum MessageError {
@@ -87,6 +96,19 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     ///
     /// This will enforce decoding according to the given [`EthVersion`] of the connection.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
+        Self::decode_message_with_tx_memory_budget(version, buf, usize::MAX)
+    }
+
+    /// Like [`Self::decode_message`], but caps the cumulative in-memory size of decoded
+    /// transactions in `Transactions` and `PooledTransactions` messages. Once exceeded,
+    /// remaining transactions are silently dropped.
+    ///
+    /// Use [`TX_MEMORY_BUDGET_MULTIPLIER`] to derive a reasonable default.
+    pub fn decode_message_with_tx_memory_budget(
+        version: EthVersion,
+        buf: &mut &[u8],
+        tx_memory_budget: usize,
+    ) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
@@ -103,7 +125,9 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             EthMessageID::NewBlock => {
                 EthMessage::NewBlock(Box::new(N::NewBlockPayload::decode(buf)?))
             }
-            EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
+            EthMessageID::Transactions => EthMessage::Transactions(
+                Transactions::decode_with_memory_budget(buf, tx_memory_budget)?,
+            ),
             EthMessageID::NewPooledTransactionHashes => {
                 if version >= EthVersion::Eth68 {
                     EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68::decode(
@@ -123,7 +147,9 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
             EthMessageID::PooledTransactions => {
-                EthMessage::PooledTransactions(RequestPair::decode(buf)?)
+                EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
+                    PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
+                })?)
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
@@ -731,6 +757,25 @@ impl<T> RequestPair<T> {
     {
         let Self { request_id, message } = self;
         RequestPair { request_id, message: f(message) }
+    }
+
+    /// Decodes the request id and then decodes the message payload using `decode_msg`.
+    pub fn decode_with<F>(buf: &mut &[u8], decode_msg: F) -> alloy_rlp::Result<Self>
+    where
+        F: FnOnce(&mut &[u8]) -> alloy_rlp::Result<T>,
+    {
+        let header = Header::decode(buf)?;
+
+        let initial_length = buf.len();
+        let request_id = u64::decode(buf)?;
+        let message = decode_msg(buf)?;
+
+        let consumed_len = initial_length - buf.len();
+        if consumed_len != header.payload_length {
+            return Err(alloy_rlp::Error::UnexpectedLength)
+        }
+
+        Ok(Self { request_id, message })
     }
 }
 
