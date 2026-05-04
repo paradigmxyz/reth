@@ -19,7 +19,7 @@
 //! And returns `TrieUpdatesSorted` containing the old node values.
 
 use crate::trie_cursor::TrieCursorIter;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::map::B256Map;
 use itertools::{merge_join_by, EitherOrBoth};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
@@ -59,19 +59,22 @@ where
 
     // Compute storage trie changesets
     let mut storage_tries = B256Map::default();
-
-    // Create storage cursor once and reuse it for all addresses
-    let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
+    let mut storage_cursor = None;
 
     for (hashed_address, storage_updates) in trie_updates.storage_tries_ref() {
-        storage_cursor.set_hashed_address(*hashed_address);
+        let cursor = if let Some(cursor) = storage_cursor.as_mut() {
+            cursor
+        } else {
+            storage_cursor.insert(factory.storage_trie_cursor(*hashed_address)?)
+        };
+        cursor.set_hashed_address(*hashed_address);
 
         let storage_changesets = if storage_updates.is_deleted() {
             // Handle wiped storage
-            compute_wiped_storage_changesets(&mut storage_cursor, storage_updates)?
+            compute_wiped_storage_changesets(cursor, storage_updates)?
         } else {
             // Handle normal storage updates
-            compute_storage_changesets(&mut storage_cursor, storage_updates)?
+            compute_storage_changesets(cursor, storage_updates)?
         };
 
         if !storage_changesets.is_empty() {
@@ -101,6 +104,10 @@ fn compute_account_changesets<Factory>(
 where
     Factory: TrieCursorFactory,
 {
+    if trie_updates.account_nodes_ref().is_empty() {
+        return Ok(Vec::new());
+    }
+
     let mut cursor = factory.account_trie_cursor()?;
     let mut account_changesets = Vec::with_capacity(trie_updates.account_nodes_ref().len());
 
@@ -245,11 +252,7 @@ mod tests {
     #[test]
     fn test_empty_updates() {
         // Create an empty mock factory
-        // Note: We need to include B256::default() in storage_tries because
-        // compute_trie_changesets creates cursors for it upfront
-        let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new());
-        let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
+        let factory = MockTrieCursorFactory::new(BTreeMap::new(), B256Map::default());
 
         // Create empty updates
         let updates = TrieUpdatesSorted::new(vec![], B256Map::default());
@@ -275,10 +278,7 @@ mod tests {
         account_nodes.insert(path1, node1.clone());
         account_nodes.insert(path2, node2);
 
-        // Need to include B256::default() for cursor creation
-        let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new());
-        let factory = MockTrieCursorFactory::new(account_nodes, storage_tries);
+        let factory = MockTrieCursorFactory::new(account_nodes, B256Map::default());
 
         // Create updates that modify path1 and add a new path3
         let path3 = Nibbles::from_nibbles([0x7, 0x8, 0x9]);
@@ -320,7 +320,6 @@ mod tests {
         storage_nodes.insert(path2, node2);
 
         let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new()); // For cursor creation
         storage_tries.insert(hashed_address, storage_nodes);
 
         let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
@@ -377,7 +376,6 @@ mod tests {
         storage_nodes.insert(path3, node3.clone());
 
         let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new()); // For cursor creation
         storage_tries.insert(hashed_address, storage_nodes);
 
         let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
@@ -433,7 +431,6 @@ mod tests {
         storage_nodes.insert(path3, node3.clone());
 
         let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new()); // For cursor creation
         storage_tries.insert(hashed_address, storage_nodes);
 
         let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
