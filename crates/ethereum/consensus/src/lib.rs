@@ -13,7 +13,8 @@ extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{eip7840::BlobParams, eip7928::BlockAccessList};
+use alloy_eips::eip7840::BlobParams;
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom, TransactionRoot,
@@ -108,14 +109,14 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        block_access_list: Option<BlockAccessList>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
         let res = validate_block_post_execution(
             block,
             &self.chain_spec,
             result,
             receipt_root_bloom,
-            block_access_list,
+            block_access_list_hash,
         );
 
         if self.skip_requests_hash_check &&
