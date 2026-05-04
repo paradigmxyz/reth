@@ -206,8 +206,18 @@ impl reth_codecs::Compact for PackedStoredNibbles {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
-        let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        debug_assert!(nibble_count <= 64);
+
+        let mut nibbles = Vec::with_capacity(nibble_count);
+        for &byte in &buf[..nibble_count.div_ceil(2)] {
+            nibbles.push(byte >> 4);
+            if nibbles.len() == nibble_count {
+                break;
+            }
+            nibbles.push(byte & 0x0f);
+        }
+
+        (Self(Nibbles::from_nibbles_unchecked(nibbles)), &buf[33..])
     }
 }
 
@@ -380,6 +390,20 @@ mod tests {
 
         let (roundtrip, _) = PackedStoredNibblesSubKey::from_compact(&buf, 33);
         assert_eq!(roundtrip.0.to_vec(), vec![0x02, 0x04]);
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_roundtrip_odd_len() {
+        let subkey = PackedStoredNibblesSubKey::from(vec![0x0A, 0x0B, 0x0C]);
+        let mut buf = BytesMut::with_capacity(33);
+        let len = subkey.to_compact(&mut buf);
+        assert_eq!(len, 33);
+        assert_eq!(buf[0], 0xAB);
+        assert_eq!(buf[1], 0xC0);
+        assert_eq!(buf[32], 3);
+
+        let (roundtrip, _) = PackedStoredNibblesSubKey::from_compact(&buf, 33);
+        assert_eq!(roundtrip.0.to_vec(), vec![0x0A, 0x0B, 0x0C]);
     }
 
     #[test]
