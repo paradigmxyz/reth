@@ -152,9 +152,11 @@ where
 
         self.provider.static_file_provider().commit()?;
         for (segment, block_range) in segments {
-            self.provider
-                .static_file_provider()
-                .update_index(segment.segment(), Some(*block_range.end()))?;
+            self.provider.static_file_provider().update_index(
+                segment.segment(),
+                Some(*block_range.end()),
+                None,
+            )?;
         }
 
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics

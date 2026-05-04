@@ -697,6 +697,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Updates the `self.reader` internal index.
     fn update_index(&self) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
+        let segment_header = self.writer.user_header();
 
         // We find the maximum block of the segment by checking this writer's last block.
         //
@@ -723,7 +724,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 prev_path.exists().then_some(prev_block)
             });
 
-        self.reader().update_index(segment, segment_max_block)
+        self.reader().update_index(segment, segment_max_block, Some(segment_header))
     }
 
     /// Ensures that the writer is positioned at the specified block number.
