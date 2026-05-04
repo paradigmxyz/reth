@@ -110,29 +110,29 @@ fn format_trie_node_path(path: &Nibbles) -> String {
     formatted
 }
 
-fn collect_account_trie_node_paths(trie_updates: &TrieUpdatesSorted) -> Vec<String> {
-    trie_updates
-        .account_nodes_ref()
-        .iter()
-        .map(|(path, node)| {
-            format!(
-                "{} ({})",
-                format_trie_node_path(path),
-                if node.is_some() { "upsert" } else { "remove" }
-            )
-        })
-        .collect()
+fn format_branch_node_compact(node: &reth_trie::BranchNodeCompact) -> String {
+    format!(
+        "state_mask={:?} tree_mask={:?} hash_mask={:?} hashes={:?} root_hash={:?}",
+        node.state_mask, node.tree_mask, node.hash_mask, node.hashes, node.root_hash
+    )
 }
 
-fn collect_all_trie_node_paths(trie_updates: &TrieUpdatesSorted) -> Vec<String> {
-    let mut paths = trie_updates
+fn format_trie_node_update(node: Option<&reth_trie::BranchNodeCompact>) -> String {
+    match node {
+        Some(node) => format!("upsert {}", format_branch_node_compact(node)),
+        None => "remove".to_string(),
+    }
+}
+
+fn collect_all_trie_nodes(trie_updates: &TrieUpdatesSorted) -> Vec<String> {
+    let mut nodes = trie_updates
         .account_nodes_ref()
         .iter()
         .map(|(path, node)| {
             format!(
-                "account {} ({})",
+                "account {} {}",
                 format_trie_node_path(path),
-                if node.is_some() { "upsert" } else { "remove" }
+                format_trie_node_update(node.as_ref())
             )
         })
         .collect::<Vec<_>>();
@@ -141,19 +141,19 @@ fn collect_all_trie_node_paths(trie_updates: &TrieUpdatesSorted) -> Vec<String> 
         trie_updates.storage_tries_ref().iter().sorted_by_key(|(hashed_address, _)| *hashed_address)
     {
         if storage_trie.is_deleted() {
-            paths.push(format!("storage {hashed_address:#x} (delete trie)"));
+            nodes.push(format!("storage {hashed_address:#x} delete trie"));
         }
 
-        paths.extend(storage_trie.storage_nodes_ref().iter().map(|(path, node)| {
+        nodes.extend(storage_trie.storage_nodes_ref().iter().map(|(path, node)| {
             format!(
-                "storage {hashed_address:#x}@{} ({})",
+                "storage {hashed_address:#x}@{} {}",
                 format_trie_node_path(path),
-                if node.is_some() { "upsert" } else { "remove" }
+                format_trie_node_update(node.as_ref())
             )
         }));
     }
 
-    paths
+    nodes
 }
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -663,32 +663,58 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let last_block_number = plan.last_block().expect("checked non-empty block range").number;
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
-        for (step_index, step) in plan.steps.iter().enumerate() {
-            let step_blocks = blocks[step.block_range.clone()]
+        if tracing::enabled!(target: "providers::db", tracing::Level::DEBUG) {
+            let step_plan = plan
+                .steps
                 .iter()
-                .map(|block| block.recovered_block().num_hash())
-                .collect::<Vec<_>>();
-            let masking_blocks = step
-                .state_trie_masking_range
-                .as_ref()
-                .map(|range| {
-                    blocks[range.clone()]
+                .enumerate()
+                .map(|(step_index, step)| {
+                    let step_blocks = blocks[step.block_range.clone()]
                         .iter()
                         .map(|block| block.recovered_block().num_hash())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+                        .collect::<Vec<_>>();
+                    let masking_blocks = step
+                        .state_trie_masking_range
+                        .as_ref()
+                        .map(|range| {
+                            blocks[range.clone()]
+                                .iter()
+                                .map(|block| block.recovered_block().num_hash())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
 
-            debug!(
-                target: "providers::db",
-                step = step_index,
-                block_range = ?step.block_range,
-                persist_rest = step.persist_rest,
-                state_trie_masking_range = ?step.state_trie_masking_range,
-                step_blocks = ?step_blocks,
-                masking_blocks = ?masking_blocks,
-                "save_blocks step plan"
-            );
+                    (
+                        step_index,
+                        step.block_range.clone(),
+                        step.persist_rest,
+                        step.state_trie_masking_range.clone(),
+                        step_blocks,
+                        masking_blocks,
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            debug!(target: "providers::db", ?step_plan, "save_blocks step plan");
+
+            if save_mode.with_state() {
+                let per_block_trie_updates = blocks
+                    .iter()
+                    .map(|block| {
+                        (
+                            block.recovered_block().number(),
+                            collect_all_trie_nodes(block.trie_data().trie_updates.as_ref()),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                debug!(
+                    target: "providers::db",
+                    range = ?first_number..=last_block_number,
+                    per_block_trie_updates = ?per_block_trie_updates,
+                    "save_blocks per-block trie updates"
+                );
+            }
         }
 
         let tx_nums: Vec<TxNumber> = if persist_rest_blocks.is_empty() {
@@ -903,13 +929,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     step_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
                     masking_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
                 );
-                debug!(
-                    target: "providers::db",
-                    step = step_index,
-                    persisted_account_trie_node_paths = ?collect_account_trie_node_paths(&merged_trie),
-                    masking_trie_node_paths = ?collect_all_trie_node_paths(&merged_masking_trie),
-                    "save_blocks trie paths"
-                );
+                if tracing::enabled!(target: "providers::db", tracing::Level::DEBUG) {
+                    let persisted_trie_updates = collect_all_trie_nodes(&merged_trie);
+                    let masking_trie_updates = collect_all_trie_nodes(&merged_masking_trie);
+                    debug!(
+                        target: "providers::db",
+                        step = step_index,
+                        persisted_trie_updates = ?persisted_trie_updates,
+                        masking_trie_updates = ?masking_trie_updates,
+                        "save_blocks merged trie updates"
+                    );
+                }
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
