@@ -268,35 +268,27 @@ where
     ///
     /// Calling this method indicates that the child will not undergo any further modifications, and
     /// therefore can be retained as a proof node if applicable.
-    fn commit_child<'a>(
+    fn commit_child(
         &mut self,
-        targets: &mut Option<TargetsCursor<'a>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
+        retain: bool,
     ) -> Result<RlpNode, StateProofError> {
         // If the child is already an `RlpNode` then there is nothing to do.
         if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
             return Ok(rlp_node)
         }
 
-        // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path, true) {
+        // Retained children need both the proof node and the branch-stack RLP node.
+        if retain {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
-            // Convert to `ProofTrieNodeV2`, which will be what is retained.
-            //
-            // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
-            // the `rlp_nodes_bufs` free-list.
             self.rlp_encode_buf.clear();
-            let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
-
-            // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
-            // nodes before returning.
-            self.rlp_encode_buf.clear();
-            proof_node.node.encode(&mut self.rlp_encode_buf);
+            let (proof_node, child_rlp_node) =
+                child.into_retained_proof_node(child_path, &mut self.rlp_encode_buf)?;
 
             self.retained_proofs.push(proof_node);
-            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+            return Ok(child_rlp_node)
         }
 
         // If the child path is not being retained then we convert directly to an `RlpNode`
@@ -379,8 +371,10 @@ where
 
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
-        if self.should_retain(targets, &child_path, true) {
-            let child_rlp_node = self.commit_child(targets, child_path, child)?;
+        let retain_child = self.should_retain(targets, &child_path, true);
+
+        if retain_child {
+            let child_rlp_node = self.commit_child(child_path, child, true)?;
             trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {

@@ -97,6 +97,23 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         Ok(ProofTrieNodeV2 { node, path, masks })
     }
 
+    /// Converts this child into a retained [`ProofTrieNodeV2`] and the corresponding [`RlpNode`]
+    /// for branch-stack bookkeeping.
+    ///
+    /// # Panics
+    ///
+    /// If called on a [`Self::RlpNode`].
+    pub(crate) fn into_retained_proof_node(
+        self,
+        path: Nibbles,
+        buf: &mut Vec<u8>,
+    ) -> Result<(ProofTrieNodeV2, RlpNode), StateProofError> {
+        let proof_node = self.into_proof_trie_node(path, buf)?;
+        buf.clear();
+        proof_node.node.encode(buf);
+        Ok((proof_node, RlpNode::from_rlp(buf)))
+    }
+
     /// Returns the short key of the child, if it is a leaf or branch, or empty if its a
     /// [`Self::RlpNode`].
     pub(crate) fn short_key(&self) -> &Nibbles {
