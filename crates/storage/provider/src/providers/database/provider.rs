@@ -46,7 +46,7 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList,
+    BlockNumberList, DatabaseError,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -2682,11 +2682,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        let mut delete_cursor_key = None;
+        let mut delete_cursor_exhausted = false;
         for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                delete_cursor_key = None;
+                delete_cursor_exhausted = false;
+            } else if Self::seek_sorted_exact::<tables::HashedAccounts, _>(
+                &mut hashed_accounts_cursor,
+                &mut delete_cursor_key,
+                &mut delete_cursor_exhausted,
+                *hashed_address,
+            )? {
                 hashed_accounts_cursor.delete_current()?;
+                delete_cursor_key = None;
+                delete_cursor_exhausted = false;
             }
         }
 
@@ -3071,6 +3082,32 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Seeks a sorted write cursor to `key` while reusing any later position already reached by
+    /// previous lookups in the same monotonically increasing stream.
+    fn seek_sorted_exact<T, C>(
+        cursor: &mut C,
+        current_key: &mut Option<T::Key>,
+        exhausted: &mut bool,
+        key: T::Key,
+    ) -> Result<bool, DatabaseError>
+    where
+        T: Table,
+        T::Key: Clone + Ord,
+        C: DbCursorRO<T>,
+    {
+        if *exhausted {
+            return Ok(false);
+        }
+
+        if current_key.as_ref().is_none_or(|cursor_key| cursor_key < &key) {
+            let entry = cursor.seek(key.clone())?;
+            *current_key = entry.map(|(cursor_key, _)| cursor_key);
+            *exhausted = current_key.is_none();
+        }
+
+        Ok(current_key.as_ref().is_some_and(|cursor_key| cursor_key == &key))
+    }
+
     fn write_account_trie_updates<A: TrieTableAdapter>(
         tx: &TX,
         trie_updates: &TrieUpdatesSorted,
@@ -3080,6 +3117,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        let mut delete_cursor_key = None;
+        let mut delete_cursor_exhausted = false;
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = A::AccountKey::from(*key);
@@ -3088,12 +3127,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
                     if !key.is_empty() {
                         *num_entries += 1;
                         account_trie_cursor.upsert(nibbles, node)?;
+                        delete_cursor_key = None;
+                        delete_cursor_exhausted = false;
                     }
                 }
                 None => {
                     *num_entries += 1;
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                    if Self::seek_sorted_exact::<A::AccountTrieTable, _>(
+                        &mut account_trie_cursor,
+                        &mut delete_cursor_key,
+                        &mut delete_cursor_exhausted,
+                        nibbles,
+                    )? {
                         account_trie_cursor.delete_current()?;
+                        delete_cursor_key = None;
+                        delete_cursor_exhausted = false;
                     }
                 }
             }
