@@ -15,7 +15,7 @@
 //! Check E (per-tx fragment compare) is skipped — check F is authoritative, and a
 //! lightweight fragment compare isn't yet designed.
 
-use super::{validation::check_item_count, RejectReason};
+use super::{validation::check_item_count, BalExecutionError, RejectReason};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
@@ -27,7 +27,6 @@ use alloy_evm::{
 use alloy_primitives::B256;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
 use reth_primitives_traits::{BlockTy, SealedBlock};
-use reth_provider::ProviderError;
 use reth_tasks::Runtime;
 use revm::{
     context::result::ResultAndState,
@@ -61,51 +60,6 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
     /// EIP-7685 withdrawal / deposit / consolidation requests.
     pub requests: alloy_eips::eip7685::Requests,
 }
-
-/// Errors surfaced by [`BalPayloadExecutor::execute_block`].
-#[derive(Debug)]
-pub enum BalExecutionError {
-    /// BAL-specific rejection.
-    Reject(RejectReason),
-    /// Worker or canonical EVM failure (including revm `BalError` for undeclared accesses,
-    /// surfaced opaquely until upstream revm carries address/slot metadata).
-    Evm(BlockExecutionError),
-    /// Provider setup failed before EVM execution could start.
-    Provider(ProviderError),
-    /// The received BAL could not be converted from alloy-format to revm-format.
-    BalConversion(String),
-}
-
-impl From<RejectReason> for BalExecutionError {
-    fn from(r: RejectReason) -> Self {
-        Self::Reject(r)
-    }
-}
-
-impl From<BlockExecutionError> for BalExecutionError {
-    fn from(e: BlockExecutionError) -> Self {
-        Self::Evm(e)
-    }
-}
-
-impl From<ProviderError> for BalExecutionError {
-    fn from(e: ProviderError) -> Self {
-        Self::Provider(e)
-    }
-}
-
-impl core::fmt::Display for BalExecutionError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Reject(r) => write!(f, "BAL rejection: {r:?}"),
-            Self::Evm(e) => write!(f, "evm execution failed: {e}"),
-            Self::Provider(e) => write!(f, "provider setup failed: {e}"),
-            Self::BalConversion(s) => write!(f, "alloy→revm BAL conversion failed: {s}"),
-        }
-    }
-}
-
-impl core::error::Error for BalExecutionError {}
 
 /// Top-level BAL-path block executor. Owns the `evm_config` so methods on `&self` give
 /// revm's lifetime unification the method-scoped `&'a self` it needs.

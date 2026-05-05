@@ -12,6 +12,6 @@ pub mod error;
 pub mod execute;
 pub mod validation;
 
-pub use error::RejectReason;
-pub use execute::{BalExecutionError, BalExecutionOutput, BalPayloadExecutor, ReceiptFor};
+pub use error::{BalExecutionError, RejectReason};
+pub use execute::{BalExecutionOutput, BalPayloadExecutor, ReceiptFor};
 pub use validation::check_item_count;
