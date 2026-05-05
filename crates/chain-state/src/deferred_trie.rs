@@ -191,77 +191,87 @@ impl DeferredTrieData {
 
         drop(_span);
 
+        let sorted_hashed_state = Arc::new(sorted_hashed_state);
+        let sorted_trie_updates = Arc::new(sorted_trie_updates);
+
+        if ancestors.is_empty() {
+            let trie_input = Arc::new(TrieInputSorted::new(
+                Arc::clone(&sorted_trie_updates),
+                Arc::clone(&sorted_hashed_state),
+                Default::default(),
+            ));
+
+            return ComputedTrieData::with_trie_input(
+                sorted_hashed_state,
+                sorted_trie_updates,
+                anchor_hash,
+                trie_input,
+            )
+        }
+
         let _span = debug_span!(target: "engine::tree::deferred_trie", "build_overlay").entered();
 
         // Reuse parent's overlay if available and anchors match.
         // We can only reuse the parent's overlay if it was built on top of the same
         // persisted anchor. If the anchor has changed (e.g., due to persistence),
         // the parent's overlay is relative to an old state and cannot be used.
-        let overlay = if let Some(parent) = ancestors.last() {
-            let parent_data = parent.wait_cloned();
+        let parent = ancestors.last().expect("ancestors.is_empty() handled above");
+        let parent_data = parent.wait_cloned();
 
-            match &parent_data.anchored_trie_input {
-                // Case 1: Parent has cached overlay AND anchors match.
-                Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
-                    if *parent_anchor == anchor_hash =>
+        let overlay = match &parent_data.anchored_trie_input {
+            // Case 1: Parent has cached overlay AND anchors match.
+            Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
+                if *parent_anchor == anchor_hash =>
+            {
+                // O(1): Reuse parent's overlay, extend with current block's data.
+                let mut overlay = TrieInputSorted::new(
+                    Arc::clone(&trie_input.nodes),
+                    Arc::clone(&trie_input.state),
+                    Default::default(), // prefix_sets are per-block, not cumulative
+                );
+                let _span =
+                    debug_span!(target: "engine::tree::deferred_trie", "extend_overlay").entered();
+                // Only trigger COW clone if there's actually data to add.
+                #[cfg(feature = "rayon")]
                 {
-                    // O(1): Reuse parent's overlay, extend with current block's data.
-                    let mut overlay = TrieInputSorted::new(
-                        Arc::clone(&trie_input.nodes),
-                        Arc::clone(&trie_input.state),
-                        Default::default(), // prefix_sets are per-block, not cumulative
+                    rayon::join(
+                        || {
+                            if !sorted_hashed_state.is_empty() {
+                                Arc::make_mut(&mut overlay.state)
+                                    .extend_ref_and_sort(&sorted_hashed_state);
+                            }
+                        },
+                        || {
+                            if !sorted_trie_updates.is_empty() {
+                                Arc::make_mut(&mut overlay.nodes)
+                                    .extend_ref_and_sort(&sorted_trie_updates);
+                            }
+                        },
                     );
-                    let _span =
-                        debug_span!(target: "engine::tree::deferred_trie", "extend_overlay")
-                            .entered();
-                    // Only trigger COW clone if there's actually data to add.
-                    #[cfg(feature = "rayon")]
-                    {
-                        rayon::join(
-                            || {
-                                if !sorted_hashed_state.is_empty() {
-                                    Arc::make_mut(&mut overlay.state)
-                                        .extend_ref_and_sort(&sorted_hashed_state);
-                                }
-                            },
-                            || {
-                                if !sorted_trie_updates.is_empty() {
-                                    Arc::make_mut(&mut overlay.nodes)
-                                        .extend_ref_and_sort(&sorted_trie_updates);
-                                }
-                            },
-                        );
-                    }
-                    #[cfg(not(feature = "rayon"))]
-                    {
-                        if !sorted_hashed_state.is_empty() {
-                            Arc::make_mut(&mut overlay.state)
-                                .extend_ref_and_sort(&sorted_hashed_state);
-                        }
-                        if !sorted_trie_updates.is_empty() {
-                            Arc::make_mut(&mut overlay.nodes)
-                                .extend_ref_and_sort(&sorted_trie_updates);
-                        }
-                    }
-                    overlay
                 }
-                // Case 2: Parent exists but anchor mismatch or no cached overlay.
-                // We must rebuild from the ancestors list (which only contains unpersisted blocks).
-                _ => Self::merge_ancestors_into_overlay(
-                    ancestors,
-                    &sorted_hashed_state,
-                    &sorted_trie_updates,
-                ),
+                #[cfg(not(feature = "rayon"))]
+                {
+                    if !sorted_hashed_state.is_empty() {
+                        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&sorted_hashed_state);
+                    }
+                    if !sorted_trie_updates.is_empty() {
+                        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&sorted_trie_updates);
+                    }
+                }
+                overlay
             }
-        } else {
-            // Case 3: No in-memory ancestors (first block after persisted anchor).
-            // Build overlay with just this block's data.
-            Self::merge_ancestors_into_overlay(&[], &sorted_hashed_state, &sorted_trie_updates)
+            // Case 2: Parent exists but anchor mismatch or no cached overlay.
+            // We must rebuild from the ancestors list (which only contains unpersisted blocks).
+            _ => Self::merge_ancestors_into_overlay(
+                ancestors,
+                sorted_hashed_state.as_ref(),
+                sorted_trie_updates.as_ref(),
+            ),
         };
 
         ComputedTrieData::with_trie_input(
-            Arc::new(sorted_hashed_state),
-            Arc::new(sorted_trie_updates),
+            sorted_hashed_state,
+            sorted_trie_updates,
             anchor_hash,
             Arc::new(overlay),
         )
@@ -283,15 +293,6 @@ impl DeferredTrieData {
         sorted_hashed_state: &HashedPostStateSorted,
         sorted_trie_updates: &TrieUpdatesSorted,
     ) -> TrieInputSorted {
-        // Early exit: no ancestors means just wrap current block's data
-        if ancestors.is_empty() {
-            return TrieInputSorted::new(
-                Arc::new(sorted_trie_updates.clone()),
-                Arc::new(sorted_hashed_state.clone()),
-                Default::default(),
-            );
-        }
-
         // Collect ancestor data in reverse (newest to oldest) for merge_slice
         let (states, updates): (Vec<_>, Vec<_>) = ancestors
             .iter()
@@ -327,6 +328,14 @@ impl DeferredTrieData {
         sorted_hashed_state: &HashedPostStateSorted,
         sorted_trie_updates: &TrieUpdatesSorted,
     ) -> TrieInputSorted {
+        if ancestors.is_empty() {
+            return TrieInputSorted::new(
+                Arc::new(sorted_trie_updates.clone()),
+                Arc::new(sorted_hashed_state.clone()),
+                Default::default(),
+            )
+        }
+
         let _span = debug_span!(target: "engine::tree::deferred_trie", "merge_ancestors", num_ancestors = ancestors.len()).entered();
         let mut overlay = TrieInputSorted::default();
 
@@ -508,6 +517,17 @@ mod tests {
         assert!(Arc::ptr_eq(&first.hashed_state, &second.hashed_state));
         assert!(Arc::ptr_eq(&first.trie_updates, &second.trie_updates));
         assert_eq!(first.anchor_hash(), second.anchor_hash());
+    }
+
+    #[test]
+    fn no_ancestor_overlay_reuses_sorted_arcs() {
+        let deferred = empty_pending();
+
+        let result = deferred.wait_cloned();
+        let overlay = result.anchored_trie_input.expect("overlay should be present");
+
+        assert!(Arc::ptr_eq(&result.hashed_state, &overlay.trie_input.state));
+        assert!(Arc::ptr_eq(&result.trie_updates, &overlay.trie_input.nodes));
     }
 
     /// Verifies that concurrent `wait_cloned` calls result in only one computation,
