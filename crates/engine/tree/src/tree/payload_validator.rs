@@ -1569,6 +1569,16 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> (Option<LazyOverlay<N>>, B256) {
+        if let Some(cached) = state.tree_state.get_cached_overlay_for_parent(parent_hash) {
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                anchor_hash = %cached.anchor_hash,
+                "Using cached canonical overlay"
+            );
+            return (Some(cached.overlay.clone()), cached.anchor_hash)
+        }
+
         // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));

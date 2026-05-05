@@ -152,6 +152,14 @@ impl<N: NodePrimitives> TreeState<N> {
         })
     }
 
+    /// Returns the cached overlay if it matches the requested parent hash.
+    pub fn get_cached_overlay_for_parent(
+        &self,
+        parent_hash: B256,
+    ) -> Option<&PreparedCanonicalOverlay<N>> {
+        self.cached_canonical_overlay.as_ref().filter(|cached| cached.parent_hash == parent_hash)
+    }
+
     /// Invalidates the cached overlay.
     ///
     /// Should be called when the anchor changes (e.g., after persistence).
