@@ -37,6 +37,14 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
+/// Packs a nibble path into the right-padded `B256` seek key used by hashed cursors.
+#[inline]
+fn packed_seek_key(path: &Nibbles) -> B256 {
+    let mut bytes = [0u8; 32];
+    path.pack_to(&mut bytes);
+    B256::from(bytes)
+}
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -712,7 +720,7 @@ where
                 "Seeking hashed cursor to meet lower bound",
             );
 
-            let lower_key = B256::right_padding_from(&lower_bound.pack());
+            let lower_key = packed_seek_key(&lower_bound);
             *hashed_cursor_current =
                 self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
         }
@@ -1819,6 +1827,25 @@ mod tests {
     use itertools::Itertools;
     use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn packed_seek_key_matches_right_padded_pack() {
+        for path in [
+            Nibbles::new(),
+            Nibbles::from_nibbles_unchecked([0x1]),
+            Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]),
+            Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xd]),
+            Nibbles::from_nibbles_unchecked([
+                0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb, 0xc, 0xd,
+                0xe, 0xf, 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb,
+                0xc, 0xd, 0xe, 0xf, 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9,
+                0xa, 0xb, 0xc, 0xd, 0xe, 0xf, 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
+                0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf,
+            ]),
+        ] {
+            assert_eq!(packed_seek_key(&path), B256::right_padding_from(&path.pack()));
+        }
+    }
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
