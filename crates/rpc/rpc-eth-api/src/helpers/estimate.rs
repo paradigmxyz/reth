@@ -320,13 +320,7 @@ pub trait EstimateCall: Call {
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
-                EstimateCall::estimate_gas_with(
-                    &this,
-                    evm_env,
-                    request,
-                    state,
-                    overrides,
-                )
+                EstimateCall::estimate_gas_with(&this, evm_env, request, state, overrides)
             })
             .await
         }
