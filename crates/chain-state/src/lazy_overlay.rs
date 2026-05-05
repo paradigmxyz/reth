@@ -104,10 +104,15 @@ impl<N: NodePrimitives> LazyOverlay<N> {
     /// The first call triggers computation (which may block waiting for deferred data).
     /// Subsequent calls for the same anchor return the cached result immediately.
     pub fn get(&self, anchor_hash: B256) -> Arc<TrieInputSorted> {
+        if let Some(input) = self.inner.get(&anchor_hash) {
+            return Arc::clone(input.value())
+        }
+
+        let input = self.compute(anchor_hash);
+
         match self.inner.entry(anchor_hash) {
             dashmap::Entry::Occupied(entry) => Arc::clone(entry.get()),
             dashmap::Entry::Vacant(entry) => {
-                let input = self.compute(anchor_hash);
                 entry.insert(Arc::clone(&input));
                 input
             }
