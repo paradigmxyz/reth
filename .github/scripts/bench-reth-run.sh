@@ -130,6 +130,14 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
+# Keep the engine in startup sync mode until the pipeline is idle. Older
+# baselines may not have this flag, so gate it on clap help output.
+SYNC_STATE_IDLE=false
+if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
+  RETH_ARGS+=(--debug.startup-sync-state-idle)
+  SYNC_STATE_IDLE=true
+fi
+
 # Append per-label extra node args (baseline or feature)
 EXTRA_NODE_ARGS=""
 case "$LABEL" in
@@ -211,6 +219,26 @@ for i in $(seq 1 60); do
   fi
   sleep 1
 done
+
+if [ "$SYNC_STATE_IDLE" = "true" ]; then
+  for i in $(seq 1 300); do
+    SYNC_RESULT=$(curl -sf http://127.0.0.1:8545 -X POST \
+      -H 'Content-Type: application/json' \
+      -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null || true)
+    if [ -n "$SYNC_RESULT" ] && jq -e '.result == false' <<< "$SYNC_RESULT" > /dev/null 2>&1; then
+      echo "reth (${LABEL}) pipeline finished after ${i}s, engine is live"
+      break
+    fi
+    if [ "$i" -eq 300 ]; then
+      echo "::error::reth (${LABEL}) pipeline did not finish within 300s"
+      cat "$LOG"
+      exit 1
+    fi
+    sleep 1
+  done
+else
+  echo "reth (${LABEL}) binary does not support --debug.startup-sync-state-idle, skipping sync wait"
+fi
 
 # Run reth-bench with high priority but as the current user so output
 # files are not root-owned (avoids EACCES on next checkout).
