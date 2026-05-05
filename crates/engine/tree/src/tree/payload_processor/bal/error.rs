@@ -52,10 +52,6 @@ impl core::fmt::Display for BalExecutionError {
 impl core::error::Error for BalExecutionError {}
 
 /// Reasons a block may be rejected on the BAL execution path.
-///
-/// These correspond to the validation stages described in `BAL.md`. Each stage maps to a specific
-/// variant; producing an instance short-circuits block validation and propagates as an invalid
-/// block error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RejectReason {
     /// The rebuilt BAL's hash disagrees with `header.block_access_list_hash` at end-of-block.
