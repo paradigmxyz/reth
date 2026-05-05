@@ -28,7 +28,7 @@ use alloy_primitives::B256;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
 use reth_primitives_traits::{BlockTy, SealedBlock};
 use reth_provider::ProviderError;
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_tasks::Runtime;
 use revm::{
     context::result::ResultAndState,
     database::{states::bundle_state::BundleRetention, BundleState, State},
@@ -135,31 +135,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         DB: Database + Send,
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
-        self.execute_block_in_pool(
-            self.runtime.bal_streaming_pool(),
-            make_db,
-            received_bal,
-            block,
-            txs,
-            header_bal_hash,
-        )
-    }
-
-    /// Executes one block on the BAL path using the provided worker pool.
-    pub fn execute_block_in_pool<Tx, DB, MakeDb>(
-        &self,
-        worker_pool: &WorkerPool,
-        make_db: MakeDb,
-        received_bal: Arc<DecodedBal>,
-        block: &SealedBlock<BlockTy<Evm::Primitives>>,
-        txs: Vec<Tx>,
-        header_bal_hash: B256,
-    ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
-    where
-        Tx: ExecutableTxFor<Evm> + Send,
-        DB: Database + Send,
-        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
-    {
+        let worker_pool = self.runtime.bal_streaming_pool();
         let bal = received_bal.as_bal();
         let block_gas_limit = block.header().gas_limit();
         check_item_count(bal, block_gas_limit)?;
