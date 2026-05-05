@@ -432,6 +432,13 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if PREWARM {
+            if let Some(account) = self.caches.0.account_cache.get(address) {
+                if let Some(stats) = &self.cache_stats {
+                    stats.record_account_hit();
+                }
+                return Ok(account)
+            }
+
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
@@ -472,6 +479,13 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if PREWARM {
+            if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
+                if let Some(stats) = &self.cache_stats {
+                    stats.record_storage_hit();
+                }
+                return Ok(Some(value).filter(|v| !v.is_zero()))
+            }
+
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
@@ -508,6 +522,13 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if PREWARM {
+            if let Some(code) = self.caches.0.code_cache.get(code_hash) {
+                if let Some(stats) = &self.cache_stats {
+                    stats.record_code_hit();
+                }
+                return Ok(code)
+            }
+
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
