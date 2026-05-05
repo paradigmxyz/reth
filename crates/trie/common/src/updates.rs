@@ -1,5 +1,5 @@
 use crate::{
-    utils::{extend_sorted_vec, kway_merge_sorted},
+    utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     BranchNodeCompact, HashBuilder, Nibbles,
 };
 use alloc::{
@@ -10,7 +10,6 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
-use itertools::Itertools;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -717,10 +716,10 @@ impl TrieUpdatesSorted {
     /// Account trie nodes are masked at the top level, while storage trie entries are only masked
     /// at the node level unless the mask deletes the entire storage trie. For duplicate keys in
     /// the batch, later items take precedence over earlier ones. The order of the mask does not
-    /// matter. Overlapping nodes are preserved when any masked value for a key is equivalent to
-    /// the merged batch value for that same key.
+    /// matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
-        let account_nodes = merge_masked_trie_nodes_preserving_ancestors(
+        let account_nodes = kway_merge_disjoint_sorted(
+            batch.iter().map(|item| item.account_nodes.len()).sum(),
             batch.iter().rev().map(|item| item.account_nodes.as_slice()),
             mask.iter().map(|item| item.account_nodes.as_slice()),
         );
@@ -728,6 +727,7 @@ impl TrieUpdatesSorted {
         struct StorageAcc<'a> {
             is_deleted: bool,
             sealed: bool,
+            node_count: usize,
             slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
         }
 
@@ -747,6 +747,7 @@ impl TrieUpdatesSorted {
                 let entry = storage_tries.entry(*hashed_address).or_insert_with(|| StorageAcc {
                     is_deleted: false,
                     sealed: false,
+                    node_count: 0,
                     slices: Vec::new(),
                 });
 
@@ -755,6 +756,7 @@ impl TrieUpdatesSorted {
                 }
 
                 entry.slices.push(storage_trie.storage_nodes.as_slice());
+                entry.node_count += storage_trie.storage_nodes.len();
                 if storage_trie.is_deleted {
                     entry.is_deleted = true;
                     entry.sealed = true;
@@ -786,7 +788,8 @@ impl TrieUpdatesSorted {
             .filter_map(|(hashed_address, entry)| {
                 let storage_nodes = match storage_masks.get(&hashed_address) {
                     Some(mask_entry) if mask_entry.is_deleted => return None,
-                    Some(mask_entry) => merge_masked_trie_nodes_preserving_ancestors(
+                    Some(mask_entry) => kway_merge_disjoint_sorted(
+                        entry.node_count,
                         entry.slices,
                         mask_entry.slices.iter().copied(),
                     ),
@@ -802,60 +805,6 @@ impl TrieUpdatesSorted {
 
         Self::new(account_nodes, storage_tries)
     }
-}
-
-fn merge_masked_trie_nodes_preserving_ancestors<'a>(
-    batch_slices: impl IntoIterator<Item = &'a [(Nibbles, Option<BranchNodeCompact>)]>,
-    mask_slices: impl IntoIterator<Item = &'a [(Nibbles, Option<BranchNodeCompact>)]>,
-) -> Vec<(Nibbles, Option<BranchNodeCompact>)> {
-    let merged_batch_nodes = kway_merge_sorted(batch_slices);
-    let merged_masked_nodes = mask_slices
-        .into_iter()
-        .filter(|slice| !slice.is_empty())
-        .map(|slice| slice.iter())
-        .kmerge_by(|(left_key, _), (right_key, _)| left_key < right_key)
-        .collect::<Vec<_>>();
-    let mut masked_node_index = 0;
-    let directly_kept_node_keys = merged_batch_nodes
-        .iter()
-        .filter_map(|(key, batch_value)| {
-            while let Some((masked_key, _)) = merged_masked_nodes.get(masked_node_index).copied() {
-                if masked_key < key {
-                    masked_node_index += 1;
-                    continue;
-                }
-
-                if masked_key > key {
-                    return Some(key.clone())
-                }
-
-                let mut has_equivalent_value = false;
-                while let Some((masked_key, masked_value)) =
-                    merged_masked_nodes.get(masked_node_index).copied()
-                {
-                    if masked_key != key {
-                        break;
-                    }
-                    has_equivalent_value |= masked_value == batch_value;
-                    masked_node_index += 1;
-                }
-
-                return has_equivalent_value.then(|| key.clone())
-            }
-
-            Some(key.clone())
-        })
-        .collect::<Vec<_>>();
-
-    merged_batch_nodes
-        .into_iter()
-        .filter(|(key, _)| {
-            directly_kept_node_keys.binary_search(key).is_ok() ||
-                directly_kept_node_keys
-                    .get(directly_kept_node_keys.partition_point(|candidate| candidate <= key))
-                    .is_some_and(|candidate| candidate.starts_with(key))
-        })
-        .collect()
 }
 
 impl AsRef<Self> for TrieUpdatesSorted {
@@ -1242,84 +1191,57 @@ mod tests {
     }
 
     #[test]
-    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_equivalent_overlapping_nodes() {
-        fn branch(mask: u16) -> BranchNodeCompact {
-            BranchNodeCompact::new(mask, 0, 0, vec![], None)
-        }
-
-        let overlapping_node = Nibbles::from_nibbles_unchecked([0x03]);
-        let overlapping_storage = B256::from([5; 32]);
-        let slot = Nibbles::from_nibbles_unchecked([0x0c]);
-        let node = branch(0b1010_0101);
-        let storage_node = branch(0b0011_1100);
+    fn test_trie_updates_sorted_disjointed_merge_batch_uses_exact_key_masking() {
+        let hashed_address = B256::from([7; 32]);
+        let grandparent = Nibbles::from_nibbles_unchecked([0x05]);
+        let parent = Nibbles::from_nibbles_unchecked([0x05, 0x04]);
+        let child = Nibbles::from_nibbles_unchecked([0x05, 0x04, 0x03]);
 
         let batch = TrieUpdatesSorted::new(
-            vec![(overlapping_node, Some(node.clone()))],
+            vec![
+                (grandparent, Some(BranchNodeCompact::default())),
+                (parent, Some(BranchNodeCompact::default())),
+                (child, Some(BranchNodeCompact::default())),
+            ],
             B256Map::from_iter([(
-                overlapping_storage,
+                hashed_address,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(slot, Some(storage_node.clone()))],
+                    storage_nodes: vec![
+                        (grandparent, Some(BranchNodeCompact::default())),
+                        (parent, Some(BranchNodeCompact::default())),
+                        (child, Some(BranchNodeCompact::default())),
+                    ],
                 },
             )]),
         );
-
         let mask = TrieUpdatesSorted::new(
-            vec![(overlapping_node, Some(node.clone()))],
+            vec![
+                (grandparent, Some(BranchNodeCompact::default())),
+                (parent, Some(BranchNodeCompact::default())),
+            ],
             B256Map::from_iter([(
-                overlapping_storage,
+                hashed_address,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(slot, Some(storage_node.clone()))],
+                    storage_nodes: vec![
+                        (grandparent, Some(BranchNodeCompact::default())),
+                        (parent, Some(BranchNodeCompact::default())),
+                    ],
                 },
             )]),
         );
 
         let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
 
-        assert_eq!(result.account_nodes, vec![(overlapping_node, Some(node))]);
+        assert_eq!(result.account_nodes, vec![(child, Some(BranchNodeCompact::default()))]);
         assert_eq!(
-            result.storage_tries.get(&overlapping_storage),
+            result.storage_tries.get(&hashed_address),
             Some(&StorageTrieUpdatesSorted {
                 is_deleted: false,
-                storage_nodes: vec![(slot, Some(storage_node))],
+                storage_nodes: vec![(child, Some(BranchNodeCompact::default()))],
             })
         );
-    }
-
-    #[test]
-    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_node_if_any_masked_value_matches() {
-        fn branch(mask: u16) -> BranchNodeCompact {
-            BranchNodeCompact::new(mask, 0, 0, vec![], None)
-        }
-
-        let overlapping_node = Nibbles::from_nibbles_unchecked([0x04]);
-        let node = branch(0b1010_0101);
-
-        let batch = TrieUpdatesSorted::new(
-            vec![(overlapping_node, Some(node.clone()))],
-            B256Map::default(),
-        );
-        let equivalent_mask = TrieUpdatesSorted::new(
-            vec![(overlapping_node, Some(node.clone()))],
-            B256Map::default(),
-        );
-        let different_mask = TrieUpdatesSorted::new(
-            vec![(overlapping_node, Some(branch(0b0101_1010)))],
-            B256Map::default(),
-        );
-
-        let result = TrieUpdatesSorted::disjointed_merge_batch(
-            vec![&batch],
-            vec![&different_mask, &equivalent_mask],
-        );
-        let reversed = TrieUpdatesSorted::disjointed_merge_batch(
-            vec![&batch],
-            vec![&equivalent_mask, &different_mask],
-        );
-
-        assert_eq!(result.account_nodes, vec![(overlapping_node, Some(node.clone()))]);
-        assert_eq!(reversed.account_nodes, vec![(overlapping_node, Some(node))]);
     }
 
     #[test]
@@ -1352,91 +1274,6 @@ mod tests {
             Some(&StorageTrieUpdatesSorted {
                 is_deleted: false,
                 storage_nodes: vec![(slot, Some(BranchNodeCompact::default()))],
-            })
-        );
-    }
-
-    #[test]
-    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_masked_ancestors_of_unmasked_nodes() {
-        let grandparent = Nibbles::from_nibbles_unchecked([0x05]);
-        let parent = Nibbles::from_nibbles_unchecked([0x05, 0x04]);
-        let child = Nibbles::from_nibbles_unchecked([0x05, 0x04, 0x03]);
-
-        let batch = TrieUpdatesSorted::new(
-            vec![
-                (grandparent, Some(BranchNodeCompact::default())),
-                (parent, Some(BranchNodeCompact::default())),
-                (child, Some(BranchNodeCompact::default())),
-            ],
-            B256Map::default(),
-        );
-        let mask = TrieUpdatesSorted::new(
-            vec![
-                (grandparent, Some(BranchNodeCompact::default())),
-                (parent, Some(BranchNodeCompact::default())),
-            ],
-            B256Map::default(),
-        );
-
-        let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
-
-        assert_eq!(
-            result.account_nodes,
-            vec![
-                (grandparent, Some(BranchNodeCompact::default())),
-                (parent, Some(BranchNodeCompact::default())),
-                (child, Some(BranchNodeCompact::default())),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_trie_updates_sorted_disjointed_merge_batch_keeps_masked_storage_ancestors_of_unmasked_nodes(
-    ) {
-        let hashed_address = B256::from([7; 32]);
-        let grandparent = Nibbles::from_nibbles_unchecked([0x05]);
-        let parent = Nibbles::from_nibbles_unchecked([0x05, 0x04]);
-        let child = Nibbles::from_nibbles_unchecked([0x05, 0x04, 0x03]);
-
-        let batch = TrieUpdatesSorted::new(
-            vec![],
-            B256Map::from_iter([(
-                hashed_address,
-                StorageTrieUpdatesSorted {
-                    is_deleted: false,
-                    storage_nodes: vec![
-                        (grandparent, Some(BranchNodeCompact::default())),
-                        (parent, Some(BranchNodeCompact::default())),
-                        (child, Some(BranchNodeCompact::default())),
-                    ],
-                },
-            )]),
-        );
-        let mask = TrieUpdatesSorted::new(
-            vec![],
-            B256Map::from_iter([(
-                hashed_address,
-                StorageTrieUpdatesSorted {
-                    is_deleted: false,
-                    storage_nodes: vec![
-                        (grandparent, Some(BranchNodeCompact::default())),
-                        (parent, Some(BranchNodeCompact::default())),
-                    ],
-                },
-            )]),
-        );
-
-        let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
-
-        assert_eq!(
-            result.storage_tries.get(&hashed_address),
-            Some(&StorageTrieUpdatesSorted {
-                is_deleted: false,
-                storage_nodes: vec![
-                    (grandparent, Some(BranchNodeCompact::default())),
-                    (parent, Some(BranchNodeCompact::default())),
-                    (child, Some(BranchNodeCompact::default())),
-                ],
             })
         );
     }
