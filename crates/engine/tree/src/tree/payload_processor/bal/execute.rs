@@ -2,9 +2,9 @@
 //!
 //! Read `execute_block` as two execution paths over the same parent state.
 //!
-//! Worker states run transactions speculatively. Each worker gets a fresh database from
-//! `make_db`, installs the received BAL, sets its transaction BAL index, and returns an
-//! uncommitted transaction result.
+//! Worker states run transactions speculatively. Each worker gets one fresh database from
+//! `make_db`, installs the received BAL, sets the transaction BAL index for each streamed
+//! transaction, and returns uncommitted transaction results.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
@@ -14,14 +14,19 @@
 //! validator still handles consensus checks, receipt-root validation, state-root work, and block
 //! insertion.
 
-use super::{debug, BalExecutionError, RejectReason};
-use alloy_consensus::{BlockHeader, Transaction};
+use super::{
+    debug,
+    worker::{self, BalWorkerOutput},
+    BalExecutionError, RejectReason,
+};
+use alloy_consensus::BlockHeader;
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
+use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
 use reth_primitives_traits::{BlockTy, ReceiptTy, SealedBlock};
 use reth_tasks::Runtime;
@@ -31,10 +36,9 @@ use revm::{
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
 use revm_state::bal::Bal;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
+
+use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
 /// Output of a successful BAL-path block execution.
 #[expect(missing_debug_implementations)]
@@ -52,22 +56,64 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
 }
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
-pub fn execute_block<Evm, Tx, DB, MakeDb>(
+pub fn execute_block<Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
     evm_config: Evm,
     make_db: MakeDb,
     received_bal: Arc<DecodedBal>,
     block: &SealedBlock<BlockTy<Evm::Primitives>>,
-    txs: Vec<Tx>,
+    transaction_count: usize,
+    txs: Receiver<(usize, Result<Tx, Err>)>,
+    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     header_bal_hash: B256,
-) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
+) -> Result<(BalExecutionOutput<Evm>, Vec<Address>), BalExecutionError>
 where
     Evm: ConfigureEvm,
     Tx: ExecutableTxFor<Evm> + Send,
+    Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send,
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+    ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
+    let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
+
+    worker_pool.in_place_scope(|scope| {
+        execute_block_inner(
+            scope,
+            evm_config,
+            &make_db,
+            received_bal,
+            block,
+            transaction_count,
+            txs,
+            receipt_tx,
+            header_bal_hash,
+            worker_count,
+        )
+    })
+}
+
+fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
+    scope: &rayon::Scope<'scope>,
+    evm_config: Evm,
+    make_db: &'scope MakeDb,
+    received_bal: Arc<DecodedBal>,
+    block: &'scope SealedBlock<BlockTy<Evm::Primitives>>,
+    transaction_count: usize,
+    txs: Receiver<(usize, Result<Tx, Err>)>,
+    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    header_bal_hash: B256,
+    worker_count: usize,
+) -> Result<(BalExecutionOutput<Evm>, Vec<Address>), BalExecutionError>
+where
+    Evm: ConfigureEvm + 'scope,
+    Tx: ExecutableTxFor<Evm> + Send + 'scope,
+    Err: core::error::Error + Send + Sync + 'static,
+    DB: Database + Send + 'scope,
+    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
+    ReceiptTy<Evm::Primitives>: Clone,
+{
     let bal = received_bal.as_bal();
     let received_bal_revm: Arc<Bal> = Arc::new(
         Bal::try_from(Vec::<_>::from(bal.clone()))
@@ -86,7 +132,6 @@ where
         .into()
         .is_enabled_in(SpecId::AMSTERDAM);
     let block_gas_limit = block.header().gas_limit();
-    let tx_gas_limits: Vec<_> = txs.iter().map(|tx| tx.tx().gas_limit()).collect();
 
     // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
     // (called by `commit_transaction`) panics at revm-database's
@@ -101,67 +146,44 @@ where
             .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
     }
 
-    let block_result = {
+    let (block_result, senders) = {
         let worker_evm_config = evm_config.clone();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (abort_guard, abort_rx) = AbortGuard::new();
+
+        for _ in 0..worker_count {
+            worker::spawn_worker(
+                scope,
+                txs.clone(),
+                abort_rx.clone(),
+                result_tx.clone(),
+                worker_evm_config.clone(),
+                make_db,
+                Arc::clone(&received_bal_revm),
+                block,
+            );
+        }
+        drop(result_tx);
+
+        let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
         let mut canonical_executor = evm_config
             .executor_for_block(&mut canonical_state, block)
             .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
 
         canonical_executor.apply_pre_execution_changes()?;
-
-        let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
-        let abort = Arc::new(AtomicBool::new(false));
-        let tx_count = txs.len() as u64;
-        let make_db = &make_db;
-
-        worker_pool.in_place_scope(|scope| -> Result<(), BalExecutionError> {
-            let mut result_rxs = Vec::with_capacity(tx_count as usize);
-
-            for (i, tx) in txs.into_iter().enumerate() {
-                let tx_index = i as u64 + 1;
-                let abort = Arc::clone(&abort);
-                let received_bal_revm = Arc::clone(&received_bal_revm);
-                let evm_config = worker_evm_config.clone();
-                let result_rx = spawn_worker(scope, abort, move || {
-                    let mut worker_state = State::builder()
-                        .with_database(make_db()?)
-                        .with_bal(received_bal_revm)
-                        .with_bundle_update()
-                        .build();
-                    worker_state.set_bal_index(tx_index);
-
-                    evm_config
-                        .executor_for_block(&mut worker_state, block)
-                        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
-                        .execute_transaction_without_commit(tx)
-                        .map_err(BalExecutionError::Evm)
-                });
-                result_rxs.push(result_rx);
-            }
-            for (i, result_rx) in result_rxs.into_iter().enumerate() {
-                let worker_result = result_rx.recv().map_err(|_| {
-                    BalExecutionError::Evm(BlockExecutionError::msg(
-                        "BAL worker result channel closed before result arrived",
-                    ))
-                })?;
-                let worker_result = match worker_result {
-                    Ok(worker_result) => worker_result,
-                    Err(err) => {
-                        abort.store(true, Ordering::Relaxed);
-                        return Err(err);
-                    }
-                };
-                gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
-                gas_tracker.record_result(worker_result.result());
-                canonical_executor.evm_mut().db_mut().bump_bal_index();
-                commit_worker_result(&mut canonical_executor, worker_result);
-            }
-
-            Ok(())
-        })?;
+        let senders = commit_ordered_worker_outputs(
+            &result_rx,
+            transaction_count,
+            &mut canonical_executor,
+            &mut gas_tracker,
+            &receipt_tx,
+        );
+        drop(abort_guard);
+        let senders = senders?;
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
-        canonical_executor.apply_post_execution_changes()?
+        let block_result = canonical_executor.apply_post_execution_changes()?;
+        (block_result, senders)
     };
 
     let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
@@ -187,13 +209,28 @@ where
     }
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
-    Ok(BalExecutionOutput {
-        bundle_state: canonical_state.take_bundle(),
-        receipts: block_result.receipts,
-        gas_used: block_result.gas_used,
-        blob_gas_used: block_result.blob_gas_used,
-        requests: block_result.requests,
-    })
+    Ok((
+        BalExecutionOutput {
+            bundle_state: canonical_state.take_bundle(),
+            receipts: block_result.receipts,
+            gas_used: block_result.gas_used,
+            blob_gas_used: block_result.blob_gas_used,
+            requests: block_result.requests,
+        },
+        senders,
+    ))
+}
+
+/// Closes the abort channel on drop, waking scoped workers before the scope exits.
+struct AbortGuard {
+    _tx: Sender<()>,
+}
+
+impl AbortGuard {
+    fn new() -> (Self, Receiver<()>) {
+        let (tx, rx) = crossbeam_channel::bounded(0);
+        (Self { _tx: tx }, rx)
+    }
 }
 
 /// Mirrors `EthBlockExecutor`'s cumulative gas admission check in the ordered BAL commit loop.
@@ -238,34 +275,74 @@ impl BlockGasTracker {
     }
 }
 
-fn spawn_worker<'scope, R, F>(
-    scope: &rayon::Scope<'scope>,
-    abort: Arc<AtomicBool>,
-    run: F,
-) -> crossbeam_channel::Receiver<Result<R, BalExecutionError>>
+fn commit_ordered_worker_outputs<'a, E, DB>(
+    result_rx: &Receiver<Result<BalWorkerOutput<E::Result>, BalExecutionError>>,
+    transaction_count: usize,
+    canonical_executor: &mut E,
+    gas_tracker: &mut BlockGasTracker,
+    receipt_tx: &Sender<IndexedReceipt<E::Receipt>>,
+) -> Result<Vec<Address>, BalExecutionError>
 where
-    R: Send + 'scope,
-    F: FnOnce() -> Result<R, BalExecutionError> + Send + 'scope,
+    E: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+    E::Receipt: Clone,
+    DB: Database + 'a,
 {
-    let (result_tx, result_rx) = crossbeam_channel::bounded(1);
+    let mut pending = (0..transaction_count).map(|_| None).collect::<Vec<_>>();
+    let mut next_commit = 0usize;
+    let mut senders = Vec::with_capacity(transaction_count);
 
-    scope.spawn(move |_| {
-        if abort.load(Ordering::Relaxed) {
-            return;
+    while next_commit < transaction_count {
+        let output = result_rx.recv().map_err(|_| {
+            BalExecutionError::Evm(BlockExecutionError::msg(
+                "BAL worker result channel closed before all results arrived",
+            ))
+        })??;
+
+        let index = output.index;
+        if index >= transaction_count {
+            return Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                "BAL worker returned out-of-bounds transaction index",
+            )));
         }
+        if pending[index].is_some() {
+            return Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                "BAL worker returned duplicate transaction index",
+            )));
+        }
+        pending[index] = Some(output);
 
-        let _ = result_tx.send(run());
-    });
+        loop {
+            if next_commit >= transaction_count {
+                break;
+            }
+            let Some(output) = pending[next_commit].take() else {
+                break;
+            };
 
-    result_rx
+            gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
+            gas_tracker.record_result(output.result.result());
+            canonical_executor.evm_mut().db_mut().bump_bal_index();
+
+            let previous_receipts_len = canonical_executor.receipts().len();
+            canonical_executor.commit_transaction(output.result);
+            senders.push(output.signer);
+
+            let receipts = canonical_executor.receipts();
+            if receipts.len() > previous_receipts_len {
+                if let Some(receipt) = receipts.last() {
+                    let _ =
+                        receipt_tx.send(IndexedReceipt::new(receipts.len() - 1, receipt.clone()));
+                }
+            }
+
+            next_commit += 1;
+        }
+    }
+
+    Ok(senders)
 }
 
-fn commit_worker_result<E>(executor: &mut E, worker_result: E::Result)
-where
-    E: BlockExecutor,
-{
-    let _ = executor.commit_transaction(worker_result);
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -286,6 +363,7 @@ mod tests {
         database::{CacheDB, EmptyDB},
         state::{AccountInfo, Bytecode},
     };
+    use std::convert::Infallible;
 
     /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
     fn to_arc_decoded(bal: BlockAccessList) -> Arc<DecodedBal> {
@@ -405,7 +483,7 @@ mod tests {
 
         let block = empty_amsterdam_block(bal_hash);
 
-        let result = execute_block(
+        let result = run_execute_block(
             &Runtime::test(),
             evm_config,
             db_factory(system_contracts_db()),
@@ -427,6 +505,44 @@ mod tests {
         db: CacheDB<EmptyDB>,
     ) -> impl Fn() -> Result<CacheDB<EmptyDB>, BalExecutionError> + Sync {
         move || Ok(db.clone())
+    }
+
+    fn tx_stream<Tx>(txs: Vec<Tx>) -> Receiver<(usize, Result<Tx, Infallible>)> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (index, transaction) in txs.into_iter().enumerate() {
+            tx.send((index, Ok(transaction))).unwrap();
+        }
+        rx
+    }
+
+    fn run_execute_block<Tx, DB, MakeDb>(
+        runtime: &Runtime,
+        evm_config: EthEvmConfig,
+        make_db: MakeDb,
+        received_bal: Arc<DecodedBal>,
+        block: &SealedBlock<Block>,
+        txs: Vec<Tx>,
+        bal_hash: B256,
+    ) -> Result<BalExecutionOutput<EthEvmConfig>, BalExecutionError>
+    where
+        Tx: ExecutableTxFor<EthEvmConfig> + Send,
+        DB: Database + Send,
+        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+    {
+        let transaction_count = txs.len();
+        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        execute_block(
+            runtime,
+            evm_config,
+            make_db,
+            received_bal,
+            block,
+            transaction_count,
+            tx_stream(txs),
+            receipt_tx,
+            bal_hash,
+        )
+        .map(|(output, _)| output)
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
@@ -570,7 +686,7 @@ mod tests {
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash);
 
-        let result = execute_block(
+        let result = run_execute_block(
             &Runtime::test(),
             evm_config,
             db_factory(pre_block_db),
@@ -667,7 +783,7 @@ mod tests {
         let block =
             empty_amsterdam_block_with_gas_limit(bal_hash, block_header_only.header().gas_limit());
 
-        let bal_out = execute_block(
+        let bal_out = run_execute_block(
             &Runtime::test(),
             evm_config,
             db_factory(canonical_db_template),
@@ -814,7 +930,7 @@ mod tests {
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, block_gas_limit);
 
-        let result = execute_block(
+        let result = run_execute_block(
             &Runtime::test(),
             evm_config,
             db_factory(pre_block_db),
