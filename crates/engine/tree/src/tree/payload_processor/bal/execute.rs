@@ -14,7 +14,7 @@
 //! Check E (per-tx fragment compare) is skipped — check F is authoritative, and a
 //! lightweight fragment compare isn't yet designed.
 
-use super::{BalExecutionError, RejectReason};
+use super::{debug, BalExecutionError, RejectReason};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
@@ -37,9 +37,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-
-mod debug;
-
 /// Alias for the canonical receipt type produced by a given `ConfigureEvm`. Factory-level
 /// associated type — DB-independent.
 pub type ReceiptFor<Evm> =

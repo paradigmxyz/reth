@@ -1,3 +1,5 @@
+//! BAL divergence diagnostics.
+
 use alloy_eip7928::AccountChanges;
 use alloy_primitives::Address;
 
