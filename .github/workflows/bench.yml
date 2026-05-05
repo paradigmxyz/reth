@@ -345,7 +345,6 @@ jobs:
             const fallbackReasons = [];
             if (bigBlocks === 'true') fallbackReasons.push('big-blocks');
             if (bal !== 'false') fallbackReasons.push('BAL');
-            if (waitTime) fallbackReasons.push('wait-time');
             const driver = fallbackReasons.length ? 'reth-bench' : 'txgen';
             const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
             const driverReason = fallbackReasons.join(',');
@@ -556,7 +555,6 @@ jobs:
     timeout-minutes: 120
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
-      BENCH_TXGEN_RPC_URL: https://eth.llamarpc.com
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
@@ -580,7 +578,7 @@ jobs:
       BENCH_DRIVER_REASON: ${{ needs.reth-bench-ack.outputs.driver-reason }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      TXGEN_REV: 420cad10ad2d1ffa10d5708a892a910e101d7811
+      TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
     steps:

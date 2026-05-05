@@ -7,10 +7,10 @@
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
-# Optional env: BENCH_WORK_DIR, BENCH_BASELINE_ARGS, BENCH_FEATURE_ARGS,
-#               BENCH_OTLP_TRACES_ENDPOINT, BENCH_OTLP_LOGS_ENDPOINT,
-#               BENCH_OTLP_DISABLED, BENCH_TRACY, BENCH_TRACY_FILTER,
-#               BENCH_TRACY_SAMPLING_HZ
+# Optional env: BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
+#               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
+#               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
+#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ
 set -euxo pipefail
 
 LABEL="$1"
@@ -26,10 +26,6 @@ RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 # the top so new txgen support can be added one feature at a time.
 if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
   echo "::error::txgen driver does not support big-block benchmarks yet; use the reth-bench driver"
-  exit 1
-fi
-if [ -n "${BENCH_WAIT_TIME:-}" ]; then
-  echo "::error::txgen driver does not support BENCH_WAIT_TIME yet"
   exit 1
 fi
 if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
@@ -222,6 +218,10 @@ fi
 TXGEN_ETHEREUM="$(which txgen-ethereum)"
 TXGEN_BENCH="$(which bench)"
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
+TXGEN_SEND_ARGS=()
+if [ -n "${BENCH_WAIT_TIME:-}" ]; then
+  TXGEN_SEND_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+fi
 
 HEAD_JSON=$(curl -sf http://127.0.0.1:8545 -X POST \
   -H 'Content-Type: application/json' \
@@ -245,10 +245,9 @@ BENCHMARK_BLOCKS="$TXGEN_DIR/benchmark-blocks.ndjson"
 
 EXTRACT_FROM=$(( HEAD_DEC + 1 ))
 EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
-SOURCE_RPC_URL="${BENCH_TXGEN_RPC_URL:-$BENCH_RPC_URL}"
 echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
 "$TXGEN_ETHEREUM" extract \
-  --rpc "$SOURCE_RPC_URL" \
+  --rpc "$BENCH_RPC_URL" \
   --from "$EXTRACT_FROM" \
   --to "$EXTRACT_TO" \
   -o "$ALL_BLOCKS"
@@ -266,6 +265,7 @@ if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
     --engine http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
     --input "$WARMUP_BLOCKS" \
+    "${TXGEN_SEND_ARGS[@]}" \
     --wait-for-persistence never \
     --report json:"$TXGEN_DIR/warmup-report.json" 2>&1 | sed -u "s/^/[bench] /"
 else
@@ -279,7 +279,6 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   sleep 0.5
 fi
 
-# TODO(txgen): expose a wait-time flag and plumb BENCH_WAIT_TIME here.
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
 # TODO(txgen): support reth-bb payload/env-switch/BAL replay so big-blocks can move here.
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
@@ -287,6 +286,7 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --engine http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
   --input "$BENCHMARK_BLOCKS" \
+  "${TXGEN_SEND_ARGS[@]}" \
   --wait-for-persistence never \
   --report json:"$OUTPUT_DIR/report.json" 2>&1 | sed -u "s/^/[bench] /"
 
