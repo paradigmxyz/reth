@@ -1202,6 +1202,9 @@ jobs:
           if [ -n "${BENCH_DRIVER:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --driver $BENCH_DRIVER"
           fi
+          if [ -n "${BENCH_DRIVER_REASON:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --driver-reason $BENCH_DRIVER_REASON"
+          fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
