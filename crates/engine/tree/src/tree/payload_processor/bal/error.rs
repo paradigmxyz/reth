@@ -58,15 +58,6 @@ impl core::error::Error for BalExecutionError {}
 /// block error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RejectReason {
-    /// BAL fails the structural item-count gate:
-    /// `(addresses + unique_storage_keys) * ITEM_COST > block_gas_limit`.
-    ItemCountExceedsGasBudget {
-        /// Count of addresses + unique storage keys.
-        bal_items: u64,
-        /// Block gas limit in gas units.
-        gas_limit: u64,
-    },
-
     /// The rebuilt BAL's hash disagrees with `header.block_access_list_hash` at end-of-block.
     /// Catches over-declared addresses and any divergence the per-tx fragment compares missed.
     FinalHashMismatch {

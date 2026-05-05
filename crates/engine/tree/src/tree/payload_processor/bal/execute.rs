@@ -8,14 +8,13 @@
 //!
 //! ### Checks performed
 //!
-//! - **B (item-count gate)**: `check_item_count(received_bal, block_gas_limit)` at entry.
 //! - **F (final hash)**: rebuilt composed BAL hashed against the header's commitment after
 //!   post-execution.
 //!
 //! Check E (per-tx fragment compare) is skipped — check F is authoritative, and a
 //! lightweight fragment compare isn't yet designed.
 
-use super::{validation::check_item_count, BalExecutionError, RejectReason};
+use super::{BalExecutionError, RejectReason};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
@@ -91,9 +90,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
     {
         let worker_pool = self.runtime.bal_streaming_pool();
         let bal = received_bal.as_bal();
-        let block_gas_limit = block.header().gas_limit();
-        check_item_count(bal, block_gas_limit)?;
-
         let received_bal_revm: Arc<Bal> = Arc::new(
             Bal::try_from(Vec::<_>::from(bal.clone()))
                 .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
@@ -114,6 +110,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             .spec
             .into()
             .is_enabled_in(SpecId::AMSTERDAM);
+        let block_gas_limit = block.header().gas_limit();
         let tx_gas_limits: Vec<_> = txs.iter().map(|tx| tx.tx().gas_limit()).collect();
 
         // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
@@ -392,40 +389,6 @@ mod tests {
             },
         };
         block.seal_slow()
-    }
-
-    #[test]
-    fn rejects_item_count_exceeding_gas_budget() {
-        // Check B: (addrs + unique_slots) * 2000 must be <= gas_limit.
-        use alloy_eip7928::AccountChanges;
-
-        let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
-
-        // 10 accounts × 2000 gas = 20,000. We set the limit to 10,000 → reject.
-        let received_bal: BlockAccessList = (0u8..10)
-            .map(|i| {
-                let mut addr_bytes = [0u8; 20];
-                addr_bytes[19] = i;
-                AccountChanges { address: addr_bytes.into(), ..Default::default() }
-            })
-            .collect();
-
-        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
-        let block = empty_amsterdam_block_with_gas_limit(bal_hash, 10_000);
-
-        let result = executor.execute_block(
-            db_factory(CacheDB::<EmptyDB>::default()),
-            to_arc_decoded(received_bal),
-            &block,
-            Vec::<Recovered<TransactionSigned>>::new(),
-            bal_hash,
-        );
-
-        match result {
-            Err(BalExecutionError::Reject(RejectReason::ItemCountExceedsGasBudget { .. })) => {}
-            Err(e) => panic!("expected ItemCountExceedsGasBudget, got error {e:?}"),
-            Ok(_) => panic!("expected ItemCountExceedsGasBudget, got Ok"),
-        }
     }
 
     /// Runs only the canonical phases (pre-exec → post-exec, no txs) against a fresh
