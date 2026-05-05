@@ -60,6 +60,10 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// The last finalized block number durably written by this service.
+    persisted_finalized_block: Option<u64>,
+    /// The last safe block number durably written by this service.
+    persisted_safe_block: Option<u64>,
 }
 
 impl<N> PersistenceService<N>
@@ -81,6 +85,8 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            persisted_finalized_block: None,
+            persisted_safe_block: None,
         }
     }
 }
@@ -117,10 +123,18 @@ where
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
+                    queue_pending_chain_state_update(
+                        &mut self.pending_finalized_block,
+                        self.persisted_finalized_block,
+                        finalized_block,
+                    );
                 }
                 PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
+                    queue_pending_chain_state_update(
+                        &mut self.pending_safe_block,
+                        self.persisted_safe_block,
+                        safe_block,
+                    );
                 }
             }
         }
@@ -129,7 +143,7 @@ where
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
-        &self,
+        &mut self,
         new_tip_num: u64,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
@@ -139,6 +153,11 @@ where
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
+
+        // Reorgs can move the persisted safe/finalized markers, so drop the in-memory dedupe
+        // state and let the next update refresh it from the authoritative engine messages.
+        self.persisted_finalized_block = None;
+        self.persisted_safe_block = None;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -166,13 +185,21 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
+                let persisted_finalized = finalized.min(last.number);
+                if self.persisted_finalized_block != Some(persisted_finalized) {
+                    provider_rw.save_finalized_block_number(persisted_finalized)?;
+                    self.persisted_finalized_block = Some(persisted_finalized);
+                }
                 if finalized > last.number {
                     self.pending_finalized_block = Some(finalized);
                 }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last.number))?;
+                let persisted_safe = safe.min(last.number);
+                if self.persisted_safe_block != Some(persisted_safe) {
+                    provider_rw.save_safe_block_number(persisted_safe)?;
+                    self.persisted_safe_block = Some(persisted_safe);
+                }
                 if safe > last.number {
                     self.pending_safe_block = Some(safe);
                 }
@@ -203,6 +230,16 @@ where
         }
 
         Ok(())
+    }
+}
+
+fn queue_pending_chain_state_update(
+    pending: &mut Option<u64>,
+    persisted: Option<u64>,
+    block_number: u64,
+) {
+    if *pending != Some(block_number) && persisted != Some(block_number) {
+        *pending = Some(block_number);
     }
 }
 
@@ -399,6 +436,31 @@ mod tests {
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+    }
+
+    #[test]
+    fn queue_pending_chain_state_update_skips_duplicates() {
+        let mut pending = None;
+
+        queue_pending_chain_state_update(&mut pending, None, 42);
+        assert_eq!(pending, Some(42));
+
+        queue_pending_chain_state_update(&mut pending, Some(42), 42);
+        assert_eq!(pending, Some(42));
+
+        queue_pending_chain_state_update(&mut pending, Some(42), 43);
+        assert_eq!(pending, Some(43));
+    }
+
+    #[test]
+    fn queue_pending_chain_state_update_ignores_already_persisted_values() {
+        let mut pending = None;
+
+        queue_pending_chain_state_update(&mut pending, Some(99), 99);
+        assert_eq!(pending, None);
+
+        queue_pending_chain_state_update(&mut pending, Some(99), 100);
+        assert_eq!(pending, Some(100));
     }
 
     #[test]
