@@ -44,7 +44,7 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
-    updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    updates: CrossbeamReceiver<HashedStateMessage>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -168,7 +168,7 @@ where
     /// `HashedPostState` in parallel.
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
-        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        hashed_state_tx: CrossbeamSender<HashedStateMessage>,
         metrics: MultiProofTaskMetrics,
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -179,22 +179,20 @@ where
 
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
-                    SparseTrieTaskMessage::PrefetchProofs(targets)
+                    HashedStateMessage::PrefetchProofs(targets)
                 }
                 StateRootMessage::StateUpdate(_, state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
-                    SparseTrieTaskMessage::HashedState(hashed)
+                    HashedStateMessage::HashedState(hashed)
                 }
-                StateRootMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
+                StateRootMessage::HashedStateUpdate(state) => {
+                    HashedStateMessage::HashedState(state)
                 }
+                StateRootMessage::FinishedStateUpdates => HashedStateMessage::FinishedStateUpdates,
                 StateRootMessage::BlockAccessList(_) => {
                     idle_start = Instant::now();
                     continue;
-                }
-                StateRootMessage::HashedStateUpdate(state) => {
-                    SparseTrieTaskMessage::HashedState(state)
                 }
             };
             if hashed_state_tx.send(msg).is_err() {
@@ -251,7 +249,7 @@ where
 
     /// Runs the sparse trie task to completion.
     ///
-    /// This waits for new incoming [`SparseTrieTaskMessage`]s, applies updates
+    /// This waits for new incoming [`HashedStateMessage`]s, applies updates
     /// to the trie and schedules proof fetching when needed.
     ///
     /// This concludes once the last state update has been received and processed.
@@ -408,14 +406,14 @@ where
         })
     }
 
-    /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    /// Processes a [`HashedStateMessage`] from the hashing task.
+    fn on_message(&mut self, message: HashedStateMessage) {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
-            SparseTrieTaskMessage::HashedState(hashed_state) => {
+            HashedStateMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            HashedStateMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state)
             }
-            SparseTrieTaskMessage::FinishedStateUpdates => self.finished_state_updates = true,
+            HashedStateMessage::FinishedStateUpdates => self.finished_state_updates = true,
         }
     }
 
@@ -879,11 +877,11 @@ impl PendingTargets {
     }
 }
 
-/// Message type for the sparse trie task.
-enum SparseTrieTaskMessage {
+/// Message type emitted by the hashing task for the sparse trie task.
+enum HashedStateMessage {
     /// A hashed state update ready to be processed.
     HashedState(HashedPostState),
-    /// Prefetch proof targets (passed through directly).
+    /// Prefetch proof targets.
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
@@ -934,8 +932,8 @@ mod tests {
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
         drop(updates_tx);
 
-        let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
-            panic!("expected HashedState message");
+        let HashedStateMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
+            panic!("expected hashed state message");
         };
 
         let account = received.accounts.get(&address).unwrap().unwrap();
@@ -946,7 +944,7 @@ mod tests {
         assert_eq!(*storage.storage.get(&slot).unwrap(), value);
 
         let second = hashed_state_rx.recv().unwrap();
-        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
+        assert!(matches!(second, HashedStateMessage::FinishedStateUpdates));
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
