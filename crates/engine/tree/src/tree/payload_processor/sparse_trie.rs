@@ -578,28 +578,39 @@ where
             }
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
 
+            let mut fetched = self.fetched_storage_targets.remove(address);
+            let mut targets = None::<Vec<ProofV2Target>>;
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+            trie.update_leaves(updates, |path, min_len| {
+                let fetched = fetched.get_or_insert_with(Default::default);
+                match fetched.entry(path) {
+                    Entry::Occupied(mut entry) => {
+                        if min_len < *entry.get() {
+                            entry.insert(min_len);
+                            targets
+                                .get_or_insert_with(Vec::new)
+                                .push(ProofV2Target::new(path).with_min_len(min_len));
+                        }
                     }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    Entry::Vacant(entry) => {
+                        entry.insert(min_len);
+                        targets
+                            .get_or_insert_with(Vec::new)
+                            .push(ProofV2Target::new(path).with_min_len(min_len));
+                    }
                 }
             })?;
             let updates_len_after = updates.len();
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
 
-            if !targets.is_empty() {
+            if let Some(fetched) = fetched.filter(|fetched| !fetched.is_empty()) {
+                self.fetched_storage_targets.insert(*address, fetched);
+            }
+
+            if let Some(targets) = targets {
                 self.pending_targets.extend_storage_targets(address, targets);
             }
         }
