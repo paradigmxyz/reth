@@ -24,7 +24,7 @@ use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
     context::Block,
-    context_interface::result::{ExecutionResult, ResultGas},
+    context_interface::result::ExecutionResult,
     primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
@@ -306,7 +306,6 @@ where
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas, .. } => {
-                let (gas_used, max_used_gas) = simulated_gas_fields(&gas);
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
@@ -315,15 +314,14 @@ where
                         code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used,
-                    max_used_gas,
+                    gas_used: gas.tx_gas_used(),
+                    max_used_gas: Some(gas.total_gas_spent()),
                     logs: Vec::new(),
                     status: false,
                     ..Default::default()
                 }
             }
             ExecutionResult::Revert { output, gas, .. } => {
-                let (gas_used, max_used_gas) = simulated_gas_fields(&gas);
                 let error = Err::from_revert(output.clone());
                 SimCallResult {
                     return_data: output,
@@ -332,40 +330,37 @@ where
                         code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used,
-                    max_used_gas,
+                    gas_used: gas.tx_gas_used(),
+                    max_used_gas: Some(gas.total_gas_spent()),
                     status: false,
                     logs: Vec::new(),
                     ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas, logs, .. } => {
-                let (gas_used, max_used_gas) = simulated_gas_fields(&gas);
-                SimCallResult {
-                    return_data: output.into_data(),
-                    error: None,
-                    gas_used,
-                    max_used_gas,
-                    logs: logs
-                        .into_iter()
-                        .map(|log| {
-                            log_index += 1;
-                            alloy_rpc_types_eth::Log {
-                                inner: log,
-                                log_index: Some(log_index - 1),
-                                transaction_index: Some(index as u64),
-                                transaction_hash: Some(*tx.tx_hash()),
-                                block_hash: Some(block.hash()),
-                                block_number: Some(block.header().number()),
-                                block_timestamp: Some(block.header().timestamp()),
-                                ..Default::default()
-                            }
-                        })
-                        .collect(),
-                    status: true,
-                    ..Default::default()
-                }
-            }
+            ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
+                return_data: output.into_data(),
+                error: None,
+                gas_used: gas.tx_gas_used(),
+                max_used_gas: Some(gas.total_gas_spent()),
+                logs: logs
+                    .into_iter()
+                    .map(|log| {
+                        log_index += 1;
+                        alloy_rpc_types_eth::Log {
+                            inner: log,
+                            log_index: Some(log_index - 1),
+                            transaction_index: Some(index as u64),
+                            transaction_hash: Some(*tx.tx_hash()),
+                            block_hash: Some(block.hash()),
+                            block_number: Some(block.header().number()),
+                            block_timestamp: Some(block.header().timestamp()),
+                            ..Default::default()
+                        }
+                    })
+                    .collect(),
+                status: true,
+                ..Default::default()
+            },
         };
 
         calls.push(call);
@@ -377,24 +372,4 @@ where
         |header, size| converter.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
-}
-
-fn simulated_gas_fields(gas: &ResultGas) -> (u64, Option<u64>) {
-    (gas.tx_gas_used(), Some(gas.total_gas_spent()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::simulated_gas_fields;
-    use revm::context_interface::result::ResultGas;
-
-    #[test]
-    fn simulated_gas_fields_sets_max_used_gas_before_refund() {
-        let gas = ResultGas::default().with_total_gas_spent(50_000).with_refunded(10_000);
-
-        let (gas_used, max_used_gas) = simulated_gas_fields(&gas);
-
-        assert_eq!(gas_used, 40_000);
-        assert_eq!(max_used_gas, Some(50_000));
-    }
 }
