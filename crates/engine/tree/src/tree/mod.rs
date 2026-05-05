@@ -1555,6 +1555,11 @@ where
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
+                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+                            // block already known to the tree (e.g. delivered via newPayload first)
+                            return Ok(ops::ControlFlow::Continue(()))
+                        }
+
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
