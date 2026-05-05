@@ -144,12 +144,13 @@ const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
-/// Default auto-commit threshold for batch writes (4 GiB).
+/// Default auto-commit threshold for batch writes (512 MiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
-/// during large bulk writes. The consistency check on startup heals any crash
-/// that occurs between auto-commits.
-const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
+/// during large bulk writes. Keep this below the `RocksDB` write buffer manager
+/// budget so stalls can recover without waiting on a single large flush.
+/// The consistency check on startup heals any crash that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
