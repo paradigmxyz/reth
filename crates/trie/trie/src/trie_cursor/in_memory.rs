@@ -62,6 +62,8 @@ pub struct InMemoryTrieCursor<'a, C> {
     in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
     /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
+    /// The last key requested via `seek` or `seek_exact`.
+    last_requested_key: Option<Nibbles>,
     #[cfg(debug_assertions)]
     /// Whether an initial seek was called.
     seeked: bool,
@@ -110,6 +112,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             db_cursor_state: DbCursorState::NeedsPosition,
             in_memory_cursor,
             last_key: None,
+            last_requested_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
             trie_updates,
@@ -130,6 +133,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             db_cursor_state: DbCursorState::new(cursor_wiped),
             in_memory_cursor,
             last_key: None,
+            last_requested_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
             trie_updates,
@@ -203,6 +207,15 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         Ok(())
     }
 
+    /// Advances the positioned DB cursor with `next()` until it reaches `key`.
+    fn cursor_advance_to(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
+        while matches!(self.db_cursor_state.entry(), Some((entry_key, _)) if entry_key < &key) {
+            self.cursor_next()?;
+        }
+
+        Ok(())
+    }
+
     /// Compares the current in-memory entry with the current entry of the cursor, and applies the
     /// in-memory entry to the cursor entry as an overlay.
     //
@@ -250,16 +263,18 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let monotonic = self.last_requested_key.is_none_or(|last| key >= last);
+        self.last_requested_key = Some(key);
         let mem_entry = self.in_memory_cursor.seek(&key);
+
+        #[cfg(debug_assertions)]
+        {
+            self.seeked = true;
+        }
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
             *mem_key == key
         {
-            #[cfg(debug_assertions)]
-            {
-                self.seeked = true;
-            }
-
             // An exact overlay hit can move the logical cursor ahead without touching the DB. If
             // the DB cursor was still behind this key, force a re-seek before the next DB-backed
             // operation so `next()` cannot return a stale earlier entry.
@@ -273,11 +288,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             return Ok(entry)
         }
 
-        self.cursor_seek(key)?;
-
-        #[cfg(debug_assertions)]
-        {
-            self.seeked = true;
+        if monotonic && !matches!(self.db_cursor_state, DbCursorState::NeedsPosition) {
+            self.cursor_advance_to(key)?;
+        } else {
+            self.cursor_seek(key)?;
         }
 
         let entry = match self.db_cursor_state.entry() {
@@ -293,6 +307,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.last_requested_key = Some(key);
         self.cursor_seek(key)?;
         self.in_memory_cursor.seek(&key);
 
@@ -353,6 +368,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         self.db_cursor_state = DbCursorState::NeedsPosition;
         self.last_key = None;
+        self.last_requested_key = None;
         #[cfg(debug_assertions)]
         {
             self.seeked = false;
@@ -374,7 +390,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trie_cursor::mock::MockTrieCursor;
+    use crate::{mock::KeyVisitType, trie_cursor::mock::MockTrieCursor};
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -600,6 +616,49 @@ mod tests {
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_sorted_exact_seeks_reuse_db_position() {
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(0b0111, 0b0111, 0, vec![], None)),
+        ];
+
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let trie_updates = TrieUpdatesSorted::default();
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+        assert_eq!(
+            cursor.seek_exact(Nibbles::from_nibbles([0x1])).unwrap().map(|entry| entry.0),
+            Some(Nibbles::from_nibbles([0x1]))
+        );
+        assert_eq!(
+            cursor.seek_exact(Nibbles::from_nibbles([0x3])).unwrap().map(|entry| entry.0),
+            Some(Nibbles::from_nibbles([0x3]))
+        );
+        assert_eq!(cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap(), None);
+        assert_eq!(
+            cursor.seek_exact(Nibbles::from_nibbles([0x7])).unwrap().map(|entry| entry.0),
+            Some(Nibbles::from_nibbles([0x7]))
+        );
+
+        let visits = visited_keys.lock();
+        let seek_count = visits
+            .iter()
+            .filter(|visit| matches!(visit.visit_type, KeyVisitType::SeekNonExact(_)))
+            .count();
+        let next_count =
+            visits.iter().filter(|visit| matches!(visit.visit_type, KeyVisitType::Next)).count();
+
+        assert_eq!(seek_count, 1, "sorted exact seeks should only position the DB cursor once");
+        assert_eq!(next_count, 3, "subsequent sorted exact seeks should advance with next()");
     }
 
     #[test]
