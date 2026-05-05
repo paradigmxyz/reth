@@ -14,21 +14,9 @@ use smallvec::SmallVec;
 pub(super) struct BranchChildIdx(u8);
 
 impl BranchChildIdx {
-    /// Returns the dense index for `nibble` within the children array of a branch whose
-    /// occupied slots are described by `state_mask`.
-    ///
-    /// Returns `None` if the nibble's bit is not set in `state_mask`.
-    pub(super) const fn new(state_mask: TrieMask, nibble: u8) -> Option<Self> {
-        if !state_mask.is_bit_set(nibble) {
-            return None;
-        }
-        Some(Self::new_unchecked(state_mask, nibble))
-    }
-
     /// Returns the dense insertion point for `nibble` — the number of occupied child slots
-    /// below `nibble`. Unlike [`Self::new`], this does **not** require the nibble's bit to be
-    /// set, making it suitable for computing the position at which a new child should be
-    /// inserted.
+    /// below `nibble`. This does not require the nibble's bit to be set, making it suitable for
+    /// computing the position at which a new child should be inserted.
     pub(super) const fn insertion_point(state_mask: TrieMask, nibble: u8) -> Self {
         Self(Self::count_below(state_mask, nibble))
     }
@@ -38,14 +26,14 @@ impl BranchChildIdx {
         self.0 as usize
     }
 
+    /// Creates an index from an already-computed dense child position.
+    pub(super) const fn from_dense(dense: u8) -> Self {
+        Self(dense)
+    }
+
     /// Counts the number of occupied child slots below `nibble` in the dense children array.
     const fn count_below(state_mask: TrieMask, nibble: u8) -> u8 {
         (state_mask.get() & ((1u16 << nibble) - 1)).count_ones() as u8
-    }
-
-    /// Computes the dense index for `nibble` without checking whether the bit is set.
-    const fn new_unchecked(state_mask: TrieMask, nibble: u8) -> Self {
-        Self(Self::count_below(state_mask, nibble))
     }
 }
 

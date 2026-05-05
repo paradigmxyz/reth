@@ -8,6 +8,8 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
 
+const MISSING_CHILD_IDX: u8 = u8::MAX;
+
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ArenaSparseNodeState {
@@ -61,6 +63,8 @@ pub(super) struct ArenaSparseNodeBranch {
     /// Revealed or blinded children, packed densely. The `state_mask` tracks which
     /// nibble positions have entries in this `SmallVec`.
     pub(super) children: SmallVec<[ArenaSparseNodeBranchChild; 4]>,
+    /// Dense child index per nibble, or `u8::MAX` when the nibble is absent.
+    pub(super) child_lookup: [u8; 16],
     /// Bitmask indicating which of the 16 child slots are occupied (have an entry
     /// in `children`).
     pub(super) state_mask: TrieMask,
@@ -72,6 +76,37 @@ pub(super) struct ArenaSparseNodeBranch {
 }
 
 impl ArenaSparseNodeBranch {
+    pub(super) fn new(
+        state: ArenaSparseNodeState,
+        children: SmallVec<[ArenaSparseNodeBranchChild; 4]>,
+        state_mask: TrieMask,
+        short_key: Nibbles,
+        branch_masks: BranchNodeMasks,
+    ) -> Self {
+        let mut branch = Self {
+            state,
+            children,
+            child_lookup: [MISSING_CHILD_IDX; 16],
+            state_mask,
+            short_key,
+            branch_masks,
+        };
+        branch.rebuild_child_lookup();
+        branch
+    }
+
+    fn rebuild_child_lookup(&mut self) {
+        self.child_lookup.fill(MISSING_CHILD_IDX);
+        for (idx, nibble) in BranchChildIter::new(self.state_mask) {
+            self.child_lookup[nibble as usize] = idx.get() as u8;
+        }
+    }
+
+    pub(super) fn child_idx(&self, nibble: u8) -> Option<BranchChildIdx> {
+        let dense = self.child_lookup[nibble as usize];
+        (dense != MISSING_CHILD_IDX).then(|| BranchChildIdx::from_dense(dense))
+    }
+
     /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
     pub(super) const fn unset_child_bit(&mut self, nibble: u8) {
         self.state_mask.unset_bit(nibble);
@@ -83,6 +118,7 @@ impl ArenaSparseNodeBranch {
         let insert_pos = BranchChildIdx::insertion_point(self.state_mask, nibble);
         self.state_mask.set_bit(nibble);
         self.children.insert(insert_pos.get(), child);
+        self.rebuild_child_lookup();
         self.state = ArenaSparseNodeState::Dirty;
     }
 
@@ -93,10 +129,10 @@ impl ArenaSparseNodeBranch {
     ///
     /// Panics if `nibble` is not set in the state mask.
     pub(super) fn remove_child(&mut self, nibble: u8) {
-        let child_idx =
-            BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
+        let child_idx = self.child_idx(nibble).expect("nibble not found in state_mask");
         self.children.remove(child_idx.get());
         self.unset_child_bit(nibble);
+        self.rebuild_child_lookup();
         self.state = ArenaSparseNodeState::Dirty;
     }
 
@@ -111,8 +147,7 @@ impl ArenaSparseNodeBranch {
             2,
             "sibling_child requires exactly 2 children"
         );
-        let child_idx =
-            BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
+        let child_idx = self.child_idx(nibble).expect("nibble not found in state_mask");
         // With exactly 2 children the dense array has indices 0 and 1.
         &self.children[1 - child_idx.get()]
     }
@@ -309,13 +344,13 @@ impl ArenaSparseNode {
                     .iter()
                     .map(|rlp| ArenaSparseNodeBranchChild::Blinded(rlp.clone()))
                     .collect();
-                Self::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed,
+                Self::Branch(ArenaSparseNodeBranch::new(
+                    ArenaSparseNodeState::Revealed,
                     children,
-                    state_mask: branch.state_mask,
-                    short_key: branch.key,
-                    branch_masks: masks.unwrap_or_default(),
-                })
+                    branch.state_mask,
+                    branch.key,
+                    masks.unwrap_or_default(),
+                ))
             }
             TrieNodeV2::Extension(_) => {
                 panic!("Extension nodes should be merged into branches by TrieNodeV2")
@@ -332,5 +367,43 @@ impl ArenaSparseNode {
             }
             _ => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn branch_child_lookup_tracks_insertions_and_removals() {
+        let mut children = SmallVec::new();
+        children.push(ArenaSparseNodeBranchChild::Blinded(RlpNode::word_rlp(&B256::ZERO)));
+        children
+            .push(ArenaSparseNodeBranchChild::Blinded(RlpNode::word_rlp(&B256::repeat_byte(0x11))));
+
+        let mut branch = ArenaSparseNodeBranch::new(
+            ArenaSparseNodeState::Revealed,
+            children,
+            TrieMask::from((1u16 << 1) | (1u16 << 5)),
+            Nibbles::default(),
+            BranchNodeMasks::default(),
+        );
+
+        assert_eq!(branch.child_idx(1).unwrap().get(), 0);
+        assert_eq!(branch.child_idx(5).unwrap().get(), 1);
+        assert!(branch.child_idx(3).is_none());
+
+        branch.set_child(
+            3,
+            ArenaSparseNodeBranchChild::Blinded(RlpNode::word_rlp(&B256::repeat_byte(0x22))),
+        );
+        assert_eq!(branch.child_idx(1).unwrap().get(), 0);
+        assert_eq!(branch.child_idx(3).unwrap().get(), 1);
+        assert_eq!(branch.child_idx(5).unwrap().get(), 2);
+
+        branch.remove_child(3);
+        assert_eq!(branch.child_idx(1).unwrap().get(), 0);
+        assert_eq!(branch.child_idx(5).unwrap().get(), 1);
+        assert!(branch.child_idx(3).is_none());
     }
 }

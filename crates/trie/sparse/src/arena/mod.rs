@@ -2,7 +2,7 @@ mod branch_child_idx;
 mod cursor;
 mod nodes;
 
-use branch_child_idx::{BranchChildIdx, BranchChildIter};
+use branch_child_idx::BranchChildIter;
 use cursor::{ArenaCursor, NextResult, SeekResult};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
@@ -906,13 +906,7 @@ impl ArenaParallelSparseTrie {
 
         trace!(target: TRACE_TARGET, "Unwrapping empty subtrie, removing child slot");
         let parent_branch = self.upper_arena[parent_idx].branch_mut();
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not found in parent state_mask");
-
-        parent_branch.children.remove(child_idx.get());
-        parent_branch.unset_child_bit(child_nibble);
-        // The branch structure changed (child removed), so any cached RLP is stale.
-        parent_branch.state = parent_branch.state.to_dirty();
+        parent_branch.remove_child(child_nibble);
 
         self.maybe_collapse_or_remove_branch(cursor);
     }
@@ -978,11 +972,7 @@ impl ArenaParallelSparseTrie {
                 self.upper_arena.remove(branch_idx);
                 let parent_idx = cursor.head().expect("cursor is non-empty").index;
                 let parent_branch = self.upper_arena[parent_idx].branch_mut();
-                let child_idx = BranchChildIdx::new(parent_branch.state_mask, branch_nibble)
-                    .expect("child nibble not found in parent state_mask");
-                parent_branch.children.remove(child_idx.get());
-                parent_branch.unset_child_bit(branch_nibble);
-                parent_branch.state = parent_branch.state.to_dirty();
+                parent_branch.remove_child(branch_nibble);
                 continue; // re-check the parent
             }
 
@@ -1323,7 +1313,7 @@ impl ArenaParallelSparseTrie {
                     }
 
                     let child_nibble = full_path.get_unchecked(logical_end);
-                    let child_idx = BranchChildIdx::new(b.state_mask, child_nibble)?;
+                    let child_idx = b.child_idx(child_nibble)?;
                     match &b.children[child_idx] {
                         ArenaSparseNodeBranchChild::Blinded(_) => return None,
                         ArenaSparseNodeBranchChild::Revealed(child_idx) => {
@@ -1388,7 +1378,7 @@ impl ArenaParallelSparseTrie {
                     }
 
                     let child_nibble = full_path.get_unchecked(logical_end);
-                    let Some(child_idx) = BranchChildIdx::new(b.state_mask, child_nibble) else {
+                    let Some(child_idx) = b.child_idx(child_nibble) else {
                         return Ok(LeafLookup::NonExistent);
                     };
 
@@ -1522,13 +1512,13 @@ impl ArenaParallelSparseTrie {
         children.push(ArenaSparseNodeBranchChild::Revealed(first_child));
         children.push(ArenaSparseNodeBranchChild::Revealed(second_child));
 
-        let new_branch_idx = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
+        let new_branch_idx = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch::new(
+            ArenaSparseNodeState::Dirty,
             children,
             state_mask,
             short_key,
-            branch_masks: BranchNodeMasks::default(),
-        }));
+            BranchNodeMasks::default(),
+        )));
 
         cursor.replace_head_index(arena, root, new_branch_idx);
         newly_dirtied_existing
@@ -2066,7 +2056,8 @@ impl ArenaParallelSparseTrie {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
             let child_nibble = nibble.expect("non-root child");
             let parent_branch = arena[parent_idx].branch_mut();
-            let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
+            let child_idx = parent_branch
+                .child_idx(child_nibble)
                 .expect("child nibble not found in parent state_mask");
             parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
         }
@@ -2109,7 +2100,8 @@ impl ArenaParallelSparseTrie {
 
         let child_nibble = node.path.get_unchecked(head_branch_logical_path.len());
         let head_branch = arena[head_idx].branch_ref();
-        let dense_child_idx = BranchChildIdx::new(head_branch.state_mask, child_nibble)
+        let dense_child_idx = head_branch
+            .child_idx(child_nibble)
             .expect("Blinded result but child nibble not in state_mask");
 
         let cached_rlp = match &head_branch.children[dense_child_idx] {
@@ -2257,13 +2249,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         .push(ArenaSparseNodeBranchChild::Blinded(branch.stack[stack_ptr].clone()));
                 }
 
-                self.upper_arena[self.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed,
+                self.upper_arena[self.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch::new(
+                    ArenaSparseNodeState::Revealed,
                     children,
-                    state_mask: branch.state_mask,
-                    short_key: branch.key,
-                    branch_masks: masks.unwrap_or_default(),
-                });
+                    branch.state_mask,
+                    branch.key,
+                    masks.unwrap_or_default(),
+                ));
             }
             TrieNodeV2::Extension(_) => {
                 panic!("set_root does not support Extension nodes; extensions are represented as branches with a short_key")

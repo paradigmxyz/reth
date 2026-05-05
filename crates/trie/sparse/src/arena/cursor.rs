@@ -1,6 +1,6 @@
 use super::{
-    branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
+    branch_child_idx::BranchChildIter, ArenaSparseNode, ArenaSparseNodeBranchChild,
+    ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -208,7 +208,8 @@ impl ArenaCursor {
             child_nibble.expect("if cursor has a parent then the head path can't be empty");
 
         let parent_branch = arena[parent.index].branch_mut();
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
+        let child_idx = parent_branch
+            .child_idx(child_nibble)
             .expect("child nibble not found in parent state_mask");
 
         debug_assert!(
@@ -340,8 +341,7 @@ impl ArenaCursor {
             }
 
             let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
-            let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
-            else {
+            let Some(branch_child_idx) = head_branch.child_idx(child_nibble) else {
                 return SeekResult::NoChild { child_nibble };
             };
 
