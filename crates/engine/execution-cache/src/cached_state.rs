@@ -20,6 +20,7 @@ use reth_trie::{
 };
 use std::{
     fmt,
+    hash::{Hash, Hasher},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -68,8 +69,7 @@ const CODE_CACHE_ENTRY_SIZE: usize =
     fixed_cache_key_size_with_value::<Address>(ESTIMATED_AVG_CODE_SIZE);
 
 /// Size in bytes of a single storage cache entry.
-const STORAGE_CACHE_ENTRY_SIZE: usize =
-    fixed_cache_entry_size::<(Address, StorageKey), StorageValue>();
+const STORAGE_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<StorageCacheKey, StorageValue>();
 
 /// Size in bytes of a single account cache entry.
 const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
@@ -82,6 +82,33 @@ impl CacheConfig for EpochCacheConfig {
 
 /// Type alias for the fixed-cache used for accounts and storage.
 type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
+
+/// Fixed-size key for execution storage cache entries.
+///
+/// `FbBuildHasher<52>` expects a single 52-byte write, so we hash the address and storage slot as
+/// one packed blob rather than relying on tuple hashing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StorageCacheKey {
+    address: Address,
+    storage_key: StorageKey,
+}
+
+impl StorageCacheKey {
+    #[inline]
+    const fn new(address: Address, storage_key: StorageKey) -> Self {
+        Self { address, storage_key }
+    }
+}
+
+impl Hash for StorageCacheKey {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let mut bytes = [0u8; 52];
+        bytes[..20].copy_from_slice(self.address.as_slice());
+        bytes[20..].copy_from_slice(self.storage_key.as_slice());
+        state.write(&bytes);
+    }
+}
 
 /// A wrapper of a state provider and a shared cache.
 ///
@@ -489,7 +516,9 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
             }
-        } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
+        } else if let Some(value) =
+            self.caches.0.storage_cache.get(&StorageCacheKey::new(account, storage_key))
+        {
             self.metrics.storage_cache_hits.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_hit();
@@ -669,7 +698,7 @@ struct ExecutionCacheInner {
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
-    storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
+    storage_cache: FixedCache<StorageCacheKey, StorageValue, FbBuildHasher<52>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
     account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
@@ -725,7 +754,7 @@ impl ExecutionCache {
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
-            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
+            storage_cache: FixedCache::new(storage_capacity, FbBuildHasher::<52>::default())
                 .with_stats(Some(Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
                 .with_stats(Some(Stats::new(account_stats.clone()))),
@@ -763,10 +792,13 @@ impl ExecutionCache {
         f: impl FnOnce() -> Result<StorageValue, E>,
     ) -> Result<CachedStatus<StorageValue>, E> {
         let mut miss = false;
-        let result = self.0.storage_cache.get_or_try_insert_with((address, key), |_| {
-            miss = true;
-            f()
-        })?;
+        let result = self.0.storage_cache.get_or_try_insert_with(
+            StorageCacheKey::new(address, key),
+            |_| {
+                miss = true;
+                f()
+            },
+        )?;
 
         if miss {
             Ok(CachedStatus::NotCached(result))
@@ -796,7 +828,7 @@ impl ExecutionCache {
 
     /// Insert storage value into cache.
     pub fn insert_storage(&self, address: Address, key: StorageKey, value: Option<StorageValue>) {
-        self.0.storage_cache.insert((address, key), value.unwrap_or_default());
+        self.0.storage_cache.insert(StorageCacheKey::new(address, key), value.unwrap_or_default());
     }
 
     /// Insert code into cache.
@@ -1125,7 +1157,7 @@ mod tests {
         // Verify caches are populated
         assert!(caches.0.account_cache.get(&addr1).is_some());
         assert!(caches.0.account_cache.get(&addr2).is_some());
-        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
+        assert!(caches.0.storage_cache.get(&StorageCacheKey::new(addr1, storage_key)).is_some());
 
         let bundle = BundleState {
             // BundleState with a destroyed contract (had code)
@@ -1157,7 +1189,7 @@ mod tests {
         // Verify all caches were cleared
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_none());
-        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_none());
+        assert!(caches.0.storage_cache.get(&StorageCacheKey::new(addr1, storage_key)).is_none());
     }
 
     #[test]
@@ -1201,7 +1233,7 @@ mod tests {
         // Verify only addr1 was removed, other data is still present
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
-        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
+        assert!(caches.0.storage_cache.get(&StorageCacheKey::new(addr1, storage_key)).is_some());
     }
 
     #[test]
