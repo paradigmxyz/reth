@@ -16,4 +16,20 @@ RUN_SCRIPT=.github/scripts/bench-reth-run.sh
 if [ "$BENCH_DRIVER" = "txgen" ]; then
   RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
 fi
-taskset -c 0 "$RUN_SCRIPT" "$LABEL" "../${NODE_DIR}/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/${RUN_DIR}"
+NODE_BINARY="../${NODE_DIR}/target/profiling/${BENCH_NODE_BIN}"
+OUTPUT_DIR="$BENCH_WORK_DIR/${RUN_DIR}"
+python3 .github/scripts/bench-run-manifest.py \
+  --output-dir "$OUTPUT_DIR" \
+  --run-dir "$RUN_DIR" \
+  --run-type "$LABEL" \
+  --git-ref "$GIT_REF" \
+  --node-binary "$NODE_BINARY" \
+  --status started
+taskset -c 0 "$RUN_SCRIPT" "$LABEL" "$NODE_BINARY" "$OUTPUT_DIR"
+python3 .github/scripts/bench-run-manifest.py \
+  --output-dir "$OUTPUT_DIR" \
+  --run-dir "$RUN_DIR" \
+  --run-type "$LABEL" \
+  --git-ref "$GIT_REF" \
+  --node-binary "$NODE_BINARY" \
+  --status completed
