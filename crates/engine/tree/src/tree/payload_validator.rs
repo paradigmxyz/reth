@@ -1143,7 +1143,6 @@ where
         let senders: Vec<Address> =
             txs.iter().map(|tx| *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(tx)).collect();
 
-        let block_gas_limit = block.header().gas_limit();
         let make_db = move || {
             let provider = provider_builder
                 .build()
@@ -1159,14 +1158,7 @@ where
             self.runtime.clone(),
             self.evm_config.clone(),
         )
-        .execute_block(
-            make_db,
-            decoded_bal,
-            block,
-            txs,
-            header_bal_hash,
-            block_gas_limit,
-        )?;
+        .execute_block(make_db, decoded_bal, block, txs, header_bal_hash)?;
         let execution_duration = execution_start.elapsed();
 
         // Forward all receipts to the receipt-root task, in order. Drop the sender so the task

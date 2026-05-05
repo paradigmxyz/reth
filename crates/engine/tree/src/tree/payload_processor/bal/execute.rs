@@ -16,7 +16,7 @@
 //! lightweight fragment compare isn't yet designed.
 
 use super::{validation::check_item_count, RejectReason};
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
     block::{
@@ -129,7 +129,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         block: &SealedBlock<BlockTy<Evm::Primitives>>,
         txs: Vec<Tx>,
         header_bal_hash: B256,
-        block_gas_limit: u64,
     ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
     where
         Tx: ExecutableTxFor<Evm> + Send,
@@ -143,12 +142,10 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
             block,
             txs,
             header_bal_hash,
-            block_gas_limit,
         )
     }
 
     /// Executes one block on the BAL path using the provided worker pool.
-    #[expect(clippy::too_many_arguments)]
     pub fn execute_block_in_pool<Tx, DB, MakeDb>(
         &self,
         worker_pool: &WorkerPool,
@@ -157,7 +154,6 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         block: &SealedBlock<BlockTy<Evm::Primitives>>,
         txs: Vec<Tx>,
         header_bal_hash: B256,
-        block_gas_limit: u64,
     ) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
     where
         Tx: ExecutableTxFor<Evm> + Send,
@@ -165,6 +161,7 @@ impl<Evm: ConfigureEvm> BalPayloadExecutor<Evm> {
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
         let bal = received_bal.as_bal();
+        let block_gas_limit = block.header().gas_limit();
         check_item_count(bal, block_gas_limit)?;
 
         let received_bal_revm: Arc<Bal> = Arc::new(
@@ -484,7 +481,7 @@ mod tests {
             .collect();
 
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
-        let block = empty_amsterdam_block(bal_hash);
+        let block = empty_amsterdam_block_with_gas_limit(bal_hash, 10_000);
 
         let result = executor.execute_block(
             db_factory(CacheDB::<EmptyDB>::default()),
@@ -492,7 +489,6 @@ mod tests {
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
             bal_hash,
-            10_000,
         );
 
         match result {
@@ -550,7 +546,6 @@ mod tests {
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
             bal_hash,
-            30_000_000,
         );
 
         match result {
@@ -716,7 +711,6 @@ mod tests {
             &block,
             vec![recovered1, recovered2],
             bal_hash,
-            30_000_000,
         );
 
         match result {
@@ -796,7 +790,6 @@ mod tests {
         canonical_db_template: CacheDB<EmptyDB>,
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
-        gas_limit: u64,
     ) {
         // Serial run: also produces the reference BAL we'll feed to the BAL path.
         let (serial, reference_bal) =
@@ -804,7 +797,8 @@ mod tests {
 
         // BAL path: stamp the hash of the reference BAL onto the header.
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
-        let block = empty_amsterdam_block(bal_hash); // same shape, updated hash
+        let block =
+            empty_amsterdam_block_with_gas_limit(bal_hash, block_header_only.header().gas_limit());
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let bal_out = executor
@@ -814,7 +808,6 @@ mod tests {
                 &block,
                 txs,
                 bal_hash,
-                gas_limit,
             )
             .unwrap_or_else(|e| panic!("BAL path failed: {e:?}"));
 
@@ -847,7 +840,6 @@ mod tests {
             system_contracts_db(),
             empty_amsterdam_block(B256::ZERO),
             Vec::new(),
-            30_000_000,
         );
     }
 
@@ -893,13 +885,7 @@ mod tests {
         let tx1 = Recovered::new_unchecked(make_tx(alice_kp, carol, 100u64, 0), alice);
         let tx2 = Recovered::new_unchecked(make_tx(bob_kp, carol, 200u64, 0), bob);
 
-        assert_shadow_equal(
-            evm_config,
-            db,
-            empty_amsterdam_block(B256::ZERO),
-            vec![tx1, tx2],
-            30_000_000,
-        );
+        assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx1, tx2]);
     }
 
     #[test]
@@ -968,7 +954,6 @@ mod tests {
             &low_gas_block,
             vec![tx1, tx2],
             bal_hash,
-            block_gas_limit,
         );
 
         match result {
@@ -1036,13 +1021,7 @@ mod tests {
             alice,
         );
 
-        assert_shadow_equal(
-            evm_config,
-            db,
-            empty_amsterdam_block(B256::ZERO),
-            vec![tx],
-            30_000_000,
-        );
+        assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
 
     #[test]
@@ -1102,12 +1081,6 @@ mod tests {
             alice,
         );
 
-        assert_shadow_equal(
-            evm_config,
-            db,
-            empty_amsterdam_block(B256::ZERO),
-            vec![tx],
-            30_000_000,
-        );
+        assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
 }
