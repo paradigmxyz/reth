@@ -242,14 +242,14 @@ where
             };
             ctx.metrics.execution_duration.record(start.elapsed());
 
-            if ctx.should_stop() {
+            if ctx.should_stop() || index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                 return;
             }
 
-            if index > 0 {
+            if index > 0 && let Some(to_sparse_trie_task) = to_sparse_trie_task {
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                if !targets.is_empty() {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
                 }
             }
