@@ -28,13 +28,6 @@ pub enum RejectReason {
         tx_index: u64,
     },
 
-    /// The canonical `bal_builder`'s entries for a tx disagree with the received BAL for the same
-    /// tx index. Caught per-tx immediately after `commit_transaction`.
-    FragmentMismatch {
-        /// Tx index whose fragment diverged.
-        tx_index: u64,
-    },
-
     /// The rebuilt BAL's hash disagrees with `header.block_access_list_hash` at end-of-block.
     /// Catches over-declared addresses and any divergence the per-tx fragment compares missed.
     FinalHashMismatch {
