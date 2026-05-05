@@ -318,7 +318,6 @@ where
                     max_used_gas: Some(gas.total_gas_spent()),
                     logs: Vec::new(),
                     status: false,
-                    ..Default::default()
                 }
             }
             ExecutionResult::Revert { output, gas, .. } => {
@@ -334,7 +333,6 @@ where
                     max_used_gas: Some(gas.total_gas_spent()),
                     status: false,
                     logs: Vec::new(),
-                    ..Default::default()
                 }
             }
             ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
@@ -359,7 +357,6 @@ where
                     })
                     .collect(),
                 status: true,
-                ..Default::default()
             },
         };
 
