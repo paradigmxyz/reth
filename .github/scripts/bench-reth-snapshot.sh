@@ -15,10 +15,10 @@
 #
 # Optional env:
 #   BENCH_BIG_BLOCKS            - true when syncing the big-blocks datadir
+#   BENCH_SNAPSHOT_NAME         - expected snapshot label for log/error output
 set -euo pipefail
 
 : "${SCHELK_MOUNT:?SCHELK_MOUNT must be set}"
-: "${BENCH_SNAPSHOT_MANIFEST_URL:?BENCH_SNAPSHOT_MANIFEST_URL must be set}"
 
 if [ "${1:-}" != "" ] && [ "${1:-}" != "--check" ]; then
   echo "Usage: $0 [--check]"
@@ -36,6 +36,40 @@ if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
 fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 LOCAL_MANIFEST="$DATADIR/manifest.json"
+
+describe_snapshot() {
+  if [ -n "${BENCH_SNAPSHOT_NAME:-}" ]; then
+    printf '%s' "${BENCH_SNAPSHOT_NAME}"
+  elif [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+    printf '%s' 'big-block weekly snapshot'
+  else
+    printf '%s' 'benchmark snapshot'
+  fi
+}
+
+EXPECTED_SNAPSHOT="$(describe_snapshot)"
+
+sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+sudo schelk mount -y
+
+if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+  if [ -d "$DATADIR/db" ] && [ -d "$DATADIR/static_files" ]; then
+    echo "Found local ${EXPECTED_SNAPSHOT} at ${DATADIR}; skipping manifest sync for big-block benchmarks"
+    exit 0
+  fi
+
+  echo "::error::Missing local ${EXPECTED_SNAPSHOT} at ${DATADIR}. Big-block benchmarks require a pre-populated schelk data volume."
+  ls -la "$SCHELK_MOUNT" || true
+  ls -la "$DATADIR" || true
+
+  if [ "$CHECK_ONLY" = true ]; then
+    exit 10
+  fi
+
+  exit 1
+fi
+
+: "${BENCH_SNAPSHOT_MANIFEST_URL:?BENCH_SNAPSHOT_MANIFEST_URL must be set}"
 
 MANIFEST_URL="$BENCH_SNAPSHOT_MANIFEST_URL"
 MANIFEST_BASE_URL="${MANIFEST_URL%/*}"
@@ -70,9 +104,6 @@ if ! jq -S . "$REMOTE_MANIFEST" > "$REMOTE_CANONICAL"; then
   exit 2
 fi
 REMOTE_HASH="$(sha256_file "$REMOTE_CANONICAL")"
-
-sudo schelk recover -y --kill || sudo schelk full-recover -y || true
-sudo schelk mount -y
 
 LOCAL_HASH=""
 LOCAL_MATCH=false
