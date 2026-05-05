@@ -3,7 +3,9 @@ use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
+use alloy_eips::{
+    eip4895::Withdrawals, eip7928::compute_block_access_list_hash, merge::BEACON_NONCE,
+};
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
@@ -45,9 +47,9 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
+            output:
+                BlockExecutionResult { receipts, requests, gas_used, blob_gas_used, block_access_list },
             state_root,
-            block_access_list_hash,
             ..
         } = input;
 
@@ -91,12 +93,6 @@ where
             };
         }
 
-        let bal_hash = if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-            block_access_list_hash
-        } else {
-            None
-        };
-
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -119,7 +115,9 @@ where
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
-            block_access_list_hash: bal_hash,
+            block_access_list_hash: block_access_list
+                .as_ref()
+                .map(|bal| compute_block_access_list_hash(bal.as_slice())),
             slot_number: ctx.slot_number,
         };
 

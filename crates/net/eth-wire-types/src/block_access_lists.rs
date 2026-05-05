@@ -89,7 +89,8 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockAccessLists {
 mod tests {
     use super::*;
     use alloy_eip7928::{
-        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange, BlockAccessIndex
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
     };
     use alloy_primitives::{Address, U256};
     use alloy_rlp::EMPTY_LIST_CODE;
@@ -101,8 +102,14 @@ mod tests {
                 storage_changes: vec![SlotChanges::new(
                     U256::from_be_bytes([seed.wrapping_add(1); 32]),
                     vec![
-                        StorageChange::new(BlockAccessIndex::new(1), U256::from_be_bytes([seed.wrapping_add(2); 32])),
-                        StorageChange::new(BlockAccessIndex::new(2), U256::from_be_bytes([seed.wrapping_add(3); 32])),
+                        StorageChange::new(
+                            BlockAccessIndex::new(1),
+                            U256::from_be_bytes([seed.wrapping_add(2); 32]),
+                        ),
+                        StorageChange::new(
+                            BlockAccessIndex::new(2),
+                            U256::from_be_bytes([seed.wrapping_add(3); 32]),
+                        ),
                     ],
                 )],
                 storage_reads: vec![
@@ -126,9 +133,15 @@ mod tests {
                 address: Address::from([seed.wrapping_add(9); 20]),
                 storage_changes: Vec::new(),
                 storage_reads: vec![U256::from_be_bytes([seed.wrapping_add(10); 32])],
-                balance_changes: vec![BalanceChange::new(BlockAccessIndex::new(3), U256::from(3_000 + seed as u64))],
+                balance_changes: vec![BalanceChange::new(
+                    BlockAccessIndex::new(3),
+                    U256::from(3_000 + seed as u64),
+                )],
                 nonce_changes: vec![NonceChange::new(BlockAccessIndex::new(3), seed as u64 + 2)],
-                code_changes: vec![CodeChange::new(BlockAccessIndex::new(2), Bytes::from(vec![0x5f, 0x5f, 0xf3]))],
+                code_changes: vec![CodeChange::new(
+                    BlockAccessIndex::new(2),
+                    Bytes::from(vec![0x5f, 0x5f, 0xf3]),
+                )],
             },
         ]
     }

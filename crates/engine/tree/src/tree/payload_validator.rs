@@ -568,38 +568,18 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx, built_bal, block) = if bal_eligible {
-            let block = convert_to_block(input)?;
-            let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
-            let built_bal = Some(decoded_bal.as_bal().clone().into());
+        let (output, senders, receipt_root_rx) = if bal_eligible {
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
-            match self.execute_block_bal(
+            ensure_ok!(self.execute_block_bal(
                 state_provider,
                 env,
-                &block,
+                &input,
                 &mut handle,
-                decoded_bal,
-                provider_builder,
-            ) {
-                Ok((output, senders, receipt_root_rx)) => {
-                    (output, senders, receipt_root_rx, built_bal, block)
-                }
-                Err(err) => {
-                    return self.handle_execution_error_with_block(block, err, &parent_block)
-                }
-            }
+                provider_builder
+            ))
         } else {
-            match self.execute_block(state_provider, env, &input, &mut handle) {
-                Ok((output, senders, receipt_root_rx, built_bal)) => {
-                    let block = convert_to_block(input)?;
-                    (output, senders, receipt_root_rx, built_bal, block)
-                }
-                Err(err) => {
-                    let block = convert_to_block(input)?;
-                    return self.handle_execution_error_with_block(block, err, &parent_block)
-                }
-            }
+            ensure_ok!(self.execute_block(state_provider, env, &input, &mut handle))
         };
         let execution_duration = execute_block_start.elapsed();
 
@@ -630,6 +610,7 @@ where
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
             });
 
+        let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
             let body = block.body().clone();
             let parent_span = Span::current();
@@ -677,7 +658,6 @@ where
                 transaction_root,
                 receipt_root_bloom,
                 hashed_state,
-                built_bal
             ),
             block
         );
@@ -934,7 +914,6 @@ where
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
             tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
-            Option<BlockAccessList>,
         ),
         InsertBlockErrorKind,
     >
@@ -959,12 +938,10 @@ where
                 })?
         }
 
-        let has_bal = input.block_access_list().is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .with_bal_builder_if(has_bal)
                 .build()
         });
 
@@ -1023,7 +1000,6 @@ where
             handle.iter_transactions(),
             &receipt_tx,
             &executed_tx_index,
-            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -1038,9 +1014,6 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        // Extract the built bal if payload has bal
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
-
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1048,7 +1021,7 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx, built_bal))
+        Ok((output, senders, result_rx))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1084,13 +1057,12 @@ where
     ///    receipt-root channel.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block_bal<S, Tx, InnerTx, Err, BalP>(
+    fn execute_block_bal<S, Tx, InnerTx, Err, BalP, T>(
         &self,
         _state_provider: S,
         env: ExecutionEnv<Evm>,
-        block: &SealedBlock<N::Block>,
+        input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<Tx, Err, N::Receipt>,
-        decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
         (
@@ -1106,15 +1078,14 @@ where
         InnerTx: TxHashRef,
         Err: core::error::Error + Send + Sync + 'static,
         BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
-        Evm: ConfigureEvm<Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        T: PayloadTypes<
+            BuiltPayload: BuiltPayload<Primitives = N>,
+            ExecutionData: ExecutionPayload,
+        >,
+        V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
-
-        let header_bal_hash = block.header().block_access_list_hash().ok_or_else(|| {
-            InsertBlockErrorKind::Other(
-                "BAL execute path: header missing block_access_list_hash".into(),
-            )
-        })?;
 
         let cache = handle.caches().ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no execution cache available".into())
@@ -1154,32 +1125,26 @@ where
             )))
         };
         let execution_start = Instant::now();
-        let bal_output = crate::tree::payload_processor::bal::execute_block(
+        let ctx =
+            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let output = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
-            self.evm_config.clone(),
+            &self.evm_config,
             make_db,
-            decoded_bal,
-            block,
+            ctx,
+            env,
             txs,
-            header_bal_hash,
         )?;
         let execution_duration = execution_start.elapsed();
 
         // Forward all receipts to the receipt-root task, in order. Drop the sender so the task
         // knows the stream is closed.
-        for (i, receipt) in bal_output.receipts.iter().enumerate() {
+        //
+        // TODO: forward receipts inside BAL execution loop
+        for (i, receipt) in output.receipts.iter().enumerate() {
             let _ = receipt_tx.send(IndexedReceipt::new(i, receipt.clone()));
         }
         drop(receipt_tx);
-
-        // Adapt BalExecutionOutput → BlockExecutionOutput.
-        let result = alloy_evm::block::BlockExecutionResult {
-            receipts: bal_output.receipts,
-            requests: bal_output.requests,
-            gas_used: bal_output.gas_used,
-            blob_gas_used: bal_output.blob_gas_used,
-        };
-        let output = BlockExecutionOutput { result, state: bal_output.bundle_state };
 
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
@@ -1208,7 +1173,6 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
-        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -1224,11 +1188,6 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
-
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -1273,10 +1232,6 @@ where
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
-            }
-            // Bump BAL index after each transaction (EIP-7928)
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
 
@@ -1562,7 +1517,6 @@ where
         transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         hashed_state: LazyHashedPostState,
-        built_bal: Option<BlockAccessList>,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1590,12 +1544,9 @@ where
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            block,
-            output,
-            receipt_root_bloom,
-            built_bal,
-        ) {
+        if let Err(err) =
+            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
+        {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())

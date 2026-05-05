@@ -3,7 +3,10 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_evm::{
-    Evm, EvmFactory, eth::EthEvmContext, precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap}, revm::{database::bal::BalDatabase, handler::EthPrecompiles, precompile::PrecompileId}
+    eth::EthEvmContext,
+    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
+    revm::{database::bal::BalDatabase, handler::EthPrecompiles, precompile::PrecompileId},
+    Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;

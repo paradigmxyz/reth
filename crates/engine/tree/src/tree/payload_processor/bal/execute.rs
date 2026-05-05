@@ -14,79 +14,44 @@
 //! validator still handles consensus checks, receipt-root validation, state-root work, and block
 //! insertion.
 
-use super::{debug, BalExecutionError, RejectReason};
-use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessIndex};
-use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
-    Evm,
+use crate::tree::ExecutionEnv;
+
+use super::BalExecutionError;
+use alloy_evm::block::{BlockExecutionError, BlockExecutor, BlockValidationError};
+use reth_evm::{
+    block::BlockExecutorFactory, execute::ExecutableTxFor, ConfigureEvm, Database, ExecutionCtxFor,
 };
-use alloy_primitives::B256;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
-use reth_primitives_traits::{BlockTy, ReceiptTy, SealedBlock};
+use reth_primitives_traits::ReceiptTy;
+use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
-    context::result::ResultAndState,
-    database::{states::bundle_state::BundleRetention, BundleState, State},
-    primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
+    context::{result::ResultAndState, Block},
+    database::{states::bundle_state::BundleRetention, State},
+    primitives::eip7825::TX_GAS_LIMIT_CAP,
 };
-use revm_state::bal::Bal;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 
-/// Output of a successful BAL-path block execution.
-#[expect(missing_debug_implementations)]
-pub struct BalExecutionOutput<Evm: ConfigureEvm> {
-    /// Accumulated state transitions from the canonical executor.
-    pub bundle_state: BundleState,
-    /// Receipts produced in order, one per committed tx.
-    pub receipts: Vec<ReceiptTy<Evm::Primitives>>,
-    /// Total gas used by all transactions.
-    pub gas_used: u64,
-    /// Blob gas used by the block.
-    pub blob_gas_used: u64,
-    /// EIP-7685 withdrawal / deposit / consolidation requests.
-    pub requests: alloy_eips::eip7685::Requests,
-}
-
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
-pub fn execute_block<Evm, Tx, DB, MakeDb>(
+pub fn execute_block<'a, Evm, Tx, DB, MakeDb>(
     runtime: &Runtime,
-    evm_config: Evm,
+    evm_config: &'a Evm,
     make_db: MakeDb,
-    received_bal: Arc<DecodedBal>,
-    block: &SealedBlock<BlockTy<Evm::Primitives>>,
+    ctx: ExecutionCtxFor<'a, Evm>,
+    env: ExecutionEnv<Evm>,
     txs: Vec<Tx>,
-    header_bal_hash: B256,
-) -> Result<BalExecutionOutput<Evm>, BalExecutionError>
+) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BalExecutionError>
 where
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm + 'static,
     Tx: ExecutableTxFor<Evm> + Send,
     DB: Database + Send,
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
 {
     let worker_pool = runtime.bal_streaming_pool();
-    let bal = received_bal.as_bal();
-    let received_bal_revm: Arc<Bal> = Arc::new(
-        Bal::try_from(Vec::<_>::from(bal.clone()))
-            .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
-    );
-
     let mut canonical_state =
-        State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
-    // NOTE: technically Amsterdam implies BAL (the current path) we are on.
-    // TODO: should we do this
-    let is_amsterdam = evm_config
-        .evm_env(block.header())
-        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
-        .cfg_env
-        .spec
-        .into()
-        .is_enabled_in(SpecId::AMSTERDAM);
-    let block_gas_limit = block.header().gas_limit();
-    let tx_gas_limits: Vec<_> = txs.iter().map(|tx| tx.tx().gas_limit()).collect();
+        State::builder().with_database(make_db()?).with_bundle_update().build();
 
     // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
     // (called by `commit_transaction`) panics at revm-database's
@@ -95,50 +60,44 @@ where
     // EVM loads the account itself during execution, but here workers execute the tx EVM
     // and the canonical loop only commits their outputs, so canonical may never have read
     // those accounts itself.
-    for account_changes in bal {
+    for account_changes in env.decoded_bal.as_ref().expect("BAL is required").as_bal() {
         canonical_state
             .load_cache_account(account_changes.address)
             .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
     }
 
     let block_result = {
-        let worker_evm_config = evm_config.clone();
-        let mut canonical_executor = evm_config
-            .executor_for_block(&mut canonical_state, block)
-            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+        let evm = evm_config.evm_with_env(&mut canonical_state, env.evm_env.clone());
+        let mut canonical_executor =
+            evm_config.block_executor_factory().create_executor(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
 
-        let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
         let abort = Arc::new(AtomicBool::new(false));
         let tx_count = txs.len() as u64;
         let make_db = &make_db;
+        let ctx = &ctx;
+        let env = &env;
 
         worker_pool.in_place_scope(|scope| -> Result<(), BalExecutionError> {
             let mut result_rxs = Vec::with_capacity(tx_count as usize);
 
             for (i, tx) in txs.into_iter().enumerate() {
-                let tx_index = i as u64 + 1;
                 let abort = Arc::clone(&abort);
-                let received_bal_revm = Arc::clone(&received_bal_revm);
-                let evm_config = worker_evm_config.clone();
                 let result_rx = spawn_worker(scope, abort, move || {
-                    let mut worker_state = State::builder()
-                        .with_database(make_db()?)
-                        .with_bal(received_bal_revm)
-                        .with_bundle_update()
-                        .build();
-                    worker_state.set_bal_index(BlockAccessIndex::new(tx_index));
+                    let mut worker_state =
+                        State::builder().with_database(make_db()?).with_bundle_update().build();
 
+                    let evm = evm_config.evm_with_env(&mut worker_state, env.evm_env.clone());
                     evm_config
-                        .executor_for_block(&mut worker_state, block)
-                        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
-                        .execute_transaction_without_commit(tx)
+                        .block_executor_factory()
+                        .create_executor(evm, ctx.clone())
+                        .execute_transaction_with_index(tx, i)
                         .map_err(BalExecutionError::Evm)
                 });
                 result_rxs.push(result_rx);
             }
-            for (i, result_rx) in result_rxs.into_iter().enumerate() {
+            for result_rx in result_rxs.into_iter() {
                 let worker_result = result_rx.recv().map_err(|_| {
                     BalExecutionError::Evm(BlockExecutionError::msg(
                         "BAL worker result channel closed before result arrived",
@@ -151,49 +110,18 @@ where
                         return Err(err);
                     }
                 };
-                gas_tracker.validate_tx_limit(tx_gas_limits[i])?;
-                gas_tracker.record_result(worker_result.result());
-                canonical_executor.evm_mut().db_mut().bump_bal_index();
-                commit_worker_result(&mut canonical_executor, worker_result);
+                canonical_executor.commit_transaction(worker_result);
             }
 
             Ok(())
         })?;
 
-        canonical_executor.evm_mut().db_mut().bump_bal_index();
         canonical_executor.apply_post_execution_changes()?
     };
 
-    let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    let rebuilt = compute_block_access_list_hash(&composed_alloy);
-    if rebuilt != header_bal_hash {
-        if tracing::enabled!(
-            target: "engine::tree::payload_processor::bal",
-            tracing::Level::DEBUG
-        ) {
-            let div = debug::first_bal_divergence(bal, &composed_alloy);
-            tracing::debug!(
-                target: "engine::tree::payload_processor::bal",
-                %rebuilt,
-                expected = %header_bal_hash,
-                ?div,
-                "first BAL divergence",
-            );
-        }
-        return Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
-            rebuilt,
-            expected: header_bal_hash,
-        }));
-    }
-
     canonical_state.merge_transitions(BundleRetention::Reverts);
-    Ok(BalExecutionOutput {
-        bundle_state: canonical_state.take_bundle(),
-        receipts: block_result.receipts,
-        gas_used: block_result.gas_used,
-        blob_gas_used: block_result.blob_gas_used,
-        requests: block_result.requests,
-    })
+
+    Ok(BlockExecutionOutput { result: block_result, state: canonical_state.take_bundle() })
 }
 
 /// Mirrors `EthBlockExecutor`'s cumulative gas admission check in the ordered BAL commit loop.
@@ -258,13 +186,6 @@ where
     });
 
     result_rx
-}
-
-fn commit_worker_result<E>(executor: &mut E, worker_result: E::Result)
-where
-    E: BlockExecutor,
-{
-    let _ = executor.commit_transaction(worker_result);
 }
 
 #[cfg(test)]

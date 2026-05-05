@@ -702,8 +702,8 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-evm = { path = "../evm/crates/evm" }
-revm-inspectors = { path = "../revm-inspectors" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "93a9ff4"}
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3c72047" }
 revm = { git = "https://github.com/bluealloy/revm", rev = "c154af02" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "c154af02" }
 revm-state = { git = "https://github.com/bluealloy/revm", rev = "c154af02" }

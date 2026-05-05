@@ -191,10 +191,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         };
 
-                        let bal= executor.take_bal();
-
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None,bal)
+                            .validate_block_post_execution(&block, &result, None)
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",
