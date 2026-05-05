@@ -555,6 +555,7 @@ jobs:
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
       BENCH_SLACK: ${{ needs.reth-bench-ack.outputs.slack }}
       BENCH_NODE_BIN: ${{ needs.reth-bench-ack.outputs.big-blocks == 'true' && 'reth-bb' || 'reth' }}
+      BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
@@ -802,10 +803,6 @@ jobs:
           echo "Payload files: $PAYLOAD_COUNT"
           echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
 
-      - name: Validate local snapshot
-        id: snapshot-check
-        run: .github/scripts/bench-reth-snapshot.sh
-
       - name: Prepare source dirs
         run: |
           prepare_source_dir() {
@@ -850,6 +847,12 @@ jobs:
             echo "::error::One or more build tasks failed"
             exit 1
           fi
+
+      - name: Sync snapshot
+        id: snapshot-check
+        run: |
+          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -1340,8 +1343,8 @@ jobs:
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
               ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
@@ -1378,8 +1381,8 @@ jobs:
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
               ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
