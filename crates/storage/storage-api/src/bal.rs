@@ -1,4 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
+use alloy_eips::eip7928::bal::DecodedBal;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -21,6 +22,17 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// The returned vector must align with `block_hashes`.
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>>;
+
+    /// Fetches and decodes the BAL for the given block hash.
+    fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
+        self.get_by_hashes(&[block_hash])?
+            .into_iter()
+            .next()
+            .flatten()
+            .map(DecodedBal::from_rlp_bytes)
+            .transpose()
+            .map_err(Into::into)
+    }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
     /// exceeded.
@@ -118,6 +130,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         self.inner.get_by_hashes(block_hashes)
+    }
+
+    /// Fetches and decodes the BAL for the given block hash.
+    #[inline]
+    pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
+        self.inner.get_decoded_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is

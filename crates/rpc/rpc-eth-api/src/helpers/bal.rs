@@ -1,6 +1,5 @@
 //! Helpers for block access lists.
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::bal::Bal as AlloyBal;
 use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockId;
@@ -87,33 +86,21 @@ pub fn load_revm_block_bal<Provider>(provider: &Provider, block_hash: B256) -> O
 where
     Provider: BalProvider,
 {
-    let raw_bal = match provider.bal_store().get_by_hashes(&[block_hash]) {
-        Ok(bals) => bals.into_iter().next().flatten()?,
+    let decoded_bal = match provider.bal_store().get_decoded_by_hash(block_hash) {
+        Ok(Some(bal)) => bal,
+        Ok(None) => return None,
         Err(err) => {
             debug!(
                 target: "reth::rpc",
                 ?block_hash,
                 %err,
-                "Failed to fetch block access list"
+                "Failed to load block access list"
             );
             return None
         }
     };
 
-    let alloy_bal = match alloy_rlp::decode_exact::<AlloyBal>(raw_bal.as_ref()) {
-        Ok(bal) => bal,
-        Err(err) => {
-            debug!(
-                target: "reth::rpc",
-                ?block_hash,
-                %err,
-                "Failed to decode block access list"
-            );
-            return None
-        }
-    };
-
-    match Bal::try_from(alloy_bal.into_inner()) {
+    match Bal::try_from(decoded_bal.split().0.into_inner()) {
         Ok(bal) => Some(Arc::new(bal)),
         Err(err) => {
             debug!(
