@@ -9,7 +9,8 @@
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_WORK_DIR, BENCH_BASELINE_ARGS, BENCH_FEATURE_ARGS,
 #               BENCH_OTLP_TRACES_ENDPOINT, BENCH_OTLP_LOGS_ENDPOINT,
-#               BENCH_OTLP_DISABLED
+#               BENCH_OTLP_DISABLED, BENCH_TRACY, BENCH_TRACY_FILTER,
+#               BENCH_TRACY_SAMPLING_HZ
 set -euxo pipefail
 
 LABEL="$1"
@@ -38,6 +39,22 @@ fi
 
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
+  if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
+    echo "Stopping tracy-capture..."
+    kill -INT "$TRACY_PID" 2>/dev/null || true
+    for i in $(seq 1 30); do
+      kill -0 "$TRACY_PID" 2>/dev/null || break
+      if [ $((i % 10)) -eq 0 ]; then
+        echo "Waiting for tracy-capture to finish writing... (${i}s)"
+      fi
+      sleep 1
+    done
+    if kill -0 "$TRACY_PID" 2>/dev/null; then
+      echo "tracy-capture still running after 30s, killing..."
+      kill -9 "$TRACY_PID" 2>/dev/null || true
+    fi
+    wait "$TRACY_PID" 2>/dev/null || true
+  fi
   if sudo systemctl is-active "$RETH_SCOPE" >/dev/null 2>&1; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
       sudo pkill -INT -x reth 2>/dev/null || true
@@ -58,6 +75,7 @@ cleanup() {
   sudo schelk recover -y --kill || true
 }
 TAIL_PID=
+TRACY_PID=
 trap cleanup EXIT
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
@@ -124,6 +142,15 @@ if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
   fi
   if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
     RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+  fi
+fi
+
+if [ "${BENCH_TRACY:-off}" != "off" ]; then
+  RETH_ARGS+=(--log.tracy --log.tracy.filter "${BENCH_TRACY_FILTER:-debug}")
+  if [ "${BENCH_TRACY}" = "on" ]; then
+    export TRACY_NO_SYS_TRACE=1
+  elif [ "${BENCH_TRACY}" = "full" ]; then
+    export TRACY_SAMPLING_HZ="${BENCH_TRACY_SAMPLING_HZ:-1}"
   fi
 fi
 
@@ -244,6 +271,13 @@ if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
     --report json:"$TXGEN_DIR/warmup-report.json" 2>&1 | sed -u "s/^/[bench] /"
 else
   echo "Skipping warmup (0 blocks)..."
+fi
+
+if [ "${BENCH_TRACY:-off}" != "off" ]; then
+  echo "Starting tracy-capture..."
+  tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
+  TRACY_PID=$!
+  sleep 0.5
 fi
 
 # TODO(txgen): expose a wait-time flag and plumb BENCH_WAIT_TIME here.
