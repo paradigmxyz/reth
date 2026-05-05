@@ -613,7 +613,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let storage_v2 = rocksdb_ctx.storage_settings.storage_v2;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -636,7 +636,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // RocksDB writes
-            if rocksdb_enabled {
+            if storage_v2 {
                 s.spawn(|_| {
                     let _guard = span.enter();
                     let start = Instant::now();
@@ -652,7 +652,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if !storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -738,7 +738,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() {
+            if save_mode.with_state() && !storage_v2 {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
@@ -757,7 +757,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Collect results from spawned tasks
         timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-        if rocksdb_enabled {
+        if storage_v2 {
             timings.rocksdb = rocksdb_result.ok_or_else(|| {
                 ProviderError::Database(reth_db_api::DatabaseError::Other(
                     "RocksDB thread panicked".into(),
