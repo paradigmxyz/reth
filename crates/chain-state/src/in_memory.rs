@@ -544,7 +544,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         hash: B256,
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider<N> {
-        let in_memory = if let Some(state) = self.state_by_hash(hash) {
+        let in_memory: Vec<_> = if let Some(state) = self.state_by_hash(hash) {
             state.chain().map(|block_state| block_state.block()).collect()
         } else {
             Vec::new()
@@ -712,7 +712,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// This merges the state of all blocks that are part of the chain that the this block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider<N> {
-        let in_memory = self.chain().map(|block_state| block_state.block()).collect();
+        let in_memory: Vec<_> = self.chain().map(|block_state| block_state.block()).collect();
 
         MemoryOverlayStateProvider::new(historical, in_memory)
     }

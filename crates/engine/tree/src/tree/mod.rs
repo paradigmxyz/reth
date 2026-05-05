@@ -102,7 +102,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The historical block hash to fetch state from.
     historical: B256,
     /// The blocks that form the chain from historical to target and are in memory.
-    overlay: Option<Vec<ExecutedBlock<N>>>,
+    overlay: Option<Arc<[ExecutedBlock<N>]>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
@@ -111,7 +111,7 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     pub const fn new(
         provider_factory: P,
         historical: B256,
-        overlay: Option<Vec<ExecutedBlock<N>>>,
+        overlay: Option<Arc<[ExecutedBlock<N>]>>,
     ) -> Self {
         Self { provider_factory, historical, overlay }
     }
@@ -124,8 +124,8 @@ where
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        if let Some(overlay) = self.overlay.clone() {
-            provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
+        if let Some(overlay) = self.overlay.as_ref() {
+            provider = Box::new(MemoryOverlayStateProvider::new(provider, Arc::clone(overlay)))
         }
         Ok(provider)
     }
@@ -3341,7 +3341,7 @@ where
             return Ok(Some(StateProviderBuilder::new(
                 self.provider.clone(),
                 historical,
-                Some(blocks),
+                Some(blocks.into()),
             )))
         }
 

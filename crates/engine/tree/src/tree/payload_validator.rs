@@ -1510,7 +1510,7 @@ where
             return Ok(Some(StateProviderBuilder::new(
                 self.provider.clone(),
                 historical,
-                Some(blocks),
+                Some(blocks.into()),
             )))
         }
 

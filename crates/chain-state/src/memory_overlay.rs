@@ -12,7 +12,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, sync::{Arc, OnceLock}};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
@@ -249,7 +249,7 @@ pub struct MemoryOverlayStateProvider<N: NodePrimitives = reth_ethereum_primitiv
     /// Historical state provider for state lookups that are not found in memory blocks.
     pub(crate) historical: StateProviderBox,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlock<N>>,
+    pub(crate) in_memory: Arc<[ExecutedBlock<N>]>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_input: OnceLock<TrieInput>,
 }
@@ -262,8 +262,11 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
-    pub fn new(historical: StateProviderBox, in_memory: Vec<ExecutedBlock<N>>) -> Self {
-        Self { historical, in_memory, trie_input: OnceLock::new() }
+    pub fn new(
+        historical: StateProviderBox,
+        in_memory: impl Into<Arc<[ExecutedBlock<N>]>>,
+    ) -> Self {
+        Self { historical, in_memory: in_memory.into(), trie_input: OnceLock::new() }
     }
 
     /// Returns a new provider that takes the `TX` as reference
@@ -271,7 +274,7 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
     fn as_ref(&self) -> MemoryOverlayStateProviderRef<'_, N> {
         MemoryOverlayStateProviderRef {
             historical: Box::new(self.historical.as_ref()),
-            in_memory: Cow::Borrowed(&self.in_memory),
+            in_memory: Cow::Borrowed(self.in_memory.as_ref()),
             trie_input: self.trie_input.clone(),
         }
     }
