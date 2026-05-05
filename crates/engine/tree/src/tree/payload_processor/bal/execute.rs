@@ -20,7 +20,10 @@ use super::{
     BalExecutionError, RejectReason,
 };
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
+use alloy_eip7928::{
+    bal::{Bal as AlloyBal, DecodedBal},
+    compute_block_access_list_hash,
+};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
@@ -35,7 +38,7 @@ use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
-use revm_state::bal::Bal;
+use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -115,13 +118,11 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = received_bal.as_bal();
-    let received_bal_revm: Arc<Bal> = Arc::new(
-        Bal::try_from(Vec::<_>::from(bal.clone()))
+    let received_bal_revm: Arc<RevmBal> = Arc::new(
+        RevmBal::try_from(Vec::<_>::from(bal.clone()))
             .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
     );
 
-    let mut canonical_state =
-        State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
     // NOTE: technically Amsterdam implies BAL (the current path) we are on.
     // TODO: should we do this
     let is_amsterdam = evm_config
@@ -132,19 +133,9 @@ where
         .into()
         .is_enabled_in(SpecId::AMSTERDAM);
     let block_gas_limit = block.header().gas_limit();
-
-    // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
-    // (called by `commit_transaction`) panics at revm-database's
-    // `cache.rs:195` ("All accounts should be present inside cache") when it tries to
-    // apply a diff for an address not previously loaded. In the normal serial flow the
-    // EVM loads the account itself during execution, but here workers execute the tx EVM
-    // and the canonical loop only commits their outputs, so canonical may never have read
-    // those accounts itself.
-    for account_changes in bal {
-        canonical_state
-            .load_cache_account(account_changes.address)
-            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
-    }
+    let mut canonical_state =
+        State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
+    load_bal_accounts(&mut canonical_state, bal)?;
 
     let (block_result, senders) = {
         let worker_evm_config = evm_config.clone();
@@ -171,42 +162,35 @@ where
             .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
 
         canonical_executor.apply_pre_execution_changes()?;
-        let senders = commit_ordered_worker_outputs(
-            &result_rx,
-            transaction_count,
-            &mut canonical_executor,
-            &mut gas_tracker,
-            &receipt_tx,
-        );
+        let mut senders = Vec::with_capacity(transaction_count);
+        let mut last_sent_len = 0usize;
+        for output in OrderedWorkerOutputs::new(&result_rx, transaction_count) {
+            let output = output?;
+
+            gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
+            gas_tracker.record_result(output.result.result());
+            canonical_executor.evm_mut().db_mut().bump_bal_index();
+
+            let _ = canonical_executor.commit_transaction(output.result);
+            senders.push(output.signer);
+
+            let current_len = canonical_executor.receipts().len();
+            if current_len > last_sent_len {
+                last_sent_len = current_len;
+                if let Some(receipt) = canonical_executor.receipts().last() {
+                    let tx_index = current_len - 1;
+                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                }
+            }
+        }
         drop(abort_guard);
-        let senders = senders?;
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
         let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
 
-    let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    let rebuilt = compute_block_access_list_hash(&composed_alloy);
-    if rebuilt != header_bal_hash {
-        if tracing::enabled!(
-            target: "engine::tree::payload_processor::bal",
-            tracing::Level::DEBUG
-        ) {
-            let div = debug::first_bal_divergence(bal, &composed_alloy);
-            tracing::debug!(
-                target: "engine::tree::payload_processor::bal",
-                %rebuilt,
-                expected = %header_bal_hash,
-                ?div,
-                "first BAL divergence",
-            );
-        }
-        return Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
-            rebuilt,
-            expected: header_bal_hash,
-        }));
-    }
+    validate_bal_hash(&mut canonical_state, bal, header_bal_hash)?;
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -219,6 +203,63 @@ where
         },
         senders,
     ))
+}
+
+fn load_bal_accounts<DB>(
+    canonical_state: &mut State<DB>,
+    bal: &AlloyBal,
+) -> Result<(), BalExecutionError>
+where
+    DB: Database,
+{
+    // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
+    // (called by `commit_transaction`) panics at revm-database's
+    // `cache.rs:195` ("All accounts should be present inside cache") when it tries to
+    // apply a diff for an address not previously loaded. In the normal serial flow the
+    // EVM loads the account itself during execution, but here workers execute the tx EVM
+    // and the canonical loop only commits their outputs, so canonical may never have read
+    // those accounts itself.
+    for account_changes in bal {
+        canonical_state
+            .load_cache_account(account_changes.address)
+            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+    }
+
+    Ok(())
+}
+
+fn validate_bal_hash<DB>(
+    canonical_state: &mut State<DB>,
+    received_bal: &AlloyBal,
+    header_bal_hash: B256,
+) -> Result<(), BalExecutionError>
+where
+    DB: Database,
+{
+    let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    let rebuilt = compute_block_access_list_hash(&composed_alloy);
+    if rebuilt == header_bal_hash {
+        return Ok(());
+    }
+
+    if tracing::enabled!(
+        target: "engine::tree::payload_processor::bal",
+        tracing::Level::DEBUG
+    ) {
+        let div = debug::first_bal_divergence(received_bal, &composed_alloy);
+        tracing::debug!(
+            target: "engine::tree::payload_processor::bal",
+            %rebuilt,
+            expected = %header_bal_hash,
+            ?div,
+            "first BAL divergence",
+        );
+    }
+
+    Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
+        rebuilt,
+        expected: header_bal_hash,
+    }))
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -275,74 +316,76 @@ impl BlockGasTracker {
     }
 }
 
-fn commit_ordered_worker_outputs<'a, E, DB>(
-    result_rx: &Receiver<Result<BalWorkerOutput<E::Result>, BalExecutionError>>,
-    transaction_count: usize,
-    canonical_executor: &mut E,
-    gas_tracker: &mut BlockGasTracker,
-    receipt_tx: &Sender<IndexedReceipt<E::Receipt>>,
-) -> Result<Vec<Address>, BalExecutionError>
-where
-    E: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
-    E::Receipt: Clone,
-    DB: Database + 'a,
-{
-    let mut pending = (0..transaction_count).map(|_| None).collect::<Vec<_>>();
-    let mut next_commit = 0usize;
-    let mut senders = Vec::with_capacity(transaction_count);
-
-    while next_commit < transaction_count {
-        let output = result_rx.recv().map_err(|_| {
-            BalExecutionError::Evm(BlockExecutionError::msg(
-                "BAL worker result channel closed before all results arrived",
-            ))
-        })??;
-
-        let index = output.index;
-        if index >= transaction_count {
-            return Err(BalExecutionError::Evm(BlockExecutionError::msg(
-                "BAL worker returned out-of-bounds transaction index",
-            )));
-        }
-        if pending[index].is_some() {
-            return Err(BalExecutionError::Evm(BlockExecutionError::msg(
-                "BAL worker returned duplicate transaction index",
-            )));
-        }
-        pending[index] = Some(output);
-
-        loop {
-            if next_commit >= transaction_count {
-                break;
-            }
-            let Some(output) = pending[next_commit].take() else {
-                break;
-            };
-
-            gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
-            gas_tracker.record_result(output.result.result());
-            canonical_executor.evm_mut().db_mut().bump_bal_index();
-
-            let previous_receipts_len = canonical_executor.receipts().len();
-            canonical_executor.commit_transaction(output.result);
-            senders.push(output.signer);
-
-            let receipts = canonical_executor.receipts();
-            if receipts.len() > previous_receipts_len {
-                if let Some(receipt) = receipts.last() {
-                    let _ =
-                        receipt_tx.send(IndexedReceipt::new(receipts.len() - 1, receipt.clone()));
-                }
-            }
-
-            next_commit += 1;
-        }
-    }
-
-    Ok(senders)
+struct OrderedWorkerOutputs<'a, R> {
+    result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalExecutionError>>,
+    pending: Vec<Option<BalWorkerOutput<R>>>,
+    next: usize,
+    total: usize,
+    failed: bool,
 }
 
+impl<'a, R> OrderedWorkerOutputs<'a, R> {
+    fn new(
+        result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalExecutionError>>,
+        total: usize,
+    ) -> Self {
+        Self {
+            result_rx,
+            pending: (0..total).map(|_| None).collect(),
+            next: 0,
+            total,
+            failed: false,
+        }
+    }
+}
 
+impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
+    type Item = Result<BalWorkerOutput<R>, BalExecutionError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.next >= self.total {
+            return None;
+        }
+
+        loop {
+            if let Some(output) = self.pending[self.next].take() {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            let output = match self.result_rx.recv() {
+                Ok(Ok(output)) => output,
+                Ok(Err(err)) => {
+                    self.failed = true;
+                    return Some(Err(err));
+                }
+                Err(_) => {
+                    self.failed = true;
+                    return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                        "BAL worker result channel closed before all results arrived",
+                    ))));
+                }
+            };
+
+            let index = output.index;
+            if index >= self.total {
+                self.failed = true;
+                return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                    "BAL worker returned out-of-bounds transaction index",
+                ))));
+            }
+
+            if index < self.next || self.pending[index].is_some() {
+                self.failed = true;
+                return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                    "BAL worker returned duplicate transaction index",
+                ))));
+            }
+
+            self.pending[index] = Some(output);
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
