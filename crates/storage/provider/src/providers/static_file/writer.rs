@@ -116,6 +116,33 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     #[instrument(
+        name = "StaticFileWriters::sync_all",
+        level = "debug",
+        target = "providers::static_file",
+        skip_all
+    )]
+    pub(crate) fn sync_all(&self) -> ProviderResult<()> {
+        debug!(target: "providers::static_file", "Syncing all static file segments");
+
+        for writer_lock in [
+            &self.headers,
+            &self.transactions,
+            &self.receipts,
+            &self.transaction_senders,
+            &self.account_change_sets,
+            &self.storage_change_sets,
+        ] {
+            let mut writer = writer_lock.write();
+            if let Some(writer) = writer.as_mut() {
+                writer.sync_all()?;
+            }
+        }
+
+        debug!(target: "providers::static_file", "Synced all static file segments");
+        Ok(())
+    }
+
+    #[instrument(
         name = "StaticFileWriters::commit",
         level = "debug",
         target = "providers::static_file",
