@@ -89,7 +89,7 @@ on:
       otlp:
         description: "Export OTLP traces and logs"
         required: false
-        default: "true"
+        default: "false"
         type: boolean
 
 env:
@@ -176,7 +176,7 @@ jobs:
               bigBlocks = '${{ github.event.inputs.big_blocks }}' === 'true' ? 'true' : 'false';
               bal = '${{ github.event.inputs.bal }}' || 'false';
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
-              var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
+              var otlp = '${{ github.event.inputs.otlp }}' === 'true' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -202,11 +202,11 @@ jobs:
               const intArgs = new Set(['warmup', 'cores', 'blocks']);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply', 'big-blocks']);
-              const boolDefaultTrue = new Set(['abba', 'otlp']);
+              const boolDefaultTrue = new Set(['abba']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -620,7 +620,7 @@ jobs:
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const abbaEnabled = (process.env.BENCH_ABBA || 'true') !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
-            const otlpEnabled = (process.env.BENCH_OTLP || 'true') !== 'false';
+            const otlpEnabled = (process.env.BENCH_OTLP || 'false') !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
