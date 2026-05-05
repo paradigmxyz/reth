@@ -497,21 +497,23 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
-            const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
-              ['building binaries', '${{ steps.build.outcome }}'],
-              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
-              ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
-              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
-            ];
-            const failed = steps_status.find(([, o]) => o === 'failure');
-            const failedStep = failed ? failed[0] : 'unknown step';
+            const { failedStep } = require('./.github/scripts/bench-failure-step.js');
+            const failed = failedStep({
+              bigBlocks: process.env.BENCH_BIG_BLOCKS === 'true',
+              abba: (process.env.BENCH_ABBA || 'true') !== 'false',
+              outcomes: {
+                bigBlocksCheck: '${{ steps.big-blocks-check.outcome }}',
+                snapshotCheck: '${{ steps.snapshot-check.outcome }}',
+                build: '${{ steps.build.outcome }}',
+                runFeature1: '${{ steps.run-feature-1.outcome }}',
+                runBaseline1: '${{ steps.run-baseline-1.outcome }}',
+                runBaseline2: '${{ steps.run-baseline-2.outcome }}',
+                runFeature2: '${{ steps.run-feature-2.outcome }}',
+              },
+            });
+            const failedStepName = failed;
             const comment = require('./.github/scripts/bench-comment.js');
-            await comment.updateFailed({github, context, failedStep});
+            await comment.updateFailed({github, context, failedStep: failedStepName});
 
       - name: Send Slack notification (failure)
         if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
@@ -521,21 +523,23 @@ jobs:
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
           script: |
-            const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
-            const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
-              ['building binaries', '${{ steps.build.outcome }}'],
-              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
-              ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
-              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
-            ];
-            const failed = steps_status.find(([, o]) => o === 'failure');
-            const failedStep = failed ? failed[0] : 'unknown step';
+            const { failedStep } = require('./.github/scripts/bench-failure-step.js');
+            const failed = failedStep({
+              bigBlocks: process.env.BENCH_BIG_BLOCKS === 'true',
+              abba: (process.env.BENCH_ABBA || 'true') !== 'false',
+              outcomes: {
+                bigBlocksCheck: '${{ steps.big-blocks-check.outcome }}',
+                snapshotCheck: '${{ steps.snapshot-check.outcome }}',
+                build: '${{ steps.build.outcome }}',
+                runFeature1: '${{ steps.run-feature-1.outcome }}',
+                runBaseline1: '${{ steps.run-baseline-1.outcome }}',
+                runBaseline2: '${{ steps.run-baseline-2.outcome }}',
+                runFeature2: '${{ steps.run-feature-2.outcome }}',
+              },
+            });
+            const failedStepName = failed;
             const notify = require('./.github/scripts/bench-slack-notify.js');
-            await notify.failure({ core, context, failedStep });
+            await notify.failure({ core, context, failedStep: failedStepName });
 
       - name: Update status (cancelled)
         if: cancelled() && env.BENCH_COMMENT_ID

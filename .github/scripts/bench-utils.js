@@ -6,6 +6,11 @@ const fs = require('fs');
 const path = require('path');
 
 const SIG_EMOJI = { good: '✅', bad: '❌', neutral: '⚪' };
+const CHARTS = [
+  { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
+  { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
+  { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
+];
 
 function fmtMs(v) { return v.toFixed(2) + 'ms'; }
 function fmtMgas(v) { return v.toFixed(2); }
@@ -28,15 +33,65 @@ function verdict(changes) {
   return { emoji: '⚪', label: 'No Difference' };
 }
 
+function runOrder(abba = (process.env.BENCH_ABBA || 'true') !== 'false') {
+  return abba ? ['feature-1', 'baseline-1', 'baseline-2', 'feature-2'] : ['feature-1', 'baseline-1'];
+}
+
 function loadSamplyUrls(workDir) {
   const urls = {};
-  for (const run of ['baseline-1', 'baseline-2', 'feature-1', 'feature-2']) {
+  for (const run of runOrder(true)) {
     try {
       const url = fs.readFileSync(path.join(workDir, run, 'samply-profile-url.txt'), 'utf8').trim();
       if (url) urls[run] = url;
     } catch {}
   }
   return urls;
+}
+
+function comparisonUrls(repo, summary, prNumber) {
+  const commitUrl = `https://github.com/${repo}/commit`;
+  return {
+    pr: prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '',
+    baseline: `${commitUrl}/${summary.baseline.ref}`,
+    feature: `${commitUrl}/${summary.feature.ref}`,
+    diff: `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`,
+  };
+}
+
+function chartBaseUrl({ chartSha, prNumber, runId }) {
+  return `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/pr/${prNumber || '0'}/${runId}`;
+}
+
+function markdownChartSection({ chartSha, prNumber, runId }) {
+  if (!chartSha) return '';
+  const baseUrl = chartBaseUrl({ chartSha, prNumber, runId });
+  let md = '\n\n### Charts\n\n';
+  for (const chart of CHARTS) {
+    md += `<details><summary>${chart.label}</summary>\n\n`;
+    md += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
+    md += `</details>\n\n`;
+  }
+  return md;
+}
+
+function markdownSamplySection(workDir, abba = (process.env.BENCH_ABBA || 'true') !== 'false') {
+  const urls = loadSamplyUrls(workDir);
+  const links = runOrder(abba)
+    .filter(run => urls[run])
+    .map(run => `- **${run}**: [Firefox Profiler](${urls[run]})`);
+  return links.length > 0 ? `\n\n### Samply Profiles\n\n${links.join('\n')}\n` : '';
+}
+
+function markdownGrafanaSection(grafanaUrl) {
+  return grafanaUrl ? `\n\n### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n` : '';
+}
+
+function markdownErrorsSection(workDir) {
+  try {
+    const errors = fs.readFileSync(path.join(workDir, 'errors.md'), 'utf8');
+    if (errors.trim()) return '\n\n' + errors;
+  } catch {}
+  return '';
 }
 
 function balModeLabel(mode) {
@@ -102,12 +157,20 @@ function waitTimeRows(summary) {
 
 module.exports = {
   SIG_EMOJI,
+  CHARTS,
   fmtMs,
   fmtMgas,
   fmtS,
   fmtChange,
   verdict,
+  runOrder,
   loadSamplyUrls,
+  comparisonUrls,
+  chartBaseUrl,
+  markdownChartSection,
+  markdownSamplySection,
+  markdownGrafanaSection,
+  markdownErrorsSection,
   blocksLabel,
   metricRows,
   waitTimeRows,

@@ -18,7 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows } = require('./bench-utils');
+const { verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows, comparisonUrls } = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -74,14 +74,13 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   const { emoji, label } = verdict(summary.changes);
   const headerEmoji = SLACK_VERDICT[emoji] || emoji;
 
-  const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
-  const commitUrl = `https://github.com/${repo}/commit`;
-  const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
-  const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
+  const urls = comparisonUrls(repo, summary, prNumber);
+  const baselineLink = `<${urls.baseline}|${summary.baseline.name}>`;
+  const featureLink = `<${urls.feature}|${summary.feature.name}>`;
 
   // Meta line
   const metaParts = [];
-  if (prNumber) metaParts.push(`*<${prUrl}|PR #${prNumber}>*`);
+  if (prNumber) metaParts.push(`*<${urls.pr}|PR #${prNumber}>*`);
   metaParts.push(`triggered by ${actorSlackId ? `<@${actorSlackId}>` : `@${actor}`}`);
 
   // Baseline/feature lines with samply profile links
@@ -108,7 +107,6 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, ...argsLines, countsLine].join('\n');
 
   // Action buttons
-  const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
   const buttons = [
     {
       type: 'button',
@@ -119,7 +117,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
     {
       type: 'button',
       text: { type: 'plain_text', text: 'Diff :github:', emoji: true },
-      url: diffUrl,
+      url: urls.diff,
       action_id: 'diff_button',
     },
   ];
