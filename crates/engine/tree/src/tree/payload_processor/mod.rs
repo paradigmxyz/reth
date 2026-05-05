@@ -259,9 +259,11 @@ where
             + Sync
             + 'static,
     {
+        let stream_to_prewarm = self.should_stream_transactions_to_prewarm(&env);
+
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, stream_to_prewarm);
 
         let span = Span::current();
 
@@ -302,8 +304,9 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
+        let stream_to_prewarm = self.should_stream_transactions_to_prewarm(&env);
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, stream_to_prewarm);
         let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
         PayloadHandle {
             state_root_handle: None,
@@ -382,6 +385,16 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
+    /// Returns whether the transaction iterator should populate the prewarm stream.
+    ///
+    /// When transaction prewarming is skipped or replaced by BAL-driven prewarming, cloning every
+    /// converted transaction into the prewarm channel only adds channel and `TxEnv` clone work.
+    fn should_stream_transactions_to_prewarm(&self, env: &ExecutionEnv<Evm>) -> bool {
+        !self.disable_transaction_prewarming &&
+            env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD &&
+            (env.decoded_bal.is_none() || self.disable_bal_parallel_execution)
+    }
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -394,6 +407,7 @@ where
         &self,
         transactions: I,
         transaction_count: usize,
+        stream_to_prewarm: bool,
     ) -> (
         mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
@@ -413,7 +427,13 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                let prewarm_tx = stream_to_prewarm.then_some(prewarm_tx);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    prewarm_tx.as_ref(),
+                    &execute_tx,
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -428,10 +448,11 @@ where
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
+                let prewarm_tx = stream_to_prewarm.then_some(prewarm_tx);
 
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(all.into_iter(), &convert, prewarm_tx.as_ref(), &execute_tx);
 
                 // Convert the remaining transactions in parallel.
                 rest.into_par_iter()
@@ -445,7 +466,9 @@ where
                         let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                            let _ = prewarm_tx.send((idx, tx.clone()));
+                            if let Some(prewarm_tx) = prewarm_tx.as_ref() {
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                            }
                             tx
                         });
                         let _ = execute_tx.send(tx);
@@ -729,7 +752,7 @@ where
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    prewarm_tx: Option<&mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
     execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
@@ -742,7 +765,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             let (tx_env, tx) = tx.into_parts();
             WithTxEnv { tx_env, tx: Arc::new(tx) }
         });
-        if let Ok(tx) = &tx {
+        if let (Some(prewarm_tx), Ok(tx)) = (prewarm_tx, &tx) {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send(tx);
