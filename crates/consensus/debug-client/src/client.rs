@@ -1,35 +1,34 @@
-use alloy_consensus::Sealable;
 use alloy_primitives::B256;
-use reth_node_api::{
-    BuiltPayload, ConsensusEngineHandle, ExecutionPayload, NodePrimitives, PayloadTypes,
-};
-use reth_primitives_traits::{Block, SealedBlock};
+use reth_node_api::{ConsensusEngineHandle, ExecutionPayload, PayloadTypes};
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::future::Future;
 use tokio::sync::mpsc;
 
-/// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
-/// by number to fetch past finalized and safe blocks.
+/// Supplies consensus client with new execution payloads sent in `tx` and a callback to find
+/// specific payloads by number to fetch past finalized and safe block hashes.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockProvider: Send + Sync + 'static {
-    /// The block type.
-    type Block: Block;
+pub trait PayloadProvider: Send + Sync + 'static {
+    /// The execution payload data type.
+    type ExecutionData: ExecutionPayload;
 
-    /// Runs a block provider to send new blocks to the given sender.
+    /// Runs a provider to send new execution payloads to the given sender.
     ///
     /// Note: This is expected to be spawned in a separate task, and as such it should ignore
     /// errors.
-    fn subscribe_blocks(&self, tx: mpsc::Sender<Self::Block>) -> impl Future<Output = ()> + Send;
+    fn subscribe_payloads(
+        &self,
+        tx: mpsc::Sender<Self::ExecutionData>,
+    ) -> impl Future<Output = ()> + Send;
 
-    /// Get a past block by number.
-    fn get_block(
+    /// Get a past execution payload by block number.
+    fn get_payload(
         &self,
         block_number: u64,
-    ) -> impl Future<Output = eyre::Result<Self::Block>> + Send;
+    ) -> impl Future<Output = eyre::Result<Self::ExecutionData>> + Send;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
-    /// started more recently than `offset`), fetch it using `get_block`.
+    /// started more recently than `offset`), fetch it using `get_payload`.
     fn get_or_fetch_previous_block(
         &self,
         previous_block_hashes: &AllocRingBuffer<B256>,
@@ -46,23 +45,23 @@ pub trait BlockProvider: Send + Sync + 'static {
                 Some(number) => number,
                 None => return Ok(B256::default()),
             };
-            let block = self.get_block(previous_block_number).await?;
-            Ok(block.header().hash_slow())
+            let payload = self.get_payload(previous_block_number).await?;
+            Ok(payload.block_hash())
         }
     }
 }
 
-/// Debug consensus client that sends FCUs and new payloads using recent blocks from an external
+/// Debug consensus client that sends FCUs and new payloads using recent payloads from an external
 /// provider like Etherscan or an RPC endpoint.
 #[derive(Debug)]
-pub struct DebugConsensusClient<P: BlockProvider, T: PayloadTypes> {
+pub struct DebugConsensusClient<P: PayloadProvider, T: PayloadTypes> {
     /// Handle to execution client.
     engine_handle: ConsensusEngineHandle<T>,
-    /// Provider to get consensus blocks from.
+    /// Provider to get consensus payloads from.
     block_provider: P,
 }
 
-impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
+impl<P: PayloadProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
     pub const fn new(engine_handle: ConsensusEngineHandle<T>, block_provider: P) -> Self {
@@ -72,25 +71,23 @@ impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
 
 impl<P, T> DebugConsensusClient<P, T>
 where
-    P: BlockProvider + Clone,
-    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = P::Block>>>,
+    P: PayloadProvider<ExecutionData = T::ExecutionData> + Clone,
+    T: PayloadTypes,
 {
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
-    /// blocks.
+    /// payloads.
     pub async fn run(self) {
         let mut previous_block_hashes = AllocRingBuffer::new(65);
-        let mut block_stream = {
-            let (tx, rx) = mpsc::channel::<P::Block>(64);
+        let mut payload_stream = {
+            let (tx, rx) = mpsc::channel::<P::ExecutionData>(64);
             let block_provider = self.block_provider.clone();
             tokio::spawn(async move {
-                block_provider.subscribe_blocks(tx).await;
+                block_provider.subscribe_payloads(tx).await;
             });
             rx
         };
 
-        while let Some(block) = block_stream.recv().await {
-            let payload = T::block_to_payload(SealedBlock::new_unhashed(block));
-
+        while let Some(payload) = payload_stream.recv().await {
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
 

@@ -7891,7 +7891,6 @@ dependencies = [
 name = "reth-consensus-debug-client"
 version = "2.2.0"
 dependencies = [
- "alloy-consensus",
  "alloy-eips 2.0.4",
  "alloy-json-rpc",
  "alloy-primitives",
@@ -7904,7 +7903,6 @@ dependencies = [
  "futures",
  "reqwest 0.13.2",
  "reth-node-api",
- "reth-primitives-traits",
  "reth-tracing",
  "ringbuffer",
  "serde",
