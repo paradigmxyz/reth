@@ -15,9 +15,7 @@
 //! insertion.
 
 use super::{
-    debug,
-    worker::{self, BalWorkerOutput},
-    BalExecutionError, RejectReason,
+    debug, ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, RejectReason,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eip7928::{
@@ -164,7 +162,7 @@ where
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
-        for output in OrderedWorkerOutputs::new(&result_rx, transaction_count) {
+        for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
@@ -313,77 +311,6 @@ impl BlockGasTracker {
         self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
         self.block_regular_gas_used =
             self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
-    }
-}
-
-struct OrderedWorkerOutputs<'a, R> {
-    result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalExecutionError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
-    next: usize,
-    total: usize,
-    failed: bool,
-}
-
-impl<'a, R> OrderedWorkerOutputs<'a, R> {
-    fn new(
-        result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalExecutionError>>,
-        total: usize,
-    ) -> Self {
-        Self {
-            result_rx,
-            pending: (0..total).map(|_| None).collect(),
-            next: 0,
-            total,
-            failed: false,
-        }
-    }
-}
-
-impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
-    type Item = Result<BalWorkerOutput<R>, BalExecutionError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.failed || self.next >= self.total {
-            return None;
-        }
-
-        loop {
-            if let Some(output) = self.pending[self.next].take() {
-                self.next += 1;
-                return Some(Ok(output));
-            }
-
-            let output = match self.result_rx.recv() {
-                Ok(Ok(output)) => output,
-                Ok(Err(err)) => {
-                    self.failed = true;
-                    return Some(Err(err));
-                }
-                Err(_) => {
-                    self.failed = true;
-                    return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
-                        "BAL worker result channel closed before all results arrived",
-                    ))));
-                }
-            };
-
-            let index = output.index;
-            if index >= self.total {
-                self.failed = true;
-                return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
-                    "BAL worker returned out-of-bounds transaction index",
-                ))));
-            }
-
-            if index < self.next || self.pending[index].is_some() {
-                self.failed = true;
-                return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
-                    "BAL worker returned duplicate transaction index",
-                ))));
-            }
-
-            self.pending[index] = Some(output);
-        }
     }
 }
 

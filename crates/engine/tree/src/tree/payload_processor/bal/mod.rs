@@ -9,6 +9,7 @@
 //! fragment checks. It does not yet report rich undeclared-access diagnostics.
 
 mod debug;
+mod ordered_outputs;
 mod worker;
 
 pub mod error;
