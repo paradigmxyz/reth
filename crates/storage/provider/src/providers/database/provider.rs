@@ -658,6 +658,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 let total_tx_count: usize =
                     blocks.iter().map(|b| b.recovered_block().body().transaction_count()).sum();
+                const PARALLEL_TX_HASH_SORT_THRESHOLD: usize = 1024;
                 let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
                 for (i, block) in blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
@@ -669,7 +670,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
 
                 // Sort by hash for optimal MDBX insertion performance
-                all_tx_hashes.sort_unstable_by_key(|(hash, _)| *hash);
+                if total_tx_count >= PARALLEL_TX_HASH_SORT_THRESHOLD {
+                    all_tx_hashes.par_sort_unstable_by_key(|(hash, _)| *hash);
+                } else {
+                    all_tx_hashes.sort_unstable_by_key(|(hash, _)| *hash);
+                }
 
                 // Write all transaction hash numbers in a single batch
                 self.with_rocksdb_batch(|batch| {
