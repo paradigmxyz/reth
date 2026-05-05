@@ -5,7 +5,7 @@ use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
-use alloy_rpc_types_eth::{state::StateOverride, BlockId, BlockOverrides};
+use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
@@ -52,8 +52,7 @@ pub trait EstimateCall: Call {
         mut evm_env: EvmEnvFor<Self::Evm>,
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state: S,
-        state_override: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
+        overrides: EvmOverrides,
     ) -> Result<U256, Self::Error>
     where
         S: EvmStateProvider,
@@ -85,12 +84,12 @@ pub trait EstimateCall: Call {
         // overrides for `gasLimit`, `baseFee` and `blobBaseFee` are visible to estimation.
         // Mirrors geth's behavior, see:
         // <https://github.com/ethereum/go-ethereum/pull/30695>
-        if let Some(block_overrides) = block_overrides {
+        if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, &mut db, evm_env.block_env.inner_mut());
         }
 
         // Apply any state overrides if specified.
-        if let Some(state_override) = state_override {
+        if let Some(state_override) = overrides.state {
             apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
         }
 
@@ -311,8 +310,7 @@ pub trait EstimateCall: Call {
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
-        state_override: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
+        overrides: EvmOverrides,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
@@ -327,8 +325,7 @@ pub trait EstimateCall: Call {
                     evm_env,
                     request,
                     state,
-                    state_override,
-                    block_overrides,
+                    overrides,
                 )
             })
             .await

@@ -781,8 +781,7 @@ where
             self,
             request,
             block_number.unwrap_or_default(),
-            state_override,
-            block_overrides,
+            EvmOverrides::new(state_override, block_overrides),
         )
         .await?)
     }
