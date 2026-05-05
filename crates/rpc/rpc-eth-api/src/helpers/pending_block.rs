@@ -9,9 +9,10 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
+    block::TxResult,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
 };
@@ -30,7 +31,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
-use revm::context_interface::Block;
+use revm::context_interface::{Block, Cfg as _};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -263,6 +264,10 @@ pub trait LoadPendingBlock:
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
         let block_gas_limit: u64 = builder.evm().block().gas_limit();
+        let is_amsterdam = self
+            .provider()
+            .chain_spec()
+            .is_amsterdam_active_at_timestamp(builder.evm().block().timestamp().saturating_to());
         let basefee = builder.evm().block().basefee();
         let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
 
@@ -271,8 +276,11 @@ pub trait LoadPendingBlock:
             .chain_spec()
             .blob_params_at_timestamp(parent.timestamp())
             .unwrap_or_else(BlobParams::cancun);
-        let mut cumulative_gas_used = 0;
+        let mut cumulative_tx_gas_used = 0;
+        let mut block_regular_gas_used = 0;
+        let mut block_state_gas_used = 0;
         let mut sum_blob_gas_used = 0;
+        let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
@@ -287,15 +295,35 @@ pub trait LoadPendingBlock:
 
             while let Some(pool_tx) = best_txs.next() {
                 // ensure we still have capacity for this transaction
-                if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+                let exceeds_gas_limit = if is_amsterdam {
+                    let regular_available_gas =
+                        block_gas_limit.saturating_sub(block_regular_gas_used);
+                    let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
+                    let regular_tx_gas_limit = pool_tx.gas_limit().min(tx_gas_limit_cap);
+
+                    if regular_tx_gas_limit > regular_available_gas {
+                        Some((regular_tx_gas_limit, regular_available_gas))
+                    } else if pool_tx.gas_limit() > state_available_gas {
+                        Some((pool_tx.gas_limit(), state_available_gas))
+                    } else {
+                        None
+                    }
+                } else {
+                    let block_available_gas =
+                        block_gas_limit.saturating_sub(cumulative_tx_gas_used);
+                    (pool_tx.gas_limit() > block_available_gas)
+                        .then_some((pool_tx.gas_limit(), block_available_gas))
+                };
+
+                if let Some((transaction_gas_limit, block_available_gas)) = exceeds_gas_limit {
                     // we can't fit this transaction into the block, so we need to mark it as
                     // invalid which also removes all dependent transaction from
                     // the iterator before we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
                         &InvalidPoolTransactionError::ExceedsGasLimit(
-                            pool_tx.gas_limit(),
-                            block_gas_limit,
+                            transaction_gas_limit,
+                            block_available_gas,
                         ),
                     );
                     continue
@@ -337,29 +365,48 @@ pub trait LoadPendingBlock:
                     continue
                 }
 
-                let gas_used = match builder.execute_transaction(tx) {
-                    Ok(gas_used) => gas_used,
-                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                        error,
-                        ..
-                    })) => {
-                        if error.is_nonce_too_low() {
-                            // if the nonce is too low, we can skip this transaction
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
+                let mut tx_regular_gas_used = 0;
+                let gas_output =
+                    match builder.execute_transaction_with_result_closure(tx, |result| {
+                        tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+                    }) {
+                        Ok(gas_output) => gas_output,
+                        Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                            error,
+                            ..
+                        })) => {
+                            if error.is_nonce_too_low() {
+                                // if the nonce is too low, we can skip this transaction
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                best_txs.mark_invalid(
+                                    &pool_tx,
+                                    &InvalidPoolTransactionError::Consensus(
+                                        InvalidTransactionError::TxTypeNotSupported,
+                                    ),
+                                );
+                            }
+                            continue
+                        }
+                        Err(BlockExecutionError::Validation(
+                            BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                                transaction_gas_limit,
+                                block_available_gas,
+                            },
+                        )) => {
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                &InvalidPoolTransactionError::Consensus(
-                                    InvalidTransactionError::TxTypeNotSupported,
+                                &InvalidPoolTransactionError::ExceedsGasLimit(
+                                    transaction_gas_limit,
+                                    block_available_gas,
                                 ),
                             );
+                            continue
                         }
-                        continue
-                    }
-                    // this is an error that we should treat as fatal for this attempt
-                    Err(err) => return Err(Self::Error::from_eth_err(err)),
-                };
+                        // this is an error that we should treat as fatal for this attempt
+                        Err(err) => return Err(Self::Error::from_eth_err(err)),
+                    };
 
                 // add to the total blob gas used if the transaction successfully executed
                 if let Some(tx_blob_gas) = tx_blob_gas {
@@ -371,9 +418,11 @@ pub trait LoadPendingBlock:
                     }
                 }
 
-                // add gas used by the transaction to cumulative gas used, before creating the
-                // receipt
-                cumulative_gas_used += gas_used;
+                // Track receipt gas and the Amsterdam block-capacity counter separately.
+                let gas_used = gas_output.tx_gas_used();
+                cumulative_tx_gas_used += gas_used;
+                block_regular_gas_used += tx_regular_gas_used;
+                block_state_gas_used += gas_output.state_gas_used();
             }
         }
 

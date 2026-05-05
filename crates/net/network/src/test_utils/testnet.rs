@@ -20,6 +20,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_evm_ethereum::EthEvmConfig;
+use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -46,12 +47,11 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    sync::{
-        mpsc::{channel, unbounded_channel},
-        oneshot,
-    },
+    sync::{mpsc::channel, oneshot},
     task::JoinHandle,
 };
+
+use crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -478,7 +478,10 @@ where
 
     /// Set a new transactions manager that's connected to the peer's network
     pub fn install_transactions_manager(&mut self, pool: Pool) {
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = memory_bounded_channel(
+            DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            "test_tx_channel",
+        );
         self.network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
             self.handle(),
@@ -496,7 +499,10 @@ where
         P: TransactionPool,
     {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = memory_bounded_channel(
+            DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            "test_tx_channel",
+        );
         network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
             network.handle().clone(),
@@ -537,7 +543,10 @@ where
         P: TransactionPool,
     {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = memory_bounded_channel(
+            DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            "test_tx_channel",
+        );
         network.set_transactions(tx);
 
         let announcement_policy = StrictEthAnnouncementFilter::default();

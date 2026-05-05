@@ -73,7 +73,8 @@ use reth_evm::{
 };
 use reth_execution_cache::{CacheStats, SavedCache};
 use reth_payload_primitives::{
-    BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
+    BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
+    PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
@@ -527,8 +528,7 @@ where
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
         let provider_factory = self.provider.clone();
-        let overlay_builder = OverlayBuilder::new(self.changeset_cache.clone())
-            .with_block_hash(Some(anchor_hash))
+        let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_lazy_overlay(lazy_overlay);
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
@@ -838,9 +838,9 @@ where
             ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
 
         let executed_block = self.spawn_deferred_trie_task(
-            block,
+            Arc::new(block),
             output,
-            &ctx,
+            ctx.state(),
             hashed_state,
             trie_output,
             changeset_provider,
@@ -1100,7 +1100,7 @@ where
     fn compute_state_root_parallel(
         &self,
         provider_factory: P,
-        overlay_builder: OverlayBuilder,
+        overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
@@ -1245,7 +1245,7 @@ where
         &self,
         state_provider_builder: StateProviderBuilder<N, P>,
         provider_factory: P,
-        overlay_builder: OverlayBuilder,
+        overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
@@ -1390,7 +1390,7 @@ where
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
         if let Err(err) =
-            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
+            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom, None)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1448,7 +1448,7 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: StateRootStrategy,
     ) -> Result<
         PayloadHandle<
@@ -1568,7 +1568,7 @@ where
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> (Option<LazyOverlay>, B256) {
+    ) -> (Option<LazyOverlay<N>>, B256) {
         // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
@@ -1596,10 +1596,7 @@ where
             "Creating lazy overlay for in-memory blocks"
         );
 
-        // Extract deferred trie data handles (non-blocking)
-        let handles: Vec<DeferredTrieData> = blocks.iter().map(|b| b.trie_data_handle()).collect();
-
-        (Some(LazyOverlay::new(anchor_hash, handles)), anchor_hash)
+        (Some(LazyOverlay::new(blocks)), anchor_hash)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -1620,16 +1617,15 @@ where
     /// from the completed task or via fallback computation.
     fn spawn_deferred_trie_task(
         &self,
-        block: RecoveredBlock<N::Block>,
+        block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
-        ctx: &TreeCtx<'_, N>,
+        state: &EngineApiTreeState<N>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
         changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
-        let (anchor_hash, overlay_blocks) = ctx
-            .state()
+        let (anchor_hash, overlay_blocks) = state
             .tree_state
             .blocks_by_hash(block.parent_hash())
             .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
@@ -1736,11 +1732,7 @@ where
             .executor()
             .spawn_blocking_named("trie-input", compute_trie_input_task);
 
-        ExecutedBlock::with_deferred_trie_data(
-            Arc::new(block),
-            execution_outcome,
-            deferred_trie_data,
-        )
+        ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
 
     fn calculate_timing_stats(
@@ -1944,7 +1936,11 @@ pub trait EngineValidator<
     ///
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
-    fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+    fn on_inserted_executed_block(
+        &self,
+        block: BuiltPayloadExecutedBlock<N>,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<ExecutedBlock<N>>;
 
     /// Returns [`SavedCache`] for the given block hash.
     fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
@@ -2013,11 +2009,33 @@ where
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
     }
 
-    fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
+    fn on_inserted_executed_block(
+        &self,
+        block: BuiltPayloadExecutedBlock<N>,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+
+        let (lazy_overlay, anchor_hash) =
+            Self::get_parent_lazy_overlay(block.recovered_block.parent_hash(), state);
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
+                .with_lazy_overlay(lazy_overlay),
+        );
+        let changeset_provider = overlay_factory.database_provider_ro()?;
+
+        Ok(self.spawn_deferred_trie_task(
+            block.recovered_block,
+            block.execution_output,
+            state,
+            LazyHashedPostState::ready(Arc::unwrap_or_clone(block.hashed_state)),
+            block.trie_updates,
+            changeset_provider,
+        ))
     }
 
     fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
@@ -2033,8 +2051,7 @@ where
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            OverlayBuilder::new(self.changeset_cache.clone())
-                .with_block_hash(Some(anchor_hash))
+            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
                 .with_lazy_overlay(lazy_overlay),
         );
 

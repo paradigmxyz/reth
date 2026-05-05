@@ -12,7 +12,7 @@ use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::setup_engine;
-use reth_network::types::NatResolver;
+use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::{NetworkArgs, RpcServerArgs},
@@ -372,6 +372,50 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
     let info = api.node_info().await.unwrap();
 
     assert_eq!(info.ip, external_ip);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_admin_node_info_uses_discv5_port_when_discv4_is_disabled() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let runtime = Runtime::test();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec =
+        Arc::new(ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).build());
+
+    let mut network = NetworkArgs::default().with_unused_ports();
+    network.bootnodes = Some(Vec::new());
+    network.discovery.disable_dns_discovery = true;
+    network.discovery.disable_discv4_discovery = true;
+    network = network.with_nat_resolver(NatResolver::ExternalIp("127.0.0.1".parse().unwrap()));
+
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_network(network)
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    assert!(node.network.discv4().is_none());
+    let discv5_port = node.network.discv5().expect("discv5 should be enabled").local_port();
+
+    let local_record = node.network.local_node_record();
+    let local_enr = node.network.local_enr();
+    let info = node.add_ons_handle.admin_api().node_info().await.unwrap();
+
+    assert_eq!(local_record.udp_port, discv5_port);
+    assert_eq!(local_enr.udp4(), Some(discv5_port));
+    assert_eq!(info.ports.discovery, discv5_port);
+    assert_eq!(info.ports.listener, local_record.tcp_port);
+    assert_eq!(info.enode, local_record.to_string());
+    assert!(info.enode.contains(&format!("?discport={discv5_port}")));
 
     Ok(())
 }

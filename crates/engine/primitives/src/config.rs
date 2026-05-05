@@ -191,9 +191,9 @@ pub struct TreeConfig {
     /// When disabled, the BAL hashed post state is not sent to the multiproof task for
     /// early parallel state root computation.
     disable_bal_parallel_state_root: bool,
-    /// Whether to disable BAL (Block Access List) batched IO during prewarming.
-    /// When disabled, falls back to individual per-slot storage reads instead of
-    /// batched cursor reads via `storage_range`.
+    /// Whether to disable BAL (Block Access List) storage prefetch IO during prewarming.
+    /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
+    /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
@@ -239,7 +239,7 @@ impl Default for TreeConfig {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
-            disable_bal_parallel_execution: false,
+            disable_bal_parallel_execution: true,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
@@ -316,7 +316,7 @@ impl TreeConfig {
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build: false,
-            disable_bal_parallel_execution: false,
+            disable_bal_parallel_execution: true,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]

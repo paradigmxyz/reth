@@ -125,20 +125,38 @@ pub enum AnyNode {
 
 impl AnyNode {
     /// Returns the peer id of the node.
+    #[cfg(not(feature = "secp256k1"))]
+    pub const fn peer_id(&self) -> PeerId {
+        match self {
+            Self::NodeRecord(record) => record.id,
+            Self::PeerId(peer_id) => *peer_id,
+        }
+    }
+
+    /// Returns the peer id of the node.
+    #[cfg(feature = "secp256k1")]
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
-            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => pk2id(&enr.public_key()),
             Self::PeerId(peer_id) => *peer_id,
         }
     }
 
     /// Returns the full node record if available.
+    #[cfg(not(feature = "secp256k1"))]
+    pub const fn node_record(&self) -> Option<NodeRecord> {
+        match self {
+            Self::NodeRecord(record) => Some(*record),
+            Self::PeerId(_) => None,
+        }
+    }
+
+    /// Returns the full node record if available.
+    #[cfg(feature = "secp256k1")]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
-            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => {
                 let node_record = NodeRecord {
                     address: enr
@@ -152,7 +170,7 @@ impl AnyNode {
                 .into_ipv4_mapped();
                 Some(node_record)
             }
-            _ => None,
+            Self::PeerId(_) => None,
         }
     }
 }

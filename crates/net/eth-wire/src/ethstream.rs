@@ -7,7 +7,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, EthMessageID, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE},
+    message::{
+        EthBroadcastMessage, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -16,7 +19,7 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
+use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
@@ -158,7 +161,11 @@ where
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
 
-        let msg = match ProtocolMessage::decode_message(self.version, &mut bytes.as_ref()) {
+        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+            self.version,
+            &mut bytes.as_ref(),
+            self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+        ) {
             Ok(m) => m,
             Err(err) => {
                 let msg = if bytes.len() > 50 {

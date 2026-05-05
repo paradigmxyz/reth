@@ -308,6 +308,18 @@ impl Config {
         }
     }
 
+    /// Returns a mutable reference to the inner [`discv5::Config`]. This allows overriding
+    /// the listen config after the config has been built.
+    pub const fn discv5_config_mut(&mut self) -> &mut discv5::Config {
+        &mut self.discv5_config
+    }
+
+    /// Returns `true` if any socket in the discv5 listen config matches the given address.
+    pub fn has_matching_socket(&self, addr: SocketAddr) -> bool {
+        ipv4(&self.discv5_config.listen_config).is_some_and(|v4| SocketAddr::V4(v4) == addr) ||
+            ipv6(&self.discv5_config.listen_config).is_some_and(|v6| SocketAddr::V6(v6) == addr)
+    }
+
     /// Inserts a new boot node to the list of boot nodes.
     pub fn insert_boot_node(&mut self, boot_node: BootNode) {
         self.bootstrap_nodes.insert(boot_node);
@@ -333,11 +345,11 @@ impl Config {
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).
     pub fn discovery_socket(&self) -> SocketAddr {
-        match self.discv5_config.listen_config {
-            ListenConfig::Ipv4 { ip, port } => (ip, port).into(),
-            ListenConfig::Ipv6 { ip, port } => (ip, port).into(),
-            ListenConfig::DualStack { ipv6, ipv6_port, .. } => (ipv6, ipv6_port).into(),
-        }
+        // Prefer v6 when both are configured (matches original `DualStack` behavior).
+        ipv6(&self.discv5_config.listen_config)
+            .map(SocketAddr::V6)
+            .or_else(|| ipv4(&self.discv5_config.listen_config).map(SocketAddr::V4))
+            .unwrap_or_else(|| SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, 0)))
     }
 
     /// Returns the `RLPx` (TCP) socket contained in the [`discv5::Config`]. This socket will be
@@ -348,24 +360,32 @@ impl Config {
 }
 
 /// Returns the IPv4 discovery socket if one is configured.
-pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
+pub fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
     match listen_config {
         ListenConfig::Ipv4 { ip, port } |
         ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
             Some(SocketAddrV4::new(*ip, *port))
         }
-        ListenConfig::Ipv6 { .. } => None,
+        ListenConfig::FromSockets { ipv4: Some(s), .. } => match s.local_addr().ok()? {
+            SocketAddr::V4(addr) => Some(addr),
+            SocketAddr::V6(_) => None,
+        },
+        _ => None,
     }
 }
 
 /// Returns the IPv6 discovery socket if one is configured.
-pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
+pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     match listen_config {
-        ListenConfig::Ipv4 { .. } => None,
         ListenConfig::Ipv6 { ip, port } |
         ListenConfig::DualStack { ipv6: ip, ipv6_port: port, .. } => {
             Some(SocketAddrV6::new(*ip, *port, 0, 0))
         }
+        ListenConfig::FromSockets { ipv6: Some(s), .. } => match s.local_addr().ok()? {
+            SocketAddr::V6(addr) => Some(addr),
+            SocketAddr::V4(_) => None,
+        },
+        _ => None,
     }
 }
 

@@ -7,13 +7,14 @@ use alloy_primitives::{
     Bytes, TxHash, B256, U128,
 };
 use alloy_rlp::{
-    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
+    Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    RlpEncodableWrapper,
 };
 use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Block, SignedTransaction};
+use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
@@ -141,6 +142,53 @@ impl<T> From<Transactions<T>> for Vec<T> {
     fn from(txs: Transactions<T>) -> Self {
         txs.0
     }
+}
+
+impl<T: Decodable + InMemorySize> Transactions<T> {
+    /// Decodes the RLP list of transactions, stopping once the cumulative
+    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
+    /// Any remaining transactions in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
+
+/// Decodes an RLP list, stopping once the cumulative [`InMemorySize`] of decoded items exceeds
+/// `memory_budget` bytes. Any remaining items in the payload are skipped.
+pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
+    buf: &mut &[u8],
+    memory_budget: usize,
+) -> alloy_rlp::Result<Vec<T>> {
+    let header = Header::decode(buf)?;
+    if !header.list {
+        return Err(alloy_rlp::Error::UnexpectedString);
+    }
+    if buf.len() < header.payload_length {
+        return Err(alloy_rlp::Error::InputTooShort);
+    }
+
+    let (payload, rest) = buf.split_at(header.payload_length);
+    let mut payload = payload;
+
+    let mut txs = Vec::new();
+    let mut total_size = 0usize;
+
+    while !payload.is_empty() {
+        let item = T::decode(&mut payload)?;
+        total_size = total_size.saturating_add(item.size());
+
+        if total_size > memory_budget {
+            break;
+        }
+
+        txs.push(item);
+    }
+
+    *buf = rest;
+    Ok(txs)
 }
 
 /// Same as [`Transactions`] but this is intended as egress message send from local to _many_ peers.
@@ -835,6 +883,19 @@ pub struct BlockRangeUpdate {
     pub latest: u64,
     /// Latest available block's hash.
     pub latest_hash: B256,
+}
+
+impl InMemorySize for NewPooledTransactionHashes {
+    fn size(&self) -> usize {
+        match self {
+            Self::Eth66(msg) => msg.0.len() * core::mem::size_of::<B256>(),
+            Self::Eth68(msg) => {
+                msg.types.len() * core::mem::size_of::<u8>() +
+                    msg.sizes.len() * core::mem::size_of::<usize>() +
+                    msg.hashes.len() * core::mem::size_of::<B256>()
+            }
+        }
+    }
 }
 
 #[cfg(test)]
