@@ -685,11 +685,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let write_senders = self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
+                EitherWriterDestination::senders(self).is_database();
+            let mut tx_senders_cursor = write_senders
+                .then(|| self.tx.cursor_write::<tables::TransactionSenders>())
+                .transpose()?;
+            let mut block_body_indices_cursor =
+                self.tx.cursor_write::<tables::BlockBodyIndices>()?;
+            let mut transaction_blocks_cursor =
+                self.tx.cursor_write::<tables::TransactionBlocks>()?;
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
-                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
+                self.insert_block_mdbx_only(
+                    recovered_block,
+                    tx_nums[i],
+                    tx_senders_cursor.as_mut(),
+                    &mut block_body_indices_cursor,
+                    &mut transaction_blocks_cursor,
+                )?;
                 timings.insert_block += start.elapsed();
 
                 if save_mode.with_state() {
@@ -777,19 +793,24 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
-    fn insert_block_mdbx_only(
+    fn insert_block_mdbx_only<TSendersCursor, TBlockBodyIndicesCursor, TTransactionBlocksCursor>(
         &self,
         block: &RecoveredBlock<BlockTy<N>>,
         first_tx_num: TxNumber,
-    ) -> ProviderResult<StoredBlockBodyIndices> {
-        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
-            EitherWriterDestination::senders(self).is_database()
-        {
+        tx_senders_cursor: Option<&mut TSendersCursor>,
+        block_body_indices_cursor: &mut TBlockBodyIndicesCursor,
+        transaction_blocks_cursor: &mut TTransactionBlocksCursor,
+    ) -> ProviderResult<StoredBlockBodyIndices>
+    where
+        TSendersCursor: DbCursorRW<tables::TransactionSenders>,
+        TBlockBodyIndicesCursor: DbCursorRW<tables::BlockBodyIndices>,
+        TTransactionBlocksCursor: DbCursorRW<tables::TransactionBlocks>,
+    {
+        if let Some(tx_senders_cursor) = tx_senders_cursor {
             let start = Instant::now();
             let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
-            let mut cursor = self.tx.cursor_write::<tables::TransactionSenders>()?;
             for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
-                cursor.append(tx_num, &sender)?;
+                tx_senders_cursor.append(tx_num, &sender)?;
             }
             self.metrics
                 .record_duration(metrics::Action::InsertTransactionSenders, start.elapsed());
@@ -802,33 +823,43 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
 
-        self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
+        self.write_block_body_indices(
+            block_number,
+            block.body(),
+            first_tx_num,
+            tx_count,
+            block_body_indices_cursor,
+            transaction_blocks_cursor,
+        )?;
 
         Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
     }
 
     /// Writes MDBX block body indices (`BlockBodyIndices`, `TransactionBlocks`,
     /// `Ommers`/`Withdrawals`).
-    fn write_block_body_indices(
+    fn write_block_body_indices<TBlockBodyIndicesCursor, TTransactionBlocksCursor>(
         &self,
         block_number: BlockNumber,
         body: &BodyTy<N>,
         first_tx_num: TxNumber,
         tx_count: u64,
-    ) -> ProviderResult<()> {
+        block_body_indices_cursor: &mut TBlockBodyIndicesCursor,
+        transaction_blocks_cursor: &mut TTransactionBlocksCursor,
+    ) -> ProviderResult<()>
+    where
+        TBlockBodyIndicesCursor: DbCursorRW<tables::BlockBodyIndices>,
+        TTransactionBlocksCursor: DbCursorRW<tables::TransactionBlocks>,
+    {
         // MDBX: BlockBodyIndices
         let start = Instant::now();
-        self.tx
-            .cursor_write::<tables::BlockBodyIndices>()?
+        block_body_indices_cursor
             .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
         self.metrics.record_duration(metrics::Action::InsertBlockBodyIndices, start.elapsed());
 
         // MDBX: TransactionBlocks (last tx -> block mapping)
         if tx_count > 0 {
             let start = Instant::now();
-            self.tx
-                .cursor_write::<tables::TransactionBlocks>()?
-                .append(first_tx_num + tx_count - 1, &block_number)?;
+            transaction_blocks_cursor.append(first_tx_num + tx_count - 1, &block_number)?;
             self.metrics.record_duration(metrics::Action::InsertTransactionBlocks, start.elapsed());
         }
 
