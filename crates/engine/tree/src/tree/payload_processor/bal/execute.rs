@@ -18,14 +18,12 @@ use super::{debug, BalExecutionError, RejectReason};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_evm::{
-    block::{
-        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError, TxResult,
-    },
+    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
 };
 use alloy_primitives::B256;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
-use reth_primitives_traits::{BlockTy, SealedBlock};
+use reth_primitives_traits::{BlockTy, ReceiptTy, SealedBlock};
 use reth_tasks::Runtime;
 use revm::{
     context::result::ResultAndState,
@@ -38,18 +36,13 @@ use std::sync::{
     Arc,
 };
 
-/// Alias for the canonical receipt type produced by a given `ConfigureEvm`. Factory-level
-/// associated type — DB-independent.
-pub type ReceiptFor<Evm> =
-    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Receipt;
-
 /// Output of a successful BAL-path block execution.
 #[expect(missing_debug_implementations)]
 pub struct BalExecutionOutput<Evm: ConfigureEvm> {
     /// Accumulated state transitions from the canonical executor.
     pub bundle_state: BundleState,
     /// Receipts produced in order, one per committed tx.
-    pub receipts: Vec<ReceiptFor<Evm>>,
+    pub receipts: Vec<ReceiptTy<Evm::Primitives>>,
     /// Total gas used by all transactions.
     pub gas_used: u64,
     /// Blob gas used by the block.
