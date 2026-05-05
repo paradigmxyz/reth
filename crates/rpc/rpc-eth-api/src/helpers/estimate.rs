@@ -2,14 +2,17 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
-use alloy_evm::overrides::apply_state_overrides;
+use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
-use alloy_rpc_types_eth::{state::StateOverride, BlockId};
+use alloy_rpc_types_eth::{state::StateOverride, BlockId, BlockOverrides};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor};
+use reth_evm::{
+    env::BlockEnvironment, ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut,
+    TxEnvFor,
+};
 use reth_revm::{
     database::{EvmStateProvider, StateProviderDatabase},
     db::{bal::EvmDatabaseError, State},
@@ -50,6 +53,7 @@ pub trait EstimateCall: Call {
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state: S,
         state_override: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<U256, Self::Error>
     where
         S: EvmStateProvider,
@@ -73,6 +77,23 @@ pub trait EstimateCall: Call {
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
+
+        // Configure the evm env
+        let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
+
+        // Apply any block overrides before deriving block-derived limits and the tx env so
+        // overrides for `gasLimit`, `baseFee` and `blobBaseFee` are visible to estimation.
+        // Mirrors geth's behavior, see:
+        // <https://github.com/ethereum/go-ethereum/pull/30695>
+        if let Some(block_overrides) = block_overrides {
+            apply_block_overrides(*block_overrides, &mut db, evm_env.block_env.inner_mut());
+        }
+
+        // Apply any state overrides if specified.
+        if let Some(state_override) = state_override {
+            apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
+        }
+
         // the gas limit of the corresponding block
         let max_gas_limit = evm_env
             .cfg_env
@@ -95,14 +116,6 @@ pub trait EstimateCall: Call {
                 tx_gas_limit
             })
             .unwrap_or(max_gas_limit);
-
-        // Configure the evm env
-        let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
-
-        // Apply any state overrides if specified.
-        if let Some(state_override) = state_override {
-            apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
-        }
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
@@ -299,6 +312,7 @@ pub trait EstimateCall: Call {
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         state_override: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
@@ -308,7 +322,14 @@ pub trait EstimateCall: Call {
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
-                EstimateCall::estimate_gas_with(&this, evm_env, request, state, state_override)
+                EstimateCall::estimate_gas_with(
+                    &this,
+                    evm_env,
+                    request,
+                    state,
+                    state_override,
+                    block_overrides,
+                )
             })
             .await
         }
