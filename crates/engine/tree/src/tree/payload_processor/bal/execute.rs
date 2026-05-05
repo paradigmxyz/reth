@@ -16,7 +16,7 @@
 
 use super::{debug, BalExecutionError, RejectReason};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessIndex};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
@@ -128,7 +128,7 @@ where
                         .with_bal(received_bal_revm)
                         .with_bundle_update()
                         .build();
-                    worker_state.set_bal_index(tx_index);
+                    worker_state.set_bal_index(BlockAccessIndex::new(tx_index));
 
                     evm_config
                         .executor_for_block(&mut worker_state, block)

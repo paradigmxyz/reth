@@ -3,10 +3,7 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_evm::{
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
-    revm::{handler::EthPrecompiles, precompile::PrecompileId},
-    Evm, EvmFactory,
+    Evm, EvmFactory, eth::EthEvmContext, precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap}, revm::{database::bal::BalDatabase, handler::EthPrecompiles, precompile::PrecompileId}
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
@@ -77,7 +74,7 @@ impl EvmFactory for MyEvmFactory {
         let spec = input.cfg_env.spec;
 
         let evm = Context::mainnet()
-            .with_db(db)
+            .with_db(BalDatabase::new(db))
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
