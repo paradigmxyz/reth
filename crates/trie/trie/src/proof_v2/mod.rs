@@ -158,9 +158,9 @@ where
     /// This may move the `targets` iterator forward if the given path comes after the current
     /// target.
     ///
-    /// This method takes advantage of the [`std::slice::Iter`] component of [`TargetsCursor`] to
-    /// check the minimum number of targets. In general it looks at a current target and the next
-    /// target simultaneously, forming an end-exclusive range.
+    /// This method uses the current target and the next target from [`TargetsCursor`] to track the
+    /// active end-exclusive range, and scans the contiguous set of neighboring targets that share a
+    /// prefix only when `min_len` needs to be checked.
     ///
     /// ```text
     /// * Given targets: [ 0x012, 0x045, 0x678 ]
@@ -223,9 +223,8 @@ where
             // longer than that value.
             //
             // _However_ even if the node doesn't match the target due to the target's `min_len`, it
-            // may match other targets whose keys match this node. So we search forwards and
-            // backwards for all targets which might match this node, and check against the
-            // `min_len` of each.
+            // may match other adjacent targets whose keys share this node as a prefix. Scan that
+            // contiguous prefix range once and check the `min_len` of each target in it.
             //
             // For example, given a branch 0xabc, with children at 0, 1, and 2, and targets:
             // - key: 0xabc0, min_len: 2
@@ -238,16 +237,7 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
-                            .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
-                        targets
-                            .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                return !check_min_len || targets.has_matching_min_len(path)
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -1719,15 +1709,24 @@ impl<'a> TargetsCursor<'a> {
         self.current()
     }
 
-    // Iterate forwards over the slice, starting from the [`ProofV2Target`] after the current.
-    fn skip_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
-        self.targets[self.i + 1..].iter()
-    }
+    /// Returns `true` if any target adjacent to the current one and sharing the given prefix can
+    /// retain a node at that path.
+    fn has_matching_min_len(&self, path: &Nibbles) -> bool {
+        let path_len = path.len();
 
-    /// Iterated backwards over the slice, starting from the [`ProofV2Target`] previous to the
-    /// current.
-    fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
-        self.targets[..self.i].iter().rev()
+        let mut start = self.i;
+        while start > 0 && self.targets[start - 1].key_nibbles.starts_with(path) {
+            start -= 1;
+        }
+
+        let mut end = self.i + 1;
+        while end < self.targets.len() && self.targets[end].key_nibbles.starts_with(path) {
+            end += 1;
+        }
+
+        self.targets[start..end]
+            .iter()
+            .any(|target| path_len >= target.min_len as usize)
     }
 }
 
@@ -1819,6 +1818,34 @@ mod tests {
     use itertools::Itertools;
     use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn targets_cursor_matches_adjacent_prefix_targets() {
+        let path = Nibbles::from_nibbles([0xa, 0xb, 0xc]);
+        let targets = vec![
+            ProofV2Target::new(B256::right_padding_from(&[0xab, 0xc0])).with_min_len(2),
+            ProofV2Target::new(B256::right_padding_from(&[0xab, 0xc1])).with_min_len(1),
+            ProofV2Target::new(B256::right_padding_from(&[0xab, 0xc2])).with_min_len(4),
+            ProofV2Target::new(B256::right_padding_from(&[0xab, 0xc3])).with_min_len(3),
+        ];
+
+        let cursor = TargetsCursor { targets: &targets, i: 2 };
+
+        assert!(cursor.has_matching_min_len(&path));
+    }
+
+    #[test]
+    fn targets_cursor_ignores_nonmatching_neighbors() {
+        let path = Nibbles::from_nibbles([0xa, 0xb, 0xc]);
+        let targets = vec![
+            ProofV2Target::new(B256::right_padding_from(&[0xab, 0xc0])).with_min_len(4),
+            ProofV2Target::new(B256::right_padding_from(&[0xab, 0xd0])).with_min_len(1),
+        ];
+
+        let cursor = TargetsCursor { targets: &targets, i: 0 };
+
+        assert!(!cursor.has_matching_min_len(&path));
+    }
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
