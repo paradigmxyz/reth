@@ -14,7 +14,7 @@ use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
-        mpsc::{Receiver, SendError, Sender},
+        mpsc::{Receiver, SendError, Sender, TryRecvError},
         Arc,
     },
     thread::JoinHandle,
@@ -22,6 +22,9 @@ use std::{
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
+
+/// Limits how many blocks we coalesce into one persistence commit while the queue is backlogged.
+const MAX_COALESCED_SAVE_BLOCKS: usize = 32;
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]
@@ -60,6 +63,8 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// A non-save action pulled while draining queued save blocks.
+    buffered_action: Option<PersistenceAction<N::Primitives>>,
 }
 
 impl<N> PersistenceService<N>
@@ -81,7 +86,22 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            buffered_action: None,
         }
+    }
+}
+
+#[derive(Debug)]
+struct SaveBlocksRequest<N: NodePrimitives = EthPrimitives> {
+    blocks: Vec<ExecutedBlock<N>>,
+    last_block: Option<BlockNumHash>,
+    sender: CrossbeamSender<PersistenceResult>,
+}
+
+impl<N: NodePrimitives> SaveBlocksRequest<N> {
+    fn new(blocks: Vec<ExecutedBlock<N>>, sender: CrossbeamSender<PersistenceResult>) -> Self {
+        let last_block = blocks.last().map(|block| block.recovered_block.num_hash());
+        Self { blocks, last_block, sender }
     }
 }
 
@@ -93,7 +113,7 @@ where
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
         // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
+        while let Some(action) = self.next_action() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
                     let last_block = self.on_remove_blocks_above(new_tip_num)?;
@@ -103,10 +123,31 @@ where
                     let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
+                    let mut requests =
+                        self.collect_save_blocks(SaveBlocksRequest::new(blocks, sender));
+                    let last_requested_block = requests
+                        .last()
+                        .and_then(|request| request.last_block)
+                        .map(|block| block.number);
+                    let total_blocks = requests.iter().map(|request| request.blocks.len()).sum();
+                    let request_count = requests.len();
+                    let mut combined_blocks = Vec::with_capacity(total_blocks);
+                    for request in &mut requests {
+                        combined_blocks.append(&mut request.blocks);
+                    }
+
+                    let result = self.on_save_blocks(combined_blocks)?;
                     let result_number = result.last_block.map(|b| b.number);
 
-                    let _ = sender.send(result);
+                    debug!(
+                        target: "engine::persistence",
+                        coalesced_blocks = total_blocks,
+                        coalesced_requests = request_count,
+                        ?last_requested_block,
+                        "Completed save blocks batch"
+                    );
+
+                    self.send_save_blocks_results(requests, result.commit_duration);
 
                     if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
@@ -125,6 +166,52 @@ where
             }
         }
         Ok(())
+    }
+
+    fn next_action(&mut self) -> Option<PersistenceAction<N::Primitives>> {
+        self.buffered_action.take().or_else(|| self.incoming.recv().ok())
+    }
+
+    fn collect_save_blocks(
+        &mut self,
+        first_request: SaveBlocksRequest<N::Primitives>,
+    ) -> Vec<SaveBlocksRequest<N::Primitives>> {
+        let mut requests = vec![first_request];
+        let mut total_blocks = requests[0].blocks.len();
+
+        while total_blocks < MAX_COALESCED_SAVE_BLOCKS {
+            match self.incoming.try_recv() {
+                Ok(PersistenceAction::SaveBlocks(blocks, sender)) => {
+                    total_blocks += blocks.len();
+                    requests.push(SaveBlocksRequest::new(blocks, sender));
+                }
+                Ok(PersistenceAction::SaveFinalizedBlock(finalized_block)) => {
+                    self.pending_finalized_block = Some(finalized_block);
+                }
+                Ok(PersistenceAction::SaveSafeBlock(safe_block)) => {
+                    self.pending_safe_block = Some(safe_block);
+                }
+                Ok(action @ PersistenceAction::RemoveBlocksAbove(_, _)) => {
+                    self.buffered_action = Some(action);
+                    break;
+                }
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+
+        requests
+    }
+
+    fn send_save_blocks_results(
+        &self,
+        requests: Vec<SaveBlocksRequest<N::Primitives>>,
+        commit_duration: Option<Duration>,
+    ) {
+        for request in requests {
+            let _ = request
+                .sender
+                .send(PersistenceResult { last_block: request.last_block, commit_duration });
+        }
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
