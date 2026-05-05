@@ -40,7 +40,7 @@ pub struct TrieWalker<C, K = AddedRemovedKeys> {
     pub changes: PrefixSet,
     /// When enabled, all children of a branch become unskippable if the branch path itself
     /// matches the prefix set, even if a given child path does not.
-    all_children_unskippable_if_path_matches_prefix_set: bool,
+    walk_all_changed_branch_children: bool,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
     /// Provided when it's necessary not to skip certain nodes during proof generation.
@@ -91,7 +91,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             changes,
             stack,
             can_skip_current_node: false,
-            all_children_unskippable_if_path_matches_prefix_set: false,
+            walk_all_changed_branch_children: false,
             removed_keys: None,
             added_removed_keys: None,
             #[cfg(feature = "metrics")]
@@ -117,8 +117,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             stack: self.stack,
             can_skip_current_node: self.can_skip_current_node,
             changes: self.changes,
-            all_children_unskippable_if_path_matches_prefix_set: self
-                .all_children_unskippable_if_path_matches_prefix_set,
+            walk_all_changed_branch_children: self.walk_all_changed_branch_children,
             removed_keys: self.removed_keys,
             added_removed_keys,
             #[cfg(feature = "metrics")]
@@ -127,11 +126,8 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     }
 
     /// Configures the walker to treat every child of a matching branch path as unskippable.
-    pub const fn with_all_children_unskippable_if_path_matches_prefix_set(
-        mut self,
-        enabled: bool,
-    ) -> Self {
-        self.all_children_unskippable_if_path_matches_prefix_set = enabled;
+    pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
+        self.walk_all_changed_branch_children = enabled;
         self
     }
 
@@ -216,7 +212,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             );
 
             let branch_path_matches_prefix_set = self
-                .all_children_unskippable_if_path_matches_prefix_set
+                .walk_all_changed_branch_children
                 .then(|| node.position().is_child())
                 .unwrap_or(false) &&
                 self.changes.contains(&node.key);
@@ -267,7 +263,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             changes,
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
-            all_children_unskippable_if_path_matches_prefix_set: false,
+            walk_all_changed_branch_children: false,
             removed_keys: None,
             added_removed_keys: Default::default(),
             #[cfg(feature = "metrics")]
@@ -467,9 +463,7 @@ mod tests {
         prefix_set.insert(Nibbles::from_nibbles([0x2, 0x3, 0x1]));
 
         TrieWalker::state_trie(factory.account_trie_cursor().unwrap(), prefix_set.freeze())
-            .with_all_children_unskippable_if_path_matches_prefix_set(
-                enable_all_children_unskippable,
-            )
+            .with_walk_all_changed_branch_children(enable_all_children_unskippable)
     }
 
     #[test]
