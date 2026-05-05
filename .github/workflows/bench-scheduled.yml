@@ -272,6 +272,7 @@ jobs:
       BENCH_ABBA: "true"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
+      BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
       BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
@@ -372,10 +373,6 @@ jobs:
           echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
 
-      - name: Validate local snapshot
-        id: snapshot-check
-        run: .github/scripts/bench-reth-snapshot.sh
-
       - name: Prepare source dirs
         run: |
           prepare_source_dir() {
@@ -418,6 +415,12 @@ jobs:
             echo "::error::One or more build tasks failed"
             exit 1
           fi
+
+      - name: Sync snapshot
+        id: snapshot-check
+        run: |
+          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/reth" \
+            .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -919,8 +922,8 @@ jobs:
             if (!token || !channel) return;
 
             const steps_status = [
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],

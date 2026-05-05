@@ -110,6 +110,27 @@ fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
     state.bal_state.bal_index()
 }
 
+/// Bumps the BAL index on a `&mut State<DB>`.
+///
+/// Used as a [`BalIndexBumper`](crate::evm::BalIndexBumper) callback so the
+/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can advance
+/// `bal_index` between sub-events of a segment boundary (post-N's `finish()`
+/// and pre-N+1's `apply_pre_execution_changes()`) without a trait bound on
+/// `DB`.
+fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
+    state.bump_bal_index();
+}
+
+/// Sets the BAL index on a `&mut State<DB>`.
+///
+/// Used as a [`BalIndexSetter`](crate::evm::BalIndexSetter) callback so
+/// [`BbBlockExecutor::initialize`](crate::evm::BbBlockExecutor) can renumber
+/// a worker's incoming `bal_index = i + 1` into the boundary-padded space
+/// `i + 1 + 2*k` (where `k` is the worker's segment index).
+fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
+    state.set_bal_index(index);
+}
+
 // ---------------------------------------------------------------------------
 // ConfigureEvm
 // ---------------------------------------------------------------------------
@@ -183,12 +204,15 @@ where
             Some(read_bal_index::<DB>);
 
         // Inject concrete function pointers that know the `State<DB>` type so
-        // the generic executor can reseed block hashes and read `bal_index`.
+        // the generic executor can manipulate `bal_index` and reseed block
+        // hashes without a trait bound on `DB`.
         self.executor_factory.create_executor_with_seeder(
             evm,
             ctx,
             Some(seed_state_block_hashes::<DB>),
             bal_index_reader,
+            Some(bump_bal_index::<DB>),
+            Some(set_bal_index::<DB>),
         )
     }
 }

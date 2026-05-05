@@ -62,6 +62,11 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
         &self.block
     }
 
+    /// Returns the built block with shared ownership.
+    pub const fn block_arc(&self) -> &Arc<SealedBlock<N::Block>> {
+        &self.block
+    }
+
     /// Fees of the block
     pub const fn fees(&self) -> U256 {
         self.fees
@@ -235,6 +240,10 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
 
     fn fees(&self) -> U256 {
         self.fees
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.block_access_list.as_ref()
     }
 
     fn requests(&self) -> Option<Requests> {

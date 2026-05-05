@@ -1577,15 +1577,31 @@ where
             },
             FromEngine::Request(request) => {
                 match request {
-                    EngineApiRequest::InsertExecutedBlock(block) => {
-                        let block_num_hash = block.recovered_block().num_hash();
+                    EngineApiRequest::InsertExecutedBlock(payload) => {
+                        let block_num_hash = payload.recovered_block.num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
+                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+                            // block already known to the tree (e.g. delivered via newPayload first)
+                            return Ok(ops::ControlFlow::Continue(()))
+                        }
+
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
+
+                        let block = match self
+                            .payload_validator
+                            .on_inserted_executed_block(payload, &self.state)
+                        {
+                            Ok(block) => block,
+                            Err(err) => {
+                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
+                                return Ok(ops::ControlFlow::Continue(()))
+                            }
+                        };
 
                         // if the parent is the canonical head, we can insert the block as the
                         // pending block
@@ -1597,7 +1613,6 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
-                        self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),

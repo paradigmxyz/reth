@@ -18,7 +18,8 @@
 #   --tracy-filter F Tracy tracing filter (default: debug)
 #   --no-tune       Skip system tuning (useful on dev machines / macOS)
 #
-# Requires: the reth repo at RETH_REPO (default: ~/reth)
+# Requires: the reth repo at RETH_REPO (default: ~/reth) and
+# BENCH_SNAPSHOT_MANIFEST_URL pointing at the benchmark snapshot manifest.
 #
 # Dependencies (install before first run):
 #   schelk, cpupower, taskset, stdbuf, python3, curl,
@@ -240,14 +241,7 @@ echo "  Baseline src : $BASELINE_SRC"
 echo "  Feature src  : $FEATURE_SRC"
 echo
 
-# ── Step 3: Validate local snapshot ──────────────────────────────────
-echo "▸ Validating local snapshot..."
-cd "$RETH_REPO"
-"${SCRIPTS_DIR}/bench-reth-snapshot.sh"
-echo "  Snapshot is ready."
-echo
-
-# ── Step 4: Build binaries in parallel ───────────────────────────────
+# ── Step 3: Build binaries in parallel ───────────────────────────────
 echo "▸ Building binaries (parallel)..."
 cd "$RETH_REPO"
 
@@ -267,6 +261,12 @@ if [ $FAIL -ne 0 ]; then
   exit 1
 fi
 echo "  Binaries built successfully."
+echo
+
+# ── Step 4: Sync snapshot ────────────────────────────────────────────
+echo "▸ Syncing snapshot..."
+BENCH_RETH_BINARY="${FEATURE_SRC}/target/profiling/reth" "${SCRIPTS_DIR}/bench-reth-snapshot.sh"
+echo "  Snapshot is ready."
 echo
 
 # ── Step 5: System tuning (optional) ────────────────────────────────

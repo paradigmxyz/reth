@@ -449,7 +449,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.3.4", default-features = false }
+alloy-eip7928 = { version = "0.3.5", default-features = false }
 alloy-evm = { version = "0.34.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
@@ -666,7 +666,7 @@ data-encoding = "2"
 delegate = "0.13"
 digest = "0.10.5"
 hash-db = "=0.15.2"
-hickory-resolver = "0.25.0"
+hickory-resolver = "0.26.1"
 hmac = "0.12.1"
 human_bytes = "0.4.1"
 indexmap = "2"
