@@ -66,7 +66,9 @@ jobs:
           git checkout -b "$BRANCH"
           git add "$TARGET"
           git commit -m "chore: update Grafana dashboard ${FILENAME}"
-          git push origin "$BRANCH"
+          gh auth setup-git
+          git push --set-upstream origin "$BRANCH"
           gh pr create \
+            --head "$BRANCH" \
             --title "chore: update Grafana dashboard ${FILENAME}" \
             --body "Automated export from Grafana (dashboard UID: \`${DASHBOARD_UID}\`, target: \`${TARGET}\`)."
