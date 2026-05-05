@@ -289,6 +289,54 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         Ok(entry)
     }
 
+    fn seek_exact_ordered(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let mem_entry = self.in_memory_cursor.seek(&key);
+
+        if let Some((mem_key, entry_inner)) = mem_entry &&
+            *mem_key == key
+        {
+            #[cfg(debug_assertions)]
+            {
+                self.seeked = true;
+            }
+
+            if matches!(&self.db_cursor_state, DbCursorState::Positioned((db_key, _)) if db_key < &key)
+            {
+                self.db_cursor_state = DbCursorState::NeedsPosition;
+            }
+
+            let entry = entry_inner.clone().map(|node| (key, node));
+            self.set_last_key(&entry);
+            return Ok(entry)
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            self.seeked = true;
+        }
+
+        let entry = match &self.db_cursor_state {
+            DbCursorState::Positioned((db_key, node)) if db_key == &key => {
+                Some((key, node.clone()))
+            }
+            DbCursorState::Positioned((db_key, _)) if db_key > &key => None,
+            DbCursorState::Exhausted | DbCursorState::Wiped => None,
+            DbCursorState::NeedsPosition | DbCursorState::Positioned(_) => {
+                self.cursor_seek(key)?;
+                match self.db_cursor_state.entry() {
+                    Some((db_key, node)) if db_key == &key => Some((key, node.clone())),
+                    _ => None,
+                }
+            }
+        };
+
+        self.set_last_key(&entry);
+        Ok(entry)
+    }
+
     fn seek(
         &mut self,
         key: Nibbles,
@@ -600,6 +648,49 @@ mod tests {
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_seek_exact_ordered_matches_seek_exact() {
+        let db_nodes: BTreeMap<_, _> = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
+        ]
+        .into_iter()
+        .collect();
+        let in_memory_nodes = vec![
+            (
+                Nibbles::from_nibbles([0x2]),
+                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            ),
+            (Nibbles::from_nibbles([0x4]), None),
+        ];
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let ordered_paths = [
+            Nibbles::from_nibbles([0x1]),
+            Nibbles::from_nibbles([0x2]),
+            Nibbles::from_nibbles([0x3]),
+            Nibbles::from_nibbles([0x4]),
+            Nibbles::from_nibbles([0x5]),
+        ];
+
+        let make_cursor = || {
+            let visited_keys = Arc::new(Mutex::new(Vec::new()));
+            InMemoryTrieCursor::new_account(
+                MockTrieCursor::new(Arc::new(db_nodes.clone()), visited_keys),
+                &trie_updates,
+            )
+        };
+
+        let mut baseline = make_cursor();
+        let mut ordered = make_cursor();
+
+        for path in ordered_paths {
+            let baseline_entry = baseline.seek_exact(path).unwrap();
+            let ordered_entry = ordered.seek_exact_ordered(path).unwrap();
+            assert_eq!(ordered_entry, baseline_entry, "ordered seek mismatch at {path:?}");
+        }
     }
 
     #[test]

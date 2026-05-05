@@ -107,7 +107,7 @@ where
     // For each changed account node, look up its current value
     // The input is already sorted, so the output will be sorted
     for (path, _new_node) in trie_updates.account_nodes_ref() {
-        let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
+        let old_node = cursor.seek_exact_ordered(*path)?.map(|(_path, node)| node);
         account_changesets.push((*path, old_node));
     }
 
@@ -134,7 +134,7 @@ fn compute_storage_changesets(
     // For each changed storage node, look up its current value
     // The input is already sorted, so the output will be sorted
     for (path, _new_node) in &storage_updates.storage_nodes {
-        let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
+        let old_node = cursor.seek_exact_ordered(*path)?.map(|(_path, node)| node);
         storage_changesets.push((*path, old_node));
     }
 
