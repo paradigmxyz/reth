@@ -138,6 +138,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let cancellation = cancellation.clone();
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
+                evm_config.set_jit(true);
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
 

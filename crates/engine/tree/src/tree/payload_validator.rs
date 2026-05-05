@@ -929,7 +929,9 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
+            let evm_config = self.evm_config.clone();
+            evm_config.set_jit(true);
+            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;

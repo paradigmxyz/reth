@@ -13,6 +13,8 @@ use revm::{
 };
 #[cfg(feature = "std")]
 use revmc::alloy_evm::JitEvmFactory;
+#[cfg(feature = "std")]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "std")]
 pub use revmc::{
@@ -31,9 +33,25 @@ type Inner = alloy_evm::EthEvmFactory;
 /// Reth EVM factory.
 ///
 /// Wraps [`JitEvmFactory`].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RethEvmFactory {
     inner: Inner,
+    #[cfg(feature = "std")]
+    disabled: JitBackend,
+    #[cfg(feature = "std")]
+    jit: AtomicBool,
+}
+
+impl Clone for RethEvmFactory {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            #[cfg(feature = "std")]
+            disabled: self.disabled.clone(),
+            #[cfg(feature = "std")]
+            jit: AtomicBool::new(self.jit.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 #[allow(clippy::derivable_impls)]
@@ -53,8 +71,12 @@ impl Default for RethEvmFactory {
 #[cfg(feature = "std")]
 impl RethEvmFactory {
     /// Creates a new factory that owns the backend.
-    pub const fn new(backend: JitBackend) -> Self {
-        Self { inner: JitEvmFactory::new(backend) }
+    pub fn new(backend: JitBackend) -> Self {
+        Self {
+            inner: JitEvmFactory::new(backend),
+            disabled: JitBackend::disabled(),
+            jit: AtomicBool::new(false),
+        }
     }
 
     /// Creates a [`RethEvmFactory`] with JIT disabled.
@@ -65,6 +87,11 @@ impl RethEvmFactory {
     /// Returns a reference to the JIT backend.
     pub const fn backend(&self) -> &JitBackend {
         self.inner.backend()
+    }
+
+    /// Enables or disables JIT for subsequently created EVMs.
+    pub fn set_jit(&self, enabled: bool) {
+        self.jit.store(enabled, Ordering::Relaxed);
     }
 }
 
@@ -80,7 +107,18 @@ impl EvmFactory for RethEvmFactory {
     type Precompiles = <Inner as EvmFactory>::Precompiles;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        self.inner.create_evm(db, input)
+        #[cfg(feature = "std")]
+        {
+            if self.jit.load(Ordering::Relaxed) {
+                self.inner.create_evm(db, input)
+            } else {
+                JitEvmFactory::new(self.disabled.clone()).create_evm(db, input)
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            self.inner.create_evm(db, input)
+        }
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
@@ -89,7 +127,19 @@ impl EvmFactory for RethEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        self.inner.create_evm_with_inspector(db, input, inspector)
+        #[cfg(feature = "std")]
+        {
+            if self.jit.load(Ordering::Relaxed) {
+                self.inner.create_evm_with_inspector(db, input, inspector)
+            } else {
+                JitEvmFactory::new(self.disabled.clone())
+                    .create_evm_with_inspector(db, input, inspector)
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            self.inner.create_evm_with_inspector(db, input, inspector)
+        }
     }
 }
 
@@ -102,8 +152,8 @@ pub struct RevmcMetrics {
     pub lookup_hits: metrics::Gauge,
     /// Total lookups that returned interpret (not ready).
     pub lookup_misses: metrics::Gauge,
-    /// Lookup-observed events successfully enqueued.
-    pub events_sent: metrics::Gauge,
+    /// Lookup-observed events currently queued.
+    pub events_queued: metrics::Gauge,
     /// Lookup-observed events dropped (channel full).
     pub events_dropped: metrics::Gauge,
     /// Number of entries in the resident compiled map.
@@ -112,8 +162,10 @@ pub struct RevmcMetrics {
     pub jit_code_bytes: metrics::Gauge,
     /// Approximate total bytes of JIT-related data (relocations, metadata, etc.).
     pub jit_data_bytes: metrics::Gauge,
-    /// Number of pending JIT compilation jobs in the queue.
-    pub jit_queue_len: metrics::Gauge,
+    /// Number of pending control commands queued for the backend.
+    pub command_queue_len: metrics::Gauge,
+    /// Number of compilation jobs dispatched but not completed yet.
+    pub pending_jobs: metrics::Gauge,
     /// Total number of entries evicted (idle + budget).
     pub evictions: metrics::Gauge,
     /// Total number of compilations dispatched (JIT promotions + AOT requests).
@@ -143,12 +195,13 @@ impl RevmcMetrics {
         let RuntimeStatsSnapshot {
             lookup_hits,
             lookup_misses,
-            events_sent,
             events_dropped,
             resident_entries,
+            events_queued,
+            command_queue_len,
+            pending_jobs,
             jit_code_bytes,
             jit_data_bytes,
-            jit_queue_len,
             evictions,
             compilations_dispatched,
             compilations_succeeded,
@@ -156,12 +209,13 @@ impl RevmcMetrics {
         } = *stats;
         self.lookup_hits.set(lookup_hits as f64);
         self.lookup_misses.set(lookup_misses as f64);
-        self.events_sent.set(events_sent as f64);
+        self.events_queued.set(events_queued as f64);
         self.events_dropped.set(events_dropped as f64);
         self.resident_entries.set(resident_entries as f64);
         self.jit_code_bytes.set(jit_code_bytes as f64);
         self.jit_data_bytes.set(jit_data_bytes as f64);
-        self.jit_queue_len.set(jit_queue_len as f64);
+        self.command_queue_len.set(command_queue_len as f64);
+        self.pending_jobs.set(pending_jobs as f64);
         self.evictions.set(evictions as f64);
         self.compilations_dispatched.set(compilations_dispatched as f64);
         self.compilations_succeeded.set(compilations_succeeded as f64);

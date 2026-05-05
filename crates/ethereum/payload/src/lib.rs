@@ -186,6 +186,7 @@ where
         .with_bal_builder_if(is_amsterdam)
         .build();
 
+    evm_config.set_jit(true);
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
@@ -197,7 +198,7 @@ where
                 gas_limit: builder_config.gas_limit(parent_header.gas_limit),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: attributes.withdrawals.clone().map(Into::into),
-                extra_data: builder_config.extra_data,
+                extra_data: builder_config.extra_data.clone(),
                 slot_number: attributes.slot_number(),
             },
         )

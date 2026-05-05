@@ -23,7 +23,7 @@ use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use core::{convert::Infallible, fmt::Debug};
+use core::{any::Any, convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
@@ -154,6 +154,18 @@ where
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
         &self.block_assembler
+    }
+
+    fn set_jit(&self, enabled: bool) {
+        #[cfg(feature = "std")]
+        if let Some(factory) =
+            (self.evm_factory() as &dyn Any).downcast_ref::<factory::RethEvmFactory>()
+        {
+            factory.set_jit(enabled);
+        }
+
+        #[cfg(not(feature = "std"))]
+        let _ = enabled;
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {

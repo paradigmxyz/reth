@@ -264,6 +264,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().evm_factory()
     }
 
+    /// Enables or disables JIT for subsequently created EVMs, if supported.
+    fn set_jit(&self, _enabled: bool) {}
+
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
     ///

@@ -472,14 +472,16 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
 fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
     let default_tuning = RuntimeTuning::default();
     let tuning = RuntimeTuning {
-        lookup_event_channel_capacity: jit.channel_capacity,
+        channel_capacity: jit.channel_capacity,
         jit_hot_threshold: jit.hot_threshold,
         jit_max_bytecode_len: jit.max_bytecode_len,
-        max_pending_jit_jobs: jit.max_pending_jobs,
+        jit_max_pending_jobs: jit.max_pending_jobs,
         jit_worker_count: jit.worker_count.unwrap_or(default_tuning.jit_worker_count),
         resident_code_cache_bytes: jit.code_cache_bytes,
         idle_evict_duration: Some(jit.idle_evict_duration),
 
+        max_events_per_drain: default_tuning.max_events_per_drain,
+        event_drain_interval: default_tuning.event_drain_interval,
         shutdown_timeout: default_tuning.shutdown_timeout,
         jit_worker_queue_capacity: default_tuning.jit_worker_queue_capacity,
         jit_opt_level: default_tuning.jit_opt_level,
@@ -499,6 +501,8 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         blocking: jit.blocking,
         no_dedup: default_config.no_dedup,
         no_dse: default_config.no_dse,
+        gas_params: default_config.gas_params,
+        aot: default_config.aot,
         on_compilation: default_config.on_compilation,
     }
 }

@@ -328,8 +328,8 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "reth_revmc_jit_events_sent",
-          "legendFormat": "events sent"
+          "expr": "reth_revmc_jit_events_queued",
+          "legendFormat": "events queued"
         },
         {
           "datasource": {
@@ -340,7 +340,7 @@
           "legendFormat": "events dropped"
         }
       ],
-      "title": "Event Channel",
+      "title": "Event Queue",
       "type": "timeseries"
     },
     {
@@ -366,11 +366,11 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "reth_revmc_jit_jit_queue_len",
-          "legendFormat": "queue length"
+          "expr": "reth_revmc_jit_pending_jobs",
+          "legendFormat": "pending jobs"
         }
       ],
-      "title": "JIT Queue Length",
+      "title": "Pending JIT Jobs",
       "type": "timeseries"
     },
     {

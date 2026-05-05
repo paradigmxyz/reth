@@ -69,6 +69,10 @@ where
     ) -> Result<crate::ExecutionCtxFor<'_, Self>, Self::Error> {
         self.inner().context_for_next_block(parent, attributes)
     }
+
+    fn set_jit(&self, enabled: bool) {
+        self.inner().set_jit(enabled);
+    }
 }
 
 #[cfg(feature = "std")]
