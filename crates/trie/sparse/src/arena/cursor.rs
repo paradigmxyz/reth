@@ -1,6 +1,7 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
+    nodes::ArenaSparseNodeBranch, ArenaSparseNode, ArenaSparseNodeBranchChild,
+    ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -174,9 +175,8 @@ impl ArenaCursor {
     /// Returns the absolute path of a child at `child_nibble` under the branch at the top of
     /// the stack. The result is `stack_head.path + branch.short_key + child_nibble`.
     pub(super) fn child_path(&self, arena: &NodeArena, child_nibble: u8) -> Nibbles {
-        let mut path = logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"));
-        path.push_unchecked(child_nibble);
-        path
+        let head = self.stack.last().expect("cursor is non-empty");
+        child_path(arena[head.index].branch_ref(), head.path, child_nibble)
     }
 
     /// Returns the logical path of the parent branch entry (second from top of the stack).
@@ -329,17 +329,13 @@ impl ArenaCursor {
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
-
-            // If full_path doesn't extend past the branch's logical path, the target is at or
-            // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
-            {
+            let Some(head_branch_logical_path_len) =
+                extending_branch_path_len(head, head_branch, full_path)
+            else {
                 return SeekResult::Diverged;
-            }
+            };
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+            let child_nibble = full_path.get_unchecked(head_branch_logical_path_len);
             let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
             else {
                 return SeekResult::NoChild { child_nibble };
@@ -351,7 +347,7 @@ impl ArenaCursor {
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    let path = child_path(head_branch, head.path, child_nibble);
                     self.push(arena, child_idx, path);
                 }
             }
@@ -371,4 +367,35 @@ fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibb
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
 fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+}
+
+/// Returns the full logical path length for `entry` if `full_path` extends the branch's
+/// `short_key` and has a child nibble beyond it.
+fn extending_branch_path_len(
+    entry: &ArenaCursorStackEntry,
+    branch: &ArenaSparseNodeBranch,
+    full_path: &Nibbles,
+) -> Option<usize> {
+    let base_len = entry.path.len();
+    let logical_len = base_len + branch.short_key.len();
+    if full_path.len() <= logical_len {
+        return None;
+    }
+
+    for (offset, nibble) in branch.short_key.iter().enumerate() {
+        if full_path.get_unchecked(base_len + offset) != nibble {
+            return None;
+        }
+    }
+
+    Some(logical_len)
+}
+
+/// Builds the absolute path for a branch child without materializing the intermediate logical
+/// branch path first.
+fn child_path(branch: &ArenaSparseNodeBranch, parent_path: Nibbles, child_nibble: u8) -> Nibbles {
+    let mut path = parent_path;
+    path.extend(&branch.short_key);
+    path.push_unchecked(child_nibble);
+    path
 }
