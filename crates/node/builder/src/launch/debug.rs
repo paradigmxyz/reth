@@ -1,6 +1,7 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_consensus::transaction::Either;
+use alloy_primitives::Bytes;
 use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
@@ -14,6 +15,7 @@ use reth_node_api::{
 };
 use std::{
     future::{Future, IntoFuture},
+    marker::PhantomData,
     pin::Pin,
     sync::Arc,
 };
@@ -72,6 +74,15 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// to the node's internal execution payload data representation.
     fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> PayloadDataTy<Self>;
 
+    /// Converts an RPC block and optional RLP-encoded block access list to execution payload data.
+    fn rpc_to_execution_data_with_block_access_list(
+        rpc_block: Self::RpcBlock,
+        block_access_list: Option<Bytes>,
+    ) -> PayloadDataTy<Self> {
+        let _ = block_access_list;
+        Self::rpc_to_execution_data(rpc_block)
+    }
+
     /// Creates a payload attributes builder for local mining in dev mode.
     ///
     ///  It will be used by the `LocalMiner` when dev mode is enabled.
@@ -81,6 +92,33 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     fn local_payload_attributes_builder(
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
+}
+
+/// Converts provider block responses and optional payload side data into execution payload data.
+pub(crate) trait DebugPayloadConverter<Block> {
+    /// The execution payload data type.
+    type ExecutionData;
+
+    /// Converts a provider block response and optional RLP-encoded block access list.
+    fn convert(block: Block, block_access_list: Option<Bytes>) -> Self::ExecutionData;
+}
+
+/// Default debug payload converter for node launchers.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct DefaultDebugPayloadConverter<N>(PhantomData<fn() -> N>);
+
+impl<N, Block> DebugPayloadConverter<Block> for DefaultDebugPayloadConverter<N>
+where
+    N: FullNodeComponents<Types: DebugNode<N>>,
+    Block: Serialize,
+{
+    type ExecutionData = PayloadDataTy<N::Types>;
+
+    fn convert(block: Block, block_access_list: Option<Bytes>) -> Self::ExecutionData {
+        let json = serde_json::to_value(block).expect("Block serialization cannot fail");
+        let rpc_block = serde_json::from_value(json).expect("Block deserialization cannot fail");
+        N::Types::rpc_to_execution_data_with_block_access_list(rpc_block, block_access_list)
+    }
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -237,15 +275,12 @@ where
         } else if let Some(url) = config.debug.rpc_consensus_url.clone() {
             info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
-            let block_provider =
-                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {
-                    let json = serde_json::to_value(block_response)
-                        .expect("Block serialization cannot fail");
-                    let rpc_block =
-                        serde_json::from_value(json).expect("Block deserialization cannot fail");
-                    N::Types::rpc_to_execution_data(rpc_block)
-                })
-                .await?;
+            let block_provider = RpcBlockProvider::<AnyNetwork, _>::new_with_payload_side_data(
+                url.as_str(),
+                DefaultDebugPayloadConverter::<N>::convert,
+            )
+            .await?
+            .with_block_access_lists();
 
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
@@ -266,7 +301,7 @@ where
                     .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
             })?;
 
-            let block_provider = EtherscanBlockProvider::new(
+            let block_provider = EtherscanBlockProvider::new_with_payload_side_data(
                 etherscan_url,
                 chain.etherscan_api_key().ok_or_else(|| {
                     eyre::eyre!(
@@ -274,7 +309,7 @@ where
                     )
                 })?,
                 chain.id(),
-                N::Types::rpc_to_execution_data,
+                N::Types::rpc_to_execution_data_with_block_access_list,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),

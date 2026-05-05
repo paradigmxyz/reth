@@ -1,6 +1,7 @@
 use crate::PayloadProvider;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::{Response, ResponsePayload};
+use alloy_primitives::Bytes;
 use reqwest::Client;
 use reth_node_api::ExecutionPayload;
 use reth_tracing::tracing::{debug, warn};
@@ -17,7 +18,8 @@ pub struct EtherscanBlockProvider<RpcBlock, ExecutionData> {
     chain_id: u64,
     interval: Duration,
     #[debug(skip)]
-    convert: Arc<dyn Fn(RpcBlock) -> ExecutionData + Send + Sync>,
+    convert: Arc<dyn Fn(RpcBlock, Option<Bytes>) -> ExecutionData + Send + Sync>,
+    _marker: std::marker::PhantomData<fn() -> RpcBlock>,
 }
 
 impl<RpcBlock, ExecutionData> EtherscanBlockProvider<RpcBlock, ExecutionData>
@@ -31,6 +33,19 @@ where
         chain_id: u64,
         convert: impl Fn(RpcBlock) -> ExecutionData + Send + Sync + 'static,
     ) -> Self {
+        Self::new_with_payload_side_data(base_url, api_key, chain_id, move |block, _| {
+            convert(block)
+        })
+    }
+
+    /// Create a new Etherscan block provider with the given base URL, API key, and payload
+    /// conversion function.
+    pub fn new_with_payload_side_data(
+        base_url: String,
+        api_key: String,
+        chain_id: u64,
+        convert: impl Fn(RpcBlock, Option<Bytes>) -> ExecutionData + Send + Sync + 'static,
+    ) -> Self {
         Self {
             http_client: Client::new(),
             base_url,
@@ -38,6 +53,7 @@ where
             chain_id,
             interval: Duration::from_secs(3),
             convert: Arc::new(convert),
+            _marker: Default::default(),
         }
     }
 
@@ -82,7 +98,7 @@ where
 
         let payload = resp.payload;
         match payload {
-            ResponsePayload::Success(block) => Ok((self.convert)(block)),
+            ResponsePayload::Success(block) => Ok((self.convert)(block, None)),
             ResponsePayload::Failure(err) => Err(eyre::eyre!("Failed to get block: {err}")),
         }
     }
