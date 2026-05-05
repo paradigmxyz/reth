@@ -18,16 +18,6 @@ pub enum RejectReason {
         gas_limit: u64,
     },
 
-    /// A worker accessed state not declared in the received BAL (surfaced as revm's
-    /// `BalError::AccountNotFound` or a storage-key miss).
-    ///
-    /// TODO: once revm's `BalError` carries the offending `address` / `slot`, thread those
-    /// through to aid diagnostics. For now we only know which tx triggered the miss.
-    UndeclaredAccess {
-        /// Tx index whose worker reported the miss.
-        tx_index: u64,
-    },
-
     /// The rebuilt BAL's hash disagrees with `header.block_access_list_hash` at end-of-block.
     /// Catches over-declared addresses and any divergence the per-tx fragment compares missed.
     FinalHashMismatch {
