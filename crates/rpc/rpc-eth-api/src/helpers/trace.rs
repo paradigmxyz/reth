@@ -177,9 +177,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             let parent_block = block.parent_hash();
             let block_hash = block.hash();
 
-            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, block_hash, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
-                bal::attach_block_bal(this.provider(), block_hash, &mut db);
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 

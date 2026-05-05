@@ -673,6 +673,23 @@ pub trait Call:
         })
     }
 
+    /// Executes the closure with state at `at` and the BAL for `bal_block_hash`, if available.
+    fn spawn_with_state_at_block_and_bal<F, R>(
+        &self,
+        at: impl Into<BlockId>,
+        bal_block_hash: B256,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_with_state_at_block(at, move |this, mut db| {
+            bal::attach_block_bal(this.provider(), bal_block_hash, &mut db);
+            f(this, db)
+        })
+    }
+
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
@@ -755,9 +772,8 @@ pub trait Call:
             let parent_block = block.parent_hash();
             let block_hash = block.hash();
 
-            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, block_hash, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
-                bal::attach_block_bal(this.provider(), block_hash, &mut db);
 
                 let mut executor = RpcNodeCore::evm_config(&this)
                     .executor_for_block(&mut db, block.sealed_block())

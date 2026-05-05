@@ -226,9 +226,8 @@ where
         let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
+            .spawn_with_state_at_block_and_bal(state_at, block_hash, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
-                bal::attach_block_bal(eth_api.provider(), block_hash, &mut db);
 
                 // configure env for the target transaction
                 let (tx, tx_info) = transaction.split();
@@ -356,9 +355,7 @@ where
         let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                bal::attach_block_bal(eth_api.provider(), block_hash, &mut db);
-
+            .spawn_with_state_at_block_and_bal(state_at, block_hash, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
