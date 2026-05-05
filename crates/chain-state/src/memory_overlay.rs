@@ -12,7 +12,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, sync::{Arc, OnceLock}};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
@@ -26,7 +26,7 @@ pub struct MemoryOverlayStateProviderRef<
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Cow<'a, [ExecutedBlock<N>]>,
     /// Lazy-loaded in-memory trie data.
-    pub(crate) trie_input: OnceLock<TrieInput>,
+    pub(crate) trie_input: Arc<OnceLock<Arc<TrieInput>>>,
 }
 
 impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
@@ -38,7 +38,11 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
     pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
-        Self { historical, in_memory: Cow::Owned(in_memory), trie_input: OnceLock::new() }
+        Self {
+            historical,
+            in_memory: Cow::Owned(in_memory),
+            trie_input: Arc::new(OnceLock::new()),
+        }
     }
 
     /// Turn this state provider into a state provider
@@ -47,7 +51,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     }
 
     /// Return lazy-loaded trie state aggregated from in-memory blocks.
-    fn trie_input(&self) -> &TrieInput {
+    fn trie_input(&self) -> &Arc<TrieInput> {
         self.trie_input.get_or_init(|| {
             let mut input = TrieInput::default();
             // Iterate from oldest to newest
@@ -56,7 +60,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
                 input.nodes.extend_from_sorted(&data.trie_updates);
                 input.state.extend_from_sorted(&data.hashed_state);
             }
-            input
+            Arc::new(input)
         })
     }
 
@@ -127,7 +131,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
-        input.prepend_self(self.trie_input().clone());
+        input.prepend_self(self.trie_input().as_ref().clone());
         self.historical.state_root_from_nodes(input)
     }
 
@@ -142,7 +146,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         &self,
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        input.prepend_self(self.trie_input().clone());
+        input.prepend_self(self.trie_input().as_ref().clone());
         self.historical.state_root_from_nodes_with_updates(input)
     }
 }
@@ -184,7 +188,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        input.prepend_self(self.trie_input().clone());
+        input.prepend_self(self.trie_input().as_ref().clone());
         self.historical.proof(input, address, slots)
     }
 
@@ -193,7 +197,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         mut input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        input.prepend_self(self.trie_input().clone());
+        input.prepend_self(self.trie_input().as_ref().clone());
         self.historical.multiproof(input, targets)
     }
 
@@ -203,7 +207,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         target: HashedPostState,
         mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
-        input.prepend_self(self.trie_input().clone());
+        input.prepend_self(self.trie_input().as_ref().clone());
         self.historical.witness(input, target, mode)
     }
 }
@@ -251,7 +255,7 @@ pub struct MemoryOverlayStateProvider<N: NodePrimitives = reth_ethereum_primitiv
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlock<N>>,
     /// Lazy-loaded in-memory trie data.
-    pub(crate) trie_input: OnceLock<TrieInput>,
+    pub(crate) trie_input: Arc<OnceLock<Arc<TrieInput>>>,
 }
 
 impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
@@ -263,7 +267,7 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
     pub fn new(historical: StateProviderBox, in_memory: Vec<ExecutedBlock<N>>) -> Self {
-        Self { historical, in_memory, trie_input: OnceLock::new() }
+        Self { historical, in_memory, trie_input: Arc::new(OnceLock::new()) }
     }
 
     /// Returns a new provider that takes the `TX` as reference
@@ -272,7 +276,7 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
         MemoryOverlayStateProviderRef {
             historical: Box::new(self.historical.as_ref()),
             in_memory: Cow::Borrowed(&self.in_memory),
-            trie_input: self.trie_input.clone(),
+            trie_input: Arc::clone(&self.trie_input),
         }
     }
 
