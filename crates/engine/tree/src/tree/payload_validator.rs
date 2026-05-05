@@ -1079,7 +1079,7 @@ where
     /// 1. Creates a shared parent-state cache handle for provider-backed workers.
     /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
-    /// 4. Calls [`crate::tree::payload_processor::bal::BalPayloadExecutor::execute_block`].
+    /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
     /// 5. Adapts the BAL output to a [`BlockExecutionOutput`] and forwards receipts to the
     ///    receipt-root channel.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
@@ -1154,11 +1154,15 @@ where
             )))
         };
         let execution_start = Instant::now();
-        let bal_output = crate::tree::payload_processor::bal::BalPayloadExecutor::new(
-            self.runtime.clone(),
+        let bal_output = crate::tree::payload_processor::bal::execute_block(
+            &self.runtime,
             self.evm_config.clone(),
-        )
-        .execute_block(make_db, decoded_bal, block, txs, header_bal_hash)?;
+            make_db,
+            decoded_bal,
+            block,
+            txs,
+            header_bal_hash,
+        )?;
         let execution_duration = execution_start.elapsed();
 
         // Forward all receipts to the receipt-root task, in order. Drop the sender so the task

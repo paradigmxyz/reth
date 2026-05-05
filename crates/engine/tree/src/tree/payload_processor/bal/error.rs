@@ -4,7 +4,7 @@ use alloy_evm::block::BlockExecutionError;
 use alloy_primitives::B256;
 use reth_provider::ProviderError;
 
-/// Errors surfaced by `BalPayloadExecutor::execute_block`.
+/// Errors surfaced by `execute_block`.
 #[derive(Debug)]
 pub enum BalExecutionError {
     /// BAL-specific rejection.
