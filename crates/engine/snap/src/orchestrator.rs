@@ -2,7 +2,7 @@
 
 use crate::{
     bal::{bal_to_state_diff, merge_account_diff},
-    download::{download_state, DownloadStateOutcome},
+    download::{download_state, initial_chunk_cursors, DownloadStateOutcome},
     finalize::write_snap_stage_checkpoints,
     pivot::PivotTracker,
     storage::{
@@ -184,16 +184,16 @@ where
 
         tracing::info!(target: "engine::snap_sync", %pivot_root, "Phase 1: bulk state download");
 
-        let mut download_cursor = B256::ZERO;
+        let mut download_cursors = initial_chunk_cursors();
         loop {
             let root = tracker.pivot_root();
-            match download_state(&self.client, &self.factory, root, download_cursor).await? {
+            match download_state(&self.client, &self.factory, root, &mut download_cursors).await? {
                 DownloadStateOutcome::Done => break,
-                DownloadStateOutcome::Stale { resume_from } => {
+                DownloadStateOutcome::Stale => {
                     tracing::info!(
                         target: "engine::snap_sync",
                         %root,
-                        %resume_from,
+                        cursors = ?download_cursors,
                         "Pivot root stale, re-resolving head from peers"
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -215,7 +215,6 @@ where
                     }
 
                     tracker.advance_pivot(&self.client, &self.factory).await?;
-                    download_cursor = resume_from;
                 }
             }
         }

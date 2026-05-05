@@ -14,6 +14,7 @@ use reth_network_peers::PeerId;
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -22,92 +23,123 @@ use tokio_stream::wrappers::ReceiverStream;
 
 /// Manages incoming snap protocol requests from peers.
 ///
+/// Each request is dispatched to [`tokio::task::spawn_blocking`] so heavy DB
+/// reads, proof generation, and on-demand BAL replay can run concurrently
+/// across the blocking thread pool. Without this, all peers' snap requests
+/// would serialize through a single task, capping serve throughput at one
+/// core regardless of in-flight client requests.
+///
 /// This should be spawned as a background task, similar to
 /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
 #[derive(Debug)]
 #[must_use = "Handler does nothing unless polled."]
 pub struct SnapRequestHandler<S> {
-    snap_provider: S,
+    snap_provider: Arc<S>,
     incoming_requests: ReceiverStream<IncomingSnapRequest>,
 }
 
 impl<S> SnapRequestHandler<S> {
     /// Creates a new handler with the given provider and receiver channel.
     pub fn new(snap_provider: S, incoming: Receiver<IncomingSnapRequest>) -> Self {
-        Self { snap_provider, incoming_requests: ReceiverStream::new(incoming) }
+        Self {
+            snap_provider: Arc::new(snap_provider),
+            incoming_requests: ReceiverStream::new(incoming),
+        }
     }
 }
 
 impl<S: SnapStateProvider> SnapRequestHandler<S> {
-    fn on_account_range_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetAccountRangeMessage,
-        response: oneshot::Sender<RequestResult<SnapResponse>>,
-    ) {
-        let (accounts, proof) = self.snap_provider.account_range(
-            request.root_hash,
-            request.starting_hash,
-            request.limit_hash,
-            request.response_bytes,
-        );
-
-        let _ = response.send(Ok(SnapResponse::AccountRange(AccountRangeMessage {
-            request_id: request.request_id,
-            accounts,
-            proof,
-        })));
+    fn dispatch(&self, incoming: IncomingSnapRequest) {
+        let provider = Arc::clone(&self.snap_provider);
+        tokio::task::spawn_blocking(move || handle_request(&*provider, incoming));
     }
+}
 
-    fn on_storage_ranges_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetStorageRangesMessage,
-        response: oneshot::Sender<RequestResult<SnapResponse>>,
-    ) {
-        let (slots, proof) = self.snap_provider.storage_ranges(
-            request.root_hash,
-            request.account_hashes,
-            request.starting_hash,
-            request.limit_hash,
-            request.response_bytes,
-        );
-
-        let _ = response.send(Ok(SnapResponse::StorageRanges(StorageRangesMessage {
-            request_id: request.request_id,
-            slots,
-            proof,
-        })));
+fn handle_request<S: SnapStateProvider + ?Sized>(provider: &S, incoming: IncomingSnapRequest) {
+    match incoming {
+        IncomingSnapRequest::GetAccountRange { peer_id, request, response } => {
+            on_account_range_request(provider, peer_id, request, response);
+        }
+        IncomingSnapRequest::GetStorageRanges { peer_id, request, response } => {
+            on_storage_ranges_request(provider, peer_id, request, response);
+        }
+        IncomingSnapRequest::GetByteCodes { peer_id, request, response } => {
+            on_byte_codes_request(provider, peer_id, request, response);
+        }
+        IncomingSnapRequest::GetBlockAccessLists { peer_id, request, response } => {
+            on_block_access_lists_request(provider, peer_id, request, response);
+        }
     }
+}
 
-    fn on_byte_codes_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetByteCodesMessage,
-        response: oneshot::Sender<RequestResult<SnapResponse>>,
-    ) {
-        let codes = self.snap_provider.bytecodes(request.hashes, request.response_bytes);
+fn on_account_range_request<S: SnapStateProvider + ?Sized>(
+    provider: &S,
+    _peer_id: PeerId,
+    request: GetAccountRangeMessage,
+    response: oneshot::Sender<RequestResult<SnapResponse>>,
+) {
+    let (accounts, proof) = provider.account_range(
+        request.root_hash,
+        request.starting_hash,
+        request.limit_hash,
+        request.response_bytes,
+    );
 
-        let _ = response.send(Ok(SnapResponse::ByteCodes(ByteCodesMessage {
-            request_id: request.request_id,
-            codes,
-        })));
-    }
+    let _ = response.send(Ok(SnapResponse::AccountRange(AccountRangeMessage {
+        request_id: request.request_id,
+        accounts,
+        proof,
+    })));
+}
 
-    fn on_block_access_lists_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetBlockAccessListsMessage,
-        response: oneshot::Sender<RequestResult<SnapResponse>>,
-    ) {
-        let block_access_lists =
-            self.snap_provider.block_access_lists(request.block_hashes, request.response_bytes);
+fn on_storage_ranges_request<S: SnapStateProvider + ?Sized>(
+    provider: &S,
+    _peer_id: PeerId,
+    request: GetStorageRangesMessage,
+    response: oneshot::Sender<RequestResult<SnapResponse>>,
+) {
+    let (slots, proof) = provider.storage_ranges(
+        request.root_hash,
+        request.account_hashes,
+        request.starting_hash,
+        request.limit_hash,
+        request.response_bytes,
+    );
 
-        let _ = response.send(Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
-            request_id: request.request_id,
-            block_access_lists,
-        })));
-    }
+    let _ = response.send(Ok(SnapResponse::StorageRanges(StorageRangesMessage {
+        request_id: request.request_id,
+        slots,
+        proof,
+    })));
+}
+
+fn on_byte_codes_request<S: SnapStateProvider + ?Sized>(
+    provider: &S,
+    _peer_id: PeerId,
+    request: GetByteCodesMessage,
+    response: oneshot::Sender<RequestResult<SnapResponse>>,
+) {
+    let codes = provider.bytecodes(request.hashes, request.response_bytes);
+
+    let _ = response.send(Ok(SnapResponse::ByteCodes(ByteCodesMessage {
+        request_id: request.request_id,
+        codes,
+    })));
+}
+
+fn on_block_access_lists_request<S: SnapStateProvider + ?Sized>(
+    provider: &S,
+    _peer_id: PeerId,
+    request: GetBlockAccessListsMessage,
+    response: oneshot::Sender<RequestResult<SnapResponse>>,
+) {
+    let block_access_lists =
+        provider.block_access_lists(request.block_hashes, request.response_bytes);
+
+    let _ = response.send(Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+        request_id: request.request_id,
+        block_access_lists,
+    })));
 }
 
 impl<S: SnapStateProvider + Unpin> Future for SnapRequestHandler<S> {
@@ -124,20 +156,7 @@ impl<S: SnapStateProvider + Unpin> Future for SnapRequestHandler<S> {
             DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS,
             this.incoming_requests.poll_next_unpin(cx),
             |incoming| {
-                match incoming {
-                    IncomingSnapRequest::GetAccountRange { peer_id, request, response } => {
-                        this.on_account_range_request(peer_id, request, response)
-                    }
-                    IncomingSnapRequest::GetStorageRanges { peer_id, request, response } => {
-                        this.on_storage_ranges_request(peer_id, request, response)
-                    }
-                    IncomingSnapRequest::GetByteCodes { peer_id, request, response } => {
-                        this.on_byte_codes_request(peer_id, request, response)
-                    }
-                    IncomingSnapRequest::GetBlockAccessLists { peer_id, request, response } => {
-                        this.on_block_access_lists_request(peer_id, request, response)
-                    }
-                }
+                this.dispatch(incoming);
             },
         );
 
