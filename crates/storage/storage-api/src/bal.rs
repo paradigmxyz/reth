@@ -1,5 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::NumHash;
+use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -47,6 +47,17 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// The returned vector must align with `block_hashes`.
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>>;
+
+    /// Fetches and decodes the BAL for the given block hash.
+    fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
+        self.get_by_hashes(&[block_hash])?
+            .into_iter()
+            .next()
+            .flatten()
+            .map(DecodedBal::from_rlp_bytes)
+            .transpose()
+            .map_err(Into::into)
+    }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
     /// exceeded.
@@ -146,6 +157,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         self.inner.get_by_hashes(block_hashes)
+    }
+
+    /// Fetches and decodes the BAL for the given block hash.
+    #[inline]
+    pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
+        self.inner.get_decoded_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -265,6 +282,24 @@ mod tests {
     }
 
     #[test]
+    fn noop_store_decoded_lookup_returns_none() {
+        let store = BalStoreHandle::default();
+
+        assert!(store.get_decoded_by_hash(B256::random()).unwrap().is_none());
+    }
+
+    #[test]
+    fn decoded_lookup_decodes_raw_bal() {
+        let hash = B256::random();
+        let raw_bal = Bytes::from_static(&[0xc0]);
+        let store = BalStoreHandle::new(TestBalStore { hash, raw_bal: raw_bal.clone() });
+
+        let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
+
+        assert_eq!(decoded.as_raw(), &raw_bal);
+    }
+
+    #[test]
     fn noop_store_limited_lookup_returns_prefix() {
         let store = BalStoreHandle::default();
         let hashes = [B256::random(), B256::random(), B256::random()];
@@ -294,5 +329,33 @@ mod tests {
         let mut stream = store.bal_stream();
 
         assert!(stream.next().await.is_none());
+    }
+
+    #[derive(Debug)]
+    struct TestBalStore {
+        hash: B256,
+        raw_bal: Bytes,
+    }
+
+    impl BalStore for TestBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(block_hashes
+                .iter()
+                .map(|hash| (*hash == self.hash).then(|| self.raw_bal.clone()))
+                .collect())
+        }
+
+        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
+            Ok(Vec::new())
+        }
+
+        #[cfg(feature = "std")]
+        fn bal_stream(&self) -> BalNotificationStream {
+            reth_tokio_util::EventSender::new(1).new_listener()
+        }
     }
 }
