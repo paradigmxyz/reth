@@ -448,7 +448,7 @@ mod tests {
     }
 
     fn walker_for_matching_branch_children_test(
-        enable_all_children_unskippable: bool,
+        walk_all_changed_branch_children: bool,
     ) -> TrieWalker<crate::trie_cursor::mock::MockTrieCursor> {
         let trie_nodes = BTreeMap::from([
             (Nibbles::default(), root_branch_node(1 << 2, 1 << 2, 1 << 2)),
@@ -463,7 +463,7 @@ mod tests {
         prefix_set.insert(Nibbles::from_nibbles([0x2, 0x3, 0x1]));
 
         TrieWalker::state_trie(factory.account_trie_cursor().unwrap(), prefix_set.freeze())
-            .with_walk_all_changed_branch_children(enable_all_children_unskippable)
+            .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
     }
 
     #[test]
