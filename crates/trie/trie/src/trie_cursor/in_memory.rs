@@ -250,7 +250,15 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let mem_entry = self.in_memory_cursor.seek(&key);
+        let mem_entry = if self
+            .in_memory_cursor
+            .current()
+            .is_some_and(|(mem_key, _)| mem_key >= &key)
+        {
+            self.in_memory_cursor.current()
+        } else {
+            self.in_memory_cursor.seek_nibbles(&key)
+        };
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
             *mem_key == key
@@ -294,7 +302,9 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         self.cursor_seek(key)?;
-        self.in_memory_cursor.seek(&key);
+        if !self.in_memory_cursor.current().is_some_and(|(mem_key, _)| mem_key >= &key) {
+            self.in_memory_cursor.seek_nibbles(&key);
+        }
 
         #[cfg(debug_assertions)]
         {
@@ -322,7 +332,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         if let Some((key, _)) = self.in_memory_cursor.current() &&
             key == &last_key
         {
-            self.in_memory_cursor.first_after(&last_key);
+            self.in_memory_cursor.first_after_nibbles(&last_key);
         }
 
         if matches!(self.db_cursor_state, DbCursorState::NeedsPosition) {

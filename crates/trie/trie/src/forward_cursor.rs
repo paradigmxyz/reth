@@ -1,3 +1,5 @@
+use reth_trie_common::Nibbles;
+
 /// The implementation of forward-only in memory cursor over the entries.
 ///
 /// The cursor operates under the assumption that the supplied collection is pre-sorted.
@@ -92,9 +94,57 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     }
 }
 
+impl<V> ForwardInMemoryCursor<'_, Nibbles, V> {
+    /// Returns the first entry from the current cursor position that's greater or equal to the
+    /// provided key. This avoids the predicate dispatch in the generic implementation because trie
+    /// overlays only ever walk sorted `Nibbles` keys.
+    #[inline]
+    pub fn seek_nibbles(&mut self, key: &Nibbles) -> Option<&(Nibbles, V)> {
+        self.advance_nibbles_while_lt(key)
+    }
+
+    /// Returns the first entry from the current cursor position that's greater than the provided
+    /// key.
+    #[inline]
+    pub fn first_after_nibbles(&mut self, key: &Nibbles) -> Option<&(Nibbles, V)> {
+        self.advance_nibbles_while_le(key)
+    }
+
+    #[inline]
+    fn advance_nibbles_while_lt(&mut self, key: &Nibbles) -> Option<&(Nibbles, V)> {
+        let remaining = self.entries.len().saturating_sub(self.idx);
+        if remaining >= BINARY_SEARCH_THRESHOLD {
+            let slice = &self.entries[self.idx..];
+            let pos = slice.partition_point(|(candidate, _)| candidate < key);
+            self.idx += pos;
+        } else {
+            while self.current().is_some_and(|(candidate, _)| candidate < key) {
+                self.next();
+            }
+        }
+        self.current()
+    }
+
+    #[inline]
+    fn advance_nibbles_while_le(&mut self, key: &Nibbles) -> Option<&(Nibbles, V)> {
+        let remaining = self.entries.len().saturating_sub(self.idx);
+        if remaining >= BINARY_SEARCH_THRESHOLD {
+            let slice = &self.entries[self.idx..];
+            let pos = slice.partition_point(|(candidate, _)| candidate <= key);
+            self.idx += pos;
+        } else {
+            while self.current().is_some_and(|(candidate, _)| candidate <= key) {
+                self.next();
+            }
+        }
+        self.current()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_trie_common::Nibbles;
 
     #[test]
     fn test_cursor_small() {
@@ -183,5 +233,26 @@ mod tests {
                 "Mismatch for key {search_key}: binary={result1:?}, linear={result2:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_nibbles_specialized_seek_reuses_current_position() {
+        let entries = vec![
+            (Nibbles::from_nibbles([0x1, 0x0]), ()),
+            (Nibbles::from_nibbles([0x1, 0x2]), ()),
+            (Nibbles::from_nibbles([0x1, 0x4]), ()),
+        ];
+        let mut cursor = ForwardInMemoryCursor::new(&entries);
+
+        let target = Nibbles::from_nibbles([0x1, 0x2]);
+        assert_eq!(cursor.seek_nibbles(&target), Some(&(target, ())));
+        assert_eq!(cursor.current(), Some(&(target, ())));
+
+        let earlier = Nibbles::from_nibbles([0x1, 0x1]);
+        assert_eq!(cursor.seek_nibbles(&earlier), Some(&(target, ())));
+        assert_eq!(cursor.current(), Some(&(target, ())));
+
+        assert_eq!(cursor.first_after_nibbles(&target), Some(&(entries[2].0, ())));
+        assert_eq!(cursor.current(), Some(&(entries[2].0, ())));
     }
 }
