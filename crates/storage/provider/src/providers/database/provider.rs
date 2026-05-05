@@ -718,21 +718,36 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
+                if let [block] = blocks.as_slice() {
+                    let trie_data = block.trie_data();
+                    if !trie_data.hashed_state.is_empty() {
+                        self.write_hashed_state(&trie_data.hashed_state)?;
+                    }
+                } else {
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let merged_hashed_state = HashedPostStateSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                if let [block] = blocks.as_slice() {
+                    let trie_updates = block.trie_updates();
+                    if !trie_updates.is_empty() {
+                        self.write_trie_updates_sorted(&trie_updates)?;
+                    }
+                } else {
+                    let merged_trie = TrieUpdatesSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
                 }
                 timings.write_trie_updates += start.elapsed();
             }
