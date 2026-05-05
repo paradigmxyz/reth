@@ -373,8 +373,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::payload_processor::bal::{BlockPreState, RequiredReads, SnapshotDatabase};
-    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+    use alloy_consensus::Header;
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -389,7 +388,6 @@ mod tests {
     use revm::{
         database::{CacheDB, EmptyDB},
         state::{AccountInfo, Bytecode},
-        Database,
     };
 
     /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
@@ -475,7 +473,6 @@ mod tests {
         use alloy_eip7928::AccountChanges;
 
         let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
-        let snapshot = Arc::new(BlockPreState::default());
 
         // 10 accounts × 2000 gas = 20,000. We set the limit to 10,000 → reject.
         let received_bal: BlockAccessList = (0u8..10)
@@ -490,7 +487,7 @@ mod tests {
         let block = empty_amsterdam_block(bal_hash);
 
         let result = executor.execute_block(
-            snapshot_db(snapshot),
+            db_factory(CacheDB::<EmptyDB>::default()),
             to_arc_decoded(received_bal),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
@@ -546,10 +543,9 @@ mod tests {
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let block = empty_amsterdam_block(bal_hash);
-        let snapshot = snapshot_for_bal(system_contracts_db(), &received_bal, block.number);
 
         let result = executor.execute_block(
-            snapshot_db(snapshot),
+            db_factory(system_contracts_db()),
             to_arc_decoded(received_bal),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
@@ -565,67 +561,18 @@ mod tests {
         }
     }
 
+    fn db_factory(
+        db: CacheDB<EmptyDB>,
+    ) -> impl Fn() -> Result<CacheDB<EmptyDB>, BalExecutionError> + Sync {
+        move || Ok(db.clone())
+    }
+
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
     fn insert_funded(db: &mut CacheDB<EmptyDB>, addr: alloy_primitives::Address, balance: U256) {
         db.insert_account_info(
             addr,
             AccountInfo { nonce: 0, balance, code_hash: B256::ZERO, code: None, account_id: None },
         );
-    }
-
-    /// Builds the BAL snapshot from the declared access list and a fresh pre-block DB.
-    fn snapshot_for_bal(
-        mut db: CacheDB<EmptyDB>,
-        bal: &BlockAccessList,
-        block_number: u64,
-    ) -> Arc<BlockPreState> {
-        let reads = RequiredReads::from_bal(bal);
-        let mut pre = BlockPreState::default();
-
-        // Empty-code lookups are legitimate and should resolve deterministically.
-        pre.code.insert(KECCAK_EMPTY, None);
-
-        for address in reads.addresses {
-            let account = db.basic(address).expect("snapshot account read succeeds");
-            pre.accounts.insert(
-                address,
-                account.as_ref().map(|info| reth_primitives_traits::Account {
-                    balance: info.balance,
-                    nonce: info.nonce,
-                    bytecode_hash: (info.code_hash != KECCAK_EMPTY).then_some(info.code_hash),
-                }),
-            );
-
-            if let Some(info) = account &&
-                info.code_hash != KECCAK_EMPTY
-            {
-                let code = info
-                    .code
-                    .unwrap_or_else(|| db.code_by_hash(info.code_hash).expect("snapshot code"));
-                pre.code.insert(info.code_hash, Some(reth_primitives_traits::Bytecode(code)));
-            }
-        }
-
-        for (address, slot) in reads.storage {
-            let value = db
-                .storage(address, U256::from_be_bytes(slot.0))
-                .expect("snapshot storage read succeeds");
-            pre.storage.insert((address, slot), value);
-        }
-
-        let start = block_number.saturating_sub(256);
-        for number in start..block_number {
-            let hash = db.block_hash(number).expect("snapshot block hash read succeeds");
-            pre.block_hashes.insert(number, hash);
-        }
-
-        Arc::new(pre)
-    }
-
-    fn snapshot_db(
-        snapshot: Arc<BlockPreState>,
-    ) -> impl Fn() -> Result<SnapshotDatabase, BalExecutionError> + Sync {
-        move || Ok(SnapshotDatabase::new(Arc::clone(&snapshot)))
     }
 
     /// Runs the canonical path on a block with real txs (no hash check) and returns the
@@ -667,7 +614,7 @@ mod tests {
     fn multi_tx_happy_path_round_trip() {
         // End-to-end with two value transfers from distinct senders to the same recipient.
         //
-        // 1. Fund alice and bob in a fresh canonical DB + snapshot.
+        // 1. Fund alice and bob in a fresh canonical DB.
         // 2. Sign tx1 (alice → carol, 100 wei) and tx2 (bob → carol, 200 wei).
         // 3. Build the reference BAL by running the block through a canonical executor with
         //    `with_bal_builder`.
@@ -761,11 +708,10 @@ mod tests {
 
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash);
-        let snapshot = snapshot_for_bal(pre_block_db.clone(), &reference_bal, block.number);
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let result = executor.execute_block(
-            snapshot_db(snapshot),
+            db_factory(pre_block_db),
             to_arc_decoded(reference_bal),
             &block,
             vec![recovered1, recovered2],
@@ -859,12 +805,11 @@ mod tests {
         // BAL path: stamp the hash of the reference BAL onto the header.
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash); // same shape, updated hash
-        let snapshot = snapshot_for_bal(canonical_db_template, &reference_bal, block.number);
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let bal_out = executor
             .execute_block(
-                snapshot_db(snapshot),
+                db_factory(canonical_db_template),
                 to_arc_decoded(reference_bal),
                 &block,
                 txs,
@@ -1015,11 +960,10 @@ mod tests {
         );
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, block_gas_limit);
-        let snapshot = snapshot_for_bal(pre_block_db, &reference_bal, low_gas_block.number);
 
         let executor = BalPayloadExecutor::new(Runtime::test(), evm_config);
         let result = executor.execute_block(
-            snapshot_db(snapshot),
+            db_factory(pre_block_db),
             to_arc_decoded(reference_bal),
             &low_gas_block,
             vec![tx1, tx2],
@@ -1165,32 +1109,5 @@ mod tests {
             vec![tx],
             30_000_000,
         );
-    }
-
-    #[test]
-    fn empty_snapshot_db_fails_before_final_hash() {
-        // Test harnesses can still supply a strict snapshot DB. With an empty snapshot,
-        // pre-execution system calls fail on their first missing read instead of reaching
-        // the final rebuilt-BAL hash comparison.
-        let executor = BalPayloadExecutor::new(Runtime::test(), EthEvmConfig::mainnet());
-        let snapshot = Arc::new(BlockPreState::default());
-        let received_bal: BlockAccessList = Vec::new();
-        let empty_bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
-        let block = empty_amsterdam_block(empty_bal_hash);
-
-        let result = executor.execute_block(
-            snapshot_db(snapshot),
-            to_arc_decoded(received_bal),
-            &block,
-            Vec::<Recovered<TransactionSigned>>::new(),
-            empty_bal_hash,
-            30_000_000,
-        );
-
-        match result {
-            Err(BalExecutionError::Evm(_)) => {}
-            Err(e) => panic!("expected strict DB execution failure, got error {e:?}"),
-            Ok(_) => panic!("expected strict DB execution failure, got Ok"),
-        }
     }
 }
