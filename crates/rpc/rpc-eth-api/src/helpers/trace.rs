@@ -169,7 +169,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 Some(res) => res,
             };
             let (tx, tx_info) = transaction.split();
-            let tx_index = tx_info.index.unwrap_or_default() as usize;
 
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
@@ -184,13 +183,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                bal::prepare_state_before_transaction(
-                    &this,
-                    &mut db,
-                    block.sealed_block(),
-                    block_txs,
-                    tx_index,
-                )?;
+                if !bal::position_before_transaction(&mut db, tx_info.index.unwrap_or_default()) {
+                    this.replay_transactions_until(
+                        &mut db,
+                        evm_env.clone(),
+                        block_txs,
+                        *tx.tx_hash(),
+                    )?;
+                }
 
                 let tx_env = this.evm_config().tx_env(tx);
                 let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;

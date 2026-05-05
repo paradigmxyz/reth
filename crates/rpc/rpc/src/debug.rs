@@ -236,13 +236,16 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                bal::prepare_state_before_transaction(
-                    &eth_api,
-                    &mut db,
-                    block.sealed_block(),
-                    block_txs,
-                    tx_index as usize,
-                )?;
+                let tx_index = if bal::position_before_transaction(&mut db, tx_index) {
+                    tx_index as usize
+                } else {
+                    eth_api.replay_transactions_until(
+                        &mut db,
+                        evm_env.clone(),
+                        block_txs,
+                        *tx.tx_hash(),
+                    )?
+                };
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
@@ -359,14 +362,15 @@ where
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // 2. position the state before the requested transaction index
-                bal::prepare_state_before_transaction(
-                    &eth_api,
-                    &mut db,
-                    block.sealed_block(),
-                    block.transactions_recovered(),
-                    tx_index,
-                )?;
+                // 2. replay the required number of transactions
+                if !bal::position_before_transaction(&mut db, tx_index as u64) {
+                    eth_api.replay_transactions_until(
+                        &mut db,
+                        evm_env.clone(),
+                        block.transactions_recovered(),
+                        *block.body().transactions()[tx_index].tx_hash(),
+                    )?;
+                }
 
                 // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =

@@ -6,12 +6,11 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_primitives_traits::{BlockTy, Recovered, SealedBlock};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BalProvider, ProviderTx, StateProviderFactory};
+use reth_storage_api::{BalProvider, StateProviderFactory};
 use revm::state::bal::Bal;
 use std::sync::Arc;
 use tracing::debug;
@@ -128,35 +127,14 @@ where
     }
 }
 
-/// Positions `db` at the state before the transaction at `target_tx_index`.
+/// Positions `db` at the state before the transaction at `target_tx_index` if a BAL is attached.
 ///
-/// If a BAL is attached, this only sets the BAL index. Otherwise it executes and commits the
-/// transactions preceding `target_tx_index`.
-///
-/// The caller must apply the block's pre-execution changes before invoking this helper.
-pub fn prepare_state_before_transaction<'a, Api, I>(
-    api: &Api,
-    db: &mut StateCacheDb,
-    block: &SealedBlock<BlockTy<Api::Primitives>>,
-    transactions: I,
-    target_tx_index: usize,
-) -> Result<(), Api::Error>
-where
-    Api: Call,
-    I: IntoIterator<Item = Recovered<&'a ProviderTx<Api::Provider>>>,
-{
-    if db.bal_state.bal.is_some() {
-        db.set_bal_index(target_tx_index as u64 + 1);
-        return Ok(())
+/// Returns `true` if the state was positioned with BAL data.
+pub fn position_before_transaction(db: &mut StateCacheDb, target_tx_index: u64) -> bool {
+    if db.bal_state.bal.is_none() {
+        return false
     }
 
-    let mut executor = api
-        .evm_config()
-        .executor_for_block(db, block)
-        .map_err(RethError::other)
-        .map_err(Api::Error::from_eth_err)?;
-    for tx in transactions.into_iter().take(target_tx_index) {
-        executor.execute_transaction(tx).map_err(Api::Error::from_eth_err)?;
-    }
-    Ok(())
+    db.set_bal_index(target_tx_index + 1);
+    true
 }
