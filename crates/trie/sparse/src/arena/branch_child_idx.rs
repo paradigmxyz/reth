@@ -1,8 +1,5 @@
-use alloy_trie::{TrieMask, TrieMaskIter};
-use core::{
-    iter::Enumerate,
-    ops::{Index, IndexMut},
-};
+use alloy_trie::TrieMask;
+use core::ops::{Index, IndexMut};
 use smallvec::SmallVec;
 
 /// A dense index into a branch node's children array.
@@ -68,13 +65,25 @@ impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
 /// Wraps `TrieMask::iter().enumerate()` to produce [`BranchChildIdx`] values instead of raw
 /// `usize` indices.
 pub(super) struct BranchChildIter {
-    inner: Enumerate<TrieMaskIter>,
+    state_mask: TrieMask,
+    remaining: u16,
 }
 
 impl BranchChildIter {
     /// Creates a new iterator over the occupied children of the given `state_mask`.
     pub(super) fn new(state_mask: TrieMask) -> Self {
-        Self { inner: state_mask.iter().enumerate() }
+        Self::from_nibble(state_mask, 0)
+    }
+
+    /// Creates a new iterator over the occupied children starting at `start_nibble`.
+    pub(super) fn from_nibble(state_mask: TrieMask, start_nibble: u8) -> Self {
+        let remaining = if start_nibble >= u16::BITS as u8 {
+            0
+        } else {
+            state_mask.get() & !((1u16 << start_nibble) - 1)
+        };
+
+        Self { state_mask, remaining }
     }
 }
 
@@ -82,10 +91,41 @@ impl Iterator for BranchChildIter {
     type Item = (BranchChildIdx, u8);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(dense, nibble)| (BranchChildIdx(dense as u8), nibble))
+        let nibble = self.remaining.trailing_zeros() as u8;
+        if nibble >= u16::BITS as u8 {
+            return None;
+        }
+
+        self.remaining &= self.remaining - 1;
+        Some((BranchChildIdx::new_unchecked(self.state_mask, nibble), nibble))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
+        let len = self.remaining.count_ones() as usize;
+        (len, Some(len))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iterates_children_in_dense_order() {
+        let mask = TrieMask::new(0b1010_0101);
+        let children =
+            BranchChildIter::new(mask).map(|(idx, nibble)| (idx.get(), nibble)).collect::<Vec<_>>();
+
+        assert_eq!(children, vec![(0, 0), (1, 2), (2, 5), (3, 7)]);
+    }
+
+    #[test]
+    fn resumes_iteration_from_nibble() {
+        let mask = TrieMask::new(0b1110_1101);
+        let children = BranchChildIter::from_nibble(mask, 4)
+            .map(|(idx, nibble)| (idx.get(), nibble))
+            .collect::<Vec<_>>();
+
+        assert_eq!(children, vec![(3, 5), (4, 6), (5, 7)]);
     }
 }
