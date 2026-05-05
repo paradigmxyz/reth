@@ -12,7 +12,7 @@ use reth_primitives_traits::{
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::sync::Arc;
-use tracing::{debug, trace};
+use tracing::debug;
 
 /// Inputs captured for lazy overlay computation.
 #[derive(Clone)]
@@ -71,12 +71,29 @@ impl<N: NodePrimitives> LazyOverlay<N> {
             "LazyOverlay blocks must be ordered newest to oldest along a single chain"
         );
 
+        if tracing::enabled!(target: "chain_state::lazy_overlay", tracing::Level::DEBUG) {
+            debug!(
+                target: "chain_state::lazy_overlay",
+                num_blocks = blocks.len(),
+                tip = ?blocks.first().map(block_summary),
+                oldest = ?blocks.last().map(block_summary),
+                anchor_hash = ?blocks.last().map(|block| block.recovered_block().parent_hash()),
+                blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
+                "Creating lazy overlay"
+            );
+        }
+
         Self { inner: Default::default(), inputs: LazyOverlayInputs { blocks } }
     }
 
     /// Returns the number of in-memory blocks this overlay covers.
     pub const fn num_blocks(&self) -> usize {
         self.inputs.blocks.len()
+    }
+
+    /// Returns a compact summary of the blocks captured by this overlay.
+    pub fn block_summaries(&self) -> Vec<String> {
+        self.inputs.blocks.iter().map(block_summary).collect()
     }
 
     /// Returns the oldest anchor hash this overlay can serve.
@@ -105,7 +122,15 @@ impl<N: NodePrimitives> LazyOverlay<N> {
     /// Subsequent calls for the same anchor return the cached result immediately.
     pub fn get(&self, anchor_hash: B256) -> Arc<TrieInputSorted> {
         match self.inner.entry(anchor_hash) {
-            dashmap::Entry::Occupied(entry) => Arc::clone(entry.get()),
+            dashmap::Entry::Occupied(entry) => {
+                debug!(
+                    target: "chain_state::lazy_overlay",
+                    %anchor_hash,
+                    num_blocks = self.inputs.blocks.len(),
+                    "Using cached lazy overlay result"
+                );
+                Arc::clone(entry.get())
+            }
             dashmap::Entry::Vacant(entry) => {
                 let input = self.compute(anchor_hash);
                 entry.insert(Arc::clone(&input));
@@ -133,11 +158,27 @@ impl<N: NodePrimitives> LazyOverlay<N> {
         let Some(last_index) =
             blocks.iter().position(|block| block.recovered_block().parent_hash() == anchor_hash)
         else {
+            debug!(
+                target: "chain_state::lazy_overlay",
+                %anchor_hash,
+                available_blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
+                "Lazy overlay requested missing anchor"
+            );
             panic!(
                 "LazyOverlay does not contain a block whose parent hash matches requested anchor {anchor_hash}"
             );
         };
         let blocks = &blocks[..=last_index];
+
+        if tracing::enabled!(target: "chain_state::lazy_overlay", tracing::Level::DEBUG) {
+            debug!(
+                target: "chain_state::lazy_overlay",
+                %anchor_hash,
+                num_selected_blocks = blocks.len(),
+                selected_blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
+                "Computing lazy overlay for anchor"
+            );
+        }
 
         // Fast path: Check if tip block's overlay is ready and anchor matches.
         // The tip block (first in list) has the cumulative overlay from all ancestors up to the
@@ -146,7 +187,14 @@ impl<N: NodePrimitives> LazyOverlay<N> {
             let data = tip.trie_data();
             if let Some(anchored) = &data.anchored_trie_input {
                 if anchored.anchor_hash == anchor_hash {
-                    trace!(target: "chain_state::lazy_overlay", %anchor_hash, "Reusing tip block's cached overlay (fast path)");
+                    debug!(
+                        target: "chain_state::lazy_overlay",
+                        %anchor_hash,
+                        tip = ?block_summary(tip),
+                        trie_updates = anchored.trie_input.nodes.total_len(),
+                        hashed_state = anchored.trie_input.state.total_len(),
+                        "Reusing tip block's cached overlay (fast path)"
+                    );
                     return Arc::clone(&anchored.trie_input);
                 }
                 debug!(
@@ -163,6 +211,7 @@ impl<N: NodePrimitives> LazyOverlay<N> {
             target: "chain_state::lazy_overlay",
             %anchor_hash,
             num_blocks = blocks.len(),
+            blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
             "Merging blocks (slow path)"
         );
         Arc::new(Self::merge_blocks(blocks))
@@ -185,6 +234,11 @@ impl<N: NodePrimitives> LazyOverlay<N> {
 
         TrieInputSorted { state, nodes, prefix_sets: Default::default() }
     }
+}
+
+fn block_summary<N: NodePrimitives>(block: &ExecutedBlock<N>) -> String {
+    let recovered = block.recovered_block();
+    format!("#{} hash={} parent={}", recovered.number(), recovered.hash(), recovered.parent_hash())
 }
 
 #[cfg(test)]
