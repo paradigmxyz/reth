@@ -119,6 +119,32 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     }
 }
 
+/// Computes the receipt root and aggregated bloom for a complete receipt slice inline.
+pub fn compute_receipt_root_bloom<R: Receipt>(receipts: &[R]) -> (B256, Bloom) {
+    let mut builder = OrderedTrieRootEncodedBuilder::new(receipts.len());
+    let mut aggregated_bloom = Bloom::ZERO;
+    let mut encode_buf = Vec::new();
+
+    for (index, receipt) in receipts.iter().enumerate() {
+        let receipt_with_bloom = receipt.with_bloom_ref();
+
+        encode_buf.clear();
+        receipt_with_bloom.encode_2718(&mut encode_buf);
+
+        aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+        builder
+            .push(index, &encode_buf)
+            .expect("inline receipt-root calculation only visits in-range indices once");
+    }
+
+    (
+        builder
+            .finalize()
+            .expect("inline receipt-root calculation receives the full receipt slice"),
+        aggregated_bloom,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +276,43 @@ mod tests {
 
         assert_eq!(task_root, expected_root);
         assert_eq!(task_bloom, expected_bloom);
+    }
+
+    #[test]
+    fn test_inline_receipt_root_matches_standard_calculation() {
+        let receipts = vec![
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 21000,
+                success: true,
+                logs: vec![],
+            },
+            Receipt {
+                tx_type: TxType::Eip1559,
+                cumulative_gas_used: 42000,
+                success: true,
+                logs: vec![Log {
+                    address: Address::ZERO,
+                    data: alloy_primitives::LogData::new_unchecked(vec![B256::ZERO], Bytes::new()),
+                }],
+            },
+            Receipt {
+                tx_type: TxType::Eip2930,
+                cumulative_gas_used: 63000,
+                success: false,
+                logs: vec![],
+            },
+        ];
+
+        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let expected_root = calculate_receipt_root(&receipts_with_bloom);
+        let expected_bloom =
+            receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+        let (root, bloom) = compute_receipt_root_bloom(&receipts);
+
+        assert_eq!(root, expected_root);
+        assert_eq!(bloom, expected_bloom);
     }
 
     #[tokio::test]

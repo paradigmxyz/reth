@@ -58,7 +58,9 @@ use alloy_primitives::{map::B256Set, B256};
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
-use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use crate::tree::payload_processor::receipt_root_task::{
+    compute_receipt_root_bloom, IndexedReceipt, ReceiptRootTaskHandle,
+};
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
@@ -116,6 +118,14 @@ type InsertPayloadResult<N> = Result<
     (ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>),
     InsertPayloadError<<N as NodePrimitives>::Block>,
 >;
+
+/// Small blocks are cheaper to finish inline than to hand off to the receipt-root worker.
+const INLINE_RECEIPT_ROOT_TX_THRESHOLD: usize = 16;
+
+enum ReceiptRootHandle {
+    Ready(ReceiptRootBloom),
+    Pending(tokio::sync::oneshot::Receiver<ReceiptRootBloom>),
+}
 
 /// Context providing access to tree state during validation.
 ///
@@ -569,7 +579,7 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx) =
+        let (output, senders, receipt_root_handle) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
@@ -618,22 +628,25 @@ where
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = {
-            let _enter = debug_span!(
-                target: "engine::tree::payload_validator",
-                "wait_receipt_root",
-            )
-            .entered();
+        let receipt_root_bloom = match receipt_root_handle {
+            ReceiptRootHandle::Ready(result) => Some(result),
+            ReceiptRootHandle::Pending(receipt_root_rx) => {
+                let _enter = debug_span!(
+                    target: "engine::tree::payload_validator",
+                    "wait_receipt_root",
+                )
+                .entered();
 
-            receipt_root_rx
-                .blocking_recv()
-                .inspect_err(|_| {
-                    tracing::error!(
-                        target: "engine::tree::payload_validator",
-                        "Receipt root task dropped sender without result, receipt root calculation likely aborted"
-                    );
-                })
-                .ok()
+                receipt_root_rx
+                    .blocking_recv()
+                    .inspect_err(|_| {
+                        tracing::error!(
+                            target: "engine::tree::payload_validator",
+                            "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                        );
+                    })
+                    .ok()
+            }
         };
         let transaction_root = transaction_root.map(|handle| {
             let _span =
@@ -906,7 +919,7 @@ where
         (
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
-            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
+            ReceiptRootHandle,
         ),
         InsertBlockErrorKind,
     >
@@ -956,15 +969,22 @@ where
             );
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
         let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        let inline_receipt_root = receipts_len <= INLINE_RECEIPT_ROOT_TX_THRESHOLD;
+        let (receipt_tx, receipt_root_handle) = if inline_receipt_root {
+            (None, None)
+        } else {
+            // Spawn background task to compute receipt root and logs bloom incrementally.
+            // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per
+            // block).
+            let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+            let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+            let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+            self.payload_processor
+                .executor()
+                .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+            (Some(receipt_tx), Some(ReceiptRootHandle::Pending(result_rx)))
+        };
 
         let transaction_count = input.transaction_count();
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
@@ -979,7 +999,7 @@ where
             executor,
             transaction_count,
             handle.iter_transactions(),
-            &receipt_tx,
+            receipt_tx.as_ref(),
             &executed_tx_index,
         )?;
         drop(receipt_tx);
@@ -1002,7 +1022,10 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx))
+        let receipt_root_handle = receipt_root_handle
+            .unwrap_or_else(|| ReceiptRootHandle::Ready(compute_receipt_root_bloom(&output.result.receipts)));
+
+        Ok((output, senders, receipt_root_handle))
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
@@ -1019,7 +1042,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: Option<&crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>>,
         executed_tx_index: &AtomicUsize,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
@@ -1075,7 +1098,7 @@ where
             if current_len > last_sent_len {
                 last_sent_len = current_len;
                 // Send the latest receipt to the background task for incremental root computation.
-                if let Some(receipt) = executor.receipts().last() {
+                if let Some(receipt) = executor.receipts().last() && let Some(receipt_tx) = receipt_tx {
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
