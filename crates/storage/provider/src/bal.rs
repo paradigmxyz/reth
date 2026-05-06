@@ -95,11 +95,6 @@ impl InMemoryBalStoreInner {
         );
     }
 
-    // Removes BALs outside the configured retention window using the highest inserted block.
-    fn prune_from_highest_block(&mut self, prune_mode: Option<PruneMode>) -> usize {
-        self.highest_block_number.map_or(0, |tip| self.prune(prune_mode, tip))
-    }
-
     // Removes BALs outside the configured retention window for the given chain tip.
     fn prune(&mut self, prune_mode: Option<PruneMode>, tip: BlockNumber) -> usize {
         let Some(prune_mode) = prune_mode else { return 0 };
@@ -129,7 +124,9 @@ impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
         inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
-        inner.prune_from_highest_block(self.config.in_memory_retention);
+        if let Some(tip) = inner.highest_block_number {
+            inner.prune(self.config.in_memory_retention, tip);
+        }
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
     }
