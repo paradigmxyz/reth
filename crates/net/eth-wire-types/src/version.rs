@@ -119,6 +119,7 @@ impl TryFrom<&str> for EthVersion {
             "69" => Ok(Self::Eth69),
             "70" => Ok(Self::Eth70),
             "71" => Ok(Self::Eth71),
+            "72" => Ok(Self::Eth72),
             _ => Err(ParseVersionError(s.to_string())),
         }
     }
@@ -145,6 +146,7 @@ impl TryFrom<u8> for EthVersion {
             69 => Ok(Self::Eth69),
             70 => Ok(Self::Eth70),
             71 => Ok(Self::Eth71),
+            72 => Ok(Self::Eth72),
             _ => Err(ParseVersionError(u.to_string())),
         }
     }
