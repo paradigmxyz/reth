@@ -262,9 +262,16 @@ impl Capabilities {
                     self.eth_72
             }
             EthVersion::Eth67 => {
-                self.eth_67 || self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72
+                self.eth_67 ||
+                    self.eth_68 ||
+                    self.eth_69 ||
+                    self.eth_70 ||
+                    self.eth_71 ||
+                    self.eth_72
             }
-            EthVersion::Eth68 => self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72,
+            EthVersion::Eth68 => {
+                self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72
+            }
             EthVersion::Eth69 => self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72,
             EthVersion::Eth70 => self.eth_70 || self.eth_71 || self.eth_72,
             EthVersion::Eth71 => self.eth_71 || self.eth_72,
