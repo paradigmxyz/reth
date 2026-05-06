@@ -118,6 +118,10 @@ type InsertPayloadResult<N> = Result<
     InsertPayloadError<<N as NodePrimitives>::Block>,
 >;
 
+type ReceiptRootSender<N> =
+    crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
+type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
+
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
@@ -933,7 +937,7 @@ where
         (
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
-            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
+            ReceiptRootReceiver,
             Option<BlockAccessList>,
         ),
         InsertBlockErrorKind,
@@ -998,17 +1002,8 @@ where
             );
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
-        let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
-
         let transaction_count = input.transaction_count();
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let executor = executor.with_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
@@ -1092,11 +1087,7 @@ where
         decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
         InsertBlockErrorKind,
     >
     where
@@ -1120,14 +1111,7 @@ where
         let cache_metrics = handle.cache_metrics().unwrap_or_default();
         let saved_cache = SavedCache::new(env.parent_hash, cache);
 
-        // Spawn the receipt-root task.
-        let receipts_len = env.transaction_count;
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
 
         let make_db = move || {
             let provider = provider_builder
@@ -1171,6 +1155,21 @@ where
         );
 
         Ok((output, senders, result_rx))
+    }
+
+    fn spawn_receipt_root_task(
+        &self,
+        receipts_len: usize,
+    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+        // Unbounded channel is used since tx count bounds capacity anyway.
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+
+        (receipt_tx, result_rx)
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
