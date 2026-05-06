@@ -11,7 +11,7 @@ use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
 use reth_primitives_traits::{BlockTy, SealedBlock};
 use revm::database::State;
-use revm_state::bal::Bal;
+use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 pub(super) struct BalWorkerOutput<R> {
@@ -35,7 +35,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     >,
     evm_config: Evm,
     make_db: &'scope MakeDb,
-    received_bal_revm: Arc<Bal>,
+    received_bal_revm: Arc<RevmBal>,
     block: &'scope SealedBlock<BlockTy<Evm::Primitives>>,
 ) where
     Evm: ConfigureEvm + 'scope,
