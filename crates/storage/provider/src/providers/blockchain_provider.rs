@@ -3,14 +3,13 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    AccountReader, BalConfig, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader,
-    BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker,
-    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader,
-    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider,
-    InMemoryBalStore, ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, InMemoryBalStore,
+    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -69,24 +68,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Create a new [`BlockchainProvider`] using only the storage, fetching the latest
     /// header from the database to initialize the provider.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
-        Self::new_with_bal_config(storage, BalConfig::default())
-    }
-
-    /// Create new provider instance with the given BAL storage config.
-    pub fn new_with_bal_config(
-        storage: ProviderFactory<N>,
-        bal_config: BalConfig,
-    ) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
-                Ok(Self::with_latest_and_bal_config(
-                    storage,
-                    SealedHeader::new(header, best.best_hash),
-                    bal_config,
-                )?)
+                Ok(Self::with_latest(storage, SealedHeader::new(header, best.best_hash))?)
             }
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
@@ -100,14 +87,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     pub fn with_latest(
         storage: ProviderFactory<N>,
         latest: SealedHeader<HeaderTy<N>>,
-    ) -> ProviderResult<Self> {
-        Self::with_latest_and_bal_config(storage, latest, BalConfig::default())
-    }
-
-    fn with_latest_and_bal_config(
-        storage: ProviderFactory<N>,
-        latest: SealedHeader<HeaderTy<N>>,
-        bal_config: BalConfig,
     ) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let finalized_header = provider
@@ -132,8 +111,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
-            bal_store: BalStoreHandle::new(InMemoryBalStore::new(bal_config)),
+            bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
         })
+    }
+
+    /// Returns this provider with the given BAL store.
+    pub fn with_balstore(mut self, bal_store: BalStoreHandle) -> Self {
+        self.bal_store = bal_store;
+        self
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
