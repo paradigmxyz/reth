@@ -401,7 +401,7 @@ find_mismatch() {
     local line
 
     line=$(grep -Ei -m1 \
-        'state[ -]?root.*mismatch|mismatch.*state[ -]?root|mismatched block state root|Failed to verify block state root' \
+        'State root task returned incorrect state root|mismatched block state root|Failed to verify block state root' \
         "$log_file" 2>/dev/null || true)
     if [[ -n "$line" ]]; then
         MISMATCH_SOURCE="$source"
