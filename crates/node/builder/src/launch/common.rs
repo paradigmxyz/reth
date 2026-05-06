@@ -642,6 +642,9 @@ where
             let prune_config = self.prune_config();
             let pruning_mode =
                 PruneConfigKind::from_config(&prune_config, self.chain_spec().as_ref()).as_str();
+            // On existing databases, stored settings are authoritative and already cached by the
+            // provider factory. Fresh databases do not have storage metadata until genesis is
+            // initialized, so report the configured setting during this pre-genesis startup window.
             let storage_settings =
                 if self.provider_factory().get_stage_checkpoint(StageId::Headers)?.is_some() {
                     self.provider_factory().cached_storage_settings()
