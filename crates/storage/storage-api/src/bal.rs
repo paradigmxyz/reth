@@ -48,12 +48,14 @@ pub trait BalStore: Send + Sync + 'static {
     /// The returned vector must align with `block_hashes`.
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>>;
 
+    /// Fetches the BAL for the given block hash.
+    fn get_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        Ok(self.get_by_hashes(&[block_hash])?.into_iter().next().flatten())
+    }
+
     /// Fetches and decodes the BAL for the given block hash.
     fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
-        self.get_by_hashes(&[block_hash])?
-            .into_iter()
-            .next()
-            .flatten()
+        self.get_by_hash(block_hash)?
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
@@ -157,6 +159,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         self.inner.get_by_hashes(block_hashes)
+    }
+
+    /// Fetches the BAL for the given block hash.
+    #[inline]
+    pub fn get_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        self.inner.get_by_hash(block_hash)
     }
 
     /// Fetches and decodes the BAL for the given block hash.
@@ -278,6 +286,7 @@ mod tests {
         let by_range = store.get_by_range(1, 10).unwrap();
 
         assert_eq!(by_hash, vec![None, None]);
+        assert!(store.get_by_hash(B256::random()).unwrap().is_none());
         assert!(by_range.is_empty());
     }
 
@@ -293,6 +302,8 @@ mod tests {
         let hash = B256::random();
         let raw_bal = Bytes::from_static(&[0xc0]);
         let store = BalStoreHandle::new(TestBalStore { hash, raw_bal: raw_bal.clone() });
+
+        assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw_bal.clone()));
 
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
