@@ -42,7 +42,9 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
+use reth_db_common::init::{
+    init_genesis_with_settings, init_genesis_with_settings_and_hash_validation, InitStorageError,
+};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -660,21 +662,17 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings(
+        init_genesis_with_settings_and_hash_validation(
             self.provider_factory(),
             self.node_config().storage_settings(),
-            self.node_config().debug.skip_genesis_validation,
+            !self.node_config().debug.skip_genesis_validation,
         )?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().storage_settings(),
-            self.node_config().debug.skip_genesis_validation,
-        )
+        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the

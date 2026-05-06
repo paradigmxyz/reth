@@ -58,7 +58,7 @@ pub struct DebugArgs {
     #[arg(long = "debug.skip-new-payload", help_heading = "Debug")]
     pub skip_new_payload: Option<usize>,
 
-    /// If set, bypasses the genesis-state-root mismatch check during init.
+    /// If set, bypasses genesis hash validation during init.
     /// Intended for tools that direct-write the database (e.g. snapshot
     /// importers, state-actor) and want reth to trust the DB-resident
     /// genesis state instead of recomputing it from the chainspec's alloc.

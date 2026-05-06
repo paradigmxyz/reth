@@ -130,20 +130,46 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings(factory, StorageSettings::base(), false)
+    init_genesis_with_settings(factory, StorageSettings::base())
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
-///
-/// `skip_genesis_validation`: when `true`, a chainspec/DB genesis-hash mismatch
-/// is logged via [`tracing::warn`] and the DB-resident hash is returned instead
-/// of an error. Intended for tools that direct-write the database (e.g.
-/// snapshot importers, state-actor) and want reth to trust the DB-resident
-/// genesis state rather than recomputing it from the chainspec's `alloc`.
 pub fn init_genesis_with_settings<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
-    skip_genesis_validation: bool,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockNumReader
+        + MetadataProvider
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
+    init_genesis_with_settings_and_hash_validation(factory, genesis_storage_settings, true)
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`],
+/// optionally validating the DB-resident genesis hash against the chainspec hash.
+pub fn init_genesis_with_settings_and_hash_validation<PF>(
+    factory: &PF,
+    genesis_storage_settings: StorageSettings,
+    validate_genesis_hash: bool,
 ) -> Result<B256, InitStorageError>
 where
     PF: DatabaseProviderFactory
@@ -203,7 +229,7 @@ where
                 return Ok(hash)
             }
 
-            if skip_genesis_validation {
+            if !validate_genesis_hash {
                 warn!(
                     target: "reth::storage",
                     chainspec_hash = %hash,
@@ -1061,19 +1087,13 @@ mod tests {
     }
 
     #[test]
-    fn skip_genesis_validation_accepts_mismatched_db() {
-        // Same setup as fail_init_inconsistent_db: write Sepolia genesis,
-        // then re-init against Mainnet chainspec. Without the bypass this
-        // returns GenesisHashMismatch (locked by the test above). With
-        // skip_genesis_validation = true, init should return Ok and the
-        // returned hash should be the DB-resident (Sepolia) hash, NOT the
-        // chainspec (Mainnet) hash — that's the contract this test pins.
+    fn skip_genesis_hash_validation_accepts_mismatched_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
         let static_file_provider = factory.static_file_provider();
         let rocksdb_provider = factory.rocksdb_provider();
         init_genesis(&factory).unwrap();
 
-        let result = init_genesis_with_settings(
+        let result = init_genesis_with_settings_and_hash_validation(
             &ProviderFactory::<MockNodeTypesWithDB>::new(
                 factory.into_db(),
                 MAINNET.clone(),
@@ -1083,7 +1103,7 @@ mod tests {
             )
             .unwrap(),
             StorageSettings::base(),
-            true, // skip_genesis_validation
+            false,
         );
 
         let returned = result.expect("skip_genesis_validation should suppress mismatch error");
@@ -1175,10 +1195,10 @@ mod tests {
     #[test]
     fn warn_storage_settings_mismatch() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        init_genesis_with_settings(&factory, StorageSettings::v1(), false).unwrap();
+        init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
 
         // Request different settings - should warn but succeed
-        let result = init_genesis_with_settings(&factory, StorageSettings::v2(), false);
+        let result = init_genesis_with_settings(&factory, StorageSettings::v2());
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
@@ -1188,9 +1208,9 @@ mod tests {
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
         let settings = StorageSettings::v2();
-        init_genesis_with_settings(&factory, settings, false).unwrap();
+        init_genesis_with_settings(&factory, settings).unwrap();
 
-        let result = init_genesis_with_settings(&factory, settings, false);
+        let result = init_genesis_with_settings(&factory, settings);
 
         assert!(result.is_ok());
     }
