@@ -78,9 +78,8 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// Converts an RPC block and payload extras to execution payload data.
     fn rpc_to_execution_data_with_extras(
         rpc_block: Self::RpcBlock,
-        extras: PayloadExtras,
+        _extras: PayloadExtras,
     ) -> PayloadDataTy<Self> {
-        let _ = extras;
         Self::rpc_to_execution_data(rpc_block)
     }
 
