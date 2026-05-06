@@ -301,7 +301,7 @@ where
                     .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
             })?;
 
-            let block_provider = EtherscanBlockProvider::new_with_payload_side_data(
+            let block_provider = EtherscanBlockProvider::new(
                 etherscan_url,
                 chain.etherscan_api_key().ok_or_else(|| {
                     eyre::eyre!(
@@ -309,7 +309,7 @@ where
                     )
                 })?,
                 chain.id(),
-                N::Types::rpc_to_execution_data_with_block_access_list,
+                N::Types::rpc_to_execution_data,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
