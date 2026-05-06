@@ -23,8 +23,9 @@ pub struct GetBlockAccessLists(
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(rlp)]
 pub struct BlockAccessLists(
-    /// The requested block access lists as raw RLP blobs. Per EIP-8159, unavailable entries are
-    /// represented by an RLP-encoded empty list (`0xc0`).
+    /// The requested block access lists as raw RLP blobs. Missing-entry encoding is protocol
+    /// specific: eth/71 uses the RLP empty list (`0xc0`), while snap/2 uses the RLP empty string
+    /// (`0x80`).
     pub Vec<Bytes>,
 );
 
@@ -57,9 +58,6 @@ impl Decodable for BlockAccessLists {
         while !payload.is_empty() {
             let item_start = payload;
             let item_header = Header::decode(&mut payload)?;
-            if !item_header.list {
-                return Err(alloy_rlp::Error::UnexpectedString)
-            }
 
             let item_length = item_header.length_with_payload();
             bals.push(Bytes::copy_from_slice(&item_start[..item_length]));
@@ -171,9 +169,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_list_bal_entries() {
-        let err = alloy_rlp::decode_exact::<BlockAccessLists>(&[0xc1, 0x01]).unwrap_err();
-        assert!(matches!(err, alloy_rlp::Error::UnexpectedString));
+    fn accepts_snap_missing_bal_entries() {
+        let decoded =
+            alloy_rlp::decode_exact::<BlockAccessLists>(&[0xc1, alloy_rlp::EMPTY_STRING_CODE])
+                .unwrap();
+        assert_eq!(
+            decoded,
+            BlockAccessLists(vec![Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE])])
+        );
     }
 
     #[test]
