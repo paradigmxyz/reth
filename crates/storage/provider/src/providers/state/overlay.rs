@@ -329,21 +329,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             ))));
         }
 
-        if anchor_number > state_trie_tip_block.number {
-            return Err(ProviderError::other(std::io::Error::other(format!(
-                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
-                anchor_number,
-                self.anchor_hash,
-                state_trie_tip_block.number,
-                state_trie_tip_block.hash,
-                state_trie_tip_block.number + 1,
-                anchor_number,
-            ))));
-        }
-
         // If the requested anchor is the current durable Finish frontier, the database already
         // exposes a consistent logical state for the overlay base.
-        if finish_tip_block.hash == self.anchor_hash {
+        if state_trie_tip_block.hash == finish_tip_block.hash &&
+            finish_tip_block.hash == self.anchor_hash
+        {
             debug!(
                 target: "providers::state::overlay",
                 anchor_hash = ?self.anchor_hash,
@@ -358,30 +348,40 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             });
         }
 
-        // If a lazy overlay can start from the durable Finish frontier and the trie is already at
-        // that frontier, prefer that base and avoid changeset reverts entirely. If the trie is only
-        // partially persisted, the trie updates for `partial_state_trie + 1..=Finish` are not in
-        // the database and must come from the revert path instead.
-        if state_trie_tip_block.number >= finish_tip_block.number &&
-            self.overlay_source.as_ref().is_some_and(|source| {
-                matches!(source, OverlaySource::Lazy(lazy) if lazy.has_anchor_hash(finish_tip_block.hash))
-            })
-        {
-            debug!(
-                target: "providers::state::overlay",
-                anchor_hash = ?self.anchor_hash,
-                ?state_trie_tip_block,
-                ?finish_tip_block,
-                overlay_anchor_hash = ?finish_tip_block.hash,
-                source = overlay_source_kind(self.overlay_source.as_ref()),
-                source_anchor = ?self.overlay_source.as_ref().and_then(overlay_source_anchor),
-                source_blocks = ?self.overlay_source.as_ref().and_then(overlay_source_blocks),
-                "Lazy overlay covers durable finish frontier; no reverts required"
-            );
-            return Ok(OverlayRevertPlan {
-                revert_blocks: None,
-                overlay_anchor_hash: finish_tip_block.hash,
-            })
+        if let Some(OverlaySource::Lazy(lazy)) = self.overlay_source.as_ref() {
+            let lazy_covers_state_trie_tip = lazy.has_anchor_hash(state_trie_tip_block.hash);
+            let lazy_covers_finish_gap = state_trie_tip_block.hash == finish_tip_block.hash ||
+                lazy.has_anchor_hash(finish_tip_block.hash);
+
+            if lazy_covers_state_trie_tip && lazy_covers_finish_gap {
+                debug!(
+                    target: "providers::state::overlay",
+                    anchor_hash = ?self.anchor_hash,
+                    ?state_trie_tip_block,
+                    ?finish_tip_block,
+                    overlay_anchor_hash = ?state_trie_tip_block.hash,
+                    source = overlay_source_kind(self.overlay_source.as_ref()),
+                    source_anchor = ?self.overlay_source.as_ref().and_then(overlay_source_anchor),
+                    source_blocks = ?self.overlay_source.as_ref().and_then(overlay_source_blocks),
+                    "Lazy overlay covers partial state trie frontier; no reverts required"
+                );
+                return Ok(OverlayRevertPlan {
+                    revert_blocks: None,
+                    overlay_anchor_hash: state_trie_tip_block.hash,
+                })
+            }
+        }
+
+        if anchor_number > state_trie_tip_block.number {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
+                anchor_number,
+                self.anchor_hash,
+                state_trie_tip_block.number,
+                state_trie_tip_block.hash,
+                state_trie_tip_block.number + 1,
+                anchor_number,
+            ))));
         }
 
         // Check account history prune checkpoint to determine the lower bound of available data.
@@ -1031,6 +1031,48 @@ mod tests {
             error.to_string().contains("is after partial state trie frontier"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn build_overlay_uses_lazy_superset_for_anchor_after_state_trie_frontier() {
+        let factory = create_test_provider_factory();
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder
+            .get_executed_blocks(0..5)
+            .enumerate()
+            .map(|(index, block)| with_unique_state(&block, index as u8 + 1))
+            .collect::<Vec<_>>();
+
+        let state_trie_tip = &blocks[1];
+        let finish_tip = &blocks[3];
+        let lazy_overlay_blocks =
+            vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone(), blocks[1].clone()];
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(blocks[0].recovered_block()).unwrap();
+        provider_rw.insert_block(state_trie_tip.recovered_block()).unwrap();
+        provider_rw.insert_block(blocks[2].recovered_block()).unwrap();
+        provider_rw.insert_block(finish_tip.recovered_block()).unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(finish_tip.block_number()).with_finish_stage_checkpoint(
+                    FinishCheckpoint { partial_state_trie: Some(state_trie_tip.block_number()) },
+                ),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let overlay = OverlayBuilder::<EthPrimitives>::new(
+            blocks[0].recovered_block().hash(),
+            ChangesetCache::new(),
+        )
+        .with_lazy_overlay(Some(LazyOverlay::new(lazy_overlay_blocks)))
+        .build_overlay(&provider)
+        .unwrap();
+
+        assert_eq!(overlay.hashed_post_state.accounts.len(), 3);
     }
 
     #[test]
