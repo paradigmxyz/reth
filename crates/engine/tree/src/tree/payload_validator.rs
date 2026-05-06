@@ -88,6 +88,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_stages_api::StageId;
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -2061,10 +2062,53 @@ where
             ?lazy_blocks,
         );
         let _guard = span.enter();
-        debug!(
-            target: "engine::tree::payload_validator",
-            "Preparing payload builder sparse trie overlay"
-        );
+        if tracing::enabled!(target: "engine::tree::payload_validator", tracing::Level::DEBUG) {
+            match self.provider.database_provider_ro() {
+                Ok(provider) => match provider.get_stage_checkpoint(StageId::Finish) {
+                    Ok(Some(checkpoint)) => {
+                        let finish_tip_number = checkpoint.block_number;
+                        let partial_state_trie_number = checkpoint
+                            .finish_stage_checkpoint()
+                            .and_then(|finish| finish.partial_state_trie)
+                            .unwrap_or(finish_tip_number);
+                        let partial_state_trie_hash = provider
+                            .convert_number(partial_state_trie_number.into())
+                            .ok()
+                            .flatten();
+                        let finish_tip_hash =
+                            provider.convert_number(finish_tip_number.into()).ok().flatten();
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            partial_state_trie_number,
+                            ?partial_state_trie_hash,
+                            finish_tip_number,
+                            ?finish_tip_hash,
+                            "Preparing payload builder sparse trie overlay"
+                        );
+                    }
+                    Ok(None) => {
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            "Preparing payload builder sparse trie overlay without finish checkpoint"
+                        );
+                    }
+                    Err(err) => {
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            %err,
+                            "Preparing payload builder sparse trie overlay without database frontiers"
+                        );
+                    }
+                },
+                Err(err) => {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %err,
+                        "Preparing payload builder sparse trie overlay without database frontiers"
+                    );
+                }
+            }
+        }
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
