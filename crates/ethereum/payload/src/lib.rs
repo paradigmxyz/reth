@@ -169,6 +169,16 @@ where
     let PayloadConfig { parent_header, attributes, payload_id } = config;
 
     let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
+    debug!(
+        target: "payload_builder",
+        id = %payload_id,
+        parent_hash = %parent_header.hash(),
+        parent_number = parent_header.number,
+        parent_state_root = %parent_header.state_root,
+        has_execution_cache = execution_cache.is_some(),
+        has_sparse_trie_handle = trie_handle.is_some(),
+        "Created payload builder parent state provider"
+    );
     if let Some(execution_cache) = execution_cache {
         state_provider = Box::new(CachedStateProvider::new(
             state_provider,
@@ -221,7 +231,22 @@ where
     // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
     // to the background trie pipeline for incremental state root computation.
     if let Some(ref handle) = trie_handle {
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            parent_hash = %parent_header.hash(),
+            parent_number = parent_header.number,
+            "Using shared sparse trie handle for payload builder state root"
+        );
         builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+    } else {
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            parent_hash = %parent_header.hash(),
+            parent_number = parent_header.number,
+            "Payload builder will compute state root through its state provider"
+        );
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {

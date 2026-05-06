@@ -34,6 +34,7 @@ use reth_trie_db::{
 };
 
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use tracing::debug;
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -309,10 +310,34 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
         let TrieInputSorted { nodes, state, prefix_sets } = input;
+        let input_trie_updates = nodes.total_len();
+        let input_hashed_state = state.total_len();
+        debug!(
+            target: "providers::historical_sp",
+            historical_block_number = self.block_number,
+            target_block,
+            %anchor_hash,
+            input_trie_updates,
+            input_hashed_state,
+            prefix_account_updates = prefix_sets.account_prefix_set.len(),
+            prefix_storage_tries = prefix_sets.storage_prefix_sets.len(),
+            prefix_destroyed_accounts = prefix_sets.destroyed_accounts.len(),
+            "Building historical state provider overlay"
+        );
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let Overlay { trie_updates, hashed_post_state } =
             overlay_builder.build_overlay(self.provider)?;
+
+        debug!(
+            target: "providers::historical_sp",
+            historical_block_number = self.block_number,
+            target_block,
+            %anchor_hash,
+            output_trie_updates = trie_updates.total_len(),
+            output_hashed_state = hashed_post_state.total_len(),
+            "Built historical state provider overlay"
+        );
 
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
