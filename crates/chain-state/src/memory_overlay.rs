@@ -13,6 +13,7 @@ use reth_trie::{
 };
 use revm_database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
+use tracing::debug;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
@@ -38,6 +39,12 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
     pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
+        debug!(
+            target: "chain_state::memory_overlay",
+            in_memory_blocks = ?block_summaries(&in_memory),
+            num_in_memory_blocks = in_memory.len(),
+            "Creating borrowed memory overlay state provider"
+        );
         Self { historical, in_memory: Cow::Owned(in_memory), trie_input: OnceLock::new() }
     }
 
@@ -50,12 +57,24 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     fn trie_input(&self) -> &TrieInput {
         self.trie_input.get_or_init(|| {
             let mut input = TrieInput::default();
+            let mut trie_updates = 0;
+            let mut hashed_state = 0;
             // Iterate from oldest to newest
             for block in self.in_memory.iter().rev() {
                 let data = block.trie_data();
+                trie_updates += data.trie_updates.total_len();
+                hashed_state += data.hashed_state.total_len();
                 input.nodes.extend_from_sorted(&data.trie_updates);
                 input.state.extend_from_sorted(&data.hashed_state);
             }
+            debug!(
+                target: "chain_state::memory_overlay",
+                in_memory_blocks = ?block_summaries(&self.in_memory),
+                num_in_memory_blocks = self.in_memory.len(),
+                trie_updates,
+                hashed_state,
+                "Built memory overlay trie input"
+            );
             input
         })
     }
@@ -127,6 +146,15 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
+        debug!(
+            target: "chain_state::memory_overlay",
+            in_memory_blocks = ?block_summaries(&self.in_memory),
+            num_in_memory_blocks = self.in_memory.len(),
+            prefix_account_updates = input.prefix_sets.account_prefix_set.len(),
+            prefix_storage_tries = input.prefix_sets.storage_prefix_sets.len(),
+            prefix_destroyed_accounts = input.prefix_sets.destroyed_accounts.len(),
+            "Calculating state root through memory overlay provider"
+        );
         input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes(input)
     }
@@ -142,6 +170,15 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         &self,
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
+        debug!(
+            target: "chain_state::memory_overlay",
+            in_memory_blocks = ?block_summaries(&self.in_memory),
+            num_in_memory_blocks = self.in_memory.len(),
+            prefix_account_updates = input.prefix_sets.account_prefix_set.len(),
+            prefix_storage_tries = input.prefix_sets.storage_prefix_sets.len(),
+            prefix_destroyed_accounts = input.prefix_sets.destroyed_accounts.len(),
+            "Calculating state root with updates through memory overlay provider"
+        );
         input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes_with_updates(input)
     }
@@ -184,6 +221,17 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
+        debug!(
+            target: "chain_state::memory_overlay",
+            in_memory_blocks = ?block_summaries(&self.in_memory),
+            num_in_memory_blocks = self.in_memory.len(),
+            %address,
+            num_slots = slots.len(),
+            prefix_account_updates = input.prefix_sets.account_prefix_set.len(),
+            prefix_storage_tries = input.prefix_sets.storage_prefix_sets.len(),
+            prefix_destroyed_accounts = input.prefix_sets.destroyed_accounts.len(),
+            "Generating proof through memory overlay provider"
+        );
         input.prepend_self(self.trie_input().clone());
         self.historical.proof(input, address, slots)
     }
@@ -193,6 +241,15 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         mut input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
+        debug!(
+            target: "chain_state::memory_overlay",
+            in_memory_blocks = ?block_summaries(&self.in_memory),
+            num_in_memory_blocks = self.in_memory.len(),
+            prefix_account_updates = input.prefix_sets.account_prefix_set.len(),
+            prefix_storage_tries = input.prefix_sets.storage_prefix_sets.len(),
+            prefix_destroyed_accounts = input.prefix_sets.destroyed_accounts.len(),
+            "Generating multiproof through memory overlay provider"
+        );
         input.prepend_self(self.trie_input().clone());
         self.historical.multiproof(input, targets)
     }
@@ -263,6 +320,12 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
     pub fn new(historical: StateProviderBox, in_memory: Vec<ExecutedBlock<N>>) -> Self {
+        debug!(
+            target: "chain_state::memory_overlay",
+            in_memory_blocks = ?block_summaries(&in_memory),
+            num_in_memory_blocks = in_memory.len(),
+            "Creating owned memory overlay state provider"
+        );
         Self { historical, in_memory, trie_input: OnceLock::new() }
     }
 
@@ -284,3 +347,18 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
 
 // Delegates all provider impls to [`MemoryOverlayStateProviderRef`]
 reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N> where [N: NodePrimitives]);
+
+fn block_summaries<N: NodePrimitives>(blocks: &[ExecutedBlock<N>]) -> Vec<String> {
+    blocks
+        .iter()
+        .map(|block| {
+            let recovered = block.recovered_block();
+            format!(
+                "#{} hash={} parent={}",
+                recovered.number(),
+                recovered.hash(),
+                recovered.parent_hash()
+            )
+        })
+        .collect()
+}

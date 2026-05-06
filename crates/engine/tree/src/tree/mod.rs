@@ -3288,8 +3288,25 @@ where
                 &self.state,
             )
         } else {
+            debug!(
+                target: "engine::tree",
+                parent_hash = %state.head_block_hash,
+                parent_number = head.number(),
+                parent_state_root = %head.state_root(),
+                "Payload builder sparse trie sharing disabled"
+            );
             None
         };
+
+        debug!(
+            target: "engine::tree",
+            parent_hash = %state.head_block_hash,
+            parent_number = head.number(),
+            parent_state_root = %head.state_root(),
+            has_execution_cache = cache.is_some(),
+            has_sparse_trie_handle = trie_handle.is_some(),
+            "Sending new payload job to payload builder"
+        );
 
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
