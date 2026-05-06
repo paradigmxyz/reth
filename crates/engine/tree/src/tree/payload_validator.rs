@@ -1080,11 +1080,10 @@ where
     /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Adapts the BAL output to a [`BlockExecutionOutput`] and forwards receipts to the
-    ///    receipt-root channel.
+    /// 5. Adapts the BAL output to a [`BlockExecutionOutput`].
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block_bal<S, Tx, InnerTx, Err, BalP>(
+    fn execute_block_bal<S, Tx, Err, BalP>(
         &self,
         _state_provider: S,
         env: ExecutionEnv<Evm>,
@@ -1102,8 +1101,7 @@ where
     >
     where
         S: StateProvider + Send,
-        Tx: ExecutableTxFor<Evm> + alloy_evm::RecoveredTx<InnerTx> + Send,
-        InnerTx: TxHashRef,
+        Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
         BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
         Evm: ConfigureEvm<Primitives = N>,
@@ -1131,18 +1129,6 @@ where
             .executor()
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
-        // Collect txs from the handle's iterator. The BAL executor needs a `Vec<Tx>` because it
-        // owns each tx for the (currently sequential) commit loop.
-        //
-        // TODO: this can be optimized so that transactions are streamed directly to the BAL
-        // executor.
-        let txs: Vec<Tx> = handle
-            .iter_transactions()
-            .collect::<Result<Vec<Tx>, Err>>()
-            .map_err(BlockExecutionError::other)?;
-        let senders: Vec<Address> =
-            txs.iter().map(|tx| *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(tx)).collect();
-
         let make_db = move || {
             let provider = provider_builder
                 .build()
@@ -1154,23 +1140,18 @@ where
             )))
         };
         let execution_start = Instant::now();
-        let bal_output = crate::tree::payload_processor::bal::execute_block(
+        let (bal_output, senders) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
             self.evm_config.clone(),
             make_db,
             decoded_bal,
             block,
-            txs,
+            env.transaction_count,
+            handle.clone_transaction_receiver(),
+            receipt_tx,
             header_bal_hash,
         )?;
         let execution_duration = execution_start.elapsed();
-
-        // Forward all receipts to the receipt-root task, in order. Drop the sender so the task
-        // knows the stream is closed.
-        for (i, receipt) in bal_output.receipts.iter().enumerate() {
-            let _ = receipt_tx.send(IndexedReceipt::new(i, receipt.clone()));
-        }
-        drop(receipt_tx);
 
         // Adapt BalExecutionOutput → BlockExecutionOutput.
         let result = alloy_evm::block::BlockExecutionResult {

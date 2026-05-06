@@ -406,10 +406,10 @@ where
         transaction_count: usize,
     ) -> (
         mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+        CrossbeamReceiver<(usize, Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>)>,
     ) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
-        let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
+        let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -458,7 +458,7 @@ where
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
-                        let _ = execute_tx.send(tx);
+                        let _ = execute_tx.send((idx, tx));
                         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                         });
                         });
@@ -737,7 +737,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
-    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+    execute_tx: &CrossbeamSender<(usize, Result<WithTxEnv<TxEnv, Recovered>, Err>)>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
@@ -752,7 +752,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
-        let _ = execute_tx.send(tx);
+        let _ = execute_tx.send((idx, tx));
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
@@ -770,7 +770,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions
-    transactions: mpsc::Receiver<Result<Tx, Err>>,
+    transactions: CrossbeamReceiver<(usize, Result<Tx, Err>)>,
     /// Span for tracing
     _span: Span,
 }
@@ -860,7 +860,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
-        self.transactions.iter()
+        self.transactions.iter().map(|(_, tx)| tx)
+    }
+
+    /// Returns a clone of the indexed transaction receiver.
+    pub fn clone_transaction_receiver(&self) -> CrossbeamReceiver<(usize, Result<Tx, Err>)> {
+        self.transactions.clone()
     }
 }
 
