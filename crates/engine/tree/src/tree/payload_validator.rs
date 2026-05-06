@@ -2049,6 +2049,22 @@ where
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
+        let lazy_anchor = lazy_overlay.as_ref().and_then(LazyOverlay::anchor_hash);
+        let lazy_blocks = lazy_overlay.as_ref().map(LazyOverlay::block_summaries);
+        let span = debug_span!(
+            target: "engine::tree::payload_validator",
+            "payload_builder_sparse_trie_overlay",
+            %parent_hash,
+            %parent_state_root,
+            %anchor_hash,
+            ?lazy_anchor,
+            ?lazy_blocks,
+        );
+        let _guard = span.enter();
+        debug!(
+            target: "engine::tree::payload_validator",
+            "Preparing payload builder sparse trie overlay"
+        );
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
