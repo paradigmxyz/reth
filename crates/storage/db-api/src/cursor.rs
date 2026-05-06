@@ -85,6 +85,15 @@ pub trait DbDupCursorRO<T: DupSort> {
     /// exist.
     fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T>;
 
+    /// Positions the cursor exactly at the provided key/subkey pair.
+    ///
+    /// Returns `None` if either the key or the exact subkey does not exist.
+    fn seek_exact_by_key_subkey(
+        &mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+    ) -> ValueOnlyResult<T>;
+
     /// Get an iterator that walks through the dup table.
     ///
     /// The cursor will start at different points in the table depending on the values of `key` and

@@ -342,6 +342,16 @@ impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
         Ok(None)
     }
 
+    /// Seeks exactly to a specific key-subkey combination.
+    /// **Mock behavior**: Always returns `None`.
+    fn seek_exact_by_key_subkey(
+        &mut self,
+        _key: <T as Table>::Key,
+        _subkey: <T as DupSort>::SubKey,
+    ) -> ValueOnlyResult<T> {
+        Ok(None)
+    }
+
     /// Creates a duplicate walker for the specified key and subkey.
     /// **Mock behavior**: Returns an empty walker that won't iterate over any data.
     fn walk_dup(

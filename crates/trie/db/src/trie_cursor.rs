@@ -294,9 +294,8 @@ where
             // Delete the old entry if it exists.
             if self
                 .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+                .seek_exact_by_key_subkey(self.hashed_address, nibbles.clone())?
+                .is_some()
             {
                 self.cursor.delete_current()?;
             }
@@ -324,8 +323,7 @@ where
         let subkey = A::StorageSubKey::from(key);
         Ok(self
             .cursor
-            .seek_by_key_subkey(self.hashed_address, subkey.clone())?
-            .filter(|e| *e.nibbles() == subkey)
+            .seek_exact_by_key_subkey(self.hashed_address, subkey)?
             .map(|value| {
                 let (subkey, node) = value.into_parts();
                 (A::subkey_to_nibbles(&subkey), node)

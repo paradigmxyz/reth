@@ -203,6 +203,18 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
             .transpose()
     }
 
+    fn seek_exact_by_key_subkey(
+        &mut self,
+        key: <T as Table>::Key,
+        subkey: <T as DupSort>::SubKey,
+    ) -> ValueOnlyResult<T> {
+        self.inner
+            .get_both(key.encode().as_ref(), subkey.encode().as_ref())
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
+    }
+
     /// Depending on its arguments, returns an iterator starting at:
     /// - Some(key), Some(subkey): a `key` item whose data is >= than `subkey`
     /// - Some(key), None: first item of a specified `key`
