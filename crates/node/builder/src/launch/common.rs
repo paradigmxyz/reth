@@ -659,11 +659,14 @@ where
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
                 ChainSpecInfo { name: self.chain_id().to_string() },
-                StorageSettingsInfo { storage_v2: storage_settings.storage_v2, pruning_mode },
                 self.task_executor().clone(),
                 metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),
             )
+            .with_storage_settings_info(StorageSettingsInfo {
+                storage_v2: storage_settings.storage_v2,
+                pruning_mode,
+            })
             .with_push_gateway(
                 self.node_config().metrics.push_gateway_url.clone(),
                 self.node_config().metrics.push_gateway_interval,

@@ -20,19 +20,18 @@ use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
 use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{
-    args::{NetworkArgs, PruneConfigKind, StageEnum},
+    args::{NetworkArgs, StageEnum},
     version::version_metadata,
 };
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     server::{MetricServer, MetricServerConfig},
-    storage::StorageSettingsInfo,
     version::VersionInfo,
 };
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
     ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StorageSettingsCache,
+    StageCheckpointWriter,
 };
 use reth_stages::{
     stages::{
@@ -129,9 +128,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let components = components(provider_factory.chain_spec());
 
         if let Some(listen_addr) = self.metrics {
-            let pruning_mode =
-                PruneConfigKind::from_config(&config.prune, provider_factory.chain_spec().as_ref())
-                    .as_str();
             let config = MetricServerConfig::new(
                 listen_addr,
                 VersionInfo {
@@ -143,10 +139,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
-                StorageSettingsInfo {
-                    storage_v2: provider_factory.cached_storage_settings().storage_v2,
-                    pruning_mode,
-                },
                 ctx.task_executor,
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),

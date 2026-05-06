@@ -23,7 +23,7 @@ pub struct MetricServerConfig {
     listen_addr: SocketAddr,
     version_info: VersionInfo,
     chain_spec_info: ChainSpecInfo,
-    storage_settings_info: StorageSettingsInfo,
+    storage_settings_info: Option<StorageSettingsInfo>,
     task_executor: TaskExecutor,
     hooks: Hooks,
     push_gateway_url: Option<String>,
@@ -37,7 +37,6 @@ impl MetricServerConfig {
         listen_addr: SocketAddr,
         version_info: VersionInfo,
         chain_spec_info: ChainSpecInfo,
-        storage_settings_info: StorageSettingsInfo,
         task_executor: TaskExecutor,
         hooks: Hooks,
         pprof_dump_dir: PathBuf,
@@ -48,11 +47,17 @@ impl MetricServerConfig {
             task_executor,
             version_info,
             chain_spec_info,
-            storage_settings_info,
+            storage_settings_info: None,
             push_gateway_url: None,
             push_gateway_interval: Duration::from_secs(5),
             pprof_dump_dir,
         }
+    }
+
+    /// Set the storage settings information to expose over prometheus.
+    pub const fn with_storage_settings_info(mut self, info: StorageSettingsInfo) -> Self {
+        self.storage_settings_info = Some(info);
+        self
     }
 
     /// Set the gateway URL and interval for pushing metrics
@@ -119,7 +124,9 @@ impl MetricServer {
 
         version_info.register_version_metrics();
         chain_spec_info.register_chain_spec_metrics();
-        storage_settings_info.register_storage_settings_metrics();
+        if let Some(storage_settings_info) = storage_settings_info {
+            storage_settings_info.register_storage_settings_metrics();
+        }
         register_process_metrics();
 
         Ok(())
@@ -488,11 +495,11 @@ mod tests {
             listen_addr,
             version_info,
             chain_spec_info,
-            storage_settings_info,
             runtime.clone(),
             hooks,
             std::env::temp_dir(),
-        );
+        )
+        .with_storage_settings_info(storage_settings_info);
 
         MetricServer::new(config).serve().await.unwrap();
 
