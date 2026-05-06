@@ -71,7 +71,7 @@ use reth_provider::{
     RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory, StorageSettingsCache,
 };
-use reth_prune::{PruneMode, PruneModes, PrunerBuilder, ReceiptsLogPruneConfig};
+use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
@@ -1295,44 +1295,12 @@ fn storage_settings_info(
     pruning_mode: &'static str,
     prune_config: &PruneConfig,
 ) -> StorageSettingsInfo {
-    StorageSettingsInfo { storage_v2, pruning_mode, prune_config: prune_config_json(prune_config) }
-}
-
-fn prune_config_json(prune_config: &PruneConfig) -> String {
-    serde_json::json!({
-        "block_interval": prune_config.block_interval,
-        "minimum_pruning_distance": prune_config.minimum_pruning_distance,
-        "segments": {
-            "sender_recovery": prune_mode_json(prune_config.segments.sender_recovery),
-            "transaction_lookup": prune_mode_json(prune_config.segments.transaction_lookup),
-            "receipts": prune_mode_json(prune_config.segments.receipts),
-            "account_history": prune_mode_json(prune_config.segments.account_history),
-            "storage_history": prune_mode_json(prune_config.segments.storage_history),
-            "bodies_history": prune_mode_json(prune_config.segments.bodies_history),
-            "receipts_log_filter": receipts_log_filter_json(
-                &prune_config.segments.receipts_log_filter,
-            ),
-        },
-    })
-    .to_string()
-}
-
-fn prune_mode_json(mode: Option<PruneMode>) -> serde_json::Value {
-    match mode {
-        Some(PruneMode::Full) => serde_json::json!("full"),
-        Some(PruneMode::Distance(distance)) => serde_json::json!({ "distance": distance }),
-        Some(PruneMode::Before(block)) => serde_json::json!({ "before": block }),
-        None => serde_json::Value::Null,
+    StorageSettingsInfo {
+        storage_v2,
+        pruning_mode,
+        prune_config: serde_json::to_string(prune_config)
+            .expect("serializing PruneConfig should not fail"),
     }
-}
-
-fn receipts_log_filter_json(config: &ReceiptsLogPruneConfig) -> serde_json::Value {
-    serde_json::Value::Object(
-        config
-            .iter()
-            .map(|(address, mode)| (address.to_string(), prune_mode_json(Some(*mode))))
-            .collect(),
-    )
 }
 
 #[cfg(test)]
