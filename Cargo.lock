@@ -9310,6 +9310,7 @@ dependencies = [
  "alloy-rpc-types-trace",
  "alloy-signer",
  "alloy-sol-types",
+ "enr",
  "eyre",
  "futures",
  "jsonrpsee-core",
