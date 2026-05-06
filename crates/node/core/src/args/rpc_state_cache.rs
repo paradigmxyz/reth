@@ -43,6 +43,10 @@ pub struct RpcStateCacheArgs {
         default_value_t = DEFAULT_MAX_CACHED_TX_HASHES,
     )]
     pub max_cached_tx_hashes: u32,
+
+    /// Block distance within which block access lists are kept in memory.
+    #[arg(long = "rpc-cache.max-balstore-blocks")]
+    pub max_balstore_blocks: Option<u64>,
 }
 
 impl RpcStateCacheArgs {
@@ -62,6 +66,7 @@ impl Default for RpcStateCacheArgs {
             max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
+            max_balstore_blocks: None,
         }
     }
 }

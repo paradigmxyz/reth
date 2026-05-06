@@ -1062,6 +1062,7 @@ mod tests {
                 max_headers: 1000,
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 30_000,
+                max_balstore_blocks: Some(1234),
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
@@ -1152,6 +1153,8 @@ mod tests {
             "1000",
             "--rpc-cache.max-concurrent-db-requests",
             "512",
+            "--rpc-cache.max-balstore-blocks",
+            "1234",
             "--gpo.blocks",
             "20",
             "--gpo.ignoreprice",
