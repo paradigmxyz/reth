@@ -71,7 +71,7 @@ use reth_provider::{
     RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory, StorageSettingsCache,
 };
-use reth_prune::{PruneModes, PrunerBuilder};
+use reth_prune::{PruneMode, PruneModes, PrunerBuilder, ReceiptsLogPruneConfig};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
@@ -639,9 +639,9 @@ where
 
         let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
+            let prune_config = self.prune_config();
             let pruning_mode =
-                PruneConfigKind::from_config(&self.prune_config(), self.chain_spec().as_ref())
-                    .as_str();
+                PruneConfigKind::from_config(&prune_config, self.chain_spec().as_ref()).as_str();
             let storage_settings =
                 if self.provider_factory().get_stage_checkpoint(StageId::Headers)?.is_some() {
                     self.provider_factory().cached_storage_settings()
@@ -663,10 +663,11 @@ where
                 metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),
             )
-            .with_storage_settings_info(StorageSettingsInfo {
-                storage_v2: storage_settings.storage_v2,
+            .with_storage_settings_info(storage_settings_info(
+                storage_settings.storage_v2,
                 pruning_mode,
-            })
+                &prune_config,
+            ))
             .with_push_gateway(
                 self.node_config().metrics.push_gateway_url.clone(),
                 self.node_config().metrics.push_gateway_interval,
@@ -1287,6 +1288,51 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
             move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
         })
         .build()
+}
+
+fn storage_settings_info(
+    storage_v2: bool,
+    pruning_mode: &'static str,
+    prune_config: &PruneConfig,
+) -> StorageSettingsInfo {
+    StorageSettingsInfo { storage_v2, pruning_mode, prune_config: prune_config_json(prune_config) }
+}
+
+fn prune_config_json(prune_config: &PruneConfig) -> String {
+    serde_json::json!({
+        "block_interval": prune_config.block_interval,
+        "minimum_pruning_distance": prune_config.minimum_pruning_distance,
+        "segments": {
+            "sender_recovery": prune_mode_json(prune_config.segments.sender_recovery),
+            "transaction_lookup": prune_mode_json(prune_config.segments.transaction_lookup),
+            "receipts": prune_mode_json(prune_config.segments.receipts),
+            "account_history": prune_mode_json(prune_config.segments.account_history),
+            "storage_history": prune_mode_json(prune_config.segments.storage_history),
+            "bodies_history": prune_mode_json(prune_config.segments.bodies_history),
+            "receipts_log_filter": receipts_log_filter_json(
+                &prune_config.segments.receipts_log_filter,
+            ),
+        },
+    })
+    .to_string()
+}
+
+fn prune_mode_json(mode: Option<PruneMode>) -> serde_json::Value {
+    match mode {
+        Some(PruneMode::Full) => serde_json::json!("full"),
+        Some(PruneMode::Distance(distance)) => serde_json::json!({ "distance": distance }),
+        Some(PruneMode::Before(block)) => serde_json::json!({ "before": block }),
+        None => serde_json::Value::Null,
+    }
+}
+
+fn receipts_log_filter_json(config: &ReceiptsLogPruneConfig) -> serde_json::Value {
+    serde_json::Value::Object(
+        config
+            .iter()
+            .map(|(address, mode)| (address.to_string(), prune_mode_json(Some(*mode))))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

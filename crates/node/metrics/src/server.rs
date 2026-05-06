@@ -55,7 +55,7 @@ impl MetricServerConfig {
     }
 
     /// Set the storage settings information to expose over prometheus.
-    pub const fn with_storage_settings_info(mut self, info: StorageSettingsInfo) -> Self {
+    pub fn with_storage_settings_info(mut self, info: StorageSettingsInfo) -> Self {
         self.storage_settings_info = Some(info);
         self
     }
@@ -475,8 +475,11 @@ mod tests {
         install_prometheus_recorder();
 
         let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
-        let storage_settings_info =
-            StorageSettingsInfo { storage_v2: true, pruning_mode: "archive" };
+        let storage_settings_info = StorageSettingsInfo {
+            storage_v2: true,
+            pruning_mode: "archive",
+            prune_config: r#"{"block_interval":5}"#.to_string(),
+        };
         let version_info = VersionInfo {
             version: "test",
             build_timestamp: "test",
@@ -516,6 +519,7 @@ mod tests {
         assert!(body.contains("reth_storage_settings"), "expected storage settings metric");
         assert!(body.contains("storage_v2=\"true\""), "expected storage v2 label");
         assert!(body.contains("pruning_mode=\"archive\""), "expected pruning mode label");
+        assert!(body.contains("prune_config="), "expected prune config label");
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);
