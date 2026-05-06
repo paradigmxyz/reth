@@ -209,9 +209,7 @@ where
             );
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::other(
-                    crate::error::UnprotectedTxDisabled,
-                ),
+                InvalidPoolTransactionError::other(crate::error::UnprotectedTxDisabled),
             );
         }
 
