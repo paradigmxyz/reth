@@ -3,6 +3,7 @@ use crate::{
     hooks::{Hook, Hooks},
     process::register_process_metrics,
     recorder::install_prometheus_recorder,
+    storage::StorageSettingsInfo,
     version::VersionInfo,
 };
 use bytes::Bytes;
@@ -22,6 +23,7 @@ pub struct MetricServerConfig {
     listen_addr: SocketAddr,
     version_info: VersionInfo,
     chain_spec_info: ChainSpecInfo,
+    storage_settings_info: StorageSettingsInfo,
     task_executor: TaskExecutor,
     hooks: Hooks,
     push_gateway_url: Option<String>,
@@ -35,6 +37,7 @@ impl MetricServerConfig {
         listen_addr: SocketAddr,
         version_info: VersionInfo,
         chain_spec_info: ChainSpecInfo,
+        storage_settings_info: StorageSettingsInfo,
         task_executor: TaskExecutor,
         hooks: Hooks,
         pprof_dump_dir: PathBuf,
@@ -45,6 +48,7 @@ impl MetricServerConfig {
             task_executor,
             version_info,
             chain_spec_info,
+            storage_settings_info,
             push_gateway_url: None,
             push_gateway_interval: Duration::from_secs(5),
             pprof_dump_dir,
@@ -79,6 +83,7 @@ impl MetricServer {
             task_executor,
             version_info,
             chain_spec_info,
+            storage_settings_info,
             push_gateway_url,
             push_gateway_interval,
             pprof_dump_dir,
@@ -114,6 +119,7 @@ impl MetricServer {
 
         version_info.register_version_metrics();
         chain_spec_info.register_chain_spec_metrics();
+        storage_settings_info.register_storage_settings_metrics();
         register_process_metrics();
 
         Ok(())
@@ -462,6 +468,8 @@ mod tests {
         install_prometheus_recorder();
 
         let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
+        let storage_settings_info =
+            StorageSettingsInfo { storage_v2: true, pruning_mode: "archive" };
         let version_info = VersionInfo {
             version: "test",
             build_timestamp: "test",
@@ -480,6 +488,7 @@ mod tests {
             listen_addr,
             version_info,
             chain_spec_info,
+            storage_settings_info,
             runtime.clone(),
             hooks,
             std::env::temp_dir(),
@@ -497,6 +506,9 @@ mod tests {
         assert!(body.contains("reth_process_cpu_seconds_total"));
         assert!(body.contains("reth_process_start_time_seconds"));
         assert!(body.contains("process_cli_args"), "expected process_cli_args metric in output");
+        assert!(body.contains("reth_storage_settings"), "expected storage settings metric");
+        assert!(body.contains("storage_v2=\"true\""), "expected storage v2 label");
+        assert!(body.contains("pruning_mode=\"archive\""), "expected pruning mode label");
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);

@@ -3,6 +3,7 @@ use clap::Parser;
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::parse_socket_address;
+use reth_config::PruneConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -10,6 +11,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_core::{
+    args::PruneConfigKind,
     dirs::{ChainPath, DataDirPath},
     version::version_metadata,
 };
@@ -17,6 +19,7 @@ use reth_node_metrics::{
     chain::ChainSpecInfo,
     hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
+    storage::StorageSettingsInfo,
     version::VersionInfo,
 };
 use reth_provider::{
@@ -62,10 +65,23 @@ impl Command {
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
         data_dir: &ChainPath<DataDirPath>,
-    ) -> eyre::Result<()> {
+        prune_config: &PruneConfig,
+    ) -> eyre::Result<()>
+    where
+        N::ChainSpec: reth_chainspec::EthereumHardforks,
+    {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
             let chain_name = tool.provider_factory.chain_spec().chain().to_string();
+            let pruning_mode = PruneConfigKind::from_config(
+                prune_config,
+                tool.provider_factory.chain_spec().as_ref(),
+            )
+            .as_str();
+            let storage_settings_info = StorageSettingsInfo {
+                storage_v2: tool.provider_factory.cached_storage_settings().storage_v2,
+                pruning_mode,
+            };
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 
@@ -81,6 +97,7 @@ impl Command {
                         build_profile: version_metadata().build_profile_name.as_ref(),
                     },
                     ChainSpecInfo { name: chain_name },
+                    storage_settings_info,
                     executor,
                     Hooks::builder().build(),
                     pprof_dump_dir,

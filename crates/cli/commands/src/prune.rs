@@ -6,13 +6,17 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_node_builder::common::metrics_hooks;
-use reth_node_core::{args::MetricArgs, version::version_metadata};
+use reth_node_core::{
+    args::{MetricArgs, PruneConfigKind},
+    version::version_metadata,
+};
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     server::{MetricServer, MetricServerConfig},
+    storage::StorageSettingsInfo,
     version::VersionInfo,
 };
-use reth_provider::RocksDBProviderFactory;
+use reth_provider::{RocksDBProviderFactory, StorageSettingsCache};
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
@@ -41,6 +45,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         let data_dir = env.data_dir;
 
         if let Some(listen_addr) = self.metrics.prometheus {
+            let pruning_mode =
+                PruneConfigKind::from_config(&config, provider_factory.chain_spec().as_ref())
+                    .as_str();
             let config = MetricServerConfig::new(
                 listen_addr,
                 VersionInfo {
@@ -52,6 +59,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                StorageSettingsInfo {
+                    storage_v2: provider_factory.cached_storage_settings().storage_v2,
+                    pruning_mode,
+                },
                 ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),

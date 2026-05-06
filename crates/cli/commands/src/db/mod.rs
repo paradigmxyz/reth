@@ -183,9 +183,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::RepairTrie(command) => {
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
-                db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool, ctx.task_executor, &data_dir)?;
-                });
+                let Environment { provider_factory, config, .. } =
+                    self.env.init::<N>(access_rights, ctx.task_executor.clone())?;
+
+                let tool = DbTool::new(provider_factory)?;
+                command.execute(&tool, ctx.task_executor, &data_dir, &config.prune)?;
             }
             Subcommands::StaticFileHeader(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RoInconsistent, {
