@@ -11,7 +11,10 @@ use alloy_eips::{
     Typed2718,
 };
 use alloy_primitives::{Bytes, B256};
-use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
+use alloy_provider::{
+    network::{AnyNetwork, AnyRpcBlock},
+    Provider, RootProvider,
+};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -19,7 +22,7 @@ use alloy_rpc_types_engine::{
 };
 use clap::Parser;
 use eyre::Context;
-use futures::{stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
@@ -312,9 +315,6 @@ impl Command {
             .http(self.rpc_url.parse()?);
         let provider = RootProvider::<AnyNetwork>::new(client);
 
-        let mut prev_big_block_hash: Option<B256> = None;
-        let mut accumulated_block_hashes: Vec<(u64, B256)> = Vec::new();
-
         // Persistent prefetch stream: keeps `prefetch_buffer` per-block fetches in flight
         // ahead of the merger across all big blocks. Each item is a fully materialized
         // `FetchedBlock` (or `None` once the chain tip is reached on this fetch).
@@ -326,31 +326,79 @@ impl Command {
                 async move { fetch_one_block(provider, block_number, bal_enabled).await }
             })
             .buffered(prefetch_buffer);
-        let mut block_stream = Box::pin(block_stream);
 
-        // Track the next block number we expect from the stream (purely for logging /
-        // big-block range bookkeeping; the stream produces blocks in `from_block..` order).
-        let mut next_block = self.from_block;
+        let mut big_blocks_stream =
+            Box::pin(big_blocks_stream(self.num_big_blocks, self.target_gas, block_stream));
 
-        for big_block_idx in 0..self.num_big_blocks {
-            let range_start = next_block;
+        while let Some(big_block) = big_blocks_stream.next().await {
+            let big_block = big_block?;
+            // Save to disk
+            let range_start = big_block.big_block_data.env_switches[0].1.block_number();
+            let range_end = big_block.big_block_data.env_switches.last().unwrap().1.block_number();
+            let block_hash = big_block.execution_data.payload.as_v1().block_hash;
+            let filename = format!("big_block_{range_start}_to_{range_end}.json");
+            let filepath = self.output_dir.join(&filename);
+            let json = serde_json::to_string_pretty(&big_block)?;
+            std::fs::write(&filepath, &json)
+                .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
+
+            info!(
+                target: "reth-bench",
+                path = %filepath.display(),
+                block_hash = %block_hash,
+                total_txs = big_block.execution_data.payload.transactions().len(),
+                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
+                env_switches = big_block.big_block_data.env_switches.len(),
+                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
+                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
+                "Big block payload saved"
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Produces a stream of big block payloads given a stream of regular blocks.
+pub(crate) fn big_blocks_stream(
+    num_big_blocks: u64,
+    target_gas: u64,
+    block_stream: impl Stream<Item = eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>>>
+        + Unpin,
+) -> impl Stream<Item = eyre::Result<BigBlockPayload>> {
+    futures::stream::try_unfold(
+        (block_stream, Vec::new(), 0, None, false, 0),
+        move |(
+            mut block_stream,
+            mut accumulated_block_hashes,
+            mut big_block_idx,
+            mut prev_big_block_hash,
+            mut reached_chain_tip,
+            mut first_block,
+        )| async move {
+            if reached_chain_tip || num_big_blocks == big_block_idx {
+                warn!(
+                    target: "reth-bench",
+                    generated = big_block_idx + 1,
+                    requested = num_big_blocks,
+                    "Reached chain tip, stopping generation early"
+                );
+                return Ok(None);
+            }
 
             // Drain the prefetch stream until the gas target is reached for this big block.
             let mut blocks = Vec::new();
             let mut block_access_lists: Vec<Option<BlockAccessList>> = Vec::new();
             let mut accumulated_block_gas: u64 = 0;
 
-            let mut reached_chain_tip = false;
-            while accumulated_block_gas < self.target_gas {
-                let block_number = next_block;
-                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Awaiting prefetched block");
+            while accumulated_block_gas < target_gas {
+                info!(target: "reth-bench", big_block = big_block_idx, "Awaiting prefetched block");
 
-                let fetched = match block_stream.next().await {
+                let (block, block_access_list) = match block_stream.next().await {
                     Some(Ok(Some(fetched))) => fetched,
                     Some(Ok(None)) => {
                         warn!(
                             target: "reth-bench",
-                            block_number,
                             "Block not found — reached chain tip"
                         );
                         reached_chain_tip = true;
@@ -364,13 +412,27 @@ impl Command {
                         break;
                     }
                 };
-                let FetchedBlock { execution_data, block_access_list } = fetched;
+
+                if first_block == 0 {
+                    first_block = block.header.number;
+                }
+
+                let block = block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                        tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+                    })?
+                    .into_consensus();
+
+                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+                let execution_data = ExecutionData { payload, sidecar };
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
 
                 info!(
                     target: "reth-bench",
-                    block_number,
+                    block_number = block.header.number,
                     gas_used = block_gas,
                     tx_count = execution_data.payload.transactions().len(),
                     "Fetched block"
@@ -379,7 +441,6 @@ impl Command {
                 accumulated_block_gas += block_gas;
                 blocks.push(execution_data);
                 block_access_lists.push(block_access_list);
-                next_block += 1;
             }
 
             // If we hit the chain tip without fetching any blocks, stop generating.
@@ -387,10 +448,10 @@ impl Command {
                 warn!(
                     target: "reth-bench",
                     big_block = big_block_idx,
-                    requested = self.num_big_blocks,
+                    requested = num_big_blocks,
                     "No blocks available, stopping generation early"
                 );
-                break;
+                return Ok(None);
             }
 
             // Block 0 is the base
@@ -459,7 +520,7 @@ impl Command {
                 base.payload.as_v1_mut().parent_hash = prev_hash;
                 // First big block keeps its original block number (from_block).
                 // Subsequent big blocks increment from there.
-                base.payload.as_v1_mut().block_number = self.from_block + big_block_idx;
+                base.payload.as_v1_mut().block_number = first_block + big_block_idx;
             }
 
             // Merge blob data from all constituent blocks:  concatenate versioned
@@ -519,47 +580,20 @@ impl Command {
                 accumulated_block_hashes.drain(..excess);
             }
 
-            // Save to disk
-            let range_end = next_block - 1;
-            let filename = format!("big_block_{range_start}_to_{range_end}.json");
-            let filepath = self.output_dir.join(&filename);
-            let json = serde_json::to_string_pretty(&big_block)?;
-            std::fs::write(&filepath, &json)
-                .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-
-            info!(
-                target: "reth-bench",
-                path = %filepath.display(),
-                block_hash = %block_hash,
-                total_txs = big_block.execution_data.payload.transactions().len(),
-                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
-                env_switches = big_block.big_block_data.env_switches.len(),
-                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
-                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
-                "Big block payload saved"
-            );
-
-            if reached_chain_tip {
-                warn!(
-                    target: "reth-bench",
-                    generated = big_block_idx + 1,
-                    requested = self.num_big_blocks,
-                    "Reached chain tip, stopping generation early"
-                );
-                break;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// One fully-materialized block fetched by the prefetcher.
-struct FetchedBlock {
-    /// Execution payload with sidecar derived from the RPC block.
-    execution_data: ExecutionData,
-    /// `eth_getBlockAccessListByBlockNumber` result when `--bal` is enabled.
-    block_access_list: Option<BlockAccessList>,
+            big_block_idx += 1;
+            Ok(Some((
+                big_block,
+                (
+                    block_stream,
+                    accumulated_block_hashes,
+                    big_block_idx,
+                    prev_big_block_hash,
+                    reached_chain_tip,
+                    first_block,
+                ),
+            )))
+        },
+    )
 }
 
 /// Fetches one block + receipts (and optionally its BAL) from the RPC. Returns `Ok(None)`
@@ -568,7 +602,7 @@ async fn fetch_one_block(
     provider: RootProvider<AnyNetwork>,
     block_number: u64,
     bal_enabled: bool,
-) -> eyre::Result<Option<FetchedBlock>> {
+) -> eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>> {
     let (rpc_block, block_access_list) =
         tokio::try_join!(provider.get_block_by_number(block_number.into()).full(), async {
             if bal_enabled {
@@ -581,18 +615,7 @@ async fn fetch_one_block(
         return Ok(None);
     };
 
-    let block = rpc_block
-        .into_inner()
-        .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-        .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
-            tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
-        })?
-        .into_consensus();
-
-    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-    let execution_data = ExecutionData { payload, sidecar };
-
-    Ok(Some(FetchedBlock { execution_data, block_access_list }))
+    Ok(Some((rpc_block, block_access_list)))
 }
 
 fn merge_block_access_list(

@@ -117,6 +117,13 @@ impl BenchContext {
             let head_number = head_block.header.number;
             info!(target: "reth-bench", "No --from provided, derived from engine head: {}", head_number);
             (Some(head_number), bench_args.to)
+        } else if bench_args.big_blocks.is_some() && bench_args.from.is_none() {
+            let head_block = auth_provider
+                .get_block_by_number(BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
+            let head_number = head_block.header.number;
+            (Some(head_number), bench_args.to)
         } else {
             (bench_args.from, bench_args.to)
         };
