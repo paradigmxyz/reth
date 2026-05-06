@@ -33,8 +33,7 @@ impl InMemoryBalStore {
     }
 }
 
-// Match the canonical state broadcast buffer so BAL subscriptions behave like the existing
-// in-memory notification path. This is a bounded best-effort channel, not a durability boundary.
+/// Size of the bounded best-effort BAL notification channel.
 const DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE: usize = 256;
 
 impl Default for InMemoryBalStore {

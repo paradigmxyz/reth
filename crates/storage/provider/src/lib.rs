@@ -41,6 +41,11 @@ pub use either_writer::*;
 mod bal;
 pub use bal::{BalConfig, InMemoryBalStore};
 
+mod diskbal;
+pub use diskbal::{
+    DiskBalStore, DiskBalStoreConfig, DEFAULT_DISK_BAL_CACHE_SIZE, DEFAULT_DISK_BAL_CHUNK_SIZE,
+};
+
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
     CanonStateNotifications, CanonStateSubscriptions,
