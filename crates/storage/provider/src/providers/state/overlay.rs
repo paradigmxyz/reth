@@ -61,6 +61,12 @@ pub(super) struct Overlay {
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
+#[derive(Debug)]
+struct OverlayRevertPlan {
+    revert_blocks: Option<RangeInclusive<BlockNumber>>,
+    overlay_anchor_hash: BlockHash,
+}
+
 /// Source of overlay data for [`OverlayStateProviderFactory`].
 ///
 /// Either provides immediate pre-computed overlay data, or a lazy overlay that computes
@@ -226,7 +232,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     return Err(ProviderError::other(std::io::Error::other(format!(
                         "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured anchor ({})",
                         self.anchor_hash
-                    ))))
+                    ))));
                 }
                 (Arc::clone(trie), Arc::clone(state))
             }
@@ -298,32 +304,59 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         ))
     }
 
-    /// Returns whether or not it is required to collect reverts, and validates that there are
-    /// sufficient changesets to revert to the requested block number if so.
+    /// Returns the revert plan required to expose the requested overlay base state, and validates
+    /// that there are sufficient changesets to revert to the requested block number if so.
     ///
     /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
     /// available data range.
-    fn reverts_required<Provider>(
+    fn revert_plan<Provider>(
         &self,
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
-    ) -> ProviderResult<Option<RangeInclusive<BlockNumber>>>
+    ) -> ProviderResult<OverlayRevertPlan>
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        // If the anchor is the current durable state/trie frontier then there won't be any
-        // reverts
-        // necessary.
-        if state_trie_tip_block.hash == self.anchor_hash {
+        // If the requested anchor is the current durable Finish frontier, the database already
+        // exposes a consistent logical state for the overlay base.
+        if finish_tip_block.hash == self.anchor_hash {
             debug!(
                 target: "providers::state::overlay",
                 anchor_hash = ?self.anchor_hash,
                 ?state_trie_tip_block,
                 ?finish_tip_block,
-                "Overlay anchor matches durable state/trie frontier; no reverts required"
+                overlay_anchor_hash = ?finish_tip_block.hash,
+                "Overlay anchor matches durable finish frontier; no reverts required"
             );
-            return Ok(None)
+            return Ok(OverlayRevertPlan {
+                revert_blocks: None,
+                overlay_anchor_hash: finish_tip_block.hash,
+            });
+        }
+
+        // If a lazy overlay can start from the durable Finish frontier, prefer that base and avoid
+        // changeset reverts entirely. This is valid even when the configured anchor is older than
+        // Finish because the database is already at the Finish logical state and the lazy overlay
+        // covers Finish -> target.
+        if self.overlay_source.as_ref().is_some_and(|source| {
+            matches!(source, OverlaySource::Lazy(lazy) if lazy.has_anchor_hash(finish_tip_block.hash))
+        }) {
+            debug!(
+                target: "providers::state::overlay",
+                anchor_hash = ?self.anchor_hash,
+                ?state_trie_tip_block,
+                ?finish_tip_block,
+                overlay_anchor_hash = ?finish_tip_block.hash,
+                source = overlay_source_kind(self.overlay_source.as_ref()),
+                source_anchor = ?self.overlay_source.as_ref().and_then(overlay_source_anchor),
+                source_blocks = ?self.overlay_source.as_ref().and_then(overlay_source_blocks),
+                "Lazy overlay covers durable finish frontier; no reverts required"
+            );
+            return Ok(OverlayRevertPlan {
+                revert_blocks: None,
+                overlay_anchor_hash: finish_tip_block.hash,
+            })
         }
 
         let anchor_number = self.get_block_number(provider)?;
@@ -351,19 +384,22 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             "Checking overlay revert requirements"
         );
 
+        let anchor_hash_at_number = provider
+            .convert_number(anchor_number.into())?
+            .ok_or_else(|| ProviderError::HeaderNotFound(anchor_number.into()))?;
+        if anchor_hash_at_number != self.anchor_hash {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "anchor hash {} is not on the durable finish chain at block {} (found {})",
+                self.anchor_hash, anchor_number, anchor_hash_at_number,
+            ))));
+        }
+
         // Check if the requested block is within the available range
         if !available_range.contains(&anchor_number) {
             return Err(ProviderError::InsufficientChangesets {
                 requested: anchor_number,
                 available: available_range,
             });
-        }
-
-        if anchor_number > state_trie_tip_block.number {
-            return Err(ProviderError::InsufficientChangesets {
-                requested: anchor_number,
-                available: lower_bound..=state_trie_tip_block.number,
-            })
         }
 
         let revert_range = anchor_number + 1..=finish_tip_block.number;
@@ -373,10 +409,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             anchor_number,
             revert_start = *revert_range.start(),
             revert_end = *revert_range.end(),
+            overlay_anchor_hash = ?self.anchor_hash,
             "Overlay reverts required"
         );
 
-        Ok(Some(revert_range))
+        Ok(OverlayRevertPlan {
+            revert_blocks: Some(revert_range),
+            overlay_anchor_hash: self.anchor_hash,
+        })
     }
 
     /// Calculates a new [`Overlay`] given a transaction and the current durable state/trie
@@ -410,13 +450,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
 
-        // Collect any reverts which are required to bring the DB view back to the anchor hash.
-        let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
-            self.reverts_required(provider, state_trie_tip_block, finish_tip_block)?
-        {
+        let OverlayRevertPlan { revert_blocks, overlay_anchor_hash } =
+            self.revert_plan(provider, state_trie_tip_block, finish_tip_block)?;
+
+        // Collect any reverts which are required to bring the DB view back to the overlay anchor
+        // hash.
+        let (trie_updates, hashed_post_state) = if let Some(revert_blocks) = revert_blocks {
             debug!(
                 target: "providers::state::overlay",
                 ?revert_blocks,
+                overlay_anchor_hash = ?overlay_anchor_hash,
                 source = overlay_source_kind(self.overlay_source.as_ref()),
                 source_anchor = ?self.overlay_source.as_ref().and_then(overlay_source_anchor),
                 source_blocks = ?self.overlay_source.as_ref().and_then(overlay_source_blocks),
@@ -452,7 +495,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             // Resolve overlays (lazy or immediate) and extend reverts with them.
             // If reverts are empty, use overlays directly to avoid cloning.
-            let (overlay_trie, overlay_state) = self.resolve_overlays(self.anchor_hash)?;
+            let (overlay_trie, overlay_state) = self.resolve_overlays(overlay_anchor_hash)?;
 
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
@@ -479,15 +522,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 target: "providers::state::overlay",
                 num_trie_updates = ?trie_updates_total_len,
                 num_state_updates = ?hashed_state_updates_total_len,
+                overlay_anchor_hash = ?overlay_anchor_hash,
                 source = overlay_source_kind(self.overlay_source.as_ref()),
                 "Built overlay after reverting to anchor",
             );
 
             (trie_updates, hashed_state_updates)
         } else {
-            // If no reverts are needed then the requested anchor is exactly the durable
-            // state/trie frontier. Use overlays directly from that frontier.
-            let (trie_updates, hashed_state) = self.resolve_overlays(state_trie_tip_block.hash)?;
+            // If no reverts are needed then the overlay can be resolved directly from the durable
+            // logical frontier selected by the revert plan.
+            let (trie_updates, hashed_state) = self.resolve_overlays(overlay_anchor_hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
@@ -498,6 +542,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 target: "providers::state::overlay",
                 num_trie_updates = trie_updates_total_len,
                 num_state_updates = hashed_state_updates_total_len,
+                overlay_anchor_hash = ?overlay_anchor_hash,
                 source = overlay_source_kind(self.overlay_source.as_ref()),
                 "Built overlay directly from durable frontier"
             );
@@ -890,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn build_overlay_uses_partial_trie_frontier_as_lazy_overlay_base() {
+    fn build_overlay_uses_finish_frontier_as_lazy_overlay_base_when_available() {
         let factory = create_test_provider_factory();
         let mut block_builder = TestBlockBuilder::eth();
         let blocks = block_builder
@@ -927,11 +972,11 @@ mod tests {
         .build_overlay(&provider)
         .unwrap();
 
-        assert_eq!(overlay.hashed_post_state.accounts.len(), 3);
+        assert_eq!(overlay.hashed_post_state.accounts.len(), 1);
     }
 
     #[test]
-    fn build_overlay_rejects_anchor_between_state_trie_frontier_and_finish() {
+    fn build_overlay_reverts_from_finish_for_anchor_after_state_trie_frontier() {
         let factory = create_test_provider_factory();
         let mut block_builder = TestBlockBuilder::eth().with_state();
 
@@ -964,16 +1009,16 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let anchor = blocks[1].recovered_block().hash();
-        let err = OverlayBuilder::<EthPrimitives>::new(anchor, ChangesetCache::new())
+        let overlay = OverlayBuilder::<EthPrimitives>::new(anchor, ChangesetCache::new())
             .with_lazy_overlay(Some(LazyOverlay::new(vec![blocks[2].clone()])))
             .build_overlay(&provider)
-            .unwrap_err();
+            .unwrap();
 
-        assert!(matches!(err, ProviderError::InsufficientChangesets { .. }));
+        assert!(!overlay.hashed_post_state.is_empty());
     }
 
     #[test]
-    fn build_overlay_rejects_finish_anchor_without_trie_bridge() {
+    fn build_overlay_accepts_finish_anchor_without_trie_bridge() {
         let factory = create_test_provider_factory();
         let mut block_builder = TestBlockBuilder::eth().with_state();
 
@@ -1007,11 +1052,11 @@ mod tests {
         let provider = factory.provider().unwrap();
         let finish_anchor = blocks[2].recovered_block().hash();
 
-        let err = OverlayBuilder::<EthPrimitives>::new(finish_anchor, ChangesetCache::new())
+        let overlay = OverlayBuilder::<EthPrimitives>::new(finish_anchor, ChangesetCache::new())
             .with_lazy_overlay(None)
             .build_overlay(&provider)
-            .unwrap_err();
+            .unwrap();
 
-        assert!(matches!(err, ProviderError::InsufficientChangesets { .. }));
+        assert!(overlay.hashed_post_state.is_empty());
     }
 }
