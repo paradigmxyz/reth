@@ -1,7 +1,7 @@
 use crate::PayloadProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{BlockHash, Bytes, B256};
+use alloy_primitives::Bytes;
 use alloy_provider::{
     network::{primitives::HeaderResponse, BlockResponse, Network},
     ConnectionConfig, Provider, ProviderBuilder, WebSocketConfig,
@@ -96,15 +96,12 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
         &self,
         header: &N::HeaderResponse,
     ) -> eyre::Result<Option<Bytes>> {
-        let block_hash = header.hash();
-        let Some(block_access_list_hash) = block_access_list_hash_to_fetch(
-            block_hash,
-            header.block_access_list_hash(),
-            self.fetch_block_access_list,
-        )?
-        else {
+        if !self.fetch_block_access_list {
             return Ok(None)
-        };
+        }
+
+        let block_hash = header.hash();
+        let Some(block_access_list_hash) = header.block_access_list_hash() else { return Ok(None) };
 
         let block_access_list = self
             .provider
@@ -123,36 +120,14 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
                 format!("failed to fetch block access list for Amsterdam block {block_hash}")
             })?;
 
-        Ok(Some(required_block_access_list(block_hash, block_access_list_hash, block_access_list)?))
+        let block_access_list = block_access_list.ok_or_else(|| {
+            eyre::eyre!(
+                "missing block access list for Amsterdam block {block_hash} with block access list hash {block_access_list_hash}"
+            )
+        })?;
+
+        Ok(Some(block_access_list))
     }
-}
-
-fn block_access_list_hash_to_fetch(
-    block_hash: BlockHash,
-    block_access_list_hash: Option<B256>,
-    fetch_block_access_list: bool,
-) -> eyre::Result<Option<B256>> {
-    let Some(block_access_list_hash) = block_access_list_hash else { return Ok(None) };
-
-    if !fetch_block_access_list {
-        eyre::bail!(
-            "block {block_hash} requires block access list {block_access_list_hash}, but block access list fetching is disabled"
-        );
-    }
-
-    Ok(Some(block_access_list_hash))
-}
-
-fn required_block_access_list(
-    block_hash: BlockHash,
-    block_access_list_hash: B256,
-    block_access_list: Option<Bytes>,
-) -> eyre::Result<Bytes> {
-    block_access_list.ok_or_else(|| {
-        eyre::eyre!(
-            "missing block access list for Amsterdam block {block_hash} with block access list hash {block_access_list_hash}"
-        )
-    })
 }
 
 impl<N: Network, ExecutionData> PayloadProvider for RpcBlockProvider<N, ExecutionData>
@@ -225,46 +200,5 @@ where
             .await?
             .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
         self.get_payload_from_block(block).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn block_access_list_hash_to_fetch_rejects_opted_out_fetching_for_amsterdam_blocks() {
-        let err = block_access_list_hash_to_fetch(B256::ZERO, Some(B256::with_last_byte(1)), false)
-            .unwrap_err();
-
-        assert!(err.to_string().contains("block access list fetching is disabled"));
-    }
-
-    #[test]
-    fn block_access_list_hash_to_fetch_ignores_pre_amsterdam_blocks() {
-        assert_eq!(block_access_list_hash_to_fetch(B256::ZERO, None, false).unwrap(), None);
-    }
-
-    #[test]
-    fn required_block_access_list_rejects_missing_bal_bytes() {
-        let err =
-            required_block_access_list(B256::ZERO, B256::with_last_byte(1), None).unwrap_err();
-
-        assert!(err.to_string().contains("missing block access list"));
-    }
-
-    #[test]
-    fn required_block_access_list_accepts_bal_bytes() {
-        let block_access_list = Bytes::from_static(&[0xc0]);
-
-        assert_eq!(
-            required_block_access_list(
-                B256::ZERO,
-                B256::with_last_byte(1),
-                Some(block_access_list.clone())
-            )
-            .unwrap(),
-            block_access_list
-        );
     }
 }
