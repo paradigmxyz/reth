@@ -72,6 +72,7 @@ impl Default for BalConfig {
 struct InMemoryBalStoreInner {
     entries: HashMap<BlockHash, BalEntry>,
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
+    highest_block_number: Option<BlockNumber>,
 }
 
 impl InMemoryBalStoreInner {
@@ -89,6 +90,14 @@ impl InMemoryBalStoreInner {
         }
 
         self.hashes_by_number.entry(block_number).or_default().push(block_hash);
+        self.highest_block_number = Some(
+            self.highest_block_number.map_or(block_number, |highest| highest.max(block_number)),
+        );
+    }
+
+    // Removes BALs outside the configured retention window using the highest inserted block.
+    fn prune_from_highest_block(&mut self, prune_mode: Option<PruneMode>) -> usize {
+        self.highest_block_number.map_or(0, |tip| self.prune(prune_mode, tip))
     }
 
     // Removes BALs outside the configured retention window for the given chain tip.
@@ -120,7 +129,7 @@ impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
         inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
-        inner.prune(self.config.in_memory_retention, num_hash.number);
+        inner.prune_from_highest_block(self.config.in_memory_retention);
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
     }
@@ -274,6 +283,26 @@ mod tests {
         assert_eq!(
             store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
             vec![None, Some(retained_bal)]
+        );
+    }
+
+    #[test]
+    fn insert_prunes_from_highest_inserted_block() {
+        let store =
+            InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Distance(2)));
+        let old_hash = B256::random();
+        let high_hash = B256::random();
+        let late_hash = B256::random();
+        let high_bal = Bytes::from_static(b"high");
+        let late_bal = Bytes::from_static(b"late");
+
+        store.insert(NumHash::new(7, old_hash), sealed_bal(Bytes::from_static(b"old"))).unwrap();
+        store.insert(NumHash::new(10, high_hash), sealed_bal(high_bal.clone())).unwrap();
+        store.insert(NumHash::new(8, late_hash), sealed_bal(late_bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[old_hash, high_hash, late_hash]).unwrap(),
+            vec![None, Some(high_bal), Some(late_bal)]
         );
     }
 
