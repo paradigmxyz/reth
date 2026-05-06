@@ -7,8 +7,6 @@
 
 use alloy_consensus::TxEnvelope;
 use alloy_eips::{
-    eip1559::BaseFeeParams,
-    eip7840::BlobParams,
     eip7928::{AccountChanges, BlockAccessList, SlotChanges},
     Typed2718,
 };
@@ -454,7 +452,7 @@ impl Command {
                 base_v1.gas_limit = total_gas_limit;
             }
 
-            // Chain sequential big blocks: set parent_hash, block_number. 
+            // Chain sequential big blocks: set parent_hash, block_number.
             // The engine validates each big block against its parent, so these fields must be
             // derivable from the previous big block's merged header.
             if let Some(prev_hash) = prev_big_block_hash {
@@ -464,7 +462,7 @@ impl Command {
                 base.payload.as_v1_mut().block_number = self.from_block + big_block_idx;
             }
 
-            // Merge blob data from all constituent blocks:  concatenate versioned 
+            // Merge blob data from all constituent blocks:  concatenate versioned
             // hashes so the sidecar matches the blob transactions in the merged payload body.
             {
                 let mut all_versioned_hashes: Vec<B256> =
