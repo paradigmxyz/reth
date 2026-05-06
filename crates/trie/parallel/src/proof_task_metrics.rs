@@ -1,5 +1,8 @@
 use crate::value_encoder::ValueEncoderStats;
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{
+    metrics::{Gauge, Histogram},
+    Metrics,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
@@ -28,6 +31,14 @@ pub struct ProofTaskTrieMetrics {
     /// (seconds). This is the portion of account worker idle time attributable to storage
     /// worker latency rather than queue wait.
     account_worker_storage_wait_seconds: Histogram,
+    /// Total number of storage workers in the pool (pool capacity).
+    max_storage_workers: Gauge,
+    /// Total number of account workers in the pool (pool capacity).
+    max_account_workers: Gauge,
+    /// Number of storage workers currently processing a job.
+    active_storage_workers: Gauge,
+    /// Number of account workers currently processing a job.
+    active_account_workers: Gauge,
 }
 
 impl ProofTaskTrieMetrics {
@@ -49,6 +60,32 @@ impl ProofTaskTrieMetrics {
         self.deferred_encoder_dispatched_missing_root
             .record(stats.dispatched_missing_root_count as f64);
         self.account_worker_storage_wait_seconds.record(stats.storage_wait_time.as_secs_f64());
+    }
+
+    /// Record the configured worker pool capacities.
+    pub fn record_worker_pool_capacity(&self, storage: usize, account: usize) {
+        self.max_storage_workers.set(storage as f64);
+        self.max_account_workers.set(account as f64);
+    }
+
+    /// Increment the number of storage workers actively processing a job.
+    pub fn inc_active_storage_workers(&self) {
+        self.active_storage_workers.increment(1.0);
+    }
+
+    /// Decrement the number of storage workers actively processing a job.
+    pub fn dec_active_storage_workers(&self) {
+        self.active_storage_workers.decrement(1.0);
+    }
+
+    /// Increment the number of account workers actively processing a job.
+    pub fn inc_active_account_workers(&self) {
+        self.active_account_workers.increment(1.0);
+    }
+
+    /// Decrement the number of account workers actively processing a job.
+    pub fn dec_active_account_workers(&self) {
+        self.active_account_workers.decrement(1.0);
     }
 }
 

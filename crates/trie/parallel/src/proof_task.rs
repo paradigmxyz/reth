@@ -192,6 +192,10 @@ impl ProofWorkerHandle {
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
 
+        #[cfg(feature = "metrics")]
+        ProofTaskTrieMetrics::default()
+            .record_worker_pool_capacity(storage_worker_count, account_worker_count);
+
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
@@ -652,6 +656,8 @@ where
 
             // Mark worker as busy.
             self.availability.mark_busy(self.worker_id);
+            #[cfg(feature = "metrics")]
+            self.metrics.inc_active_storage_workers();
 
             #[cfg(feature = "trie-debug")]
             if let Some(max_jitter) = self.task_ctx.proof_jitter {
@@ -680,6 +686,8 @@ where
 
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
+            #[cfg(feature = "metrics")]
+            self.metrics.dec_active_storage_workers();
 
             idle_start = Instant::now();
         }
@@ -903,6 +911,8 @@ where
 
             // Mark worker as busy.
             self.availability.mark_busy(self.worker_id);
+            #[cfg(feature = "metrics")]
+            self.metrics.inc_active_account_workers();
 
             #[cfg(feature = "trie-debug")]
             if let Some(max_jitter) = self.task_ctx.proof_jitter {
@@ -932,6 +942,8 @@ where
 
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
+            #[cfg(feature = "metrics")]
+            self.metrics.dec_active_account_workers();
 
             idle_start = Instant::now();
         }
