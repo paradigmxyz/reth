@@ -161,12 +161,12 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings_and_hash_validation(factory, genesis_storage_settings, true)
+    init_genesis_with_settings_and_validate(factory, genesis_storage_settings, true)
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`],
 /// optionally validating the DB-resident genesis hash against the chainspec hash.
-pub fn init_genesis_with_settings_and_hash_validation<PF>(
+pub fn init_genesis_with_settings_and_validate<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
     validate_genesis_hash: bool,
@@ -1093,7 +1093,7 @@ mod tests {
         let rocksdb_provider = factory.rocksdb_provider();
         init_genesis(&factory).unwrap();
 
-        let result = init_genesis_with_settings_and_hash_validation(
+        let result = init_genesis_with_settings_and_validate(
             &ProviderFactory::<MockNodeTypesWithDB>::new(
                 factory.into_db(),
                 MAINNET.clone(),

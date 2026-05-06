@@ -43,7 +43,7 @@ use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{
-    init_genesis_with_settings, init_genesis_with_settings_and_hash_validation, InitStorageError,
+    init_genesis_with_settings, init_genesis_with_settings_and_validate, InitStorageError,
 };
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
@@ -662,7 +662,7 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings_and_hash_validation(
+        init_genesis_with_settings_and_validate(
             self.provider_factory(),
             self.node_config().storage_settings(),
             !self.node_config().debug.skip_genesis_validation,
