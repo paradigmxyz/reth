@@ -4,8 +4,7 @@ pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
-use alloy_primitives::Bytes;
-use alloy_rpc_types_engine::ExecutionData;
+use alloy_rpc_types_engine::{ExecutionData, PayloadExtras};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
@@ -454,14 +453,23 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> ExecutionData {
-        rpc_block_to_execution_data(rpc_block, None)
+        <Self as DebugNode<N>>::rpc_to_execution_data_with_extras(
+            rpc_block,
+            PayloadExtras::default(),
+        )
     }
 
-    fn rpc_to_execution_data_with_block_access_list(
+    fn rpc_to_execution_data_with_extras(
         rpc_block: Self::RpcBlock,
-        block_access_list: Option<Bytes>,
+        extras: PayloadExtras,
     ) -> ExecutionData {
-        rpc_block_to_execution_data(rpc_block, block_access_list)
+        let (block, hash) = rpc_block.into_consensus_sealed().into_parts();
+        let block = block.convert_transactions::<TransactionSigned>();
+        let (payload, sidecar) =
+            alloy_rpc_types_engine::ExecutionPayload::from_block_unchecked_with_extras(
+                hash, &block, extras,
+            );
+        ExecutionData::new(payload, sidecar)
     }
 
     fn local_payload_attributes_builder(
@@ -469,21 +477,6 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes> {
         LocalPayloadAttributesBuilder::new(Arc::new(chain_spec.clone()))
     }
-}
-
-fn rpc_block_to_execution_data(
-    rpc_block: alloy_rpc_types_eth::Block,
-    block_access_list: Option<Bytes>,
-) -> ExecutionData {
-    let (block, hash) = rpc_block.into_consensus_sealed().into_parts();
-    let block = block.convert_transactions::<TransactionSigned>();
-    let (payload, sidecar) =
-        alloy_rpc_types_engine::ExecutionPayload::from_block_unchecked_with_extras(
-            hash,
-            &block,
-            block_access_list,
-        );
-    ExecutionData::new(payload, sidecar)
 }
 
 /// A regular ethereum evm and executor builder.

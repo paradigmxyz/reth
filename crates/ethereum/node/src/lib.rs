@@ -11,6 +11,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+use alloy_primitives as _;
 use reth_revm as _;
 use revm as _;
 

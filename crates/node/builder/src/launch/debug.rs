@@ -3,6 +3,7 @@ use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_consensus::transaction::Either;
 use alloy_primitives::Bytes;
 use alloy_provider::network::AnyNetwork;
+use alloy_rpc_types_engine::PayloadExtras;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
@@ -74,12 +75,12 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// to the node's internal execution payload data representation.
     fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> PayloadDataTy<Self>;
 
-    /// Converts an RPC block and optional RLP-encoded block access list to execution payload data.
-    fn rpc_to_execution_data_with_block_access_list(
+    /// Converts an RPC block and payload extras to execution payload data.
+    fn rpc_to_execution_data_with_extras(
         rpc_block: Self::RpcBlock,
-        block_access_list: Option<Bytes>,
+        extras: PayloadExtras,
     ) -> PayloadDataTy<Self> {
-        let _ = block_access_list;
+        let _ = extras;
         Self::rpc_to_execution_data(rpc_block)
     }
 
@@ -99,7 +100,7 @@ pub(crate) trait DebugPayloadConverter<Block> {
     /// The execution payload data type.
     type ExecutionData;
 
-    /// Converts a provider block response and optional RLP-encoded block access list.
+    /// Converts a provider block response and payload extras.
     fn convert(block: Block, block_access_list: Option<Bytes>) -> Self::ExecutionData;
 }
 
@@ -117,7 +118,10 @@ where
     fn convert(block: Block, block_access_list: Option<Bytes>) -> Self::ExecutionData {
         let json = serde_json::to_value(block).expect("Block serialization cannot fail");
         let rpc_block = serde_json::from_value(json).expect("Block deserialization cannot fail");
-        N::Types::rpc_to_execution_data_with_block_access_list(rpc_block, block_access_list)
+        N::Types::rpc_to_execution_data_with_extras(
+            rpc_block,
+            PayloadExtras::from(block_access_list),
+        )
     }
 }
 
