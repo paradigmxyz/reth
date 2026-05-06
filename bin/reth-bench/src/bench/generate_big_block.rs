@@ -377,8 +377,7 @@ impl Command {
                         break;
                     }
                 };
-                let FetchedBlock { execution_data, block_access_list } =
-                    fetched;
+                let FetchedBlock { execution_data, block_access_list } = fetched;
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
                 let block_blob_gas =
@@ -636,16 +635,14 @@ async fn fetch_one_block(
     block_number: u64,
     bal_enabled: bool,
 ) -> eyre::Result<Option<FetchedBlock>> {
-    let (rpc_block, block_access_list) = tokio::try_join!(
-        provider.get_block_by_number(block_number.into()).full(),
-        async {
+    let (rpc_block, block_access_list) =
+        tokio::try_join!(provider.get_block_by_number(block_number.into()).full(), async {
             if bal_enabled {
                 provider.get_block_access_list_by_number(block_number.into()).await
             } else {
                 Ok(None)
             }
-        }
-    )?;
+        })?;
     let Some(rpc_block) = rpc_block else {
         return Ok(None);
     };
