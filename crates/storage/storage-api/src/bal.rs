@@ -46,9 +46,7 @@ pub trait BalStore: Send + Sync + 'static {
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
     ///
     /// Returns the number of BALs pruned.
-    fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-        Ok(0)
-    }
+    fn prune(&self, tip: BlockNumber) -> ProviderResult<usize>;
 
     /// Fetch BALs for the given block hashes.
     ///
@@ -250,6 +248,10 @@ impl BalStore for NoopBalStore {
         Ok(())
     }
 
+    fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+        Ok(0)
+    }
+
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         Ok(block_hashes.iter().map(|_| None).collect())
     }
@@ -365,6 +367,10 @@ mod tests {
     impl BalStore for TestBalStore {
         fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
             Ok(())
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Ok(0)
         }
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
