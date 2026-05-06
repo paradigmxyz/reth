@@ -54,15 +54,14 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
                     .await?,
             ),
             url: rpc_url.to_string(),
-            fetch_block_access_list: false,
+            fetch_block_access_list: true,
             convert: Arc::new(convert),
         })
     }
 
-    /// Enables fetching raw block access list bytes and passing them to the payload conversion
-    /// function.
-    pub const fn with_block_access_lists(mut self) -> Self {
-        self.fetch_block_access_list = true;
+    /// Disables fetching raw block access list bytes.
+    pub const fn without_block_access_lists(mut self) -> Self {
+        self.fetch_block_access_list = false;
         self
     }
 
@@ -234,7 +233,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn block_access_list_hash_to_fetch_rejects_disabled_fetching_for_amsterdam_blocks() {
+    fn block_access_list_hash_to_fetch_rejects_opted_out_fetching_for_amsterdam_blocks() {
         let err = block_access_list_hash_to_fetch(B256::ZERO, Some(B256::with_last_byte(1)), false)
             .unwrap_err();
 

@@ -279,8 +279,7 @@ where
                 url.as_str(),
                 DefaultDebugPayloadConverter::<N>::convert,
             )
-            .await?
-            .with_block_access_lists();
+            .await?;
 
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
