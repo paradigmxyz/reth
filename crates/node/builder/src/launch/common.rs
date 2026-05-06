@@ -663,11 +663,12 @@ where
                 metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),
             )
-            .with_storage_settings_info(storage_settings_info(
-                storage_settings.storage_v2,
+            .with_storage_settings_info(StorageSettingsInfo {
+                storage_v2: storage_settings.storage_v2,
                 pruning_mode,
-                &prune_config,
-            ))
+                prune_config: serde_json::to_string(&prune_config)
+                    .expect("serializing PruneConfig should not fail"),
+            })
             .with_push_gateway(
                 self.node_config().metrics.push_gateway_url.clone(),
                 self.node_config().metrics.push_gateway_interval,
@@ -1288,19 +1289,6 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
             move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
         })
         .build()
-}
-
-fn storage_settings_info(
-    storage_v2: bool,
-    pruning_mode: &'static str,
-    prune_config: &PruneConfig,
-) -> StorageSettingsInfo {
-    StorageSettingsInfo {
-        storage_v2,
-        pruning_mode,
-        prune_config: serde_json::to_string(prune_config)
-            .expect("serializing PruneConfig should not fail"),
-    }
 }
 
 #[cfg(test)]
