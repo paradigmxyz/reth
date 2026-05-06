@@ -43,6 +43,13 @@ pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
 
+    /// Prunes expired BALs according to the store's retention policy and the given chain tip.
+    ///
+    /// Returns the number of BALs pruned.
+    fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+        Ok(0)
+    }
+
     /// Fetch BALs for the given block hashes.
     ///
     /// The returned vector must align with `block_hashes`.
@@ -153,6 +160,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         self.inner.insert(num_hash, bal)
+    }
+
+    /// Prunes expired BALs according to the store's retention policy and the given chain tip.
+    #[inline]
+    pub fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
+        self.inner.prune(tip)
     }
 
     /// Fetch BALs for the given block hashes.
@@ -288,6 +301,7 @@ mod tests {
         assert_eq!(by_hash, vec![None, None]);
         assert!(store.get_by_hash(B256::random()).unwrap().is_none());
         assert!(by_range.is_empty());
+        assert_eq!(store.prune(10).unwrap(), 0);
     }
 
     #[test]

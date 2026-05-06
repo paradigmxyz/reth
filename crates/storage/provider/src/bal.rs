@@ -72,7 +72,6 @@ impl Default for BalConfig {
 struct InMemoryBalStoreInner {
     entries: HashMap<BlockHash, BalEntry>,
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
-    highest_block_number: Option<BlockNumber>,
 }
 
 impl InMemoryBalStoreInner {
@@ -90,16 +89,13 @@ impl InMemoryBalStoreInner {
         }
 
         self.hashes_by_number.entry(block_number).or_default().push(block_hash);
-        self.highest_block_number = Some(
-            self.highest_block_number.map_or(block_number, |highest| highest.max(block_number)),
-        );
     }
 
-    // Removes BALs outside the configured retention window.
-    fn prune(&mut self, prune_mode: Option<PruneMode>) {
-        let Some(prune_mode) = prune_mode else { return };
-        let Some(tip) = self.highest_block_number else { return };
+    // Removes BALs outside the configured retention window for the given chain tip.
+    fn prune(&mut self, prune_mode: Option<PruneMode>, tip: BlockNumber) -> usize {
+        let Some(prune_mode) = prune_mode else { return 0 };
 
+        let mut pruned = 0;
         while let Some((&block_number, _)) = self.hashes_by_number.first_key_value() {
             if !prune_mode.should_prune(block_number, tip) {
                 break
@@ -107,9 +103,10 @@ impl InMemoryBalStoreInner {
 
             let Some((_, hashes)) = self.hashes_by_number.pop_first() else { break };
             for hash in hashes {
-                self.entries.remove(&hash);
+                pruned += usize::from(self.entries.remove(&hash).is_some());
             }
         }
+        pruned
     }
 }
 
@@ -123,9 +120,13 @@ impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
         inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
-        inner.prune(self.config.in_memory_retention);
+        inner.prune(self.config.in_memory_retention, num_hash.number);
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
+    }
+
+    fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
+        Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
     }
 
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
@@ -258,6 +259,25 @@ mod tests {
     }
 
     #[test]
+    fn prune_uses_chain_tip() {
+        let store =
+            InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Distance(2)));
+        let old_hash = B256::random();
+        let retained_hash = B256::random();
+        let old_bal = Bytes::from_static(b"old");
+        let retained_bal = Bytes::from_static(b"retained");
+
+        store.insert(NumHash::new(7, old_hash), sealed_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(8, retained_hash), sealed_bal(retained_bal.clone())).unwrap();
+
+        assert_eq!(store.prune(10).unwrap(), 1);
+        assert_eq!(
+            store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
+            vec![None, Some(retained_bal)]
+        );
+    }
+
+    #[test]
     fn unbounded_retention_keeps_old_bals() {
         let store = InMemoryBalStore::new(BalConfig::unbounded());
         let old_hash = B256::random();
@@ -277,6 +297,7 @@ mod tests {
             store.get_by_hashes(&[old_hash, tip_hash]).unwrap(),
             vec![Some(old_bal), Some(tip_bal)]
         );
+        assert_eq!(store.prune(BAL_RETENTION_PERIOD_SLOTS + 2).unwrap(), 0);
     }
 
     #[test]
