@@ -3,6 +3,7 @@ use crate::{
     hooks::{Hook, Hooks},
     process::register_process_metrics,
     recorder::install_prometheus_recorder,
+    storage::describe_storage_metrics,
     version::VersionInfo,
 };
 use bytes::Bytes;
@@ -106,6 +107,7 @@ impl MetricServer {
 
         // Describe metrics after recorder installation
         describe_db_metrics();
+        describe_storage_metrics();
         describe_static_file_metrics();
         describe_rocksdb_metrics();
         Collector::default().describe();
@@ -473,7 +475,12 @@ mod tests {
 
         let runtime = Runtime::test();
 
-        let hooks = Hooks::builder().build();
+        let hooks = Hooks::builder()
+            .with_hook(|| {
+                crate::storage::StorageInfo::new(true, crate::storage::StorageMode::Minimal)
+                    .register_storage_metrics();
+            })
+            .build();
 
         let listen_addr = get_random_available_addr();
         let config = MetricServerConfig::new(
@@ -497,6 +504,15 @@ mod tests {
         assert!(body.contains("reth_process_cpu_seconds_total"));
         assert!(body.contains("reth_process_start_time_seconds"));
         assert!(body.contains("process_cli_args"), "expected process_cli_args metric in output");
+        assert!(body.contains("reth_storage_v2 1"), "expected storage v2 metric in output");
+        assert!(
+            body.contains("reth_storage_v2_minimal 1"),
+            "expected storage v2 minimal metric in output"
+        );
+        assert!(
+            body.contains(r#"reth_storage_mode{mode="minimal"} 1"#),
+            "expected minimal storage mode metric in output"
+        );
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);

@@ -38,7 +38,7 @@ use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
@@ -51,7 +51,7 @@ use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::{
-    args::DefaultEraHost,
+    args::{DefaultEraHost, DefaultPruningValues},
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::BlockHeader,
@@ -62,15 +62,16 @@ use reth_node_metrics::{
     hooks::Hooks,
     recorder::install_prometheus_recorder,
     server::{MetricServer, MetricServerConfig},
+    storage::{StorageInfo, StorageMode},
     version::VersionInfo,
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
     RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
-use reth_prune::{PruneModes, PrunerBuilder};
+use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
@@ -620,18 +621,25 @@ where
     /// This launches the prometheus endpoint.
     ///
     /// Convenience function to [`Self::start_prometheus_endpoint`]
-    pub async fn with_prometheus_server(self) -> eyre::Result<Self> {
+    pub async fn with_prometheus_server(self) -> eyre::Result<Self>
+    where
+        T::ChainSpec: EthereumHardforks,
+    {
         self.start_prometheus_endpoint().await?;
         Ok(self)
     }
 
     /// Starts the prometheus endpoint.
-    pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()> {
+    pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()>
+    where
+        T::ChainSpec: EthereumHardforks,
+    {
         // ensure recorder runs upkeep periodically
         install_prometheus_recorder().spawn_upkeep();
 
         let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
+            let storage_mode = storage_mode(&self.prune_config(), self.chain_spec().as_ref());
             let config = MetricServerConfig::new(
                 addr,
                 VersionInfo {
@@ -644,7 +652,7 @@ where
                 },
                 ChainSpecInfo { name: self.chain_id().to_string() },
                 self.task_executor().clone(),
-                metrics_hooks(self.provider_factory()),
+                metrics_hooks_with_storage_mode(self.provider_factory(), storage_mode),
                 self.data_dir().pprof_dumps(),
             )
             .with_push_gateway(
@@ -1247,7 +1255,21 @@ where
 
 /// Returns the metrics hooks for the node.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
+    metrics_hooks_with_storage_mode(provider_factory, StorageMode::Custom)
+}
+
+fn metrics_hooks_with_storage_mode<N: NodeTypesWithDB>(
+    provider_factory: &ProviderFactory<N>,
+    storage_mode: StorageMode,
+) -> Hooks {
     Hooks::builder()
+        .with_hook({
+            let provider_factory = provider_factory.clone();
+            move || {
+                StorageInfo::new(provider_factory.cached_storage_settings().is_v2(), storage_mode)
+                    .register_storage_metrics();
+            }
+        })
         .with_hook({
             let db = provider_factory.db_ref().clone();
             move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
@@ -1269,11 +1291,53 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
         .build()
 }
 
+fn storage_mode<ChainSpec>(prune_config: &PruneConfig, chain_spec: &ChainSpec) -> StorageMode
+where
+    ChainSpec: EthereumHardforks,
+{
+    let prune_modes = &prune_config.segments;
+
+    if prune_modes == &PruneModes::default() {
+        return StorageMode::Archive;
+    }
+
+    let defaults = DefaultPruningValues::get_global();
+    if prune_modes == &defaults.minimal_prune_modes {
+        return StorageMode::Minimal;
+    }
+
+    if prune_modes == &full_prune_modes(chain_spec) {
+        return StorageMode::Full;
+    }
+
+    StorageMode::Custom
+}
+
+fn full_prune_modes<ChainSpec>(chain_spec: &ChainSpec) -> PruneModes
+where
+    ChainSpec: EthereumHardforks,
+{
+    let defaults = DefaultPruningValues::get_global();
+    let mut modes = defaults.full_prune_modes.clone();
+
+    if defaults.full_bodies_history_use_pre_merge {
+        modes.bodies_history = chain_spec
+            .ethereum_fork_activation(EthereumHardfork::Paris)
+            .block_number()
+            .map(PruneMode::Before);
+    }
+
+    modes
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LaunchContext, NodeConfig};
+    use super::{full_prune_modes, storage_mode, LaunchContext, NodeConfig};
+    use reth_chainspec::MAINNET;
     use reth_config::Config;
     use reth_node_core::args::PruningArgs;
+    use reth_node_metrics::storage::StorageMode;
+    use reth_prune::{PruneMode, PruneModes, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE};
 
     const EXTENSION: &str = "toml";
 
@@ -1324,5 +1388,44 @@ mod tests {
 
             assert_eq!(reth_config, loaded_config);
         })
+    }
+
+    #[test]
+    fn storage_mode_detects_archive_profile() {
+        let config = Config::default();
+
+        assert_eq!(storage_mode(&config.prune, MAINNET.as_ref()), StorageMode::Archive);
+    }
+
+    #[test]
+    fn storage_mode_detects_minimal_profile() {
+        let mut config = Config::default();
+        config.prune.segments = PruneModes {
+            sender_recovery: Some(PruneMode::Full),
+            transaction_lookup: Some(PruneMode::Full),
+            receipts: Some(PruneMode::Distance(MINIMUM_DISTANCE)),
+            account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+            storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+            bodies_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+            receipts_log_filter: Default::default(),
+        };
+
+        assert_eq!(storage_mode(&config.prune, MAINNET.as_ref()), StorageMode::Minimal);
+    }
+
+    #[test]
+    fn storage_mode_detects_full_profile() {
+        let mut config = Config::default();
+        config.prune.segments = full_prune_modes(MAINNET.as_ref());
+
+        assert_eq!(storage_mode(&config.prune, MAINNET.as_ref()), StorageMode::Full);
+    }
+
+    #[test]
+    fn storage_mode_detects_custom_profile() {
+        let mut config = Config::default();
+        config.prune.segments.receipts = Some(PruneMode::Distance(MINIMUM_DISTANCE));
+
+        assert_eq!(storage_mode(&config.prune, MAINNET.as_ref()), StorageMode::Custom);
     }
 }
