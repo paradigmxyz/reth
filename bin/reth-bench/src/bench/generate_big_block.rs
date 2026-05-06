@@ -27,15 +27,12 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::BigBlockData;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-use reth_ethereum_primitives::Receipt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
 };
 use tracing::{info, warn};
-
-use crate::bench::helpers::fetch_block_access_list;
 
 /// A single transaction with its gas used and raw encoded bytes.
 #[derive(Debug, Clone)]
@@ -380,8 +377,7 @@ impl Command {
                         break;
                     }
                 };
-                let FetchedBlock { execution_data, consensus_receipts, block_access_list } =
-                    fetched;
+                let FetchedBlock { execution_data, block_access_list } = fetched;
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
                 let block_blob_gas =
@@ -393,7 +389,6 @@ impl Command {
                     gas_used = block_gas,
                     blob_gas_used = block_blob_gas,
                     tx_count = execution_data.payload.transactions().len(),
-                    receipts = consensus_receipts.len(),
                     "Fetched block"
                 );
 
@@ -629,9 +624,6 @@ impl Command {
 struct FetchedBlock {
     /// Execution payload with sidecar derived from the RPC block.
     execution_data: ExecutionData,
-    /// Consensus-format receipts (`cumulative_gas_used` is still per-block, callers offset
-    /// it when merging).
-    consensus_receipts: Vec<Receipt>,
     /// `eth_getBlockAccessListByBlockNumber` result when `--bal` is enabled.
     block_access_list: Option<BlockAccessList>,
 }
@@ -643,46 +635,17 @@ async fn fetch_one_block(
     block_number: u64,
     bal_enabled: bool,
 ) -> eyre::Result<Option<FetchedBlock>> {
-    let (rpc_block, receipts) = tokio::try_join!(
-        provider.get_block_by_number(block_number.into()).full(),
-        provider.get_block_receipts(block_number.into()),
-    )?;
-    let (rpc_block, receipts) = match (rpc_block, receipts) {
-        (Some(b), Some(r)) => (b, r),
-        _ => return Ok(None),
-    };
-
-    let block_access_list = if bal_enabled {
-        Some(
-            fetch_block_access_list(&provider, block_number)
-                .await
-                .wrap_err_with(|| format!("Failed to fetch BAL for block {block_number}"))?,
-        )
-    } else {
-        None
-    };
-
-    let consensus_receipts: Vec<Receipt> = receipts
-        .iter()
-        .map(|r| {
-            let inner = &r.inner.inner.inner;
-            let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
-            Receipt {
-                tx_type,
-                success: inner.receipt.status.coerce_status(),
-                cumulative_gas_used: inner.receipt.cumulative_gas_used,
-                logs: inner
-                    .receipt
-                    .logs
-                    .iter()
-                    .map(|log| alloy_primitives::Log {
-                        address: log.inner.address,
-                        data: log.inner.data.clone(),
-                    })
-                    .collect(),
+    let (rpc_block, block_access_list) =
+        tokio::try_join!(provider.get_block_by_number(block_number.into()).full(), async {
+            if bal_enabled {
+                provider.get_block_access_list_by_number(block_number.into()).await
+            } else {
+                Ok(None)
             }
-        })
-        .collect();
+        })?;
+    let Some(rpc_block) = rpc_block else {
+        return Ok(None);
+    };
 
     let block = rpc_block
         .into_inner()
@@ -695,7 +658,7 @@ async fn fetch_one_block(
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
     let execution_data = ExecutionData { payload, sidecar };
 
-    Ok(Some(FetchedBlock { execution_data, consensus_receipts, block_access_list }))
+    Ok(Some(FetchedBlock { execution_data, block_access_list }))
 }
 
 fn merge_block_access_list(
