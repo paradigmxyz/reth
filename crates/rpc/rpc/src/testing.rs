@@ -90,6 +90,14 @@ where
         let evm_config = self.evm_config.clone();
         let skip_invalid_transactions = self.skip_invalid_transactions;
         let gas_limit_override = self.gas_limit_override;
+        debug!(
+            target: "rpc::testing",
+            parent_block_hash = %request.parent_block_hash,
+            transaction_count = request.transactions.len(),
+            timestamp = request.payload_attributes.timestamp,
+            ?gas_limit_override,
+            "Starting testing_buildBlockV1"
+        );
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
                 let state = state.database.0;
@@ -103,6 +111,14 @@ where
                     .ok_or_else(|| {
                     EthApiError::HeaderNotFound(request.parent_block_hash.into())
                 })?;
+                debug!(
+                    target: "rpc::testing",
+                    parent_block_hash = %request.parent_block_hash,
+                    parent_number = parent.number(),
+                    parent_state_root = %parent.state_root(),
+                    transaction_count = request.transactions.len(),
+                    "Resolved testing_buildBlockV1 parent and state provider"
+                );
 
                 let chain_spec = eth_api.provider().chain_spec();
                 let is_osaka =
@@ -206,10 +222,25 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
+                debug!(
+                    target: "rpc::testing",
+                    parent_block_hash = %request.parent_block_hash,
+                    parent_number = parent.number(),
+                    total_fees = %total_fees,
+                    "Finishing testing_buildBlockV1 with state provider root"
+                );
                 let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let sealed_block = Arc::new(outcome.block.into_sealed_block());
+                debug!(
+                    target: "rpc::testing",
+                    parent_block_hash = %request.parent_block_hash,
+                    built_block_hash = %sealed_block.hash(),
+                    built_block_number = sealed_block.number(),
+                    built_state_root = %sealed_block.state_root(),
+                    "Finished testing_buildBlockV1"
+                );
 
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 

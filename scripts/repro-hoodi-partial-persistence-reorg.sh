@@ -288,7 +288,7 @@ capture_command reth "$RETH_BIN" node \
     --engine.persistence-threshold 10 \
     --engine.deferred-trie-blocks 3 \
     --engine.accept-execution-requests-hash \
-    --log.stdout.filter 'info,providers::state::overlay=debug,chain_state::lazy_overlay=debug,engine::tree::payload_validator=debug,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug,reth-bench=debug' \
+    --log.stdout.filter debug \
     --color never
 
 restore_snapshot() {
@@ -359,7 +359,7 @@ start_node() {
         --engine.persistence-threshold 10 \
         --engine.deferred-trie-blocks 3 \
         --engine.accept-execution-requests-hash \
-        --log.stdout.filter 'info,providers::state::overlay=debug,providers::historical_sp=debug,chain_state::lazy_overlay=debug,chain_state::memory_overlay=debug,engine::tree=debug,engine::tree::payload_validator=debug,payload_builder=debug,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug,reth-bench=debug' \
+        --log.stdout.filter debug \
         --color never \
         >"$NODE_LOG" 2>&1 &
     echo $!

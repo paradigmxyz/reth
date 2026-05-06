@@ -44,7 +44,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -665,7 +665,9 @@ pub trait Call:
     {
         let at = at.into();
         self.spawn_blocking_io_fut(async move |this| {
+            debug!(target: "rpc::eth::call", ?at, "Resolving state provider for block");
             let state = this.state_at_block_id(at).await?;
+            debug!(target: "rpc::eth::call", ?at, "Resolved state provider for block");
             let db = State::builder()
                 .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
                 .build();

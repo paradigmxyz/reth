@@ -13,6 +13,7 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
+use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
     StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
@@ -308,6 +309,49 @@ where
             .provider
             .block_hash(target_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
+
+        match self.provider.get_stage_checkpoint(StageId::Finish) {
+            Ok(Some(checkpoint)) => {
+                let finish_tip_number = checkpoint.block_number;
+                let partial_state_trie_number = checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie)
+                    .unwrap_or(finish_tip_number);
+                let finish_tip_hash = self.provider.block_hash(finish_tip_number)?;
+                let partial_state_trie_hash =
+                    self.provider.block_hash(partial_state_trie_number)?;
+                debug!(
+                    target: "providers::historical_sp",
+                    historical_block_number = self.block_number,
+                    target_block,
+                    %anchor_hash,
+                    finish_tip_number,
+                    ?finish_tip_hash,
+                    partial_state_trie_number,
+                    ?partial_state_trie_hash,
+                    "Historical state provider overlay frontiers"
+                );
+            }
+            Ok(None) => {
+                debug!(
+                    target: "providers::historical_sp",
+                    historical_block_number = self.block_number,
+                    target_block,
+                    %anchor_hash,
+                    "Historical state provider overlay without finish checkpoint"
+                );
+            }
+            Err(err) => {
+                debug!(
+                    target: "providers::historical_sp",
+                    historical_block_number = self.block_number,
+                    target_block,
+                    %anchor_hash,
+                    %err,
+                    "Historical state provider overlay could not load finish checkpoint"
+                );
+            }
+        }
 
         let TrieInputSorted { nodes, state, prefix_sets } = input;
         let input_trie_updates = nodes.total_len();
