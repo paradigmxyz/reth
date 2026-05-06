@@ -41,7 +41,17 @@ mod subscriptions {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
+    ///
+    /// Implementations may buffer inserts. Call [`Self::flush`] when pending BALs need to be made
+    /// durable.
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
+
+    /// Flushes any pending BALs to the backing store.
+    ///
+    /// In-memory implementations may treat this as a no-op.
+    fn flush(&self) -> ProviderResult<()> {
+        Ok(())
+    }
 
     /// Fetch BALs for the given block hashes.
     ///
@@ -140,6 +150,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         self.inner.insert(num_hash, bal)
+    }
+
+    /// Flushes any pending BALs to the backing store.
+    #[inline]
+    pub fn flush(&self) -> ProviderResult<()> {
+        self.inner.flush()
     }
 
     /// Fetch BALs for the given block hashes.
@@ -262,6 +278,13 @@ mod tests {
 
         assert_eq!(by_hash, vec![None, None]);
         assert!(by_range.is_empty());
+    }
+
+    #[test]
+    fn noop_store_flush_is_noop() {
+        let store = BalStoreHandle::default();
+
+        store.flush().unwrap();
     }
 
     #[test]
