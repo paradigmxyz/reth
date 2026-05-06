@@ -399,7 +399,7 @@ BASELINE_BIN="${BASELINE_SRC}/target/profiling/reth"
 FEATURE_BIN="${FEATURE_SRC}/target/profiling/reth"
 
 # Start metrics proxy (reth → label injection → Prometheus)
-LABELS_FILE="/tmp/bench-metrics-labels.json"
+LABELS_FILE="$(mktemp "${TMPDIR:-/tmp}/bench-metrics-labels.XXXXXX")"
 echo '{}' > "$LABELS_FILE"
 METRICS_SUBNET="${METRICS_SUBNET:-10.10.0.0/24}"
 METRICS_PORT="${METRICS_PORT:-9090}"
