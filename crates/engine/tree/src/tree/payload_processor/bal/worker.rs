@@ -14,6 +14,19 @@ use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
+#[derive(Debug, thiserror::Error)]
+pub(super) enum BalWorkerError {
+    /// Worker state or provider setup failed.
+    #[error("BAL worker setup failed: {0}")]
+    Setup(#[source] BalExecutionError),
+    /// Transaction recovery or conversion failed before EVM execution.
+    #[error("BAL worker transaction conversion failed: {0}")]
+    Transaction(Box<dyn core::error::Error + Send + Sync + 'static>),
+    /// EVM transaction execution failed.
+    #[error("BAL worker EVM execution failed: {0}")]
+    Execution(BlockExecutionError),
+}
+
 pub(super) struct BalWorkerOutput<R> {
     pub(super) index: usize,
     pub(super) signer: Address,
@@ -25,7 +38,7 @@ type WorkerExecutorResult<Cfg> =
     <<Cfg as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
 
 type WorkerResultSender<Cfg> =
-    Sender<Result<BalWorkerOutput<WorkerExecutorResult<Cfg>>, BalExecutionError>>;
+    Sender<Result<BalWorkerOutput<WorkerExecutorResult<Cfg>>, BalWorkerError>>;
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
@@ -46,9 +59,9 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
 {
     scope.spawn(move |_| {
-        let worker_result = (|| -> Result<(), BalExecutionError> {
+        let worker_result = (|| -> Result<(), BalWorkerError> {
             let mut worker_state = State::builder()
-                .with_database(make_db()?)
+                .with_database(make_db().map_err(BalWorkerError::Setup)?)
                 .with_bal(received_bal_revm)
                 .with_bundle_update()
                 .build();
@@ -64,14 +77,14 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                         Err(_) => break,
                     },
                 };
-                let tx = tx.map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+                let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
                 let signer = *tx.signer();
                 let tx_gas_limit = tx.tx().gas_limit();
 
                 executor.evm_mut().db_mut().set_bal_index(index as u64 + 1);
                 let result = executor
                     .execute_transaction_without_commit(tx)
-                    .map_err(BalExecutionError::Evm)?;
+                    .map_err(BalWorkerError::Execution)?;
 
                 if result_tx
                     .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))

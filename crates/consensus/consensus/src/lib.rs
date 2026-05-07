@@ -475,12 +475,21 @@ pub enum ConsensusError {
     /// EIP-7825: Transaction gas limit exceeds maximum allowed
     #[error(transparent)]
     TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
-    /// Error when an unexpected block access list cost is encountered.
+    /// EIP-7928: Error when an unexpected block access list cost is encountered.
     #[error("block access list cost exceeds gas limit")]
     BlockAccessListCostMoreThanGasLimit,
-    /// Error when the block access list hash doesn't match the expected value.
+    /// EIP-7928: Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
+    /// EIP-7928: Error when the block access list cannot be decoded or converted.
+    #[error("invalid block access list: {0}")]
+    BlockAccessListInvalid(String),
+    /// EIP-7928: Error when execution touches an account missing from the block access list.
+    #[error("block access list missing account")]
+    BlockAccessListMissingAccount,
+    /// EIP-7928: Error when execution touches a storage slot missing from the block access list.
+    #[error("block access list missing storage slot")]
+    BlockAccessListMissingStorageSlot,
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
