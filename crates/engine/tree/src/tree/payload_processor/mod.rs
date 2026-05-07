@@ -81,14 +81,31 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
+type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
-    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
+    IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <N as NodePrimitives>::Receipt,
 >;
 
-type ExecuteTxSender<TxEnv, Recovered, Err> =
-    CrossbeamSender<(usize, Result<WithTxEnv<TxEnv, Recovered>, Err>)>;
+type IteratorPrewarmTxReceiver<Evm, I> =
+    PrewarmTxReceiver<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+
+type IteratorExecuteTxReceiver<Evm, I> = ExecuteTxReceiver<
+    TxEnvFor<Evm>,
+    <I as ExecutableTxIterator<Evm>>::Recovered,
+    <I as ExecutableTxTuple>::Error,
+>;
+
+type RecoveredTx<TxEnv, Recovered> = WithTxEnv<TxEnv, Recovered>;
+type IndexedTxResult<Tx, Err> = (usize, Result<Tx, Err>);
+type IndexedTxReceiver<Tx, Err> = CrossbeamReceiver<IndexedTxResult<Tx, Err>>;
+type IndexedTxSender<Tx, Err> = CrossbeamSender<IndexedTxResult<Tx, Err>>;
+type PrewarmTxReceiver<TxEnv, Recovered> = mpsc::Receiver<(usize, RecoveredTx<TxEnv, Recovered>)>;
+type ExecuteTxReceiver<TxEnv, Recovered, Err> =
+    IndexedTxReceiver<RecoveredTx<TxEnv, Recovered>, Err>;
+type ExecuteTxSender<TxEnv, Recovered, Err> = IndexedTxSender<RecoveredTx<TxEnv, Recovered>, Err>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -403,16 +420,12 @@ where
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
     /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
-    #[expect(clippy::type_complexity)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
         transaction_count: usize,
-    ) -> (
-        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
-        CrossbeamReceiver<(usize, Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>)>,
-    ) {
+    ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 
@@ -774,8 +787,8 @@ pub struct PayloadHandle<Tx, Err, R> {
     install_state_hook: bool,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
-    /// Stream of block transactions
-    transactions: CrossbeamReceiver<(usize, Result<Tx, Err>)>,
+    /// Stream of block transactions and their indices in the block.
+    transactions: IndexedTxReceiver<Tx, Err>,
     /// Span for tracing
     _span: Span,
 }
@@ -869,7 +882,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     }
 
     /// Returns a clone of the indexed transaction receiver.
-    pub fn clone_transaction_receiver(&self) -> CrossbeamReceiver<(usize, Result<Tx, Err>)> {
+    pub fn clone_transaction_receiver(&self) -> IndexedTxReceiver<Tx, Err> {
         self.transactions.clone()
     }
 }

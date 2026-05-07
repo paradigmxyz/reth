@@ -7,8 +7,6 @@
 
 use alloy_consensus::TxEnvelope;
 use alloy_eips::{
-    eip1559::BaseFeeParams,
-    eip7840::BlobParams,
     eip7928::{AccountChanges, BlockAccessList, SlotChanges},
     Typed2718,
 };
@@ -317,17 +315,6 @@ impl Command {
         let mut prev_big_block_hash: Option<B256> = None;
         let mut accumulated_block_hashes: Vec<(u64, B256)> = Vec::new();
 
-        // Track previous big block's merged header fields for deriving basefee and
-        // excess_blob_gas on subsequent big blocks.
-        struct PrevBigBlockHeader {
-            gas_used: u64,
-            gas_limit: u64,
-            base_fee_per_gas: u64,
-            blob_gas_used: u64,
-            excess_blob_gas: u64,
-        }
-        let mut prev_big_block_header: Option<PrevBigBlockHeader> = None;
-
         // Persistent prefetch stream: keeps `prefetch_buffer` per-block fetches in flight
         // ahead of the merger across all big blocks. Each item is a fully materialized
         // `FetchedBlock` (or `None` once the chain tip is reached on this fetch).
@@ -380,14 +367,11 @@ impl Command {
                 let FetchedBlock { execution_data, block_access_list } = fetched;
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
-                let block_blob_gas =
-                    execution_data.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0);
 
                 info!(
                     target: "reth-bench",
                     block_number,
                     gas_used = block_gas,
-                    blob_gas_used = block_blob_gas,
                     tx_count = execution_data.payload.transactions().len(),
                     "Fetched block"
                 );
@@ -468,9 +452,8 @@ impl Command {
                 base_v1.gas_limit = total_gas_limit;
             }
 
-            // Chain sequential big blocks: set parent_hash, block_number, basefee,
-            // and excess_blob_gas for sequential continuity. The engine validates
-            // each big block against its parent, so these fields must be
+            // Chain sequential big blocks: set parent_hash, block_number.
+            // The engine validates each big block against its parent, so these fields must be
             // derivable from the previous big block's merged header.
             if let Some(prev_hash) = prev_big_block_hash {
                 base.payload.as_v1_mut().parent_hash = prev_hash;
@@ -478,53 +461,17 @@ impl Command {
                 // Subsequent big blocks increment from there.
                 base.payload.as_v1_mut().block_number = self.from_block + big_block_idx;
             }
-            if let Some(prev) = &prev_big_block_header {
-                // Derive basefee from the previous big block's merged header using
-                // the standard EIP-1559 formula so validate_against_parent_eip1559_base_fee passes.
-                let next_base_fee = alloy_eips::calc_next_block_base_fee(
-                    prev.gas_used,
-                    prev.gas_limit,
-                    prev.base_fee_per_gas,
-                    BaseFeeParams::ethereum(),
-                );
-                base.payload.as_v1_mut().base_fee_per_gas =
-                    alloy_primitives::U256::from(next_base_fee);
 
-                // Derive excess_blob_gas from the previous big block's merged header
-                // so validate_against_parent_4844 passes.
-                let timestamp = base.payload.as_v1().timestamp;
-                let blob_params = chain_spec
-                    .blob_params_at_timestamp(timestamp)
-                    .unwrap_or_else(BlobParams::cancun);
-                let next_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
-                    prev.excess_blob_gas,
-                    prev.blob_gas_used,
-                    prev.base_fee_per_gas,
-                );
-                if let Some(v3) = base.payload.as_v3_mut() {
-                    v3.excess_blob_gas = next_excess_blob_gas;
-                }
-            }
-
-            // Merge blob data from all constituent blocks: sum blob_gas_used
-            // and concatenate versioned hashes so the sidecar matches the blob
-            // transactions in the merged payload body.
+            // Merge blob data from all constituent blocks:  concatenate versioned
+            // hashes so the sidecar matches the blob transactions in the merged payload body.
             {
                 let mut all_versioned_hashes: Vec<B256> =
                     base.sidecar.cancun().map(|c| c.versioned_hashes.clone()).unwrap_or_default();
-                let mut total_blob_gas =
-                    base.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0);
                 // Skip env_switch[0] (base block clone) to avoid double-counting
                 for (_, switch_data) in env_switches.iter().skip(1) {
                     if let Some(cancun) = switch_data.sidecar.cancun() {
                         all_versioned_hashes.extend_from_slice(&cancun.versioned_hashes);
                     }
-                    if let Some(v3) = switch_data.payload.as_v3() {
-                        total_blob_gas += v3.blob_gas_used;
-                    }
-                }
-                if let Some(v3) = base.payload.as_v3_mut() {
-                    v3.blob_gas_used = total_blob_gas;
                 }
                 let cancun = base.sidecar.cancun().map(|c| CancunPayloadFields {
                     versioned_hashes: all_versioned_hashes,
@@ -549,19 +496,6 @@ impl Command {
             let block_hash = compute_payload_block_hash(&base)?;
             base.payload.as_v1_mut().block_hash = block_hash;
             prev_big_block_hash = Some(block_hash);
-
-            // Record this big block's merged header fields so the next big block
-            // can derive its basefee and excess_blob_gas correctly.
-            {
-                let v1 = base.payload.as_v1();
-                prev_big_block_header = Some(PrevBigBlockHeader {
-                    gas_used: v1.gas_used,
-                    gas_limit: v1.gas_limit,
-                    base_fee_per_gas: v1.base_fee_per_gas.to::<u64>(),
-                    blob_gas_used: base.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0),
-                    excess_blob_gas: base.payload.as_v3().map(|v3| v3.excess_blob_gas).unwrap_or(0),
-                });
-            }
 
             let big_block = BigBlockPayload {
                 execution_data: base,

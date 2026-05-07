@@ -2350,7 +2350,10 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
+        self.emit_event(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(head),
+            error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+        });
 
         Ok(status)
     }
@@ -3083,9 +3086,10 @@ where
         } else {
             self.state.invalid_headers.insert(block.block_with_parent());
         }
-        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
-            Box::new(block),
-        )));
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(block),
+            error: validation_err.to_string(),
+        }));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
