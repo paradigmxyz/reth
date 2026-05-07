@@ -28,7 +28,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteOptions, DB,
+    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
 use std::{
     collections::BTreeMap,
@@ -133,17 +133,24 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// to 64 MB default, with negligible impact on mean throughput.
 const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
 
+/// Default total `RocksDB` memtable memory budget across column families (4 GiB).
+///
+/// This is a soft limit; with write stalls enabled, `RocksDB` waits for flushes once
+/// memtable arena usage exceeds the budget.
+const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
-/// Default auto-commit threshold for batch writes (4 GiB).
+/// Default auto-commit threshold for batch writes (512 MiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
-/// during large bulk writes. The consistency check on startup heals any crash
-/// that occurs between auto-commits.
-const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
+/// during large bulk writes. Keep this below the `RocksDB` write buffer manager
+/// budget so stalls can recover without waiting on a single large flush.
+/// The consistency check on startup heals any crash that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -207,6 +214,9 @@ impl RocksDBBuilder {
         options.create_missing_column_families(true);
         options.set_max_background_jobs(DEFAULT_MAX_BACKGROUND_JOBS);
         options.set_bytes_per_sync(DEFAULT_BYTES_PER_SYNC);
+        let write_buffer_manager =
+            WriteBufferManager::new_write_buffer_manager(DEFAULT_WRITE_BUFFER_MANAGER_SIZE, true);
+        options.set_write_buffer_manager(&write_buffer_manager);
 
         options.set_bottommost_compression_type(DBCompressionType::Zstd);
         options.set_bottommost_zstd_max_train_bytes(0, true);
