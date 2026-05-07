@@ -40,5 +40,5 @@ pub use gas_oracle::{
 };
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-pub use transaction::TransactionSource;
+pub use transaction::{mined_transaction_info, pending_transaction_info, TransactionSource};
 pub use tx_forward::ForwardConfig;

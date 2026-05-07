@@ -58,15 +58,14 @@ impl<T: SignedTransaction> TransactionSource<T> {
                 block_timestamp,
                 base_fee,
             } => {
-                let tx_info = TransactionInfo {
-                    hash: Some(transaction.trie_hash()),
-                    index: Some(index),
-                    block_hash: Some(block_hash),
-                    block_number: Some(block_number),
-                    block_timestamp: Some(block_timestamp),
+                let tx_info = mined_transaction_info(
+                    transaction.trie_hash(),
+                    index,
+                    block_hash,
+                    block_number,
+                    block_timestamp,
                     base_fee,
-                };
-
+                );
                 resp_builder.fill(transaction, tx_info)
             }
         }
@@ -77,7 +76,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
         match self {
             Self::Pool(tx) => {
                 let hash = tx.trie_hash();
-                (tx, TransactionInfo { hash: Some(hash), ..Default::default() })
+                (tx, pending_transaction_info(hash))
             }
             Self::Block {
                 transaction,
@@ -90,17 +89,41 @@ impl<T: SignedTransaction> TransactionSource<T> {
                 let hash = transaction.trie_hash();
                 (
                     transaction,
-                    TransactionInfo {
-                        hash: Some(hash),
-                        index: Some(index),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_number),
-                        block_timestamp: Some(block_timestamp),
+                    mined_transaction_info(
+                        hash,
+                        index,
+                        block_hash,
+                        block_number,
+                        block_timestamp,
                         base_fee,
-                    },
+                    ),
                 )
             }
         }
+    }
+}
+
+/// Builds [`TransactionInfo`] for a pending transaction.
+pub fn pending_transaction_info(hash: B256) -> TransactionInfo {
+    TransactionInfo { hash: Some(hash), ..Default::default() }
+}
+
+/// Builds [`TransactionInfo`] for a mined transaction.
+pub fn mined_transaction_info(
+    hash: B256,
+    index: u64,
+    block_hash: B256,
+    block_number: u64,
+    block_timestamp: u64,
+    base_fee: Option<u64>,
+) -> TransactionInfo {
+    TransactionInfo {
+        hash: Some(hash),
+        index: Some(index),
+        block_hash: Some(block_hash),
+        block_number: Some(block_number),
+        block_timestamp: Some(block_timestamp),
+        base_fee,
     }
 }
 

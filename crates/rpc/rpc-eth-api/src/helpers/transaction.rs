@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
+use alloy_rpc_types_eth::state::EvmOverrides;
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
@@ -24,6 +24,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
+    mined_transaction_info,
     utils::{binary_search, recover_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
     FillTransaction, SignError, TransactionSource,
@@ -328,14 +329,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let block_timestamp = block.timestamp();
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
-                    let tx_info = TransactionInfo {
-                        hash: Some(*tx.tx_hash()),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_number),
-                        block_timestamp: Some(block_timestamp),
-                        base_fee: base_fee_per_gas,
-                        index: Some(index as u64),
-                    };
+                    let tx_info = mined_transaction_info(
+                        *tx.tx_hash(),
+                        index as u64,
+                        block_hash,
+                        block_number,
+                        block_timestamp,
+                        base_fee_per_gas,
+                    );
 
                     return Ok(Some(
                         self.converter().fill(tx.clone().with_signer(*signer), tx_info)?,
@@ -404,14 +405,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .enumerate()
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
-                            let tx_info = TransactionInfo {
-                                hash: Some(*tx.tx_hash()),
-                                block_hash: Some(block_hash),
-                                block_number: Some(block_number),
-                                block_timestamp: Some(block_timestamp),
-                                base_fee: base_fee_per_gas,
-                                index: Some(index as u64),
-                            };
+                            let tx_info = mined_transaction_info(
+                                *tx.tx_hash(),
+                                index as u64,
+                                block_hash,
+                                block_number,
+                                block_timestamp,
+                                base_fee_per_gas,
+                            );
                             Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
                 })

@@ -16,7 +16,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     db::{bal::EvmDatabaseError, State},
 };
-use reth_rpc_eth_types::cache::db::StateCacheDb;
+use reth_rpc_eth_types::{cache::db::StateCacheDb, mined_transaction_info};
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -305,14 +305,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
                     .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
-                        let tx_info = TransactionInfo {
-                            hash: Some(*ctx.tx.tx_hash()),
-                            index: Some(idx),
-                            block_hash: Some(block_hash),
-                            block_number: Some(block_number),
-                            block_timestamp: Some(block_timestamp),
-                            base_fee: Some(base_fee),
-                        };
+                        let tx_info = mined_transaction_info(
+                            *ctx.tx.tx_hash(),
+                            idx,
+                            block_hash,
+                            block_number,
+                            block_timestamp,
+                            Some(base_fee),
+                        );
                         idx += 1;
 
                         f(tx_info, ctx)
