@@ -596,6 +596,7 @@ pub(crate) fn big_blocks_stream(
                 env_switches = %big_block.big_block_data.env_switches.len(),
                 prior_block_hashes = %big_block.big_block_data.prior_block_hashes.len(),
                 bal_accounts = %big_block.block_access_list.as_ref().map_or(0, Vec::len),
+                "Generated big block"
             );
 
             big_block_idx += 1;
