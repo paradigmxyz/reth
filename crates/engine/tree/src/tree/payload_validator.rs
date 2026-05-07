@@ -489,8 +489,12 @@ where
         // Extract the decoded BAL, if valid and available.
         let decoded_bal = ensure_ok!(input
             .try_decoded_access_list()
-            .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }))
+            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
         .map(Arc::new);
+
+        if let Some(decoded_bal) = decoded_bal.as_deref() {
+            ensure_ok!(Self::validate_received_bal_gas(decoded_bal, input.gas_limit()));
+        }
 
         let env = ExecutionEnv {
             evm_env,
@@ -570,7 +574,6 @@ where
         let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
             let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
-            let built_bal = Some(decoded_bal.as_bal().clone().into());
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
             match self.execute_block_bal(
@@ -581,7 +584,7 @@ where
                 decoded_bal,
                 provider_builder,
             ) {
-                Ok((output, senders, receipt_root_rx)) => {
+                Ok((output, senders, receipt_root_rx, built_bal)) => {
                     (output, senders, receipt_root_rx, built_bal)
                 }
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
@@ -906,6 +909,13 @@ where
         Ok(())
     }
 
+    fn validate_received_bal_gas(
+        decoded_bal: &DecodedBal,
+        gas_limit: u64,
+    ) -> Result<(), ConsensusError> {
+        decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)
+    }
+
     /// Executes a block with the given state provider.
     ///
     /// This method orchestrates block execution:
@@ -938,16 +948,6 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
-
-        if let Some(decoded_bal) = &env.decoded_bal {
-            decoded_bal
-                .as_bal()
-                .validate_gas_limit(input.gas_limit())
-                .map_err(|e| {
-                    debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
-                    InsertBlockErrorKind::Consensus(ConsensusError::from(e))
-                })?
-        }
 
         let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
@@ -1063,7 +1063,7 @@ where
     /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Adapts the BAL output to a [`BlockExecutionOutput`].
+    /// 5. Returns the rebuilt BAL for post-execution consensus validation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block_bal<S, Tx, Err, BalP, T>(
@@ -1075,7 +1075,12 @@ where
         decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<BlockAccessList>,
+        ),
         InsertBlockErrorKind,
     >
     where
@@ -1110,7 +1115,7 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders) = crate::tree::payload_processor::bal::execute_block(
+        let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
             &self.evm_config,
             &make_db,
@@ -1131,7 +1136,7 @@ where
             "Executed block via BAL path",
         );
 
-        Ok((output, senders, result_rx))
+        Ok((output, senders, result_rx, Some(built_bal)))
     }
 
     fn spawn_receipt_root_task(

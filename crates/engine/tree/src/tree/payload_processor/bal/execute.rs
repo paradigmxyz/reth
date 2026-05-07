@@ -10,16 +10,18 @@
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
 //! execution actually produced.
 //!
-//! The final hash check compares that rebuilt BAL with the header commitment. The outer payload
-//! validator still handles consensus checks, receipt-root validation, state-root work, and block
-//! insertion.
+//! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
+//! validation. This module only logs the first divergence between the received BAL and the BAL
+//! rebuilt from canonical execution.
 
 use super::{
-    debug, ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, RejectReason,
+    debug,
+    ordered_outputs::{ordered_worker_outputs, OrderedWorkerOutputError},
+    worker, BalExecutionError,
 };
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash,
+    compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
@@ -35,11 +37,13 @@ use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
+    bytecode::BytecodeDecodeError,
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
+    database_interface::bal::EvmDatabaseError,
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
-use revm_state::bal::Bal as RevmBal;
+use revm_state::bal::{Bal as RevmBal, BalError};
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -56,7 +60,10 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
-) -> Result<(BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>), BalExecutionError>
+) -> Result<
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    BalExecutionError,
+>
 where
     Evm: ConfigureEvm + 'static,
     Tx: ExecutableTxFor<Evm> + Send + 'a,
@@ -96,7 +103,10 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
-) -> Result<(BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>), BalExecutionError>
+) -> Result<
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    BalExecutionError,
+>
 where
     Evm: ConfigureEvm + 'scope,
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
@@ -106,13 +116,8 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = received_bal.as_bal();
-    let received_bal_revm: Arc<RevmBal> = Arc::new(
-        RevmBal::try_from(Vec::<_>::from(bal.clone()))
-            .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
-    );
+    let received_bal_revm = convert_alloy_to_revm_bal(bal)?;
 
-    // NOTE: technically Amsterdam implies BAL (the current path) we are on.
-    // TODO: should we do this
     let is_amsterdam = evm_env.cfg_env.spec.into().is_enabled_in(SpecId::AMSTERDAM);
     let block_gas_limit = evm_env.block_env.gas_limit();
     let mut canonical_state =
@@ -147,7 +152,7 @@ where
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
-            let output = output?;
+            let output = output.map_err(map_ordered_output_error::<DB>)?;
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
@@ -172,13 +177,37 @@ where
         (block_result, senders)
     };
 
-    validate_bal(&mut canonical_state, bal)?;
+    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
+        built_bal,
     ))
+}
+
+fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
+    // Convert the BAL from alloy to a BAL that can be consumed by revm, that is more amenable
+    // for state lookups.
+    //
+    // This is failable.
+    //
+    // This is due to bytecodes. A transaction can attempt to deploy illegal bytecodes, e.g. due to
+    // EIP-3541 or more specifically due to EIP-7702.
+    //
+    // During serial execution this check happens before the bytecode is deployed and if the check
+    // is triggered then the execution is reverted, and as such no actual code change event takes
+    // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
+    // invalid as no legal execution should've led to this bytecode deployment.
+    let alloy_bal: Vec<_> = Vec::<_>::from(bal.clone());
+    let received_bal_revm = RevmBal::try_from(alloy_bal).map_err(|e| {
+        let e: BytecodeDecodeError = e;
+        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
+            format!("{e:?}"),
+        ))
+    })?;
+    Ok(Arc::new(received_bal_revm))
 }
 
 fn load_bal_accounts<DB>(
@@ -198,44 +227,97 @@ where
     for account_changes in bal {
         canonical_state
             .load_cache_account(account_changes.address)
-            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+            .map_err(|e| BalExecutionError::Execution(BlockExecutionError::other(e)))?;
     }
 
     Ok(())
 }
 
-fn validate_bal<DB>(
-    canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
-) -> Result<(), BalExecutionError>
+fn map_ordered_output_error<DB>(err: OrderedWorkerOutputError) -> BalExecutionError
 where
     DB: Database,
 {
-    let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if composed_alloy == received_bal.as_ref() {
-        return Ok(());
+    match err {
+        OrderedWorkerOutputError::Worker(err) => map_worker_error::<DB>(err),
+        other => BalExecutionError::other(other),
     }
-    let rebuilt = compute_block_access_list_hash(&composed_alloy);
-    let header_bal_hash = compute_block_access_list_hash(received_bal);
+}
 
+fn map_worker_error<DB>(err: worker::BalWorkerError) -> BalExecutionError
+where
+    DB: Database,
+{
+    match err {
+        worker::BalWorkerError::Setup(err) => err,
+        worker::BalWorkerError::Transaction(err) => BalExecutionError::Other(err),
+        worker::BalWorkerError::Execution(err) => map_worker_execution_error::<DB>(err),
+    }
+}
+
+fn map_worker_execution_error<DB>(err: BlockExecutionError) -> BalExecutionError
+where
+    DB: Database,
+{
+    // Right now, revm directs the BAL related errors as the internal errors, all the while
+    // they are actually consensus errors. Here we fish out the internal DB error if it's a
+    // BAL-related one and promote it to the BAL-related consensus errors.
+    if let Some(bal_error) = bal_error_from_block_execution::<DB>(&err) {
+        return BalExecutionError::Consensus(match bal_error {
+            BalError::AccountNotFound => {
+                reth_consensus::ConsensusError::BlockAccessListMissingAccount
+            }
+            BalError::SlotNotFound => {
+                reth_consensus::ConsensusError::BlockAccessListMissingStorageSlot
+            }
+        });
+    }
+
+    BalExecutionError::Execution(err)
+}
+
+fn bal_error_from_block_execution<DB>(err: &BlockExecutionError) -> Option<BalError>
+where
+    DB: Database,
+{
+    let (_, evm_error) = err.as_internal()?.as_evm()?;
+    let mut source = Some(evm_error as &(dyn core::error::Error + 'static));
+    while let Some(error) = source {
+        if let Some(EvmDatabaseError::Bal(bal_error)) =
+            error.downcast_ref::<EvmDatabaseError<DB::Error>>()
+        {
+            return Some(bal_error.clone());
+        }
+        source = error.source();
+    }
+    None
+}
+
+fn take_built_bal_and_log_divergence<DB>(
+    canonical_state: &mut State<DB>,
+    received_bal: &AlloyBal,
+) -> BlockAccessList
+where
+    DB: Database,
+{
+    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
     if tracing::enabled!(
         target: "engine::tree::payload_processor::bal",
         tracing::Level::DEBUG
-    ) {
-        let div = debug::first_bal_divergence(received_bal, &composed_alloy);
+    ) && built_bal != received_bal.as_ref()
+    {
+        let rebuilt = compute_block_access_list_hash(&built_bal);
+        let expected = compute_block_access_list_hash(received_bal);
+        let div = debug::first_bal_divergence(received_bal, &built_bal);
         tracing::debug!(
             target: "engine::tree::payload_processor::bal",
             %rebuilt,
-            expected = %header_bal_hash,
+            %expected,
             ?div,
             "first BAL divergence",
         );
     }
 
-    Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
-        rebuilt,
-        expected: header_bal_hash,
-    }))
+    built_bal
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -295,7 +377,7 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{BlockHeader, EthereumReceipt, Header};
+    use alloy_consensus::{BlockHeader, Header};
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -303,13 +385,16 @@ mod tests {
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
     use alloy_primitives::{keccak256, B256, U256};
-    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+    use reth_consensus::ConsensusError;
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
     use reth_revm::db::BundleState;
     use reth_tasks::Runtime;
     use revm::{
+        context::result::EVMError,
         database::{CacheDB, EmptyDB},
+        database_interface::bal::EvmDatabaseError,
         state::{AccountInfo, Bytecode},
     };
     use std::convert::Infallible;
@@ -470,7 +555,7 @@ mod tests {
         received_bal: Arc<DecodedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
-    ) -> Result<BlockExecutionOutput<EthereumReceipt>, BalExecutionError>
+    ) -> Result<BlockExecutionOutput<Receipt>, BalExecutionError>
     where
         Tx: ExecutableTxFor<EthEvmConfig> + Send,
         DB: Database + Send,
@@ -491,7 +576,36 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _)| output)
+        .map(|(output, _, _)| output)
+    }
+
+    #[test]
+    fn maps_worker_bal_database_error_to_consensus_error() {
+        let account_error =
+            BlockExecutionError::Internal(alloy_evm::block::InternalBlockExecutionError::EVM {
+                hash: B256::ZERO,
+                error: Box::new(EVMError::<EvmDatabaseError<Infallible>>::Database(
+                    EvmDatabaseError::Bal(BalError::AccountNotFound),
+                )),
+            });
+
+        assert!(matches!(
+            map_worker_execution_error::<EmptyDB>(account_error),
+            BalExecutionError::Consensus(ConsensusError::BlockAccessListMissingAccount)
+        ));
+
+        let slot_error =
+            BlockExecutionError::Internal(alloy_evm::block::InternalBlockExecutionError::EVM {
+                hash: B256::ZERO,
+                error: Box::new(EVMError::<EvmDatabaseError<Infallible>>::Database(
+                    EvmDatabaseError::Bal(BalError::SlotNotFound),
+                )),
+            });
+
+        assert!(matches!(
+            map_worker_execution_error::<EmptyDB>(slot_error),
+            BalExecutionError::Consensus(ConsensusError::BlockAccessListMissingStorageSlot)
+        ));
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
@@ -887,7 +1001,7 @@ mod tests {
         );
 
         match result {
-            Err(BalExecutionError::Evm(err)) => assert!(matches!(
+            Err(BalExecutionError::Execution(err)) => assert!(matches!(
                 err.as_validation(),
                 Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
             )),
