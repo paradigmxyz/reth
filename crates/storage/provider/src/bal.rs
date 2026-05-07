@@ -95,11 +95,11 @@ impl InMemoryBalStoreInner {
         );
     }
 
-    // Removes BALs outside the configured retention window.
-    fn prune(&mut self, prune_mode: Option<PruneMode>) {
-        let Some(prune_mode) = prune_mode else { return };
-        let Some(tip) = self.highest_block_number else { return };
+    // Removes BALs outside the configured retention window for the given chain tip.
+    fn prune(&mut self, prune_mode: Option<PruneMode>, tip: BlockNumber) -> usize {
+        let Some(prune_mode) = prune_mode else { return 0 };
 
+        let mut pruned = 0;
         while let Some((&block_number, _)) = self.hashes_by_number.first_key_value() {
             if !prune_mode.should_prune(block_number, tip) {
                 break
@@ -107,9 +107,10 @@ impl InMemoryBalStoreInner {
 
             let Some((_, hashes)) = self.hashes_by_number.pop_first() else { break };
             for hash in hashes {
-                self.entries.remove(&hash);
+                pruned += usize::from(self.entries.remove(&hash).is_some());
             }
         }
+        pruned
     }
 }
 
@@ -123,9 +124,16 @@ impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
         inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
-        inner.prune(self.config.in_memory_retention);
+        if let Some(highest_block_number) = inner.highest_block_number {
+            // This preserves insert-time cleanup based on the highest inserted BAL block.
+            inner.prune(self.config.in_memory_retention, highest_block_number);
+        }
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
+    }
+
+    fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
+        Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
     }
 
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
@@ -258,6 +266,45 @@ mod tests {
     }
 
     #[test]
+    fn prune_uses_chain_tip() {
+        let store =
+            InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Distance(2)));
+        let old_hash = B256::random();
+        let retained_hash = B256::random();
+        let old_bal = Bytes::from_static(b"old");
+        let retained_bal = Bytes::from_static(b"retained");
+
+        store.insert(NumHash::new(7, old_hash), sealed_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(8, retained_hash), sealed_bal(retained_bal.clone())).unwrap();
+
+        assert_eq!(store.prune(10).unwrap(), 1);
+        assert_eq!(
+            store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
+            vec![None, Some(retained_bal)]
+        );
+    }
+
+    #[test]
+    fn insert_prunes_from_highest_inserted_block() {
+        let store =
+            InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Distance(2)));
+        let old_hash = B256::random();
+        let high_hash = B256::random();
+        let late_hash = B256::random();
+        let high_bal = Bytes::from_static(b"high");
+        let late_bal = Bytes::from_static(b"late");
+
+        store.insert(NumHash::new(7, old_hash), sealed_bal(Bytes::from_static(b"old"))).unwrap();
+        store.insert(NumHash::new(10, high_hash), sealed_bal(high_bal.clone())).unwrap();
+        store.insert(NumHash::new(8, late_hash), sealed_bal(late_bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[old_hash, high_hash, late_hash]).unwrap(),
+            vec![None, Some(high_bal), Some(late_bal)]
+        );
+    }
+
+    #[test]
     fn unbounded_retention_keeps_old_bals() {
         let store = InMemoryBalStore::new(BalConfig::unbounded());
         let old_hash = B256::random();
@@ -277,6 +324,7 @@ mod tests {
             store.get_by_hashes(&[old_hash, tip_hash]).unwrap(),
             vec![Some(old_bal), Some(tip_bal)]
         );
+        assert_eq!(store.prune(BAL_RETENTION_PERIOD_SLOTS + 2).unwrap(), 0);
     }
 
     #[test]
