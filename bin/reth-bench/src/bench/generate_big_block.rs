@@ -357,11 +357,6 @@ impl Command {
                 target: "reth-bench",
                 path = %filepath.display(),
                 block_hash = %block_hash,
-                total_txs = big_block.execution_data.payload.transactions().len(),
-                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
-                env_switches = big_block.big_block_data.env_switches.len(),
-                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
-                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
                 "Big block payload saved"
             );
         }
@@ -413,8 +408,6 @@ pub(crate) fn big_blocks_stream(
             let mut accumulated_block_gas: u64 = 0;
 
             while accumulated_block_gas < target_gas {
-                info!(target: "reth-bench", big_block = big_block_idx, "Awaiting prefetched block");
-
                 let (block, block_access_list) = match block_stream.next().await {
                     Some(Ok(Some(fetched))) => fetched,
                     Some(Ok(None)) => {
@@ -450,14 +443,6 @@ pub(crate) fn big_blocks_stream(
                 let execution_data = ExecutionData { payload, sidecar };
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
-
-                info!(
-                    target: "reth-bench",
-                    block_number = block.header.number,
-                    gas_used = block_gas,
-                    tx_count = execution_data.payload.transactions().len(),
-                    "Fetched block"
-                );
 
                 accumulated_block_gas += block_gas;
                 blocks.push(execution_data);
@@ -602,6 +587,16 @@ pub(crate) fn big_blocks_stream(
                 let excess = accumulated_block_hashes.len() - 256;
                 accumulated_block_hashes.drain(..excess);
             }
+
+            info!(
+                target: "reth-bench",
+                block_hash = %big_block.execution_data.payload.as_v1().block_hash,
+                total_txs = %big_block.execution_data.payload.transactions().len(),
+                total_gas_used = %big_block.execution_data.payload.as_v1().gas_used,
+                env_switches = %big_block.big_block_data.env_switches.len(),
+                prior_block_hashes = %big_block.big_block_data.prior_block_hashes.len(),
+                bal_accounts = %big_block.block_access_list.as_ref().map_or(0, Vec::len),
+            );
 
             big_block_idx += 1;
             Ok(Some((
