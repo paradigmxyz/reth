@@ -124,8 +124,9 @@ impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
         inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
-        if let Some(tip) = inner.highest_block_number {
-            inner.prune(self.config.in_memory_retention, tip);
+        if let Some(highest_block_number) = inner.highest_block_number {
+            // This preserves insert-time cleanup based on the highest inserted BAL block.
+            inner.prune(self.config.in_memory_retention, highest_block_number);
         }
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
