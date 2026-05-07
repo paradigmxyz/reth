@@ -281,8 +281,9 @@ where
         // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
         // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
         // prewarm, not this dispatch decision.
-        let parallel_bal_execution =
-            !config.disable_bal_parallel_execution() && env.decoded_bal.is_some();
+        let parallel_bal_execution = !config.disable_state_cache() &&
+            !config.disable_bal_parallel_execution() &&
+            env.decoded_bal.is_some();
         let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
