@@ -16,4 +16,4 @@ pub mod error;
 pub mod execute;
 
 pub use error::{BalExecutionError, RejectReason};
-pub use execute::{execute_block, BalExecutionOutput};
+pub use execute::execute_block;

@@ -339,18 +339,25 @@ where
     ///
     /// When an execution error occurs, this function checks if there are any header validation
     /// errors that should be reported instead, as header validation errors have higher priority.
-    fn handle_execution_error_with_block(
+    fn handle_execution_error<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
-        block: SealedBlock<N::Block>,
+        input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> InsertPayloadResult<N> {
+    ) -> InsertPayloadResult<N>
+    where
+        V: PayloadValidator<T, Block = N::Block>,
+    {
         debug!(
             target: "engine::tree::payload_validator",
             ?execution_err,
-            block = ?block.num_hash(),
+            block = ?input.num_hash(),
             "Block execution failed, checking for header validation errors"
         );
+
+        // If execution failed, we should first check if there are any header validation
+        // errors that take precedence over the execution error
+        let block = self.convert_to_block(input)?;
 
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block, None) {
@@ -573,8 +580,7 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx, built_bal, block) = if bal_eligible {
-            let block = convert_to_block(input)?;
+        let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
             let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
             let built_bal = Some(decoded_bal.as_bal().clone().into());
             let provider_builder =
@@ -582,28 +588,22 @@ where
             match self.execute_block_bal(
                 state_provider,
                 env,
-                &block,
+                &input,
                 &handle,
                 decoded_bal,
                 provider_builder,
             ) {
                 Ok((output, senders, receipt_root_rx)) => {
-                    (output, senders, receipt_root_rx, built_bal, block)
+                    (output, senders, receipt_root_rx, built_bal)
                 }
-                Err(err) => {
-                    return self.handle_execution_error_with_block(block, err, &parent_block)
-                }
+                Err(err) => return self.handle_execution_error(input, err, &parent_block),
             }
         } else {
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok((output, senders, receipt_root_rx, built_bal)) => {
-                    let block = convert_to_block(input)?;
-                    (output, senders, receipt_root_rx, built_bal, block)
+                    (output, senders, receipt_root_rx, built_bal)
                 }
-                Err(err) => {
-                    let block = convert_to_block(input)?;
-                    return self.handle_execution_error_with_block(block, err, &parent_block)
-                }
+                Err(err) => return self.handle_execution_error(input, err, &parent_block),
             }
         };
         let execution_duration = execute_block_start.elapsed();
@@ -635,6 +635,7 @@ where
                 Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
             });
 
+        let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
             let body = block.body().clone();
             let parent_span = Span::current();
@@ -1081,11 +1082,11 @@ where
     /// 5. Adapts the BAL output to a [`BlockExecutionOutput`].
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block_bal<S, Tx, Err, BalP>(
+    fn execute_block_bal<S, Tx, Err, BalP, T>(
         &self,
         _state_provider: S,
         env: ExecutionEnv<Evm>,
-        block: &SealedBlock<N::Block>,
+        input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
@@ -1098,15 +1099,11 @@ where
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
         BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
-        Evm: ConfigureEvm<Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
-
-        let header_bal_hash = block.header().block_access_list_hash().ok_or_else(|| {
-            InsertBlockErrorKind::Other(
-                "BAL execute path: header missing block_access_list_hash".into(),
-            )
-        })?;
 
         let cache = handle.caches().ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no execution cache available".into())
@@ -1127,27 +1124,20 @@ where
             )))
         };
         let execution_start = Instant::now();
-        let (bal_output, senders) = crate::tree::payload_processor::bal::execute_block(
+        let ctx =
+            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let (output, senders) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
-            self.evm_config.clone(),
-            make_db,
+            &self.evm_config,
+            &make_db,
             decoded_bal,
-            block,
+            env.evm_env,
+            ctx,
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
-            header_bal_hash,
         )?;
         let execution_duration = execution_start.elapsed();
-
-        // Adapt BalExecutionOutput → BlockExecutionOutput.
-        let result = alloy_evm::block::BlockExecutionResult {
-            receipts: bal_output.receipts,
-            requests: bal_output.requests,
-            gas_used: bal_output.gas_used,
-            blob_gas_used: bal_output.blob_gas_used,
-        };
-        let output = BlockExecutionOutput { result, state: bal_output.bundle_state };
 
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);

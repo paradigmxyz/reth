@@ -1,5 +1,3 @@
-//! Speculative BAL worker execution.
-
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_evm::{
@@ -8,8 +6,10 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
-use reth_primitives_traits::{BlockTy, SealedBlock};
+use reth_evm::{
+    block::BlockExecutorFactory, execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor,
+    ExecutionCtxFor,
+};
 use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
@@ -21,22 +21,23 @@ pub(super) struct BalWorkerOutput<R> {
     pub(super) result: R,
 }
 
-type WorkerExecutorResult<'scope, Cfg, DB> =
-    <reth_evm::BlockExecutorForEvm<'scope, Cfg, DB> as BlockExecutor>::Result;
+type WorkerExecutorResult<Cfg> =
+    <<Cfg as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
 
-type WorkerResultSender<'scope, Cfg, DB> =
-    Sender<Result<BalWorkerOutput<WorkerExecutorResult<'scope, Cfg, DB>>, BalExecutionError>>;
+type WorkerResultSender<Cfg> =
+    Sender<Result<BalWorkerOutput<WorkerExecutorResult<Cfg>>, BalExecutionError>>;
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
-    result_tx: WorkerResultSender<'scope, Evm, DB>,
-    evm_config: Evm,
+    result_tx: WorkerResultSender<Evm>,
+    evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     received_bal_revm: Arc<RevmBal>,
-    block: &'scope SealedBlock<BlockTy<Evm::Primitives>>,
+    evm_env: EvmEnvFor<Evm>,
+    ctx: ExecutionCtxFor<'scope, Evm>,
 ) where
     Evm: ConfigureEvm + 'scope,
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
@@ -51,9 +52,9 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .with_bal(received_bal_revm)
                 .with_bundle_update()
                 .build();
-            let mut executor = evm_config
-                .executor_for_block(&mut worker_state, block)
-                .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+            let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
+            let mut executor =
+                evm_config.block_executor_factory().create_executor(evm, ctx.clone());
 
             loop {
                 let (index, tx) = crossbeam_channel::select_biased! {

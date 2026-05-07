@@ -17,7 +17,6 @@
 use super::{
     debug, ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, RejectReason,
 };
-use alloy_consensus::BlockHeader;
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash,
@@ -26,55 +25,43 @@ use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
-use reth_primitives_traits::{BlockTy, ReceiptTy, SealedBlock};
+use reth_evm::{
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor, block::BlockExecutorFactory, execute::ExecutableTxFor
+};
+use reth_primitives_traits::ReceiptTy;
+use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
-    context::result::ResultAndState,
-    database::{states::bundle_state::BundleRetention, BundleState, State},
+    context::{result::ResultAndState, Block},
+    database::{states::bundle_state::BundleRetention, State},
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
-use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
-
-/// Output of a successful BAL-path block execution.
-#[expect(missing_debug_implementations)]
-pub struct BalExecutionOutput<Evm: ConfigureEvm> {
-    /// Accumulated state transitions from the canonical executor.
-    pub bundle_state: BundleState,
-    /// Receipts produced in order, one per committed tx.
-    pub receipts: Vec<ReceiptTy<Evm::Primitives>>,
-    /// Total gas used by all transactions.
-    pub gas_used: u64,
-    /// Blob gas used by the block.
-    pub blob_gas_used: u64,
-    /// EIP-7685 withdrawal / deposit / consolidation requests.
-    pub requests: alloy_eips::eip7685::Requests,
-}
+use crate::tree::{payload_processor::receipt_root_task::IndexedReceipt};
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
-#[expect(clippy::too_many_arguments)]
-pub fn execute_block<Evm, Tx, Err, DB, MakeDb>(
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
-    evm_config: Evm,
-    make_db: MakeDb,
+    evm_config: &'a Evm,
+    make_db: &'a MakeDb,
     received_bal: Arc<DecodedBal>,
-    block: &SealedBlock<BlockTy<Evm::Primitives>>,
+    evm_env: EvmEnvFor<Evm>,
+    ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
-    header_bal_hash: B256,
-) -> Result<(BalExecutionOutput<Evm>, Vec<Address>), BalExecutionError>
+) -> Result<(BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>), BalExecutionError>
 where
-    Evm: ConfigureEvm,
-    Tx: ExecutableTxFor<Evm> + Send,
+    Evm: ConfigureEvm + 'static,
+    Tx: ExecutableTxFor<Evm> + Send + 'a,
     Err: core::error::Error + Send + Sync + 'static,
-    DB: Database + Send,
-    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+    DB: Database + Send + 'a,
+    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
@@ -84,31 +71,31 @@ where
         execute_block_inner(
             scope,
             evm_config,
-            &make_db,
+            make_db,
             received_bal,
-            block,
+            evm_env,
+            ctx,
             transaction_count,
             txs,
             receipt_tx,
-            header_bal_hash,
             worker_count,
         )
     })
 }
 
-#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
-    evm_config: Evm,
+    evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     received_bal: Arc<DecodedBal>,
-    block: &'scope SealedBlock<BlockTy<Evm::Primitives>>,
+    evm_env: EvmEnvFor<Evm>,
+    ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
-    header_bal_hash: B256,
     worker_count: usize,
-) -> Result<(BalExecutionOutput<Evm>, Vec<Address>), BalExecutionError>
+) -> Result<(BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>), BalExecutionError>
 where
     Evm: ConfigureEvm + 'scope,
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
@@ -125,20 +112,13 @@ where
 
     // NOTE: technically Amsterdam implies BAL (the current path) we are on.
     // TODO: should we do this
-    let is_amsterdam = evm_config
-        .evm_env(block.header())
-        .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?
-        .cfg_env
-        .spec
-        .into()
-        .is_enabled_in(SpecId::AMSTERDAM);
-    let block_gas_limit = block.header().gas_limit();
+    let is_amsterdam = evm_env.cfg_env.spec.into().is_enabled_in(SpecId::AMSTERDAM);
+    let block_gas_limit = evm_env.block_env.gas_limit();
     let mut canonical_state =
         State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
     load_bal_accounts(&mut canonical_state, bal)?;
 
     let (block_result, senders) = {
-        let worker_evm_config = evm_config.clone();
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let (abort_guard, abort_rx) = AbortGuard::new();
 
@@ -148,18 +128,19 @@ where
                 txs.clone(),
                 abort_rx.clone(),
                 result_tx.clone(),
-                worker_evm_config.clone(),
+                evm_config,
                 make_db,
                 Arc::clone(&received_bal_revm),
-                block,
+                evm_env.clone(),
+                ctx.clone(),
             );
         }
         drop(result_tx);
 
         let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
-        let mut canonical_executor = evm_config
-            .executor_for_block(&mut canonical_state, block)
-            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
+        let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
+        let mut canonical_executor =
+            evm_config.block_executor_factory().create_executor(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
@@ -190,17 +171,11 @@ where
         (block_result, senders)
     };
 
-    validate_bal_hash(&mut canonical_state, bal, header_bal_hash)?;
+    validate_bal(&mut canonical_state, bal)?;
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
-        BalExecutionOutput {
-            bundle_state: canonical_state.take_bundle(),
-            receipts: block_result.receipts,
-            gas_used: block_result.gas_used,
-            blob_gas_used: block_result.blob_gas_used,
-            requests: block_result.requests,
-        },
+        BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
     ))
 }
@@ -228,19 +203,19 @@ where
     Ok(())
 }
 
-fn validate_bal_hash<DB>(
+fn validate_bal<DB>(
     canonical_state: &mut State<DB>,
     received_bal: &AlloyBal,
-    header_bal_hash: B256,
 ) -> Result<(), BalExecutionError>
 where
     DB: Database,
 {
     let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    let rebuilt = compute_block_access_list_hash(&composed_alloy);
-    if rebuilt == header_bal_hash {
+    if composed_alloy == received_bal.as_ref() {
         return Ok(());
     }
+    let rebuilt = compute_block_access_list_hash(&composed_alloy);
+    let header_bal_hash = compute_block_access_list_hash(received_bal);
 
     if tracing::enabled!(
         target: "engine::tree::payload_processor::bal",
@@ -319,7 +294,7 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use alloy_consensus::{EthereumReceipt, Header, BlockHeader};
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -330,6 +305,7 @@ mod tests {
     use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
+    use reth_revm::db::BundleState;
     use reth_tasks::Runtime;
     use revm::{
         database::{CacheDB, EmptyDB},
@@ -462,7 +438,6 @@ mod tests {
             to_arc_decoded(received_bal),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
-            bal_hash,
         );
 
         match result {
@@ -494,8 +469,7 @@ mod tests {
         received_bal: Arc<DecodedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
-        bal_hash: B256,
-    ) -> Result<BalExecutionOutput<EthEvmConfig>, BalExecutionError>
+    ) -> Result<BlockExecutionOutput<EthereumReceipt>, BalExecutionError>
     where
         Tx: ExecutableTxFor<EthEvmConfig> + Send,
         DB: Database + Send,
@@ -503,16 +477,18 @@ mod tests {
     {
         let transaction_count = txs.len();
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let evm_env = evm_config.evm_env(block.header()).unwrap();
+        let execution_ctx = evm_config.context_for_block(block).unwrap();
         execute_block(
             runtime,
-            evm_config,
-            make_db,
+            &evm_config,
+            &make_db,
             received_bal,
-            block,
+            evm_env,
+            execution_ctx,
             transaction_count,
             tx_stream(txs),
             receipt_tx,
-            bal_hash,
         )
         .map(|(output, _)| output)
     }
@@ -665,7 +641,6 @@ mod tests {
             to_arc_decoded(reference_bal),
             &block,
             vec![recovered1, recovered2],
-            bal_hash,
         );
 
         match result {
@@ -762,7 +737,6 @@ mod tests {
             to_arc_decoded(reference_bal),
             &block,
             txs,
-            bal_hash,
         )
         .unwrap_or_else(|e| panic!("BAL path failed: {e:?}"));
 
@@ -781,7 +755,7 @@ mod tests {
             "requests (EIP-7685) diverge between serial and BAL paths",
         );
         assert_eq!(
-            serial.bundle_state, bal_out.bundle_state,
+            serial.bundle_state, bal_out.state,
             "bundle_state diverges — the canonical state transitions don't match",
         );
     }
@@ -909,7 +883,6 @@ mod tests {
             to_arc_decoded(reference_bal),
             &low_gas_block,
             vec![tx1, tx2],
-            bal_hash,
         );
 
         match result {
