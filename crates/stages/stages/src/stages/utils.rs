@@ -201,7 +201,10 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache
+            .entry(AddressStorageKey((address, storage.key)))
+            .or_insert_with(|| Vec::with_capacity(4))
+            .push(block_number);
 
         if block_number != current_block_number {
             current_block_number = block_number;
