@@ -20,7 +20,7 @@ struct LazyOverlayInputs<N: NodePrimitives = EthPrimitives> {
     /// In-memory blocks from tip to anchor child.
     ///
     /// Blocks must be provided in reverse chain order (newest to oldest).
-    blocks: Vec<ExecutedBlock<N>>,
+    blocks: Arc<[ExecutedBlock<N>]>,
 }
 
 /// Lazily computed trie overlay.
@@ -63,7 +63,8 @@ impl<N: NodePrimitives> LazyOverlay<N> {
     /// # Arguments
     ///
     /// * `blocks` - Executed blocks in reverse chain order (newest to oldest)
-    pub fn new(blocks: Vec<ExecutedBlock<N>>) -> Self {
+    pub fn new(blocks: impl Into<Arc<[ExecutedBlock<N>]>>) -> Self {
+        let blocks = blocks.into();
         debug_assert!(
             blocks.windows(2).all(|window| {
                 window[0].recovered_block().parent_hash() == window[1].recovered_block().hash()
@@ -75,7 +76,7 @@ impl<N: NodePrimitives> LazyOverlay<N> {
     }
 
     /// Returns the number of in-memory blocks this overlay covers.
-    pub const fn num_blocks(&self) -> usize {
+    pub fn num_blocks(&self) -> usize {
         self.inputs.blocks.len()
     }
 
