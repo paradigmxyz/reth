@@ -133,7 +133,7 @@ pub struct BenchmarkArgs {
 
     /// If provided, the benchmark will generate the specified number of big blocks and use them
     /// instead of regular blocks.
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    #[arg(long, verbatim_doc_comment)]
     pub big_blocks: Option<usize>,
 }
 
