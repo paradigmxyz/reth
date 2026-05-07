@@ -612,11 +612,21 @@ jobs:
           CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
         run: |
-          if [ "$BENCH_MODE" = "release" ]; then
-            WORKFLOW_NAME="workflows-release-regression-${{ github.run_id }}"
-          else
-            WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
-          fi
+          case "$BENCH_MODE" in
+            release)
+              WORKFLOW_NAME="workflows-release-regression-${{ github.run_id }}"
+              ;;
+            hourly)
+              WORKFLOW_NAME="workflows-hourly-regression-${{ github.run_id }}"
+              ;;
+            nightly)
+              WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
+              ;;
+            *)
+              echo "::error::Unsupported BENCH_MODE: $BENCH_MODE"
+              exit 1
+              ;;
+          esac
           DIFF_URL="https://github.com/${{ github.repository }}/compare/${BASELINE_REF}...${FEATURE_REF}"
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           JOB_URL="${BENCH_JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}"
