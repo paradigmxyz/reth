@@ -23,7 +23,7 @@ use alloy_eip7928::{
     compute_block_access_list_hash,
 };
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
+    block::{BlockExecutionError, BlockExecutor, BlockValidationError, GasOutput, TxResult},
     Evm,
 };
 use alloy_primitives::{Address, B256};
@@ -32,7 +32,6 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database};
 use reth_primitives_traits::{BlockTy, ReceiptTy, SealedBlock};
 use reth_tasks::Runtime;
 use revm::{
-    context::result::ResultAndState,
     database::{states::bundle_state::BundleRetention, BundleState, State},
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
@@ -168,10 +167,12 @@ where
             let output = output?;
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
-            gas_tracker.record_result(output.result.result());
+            let block_regular_gas_used =
+                output.result.result().result.gas().block_regular_gas_used();
             canonical_executor.evm_mut().db_mut().bump_bal_index();
 
-            let _ = canonical_executor.commit_transaction(output.result);
+            let gas_output = canonical_executor.commit_transaction(output.result);
+            gas_tracker.record_commit(gas_output, block_regular_gas_used);
             senders.push(output.signer);
 
             let current_len = canonical_executor.receipts().len();
@@ -281,38 +282,65 @@ struct BlockGasTracker {
     is_amsterdam: bool,
     cumulative_tx_gas_used: u64,
     block_regular_gas_used: u64,
+    block_state_gas_used: u64,
 }
 
 impl BlockGasTracker {
     const fn new(block_gas_limit: u64, is_amsterdam: bool) -> Self {
-        Self { block_gas_limit, is_amsterdam, cumulative_tx_gas_used: 0, block_regular_gas_used: 0 }
+        Self {
+            block_gas_limit,
+            is_amsterdam,
+            cumulative_tx_gas_used: 0,
+            block_regular_gas_used: 0,
+            block_state_gas_used: 0,
+        }
     }
 
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
-        let block_gas_used = if self.is_amsterdam {
-            self.block_regular_gas_used
-        } else {
-            self.cumulative_tx_gas_used
-        };
-        let block_available_gas = self.block_gas_limit.saturating_sub(block_gas_used);
-        let tx_min_gas_limit = tx_gas_limit.min(TX_GAS_LIMIT_CAP);
+        if self.is_amsterdam {
+            let regular_available_gas =
+                self.block_gas_limit.saturating_sub(self.block_regular_gas_used);
+            let state_available_gas =
+                self.block_gas_limit.saturating_sub(self.block_state_gas_used);
+            let regular_tx_gas_limit = tx_gas_limit.min(TX_GAS_LIMIT_CAP);
 
-        if tx_min_gas_limit > block_available_gas {
+            if regular_tx_gas_limit > regular_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: tx_gas_limit,
+                    block_available_gas: regular_available_gas,
+                }
+                .into());
+            }
+
+            if tx_gas_limit > state_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: tx_gas_limit,
+                    block_available_gas: state_available_gas,
+                }
+                .into());
+            }
+
+            return Ok(());
+        }
+
+        let block_available_gas = self.block_gas_limit.saturating_sub(self.cumulative_tx_gas_used);
+        if tx_gas_limit.min(TX_GAS_LIMIT_CAP) > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                 transaction_gas_limit: tx_gas_limit,
                 block_available_gas,
             }
             .into());
         }
-
         Ok(())
     }
 
-    fn record_result<H>(&mut self, result: &ResultAndState<H>) {
-        let gas = result.result.gas();
-        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
+    const fn record_commit(&mut self, gas_output: GasOutput, block_regular_gas_used: u64) {
+        self.cumulative_tx_gas_used =
+            self.cumulative_tx_gas_used.saturating_add(gas_output.tx_gas_used());
         self.block_regular_gas_used =
-            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+            self.block_regular_gas_used.saturating_add(block_regular_gas_used);
+        self.block_state_gas_used =
+            self.block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 }
 
@@ -412,6 +440,43 @@ mod tests {
             },
         };
         block.seal_slow()
+    }
+
+    fn assert_tx_limit_error(
+        err: BlockExecutionError,
+        transaction_gas_limit: u64,
+        block_available_gas: u64,
+    ) {
+        match err {
+            BlockExecutionError::Validation(
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: got_transaction_gas_limit,
+                    block_available_gas: got_block_available_gas,
+                },
+            ) => {
+                assert_eq!(got_transaction_gas_limit, transaction_gas_limit);
+                assert_eq!(got_block_available_gas, block_available_gas);
+            }
+            other => panic!("unexpected block execution error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_gas_tracker_rejects_amsterdam_regular_gas_overflow() {
+        let mut tracker = BlockGasTracker::new(100, true);
+        tracker.record_commit(GasOutput::with_state_gas(96, 0), 96);
+
+        let err = tracker.validate_tx_limit(5).expect_err("tx should exceed regular gas");
+        assert_tx_limit_error(err, 5, 4);
+    }
+
+    #[test]
+    fn block_gas_tracker_rejects_amsterdam_state_gas_overflow() {
+        let mut tracker = BlockGasTracker::new(100, true);
+        tracker.record_commit(GasOutput::with_state_gas(4, 96), 4);
+
+        let err = tracker.validate_tx_limit(5).expect_err("tx should exceed state gas");
+        assert_tx_limit_error(err, 5, 4);
     }
 
     /// Runs only the canonical phases (pre-exec → post-exec, no txs) against a fresh
