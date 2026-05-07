@@ -75,43 +75,11 @@ impl CachedRevmBal {
     fn new(bal: RevmBal) -> Self {
         Self(Arc::new(bal))
     }
-
-    /// Returns the cached BAL as a shared pointer.
-    #[inline]
-    fn into_arc(self) -> Arc<RevmBal> {
-        self.0
-    }
-
-    /// Returns a reference to the cached BAL.
-    #[inline]
-    fn as_ref(&self) -> &RevmBal {
-        &self.0
-    }
 }
 
 impl InMemorySize for CachedRevmBal {
     fn size(&self) -> usize {
-        // This is a heuristic aligned with the cache metrics model. It counts the indexed
-        // account map and the nested BAL write vectors, but avoids depending on revm internals
-        // beyond the public fields exposed for BAL consumption.
-        let bal = self.as_ref();
-        let mut size = core::mem::size_of::<RevmBal>();
-        size += bal.accounts.capacity() *
-            core::mem::size_of::<(alloy_primitives::Address, reth_revm::state::bal::AccountBal)>(
-            );
-        for account in bal.accounts.values() {
-            size +=
-                account.account_info.nonce.writes.capacity() * core::mem::size_of::<(u64, u64)>();
-            size += account.account_info.balance.writes.capacity() *
-                core::mem::size_of::<(u64, alloy_primitives::U256)>();
-            size += account.account_info.code.writes.capacity() *
-                core::mem::size_of::<(u64, (B256, reth_revm::state::Bytecode))>();
-            for writes in account.storage.storage.values() {
-                size += writes.writes.capacity() *
-                    core::mem::size_of::<(u64, alloy_primitives::U256)>();
-            }
-        }
-        size
+        core::mem::size_of::<Self>() + core::mem::size_of::<RevmBal>()
     }
 }
 
@@ -338,7 +306,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
         rx.await
             .map_err(|_| CacheServiceUnavailable)?
-            .map(|maybe_bal| maybe_bal.map(CachedRevmBal::into_arc))
+            .map(|maybe_bal| maybe_bal.map(|cached| cached.0))
     }
 }
 /// Thrown when the cache service task dropped.
