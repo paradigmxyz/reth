@@ -30,7 +30,6 @@ std = [
     "reth-primitives-traits/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
-    "alloy-eip7928/std",
     "reth-execution-types/std",
     "thiserror/std",
     "alloy-eip7928/std",

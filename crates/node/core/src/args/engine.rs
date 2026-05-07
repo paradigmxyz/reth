@@ -285,7 +285,7 @@ impl Default for DefaultEngineValues {
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
-            state_root_task_timeout: Some("1s".to_string()),
+            state_root_task_timeout: Some("4s".to_string()),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
@@ -459,14 +459,14 @@ pub struct EngineArgs {
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
     ///
-    /// --engine.state-root-task-timeout 1s
+    /// --engine.state-root-task-timeout 4s
     /// --engine.state-root-task-timeout 400ms
     ///
     /// Set to 0s to disable.
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
+        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
 
@@ -520,8 +520,8 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
     pub bal_parallel_state_root_disabled: bool,
 
-    /// Disable BAL (Block Access List) state prefetching during prewarm. When set, BAL executor
-    /// workers fetch state on demand instead of consuming BAL-declared cache prefetches.
+    /// Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL
+    /// storage slots are not read into the execution cache.
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 

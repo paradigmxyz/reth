@@ -115,7 +115,9 @@ Networking:
           [default: 9200]
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
-          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set.
+
+          If not provided, discovery V5 defaults to same port as discovery V4 (--discovery.port).
 
           [default: 9200]
 
@@ -751,6 +753,9 @@ Debug:
       --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
           If provided, the engine will skip `n` consecutive new payloads
 
+      --debug.skip-genesis-validation
+          If set, bypasses genesis hash validation during init. Intended for tools that direct-write the database (e.g. snapshot importers, state-actor) and want reth to trust the DB-resident genesis state instead of recomputing it from the chainspec's alloc. When the bypass fires, a structured `tracing::warn!` is emitted so the divergence stays observable in operator logs
+
       --debug.reorg-frequency <REORG_FREQUENCY>
           If provided, the chain will be reorged at specified frequency
 
@@ -1056,11 +1061,11 @@ Engine:
       --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
           Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
 
-          --engine.state-root-task-timeout 1s --engine.state-root-task-timeout 400ms
+          --engine.state-root-task-timeout 4s --engine.state-root-task-timeout 400ms
 
           Set to 0s to disable.
 
-          [default: 1s]
+          [default: 4s]
 
       --engine.share-execution-cache-with-payload-builder
           Whether to share execution cache with the payload builder.
@@ -1090,7 +1095,7 @@ Engine:
           Disable BAL-driven parallel state root computation. This is only valid together with `--engine.disable-bal-parallel-execution`
 
       --engine.disable-bal-batch-io
-          Disable BAL (Block Access List) state prefetching during prewarm. When set, BAL executor workers fetch state on demand instead of consuming BAL-declared cache prefetches
+          Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
 ERA:
       --era.enable

@@ -1,5 +1,6 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use alloy_eip7928::BlockAccessList;
+use alloy_primitives::B256;
 use core::sync::atomic::{AtomicBool, Ordering};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
@@ -54,6 +55,7 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
         _result: &BlockExecutionResult<N::Receipt>,
         _receipt_root_bloom: Option<ReceiptRootBloom>,
         _block_access_list: Option<BlockAccessList>,
+        _block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)

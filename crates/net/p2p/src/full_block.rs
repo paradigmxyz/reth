@@ -1,6 +1,6 @@
 use super::headers::client::HeadersRequest;
 use crate::{
-    block_access_lists::client::BlockAccessListsClient,
+    block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::{BodiesClient, SingleBodyRequest},
     download::DownloadClient,
     error::PeerRequestResult,
@@ -29,6 +29,10 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tracing::debug;
+
+/// Response returned by [`FetchFullBlockRangeWithOptionalAccessListsFuture`].
+pub type FullBlockRangeWithOptionalAccessListsResponse<B> =
+    (Vec<SealedBlock<B>>, Option<BlockAccessLists>);
 
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
@@ -72,7 +76,7 @@ where
 
     /// Returns a future that fetches [`SealedBlock`]s for the given hash and count.
     ///
-    /// Note: this future is cancel safe
+    /// Note: this future is cancel safe.
     ///
     /// Caution: This does no validation of body (transactions) responses but guarantees that
     /// the starting [`SealedHeader`] matches the requested hash, and that the number of headers and
@@ -101,25 +105,6 @@ where
     }
 }
 
-impl<Client> FetchFullBlockFuture<Client>
-where
-    Client: BlockClient,
-{
-    fn new(client: Client, consensus: Arc<dyn Consensus<Client::Block>>, hash: B256) -> Self {
-        Self {
-            hash,
-            consensus,
-            request: FullBlockRequest {
-                header: Some(client.get_header(hash.into())),
-                body: Some(client.get_block_body(hash)),
-            },
-            client,
-            header: None,
-            body: None,
-        }
-    }
-}
-
 impl<Client> FullBlockClient<Client>
 where
     Client: BlockClient + BlockAccessListsClient,
@@ -140,6 +125,26 @@ where
             block: FetchFullBlockFuture::new(client.clone(), self.consensus.clone(), hash),
             block_result: None,
             bal_request_state: BalRequestState::Pending(client.get_block_access_lists(vec![hash])),
+        }
+    }
+
+    /// Returns a future that fetches [`SealedBlock`]s and optionally their [`BlockAccessLists`] for
+    /// the given hash and count.
+    ///
+    /// The block range is always the primary result. Access lists are requested after the block
+    /// range is downloaded. `Some` may contain a partial prefix when the peer truncates the BAL
+    /// response, while `None` means the optional BAL lookup failed or was unavailable.
+    pub fn get_full_block_range_with_optional_access_lists(
+        &self,
+        hash: B256,
+        count: u64,
+    ) -> FetchFullBlockRangeWithOptionalAccessListsFuture<Client> {
+        let client = self.client.clone();
+        FetchFullBlockRangeWithOptionalAccessListsFuture {
+            blocks: self.get_full_block_range(hash, count),
+            client,
+            block_result: None,
+            access_lists: OptionalBlockAccessListsState::WaitingForBlocks,
         }
     }
 }
@@ -165,6 +170,20 @@ impl<Client> FetchFullBlockFuture<Client>
 where
     Client: BlockClient,
 {
+    fn new(client: Client, consensus: Arc<dyn Consensus<Client::Block>>, hash: B256) -> Self {
+        Self {
+            hash,
+            consensus,
+            request: FullBlockRequest {
+                header: Some(client.get_header(hash.into())),
+                body: Some(client.get_block_body(hash)),
+            },
+            client,
+            header: None,
+            body: None,
+        }
+    }
+
     /// Returns the hash of the block being requested.
     pub const fn hash(&self) -> &B256 {
         &self.hash
@@ -435,6 +454,145 @@ impl<Req> BalRequestState<Req> {
     }
 }
 
+/// A future that downloads a range of full blocks and optionally their block access lists from the
+/// network.
+///
+/// This composes the existing full block range downloader with a follow-up optional block
+/// access-list request, so callers that only need blocks can keep using
+/// [`FetchFullBlockRangeFuture`].
+#[must_use = "futures do nothing unless polled"]
+#[expect(missing_debug_implementations)]
+pub struct FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    blocks: FetchFullBlockRangeFuture<Client>,
+    client: Client,
+    block_result: Option<Vec<SealedBlock<Client::Block>>>,
+    access_lists: OptionalBlockAccessListsState<<Client as BlockAccessListsClient>::Output>,
+}
+
+impl<Client> FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
+where
+    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>
+        + BlockAccessListsClient,
+{
+    fn start_access_lists_request_if_possible(&mut self) {
+        if !matches!(self.access_lists, OptionalBlockAccessListsState::WaitingForBlocks) {
+            return
+        }
+
+        // BALs are requested by block hash, so wait until the block range is fully assembled.
+        let Some(blocks) = self.block_result.as_ref() else { return };
+        let hashes = blocks.iter().map(|block| block.hash()).collect::<Vec<_>>();
+        self.access_lists = OptionalBlockAccessListsState::Pending(
+            self.client.get_block_access_lists_with_requirement(hashes, BalRequirement::Optional),
+        );
+    }
+
+    fn on_access_lists_response(&mut self, response: WithPeerId<BlockAccessLists>) {
+        let (peer, access_lists) = response.split();
+        let expected =
+            self.block_result.as_ref().expect("blocks should be ready before BAL response").len();
+        let received = access_lists.0.len();
+
+        if received > expected {
+            debug!(
+                target: "downloaders",
+                start_hash = ?self.blocks.start_hash(),
+                expected,
+                received,
+                "Received wrong access list range response",
+            );
+            self.client.report_bad_message(peer);
+            self.access_lists = OptionalBlockAccessListsState::Ready(None);
+            return
+        }
+
+        // Short BAL responses are allowed by the wire protocol. Preserve the returned prefix and
+        // let callers decide whether they need to fetch the remaining entries.
+        self.access_lists = OptionalBlockAccessListsState::Ready(Some(access_lists));
+    }
+
+    /// Starts and polls the optional BAL request once, if it is ready to make progress.
+    fn poll_access_lists(&mut self, cx: &mut Context<'_>) {
+        self.start_access_lists_request_if_possible();
+
+        let poll = match &mut self.access_lists {
+            OptionalBlockAccessListsState::Pending(fut) => fut.poll_unpin(cx),
+            OptionalBlockAccessListsState::WaitingForBlocks |
+            OptionalBlockAccessListsState::Ready(_) => return,
+        };
+
+        match poll {
+            Poll::Pending => {}
+            Poll::Ready(Ok(access_lists)) => self.on_access_lists_response(access_lists),
+            Poll::Ready(Err(err)) => {
+                debug!(
+                    target: "downloaders",
+                    %err,
+                    start_hash = ?self.blocks.start_hash(),
+                    "Access list range download failed",
+                );
+
+                // Optional BAL lookup is best-effort: missing eth/71 support or request failures
+                // should not block returning the downloaded block range.
+                self.access_lists = OptionalBlockAccessListsState::Ready(None);
+            }
+        }
+    }
+
+    /// Returns the block range once blocks and the optional BAL lookup are both complete.
+    fn take_response(
+        &mut self,
+    ) -> Option<FullBlockRangeWithOptionalAccessListsResponse<Client::Block>> {
+        let OptionalBlockAccessListsState::Ready(access_lists) = &mut self.access_lists else {
+            return None
+        };
+
+        let blocks = self.block_result.take()?;
+        Some((blocks, access_lists.take()))
+    }
+}
+
+impl<Client> Future for FetchFullBlockRangeWithOptionalAccessListsFuture<Client>
+where
+    Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>
+        + BlockAccessListsClient
+        + 'static,
+{
+    type Output = FullBlockRangeWithOptionalAccessListsResponse<Client::Block>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        // Complete the normal block range first, then issue a separate BAL hash-list request.
+        if this.block_result.is_none() &&
+            let Poll::Ready(blocks) = this.blocks.poll_unpin(cx)
+        {
+            this.block_result = Some(blocks);
+        }
+
+        this.poll_access_lists(cx);
+
+        if let Some(response) = this.take_response() {
+            return Poll::Ready(response)
+        }
+
+        Poll::Pending
+    }
+}
+
+/// Tracks an optional BAL range request and its completed result.
+enum OptionalBlockAccessListsState<Req> {
+    /// The block hashes needed for `GetBlockAccessLists` are not known yet.
+    WaitingForBlocks,
+    /// A `GetBlockAccessLists` request is in flight.
+    Pending(Req),
+    /// `None` means the block range is available but optional BAL data is not.
+    Ready(Option<BlockAccessLists>),
+}
+
 impl<Client> Debug for FetchFullBlockFuture<Client>
 where
     Client: BlockClient<Header: Debug, Body: Debug>,
@@ -534,11 +692,6 @@ impl<Client> FetchFullBlockRangeFuture<Client>
 where
     Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq>,
 {
-    /// Returns the block hashes for the given range, if they are available.
-    pub fn range_block_hashes(&self) -> Option<Vec<B256>> {
-        self.headers.as_ref().map(|h| h.iter().map(|h| h.hash()).collect())
-    }
-
     /// Returns whether or not the bodies map is fully populated with requested headers and bodies.
     fn is_bodies_complete(&self) -> bool {
         self.bodies.len() == self.count as usize
@@ -1046,6 +1199,9 @@ mod tests {
         inner: TestFullBlockClient,
         access_lists: Arc<Mutex<HashMap<B256, Bytes>>>,
         access_list_requests: Arc<AtomicUsize>,
+        access_list_soft_limit: Arc<AtomicUsize>,
+        extra_access_list_entries: Arc<AtomicUsize>,
+        unsupported_access_lists: Arc<AtomicBool>,
         bad_messages: Arc<AtomicUsize>,
         empty_first_response: Arc<AtomicBool>,
     }
@@ -1056,6 +1212,9 @@ mod tests {
                 inner: TestFullBlockClient::default(),
                 access_lists: Arc::new(Mutex::new(HashMap::default())),
                 access_list_requests: Arc::new(AtomicUsize::new(0)),
+                access_list_soft_limit: Arc::new(AtomicUsize::new(usize::MAX)),
+                extra_access_list_entries: Arc::new(AtomicUsize::new(0)),
+                unsupported_access_lists: Arc::new(AtomicBool::new(false)),
                 bad_messages: Arc::new(AtomicUsize::new(0)),
                 empty_first_response: Arc::new(AtomicBool::new(false)),
             }
@@ -1067,6 +1226,39 @@ mod tests {
             self.inner.insert(header.clone(), body);
             self.access_lists.lock().insert(header.hash(), access_list);
         }
+
+        fn set_access_list_soft_limit(&self, limit: usize) {
+            self.access_list_soft_limit.store(limit, Ordering::SeqCst);
+        }
+
+        fn set_extra_access_list_entries(&self, count: usize) {
+            self.extra_access_list_entries.store(count, Ordering::SeqCst);
+        }
+
+        fn set_access_lists_unsupported(&self, unsupported: bool) {
+            self.unsupported_access_lists.store(unsupported, Ordering::SeqCst);
+        }
+    }
+
+    /// Inserts headers with block access lists and returns the last header and block body.
+    fn insert_headers_with_access_lists_into_client(
+        client: &FullBlockWithAccessListsClient,
+        range: Range<usize>,
+    ) -> (SealedHeader, BlockBody) {
+        let mut sealed_header: SealedHeader = SealedHeader::default();
+        let body = BlockBody::default();
+        for block_idx in range {
+            let (mut header, hash) = sealed_header.split();
+            header.parent_hash = hash;
+            header.number += 1;
+
+            sealed_header = SealedHeader::seal_slow(header);
+            let access_list = Bytes::from(vec![EMPTY_LIST_CODE, block_idx as u8]);
+
+            client.insert(sealed_header.clone(), body.clone(), access_list);
+        }
+
+        (sealed_header, body)
     }
 
     impl DownloadClient for FullBlockWithAccessListsClient {
@@ -1118,6 +1310,10 @@ mod tests {
         ) -> Self::Output {
             self.access_list_requests.fetch_add(1, Ordering::SeqCst);
 
+            if self.unsupported_access_lists.load(Ordering::SeqCst) {
+                return futures::future::ready(Err(RequestError::UnsupportedCapability))
+            }
+
             if self.empty_first_response.swap(false, Ordering::SeqCst) {
                 return futures::future::ready(Ok(WithPeerId::new(
                     PeerId::random(),
@@ -1125,8 +1321,9 @@ mod tests {
                 )))
             }
 
-            let access_lists = hashes
+            let mut access_lists: Vec<_> = hashes
                 .into_iter()
+                .take(self.access_list_soft_limit.load(Ordering::SeqCst))
                 .map(|hash| {
                     self.access_lists
                         .lock()
@@ -1135,6 +1332,9 @@ mod tests {
                         .unwrap_or_else(|| Bytes::from_static(&[EMPTY_LIST_CODE]))
                 })
                 .collect();
+            for _ in 0..self.extra_access_list_entries.load(Ordering::SeqCst) {
+                access_lists.push(Bytes::from_static(&[EMPTY_LIST_CODE]));
+            }
 
             futures::future::ready(Ok(WithPeerId::new(
                 PeerId::random(),
@@ -1260,6 +1460,131 @@ mod tests {
 
         assert_eq!(received.len(), 3);
         assert_eq!(body_requests.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_access_lists() {
+        let client = FullBlockWithAccessListsClient::default();
+        let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
+
+        let access_lists = Arc::clone(&client.access_lists);
+        let request_count = Arc::clone(&client.access_list_requests);
+        let client = FullBlockClient::test_client(client);
+
+        let response = timeout(
+            Duration::from_secs(1),
+            client.get_full_block_range_with_optional_access_lists(header.hash(), 3),
+        )
+        .await
+        .expect("range request should complete");
+
+        let (blocks, received_access_lists) = response;
+        assert_eq!(blocks.len(), 3);
+        let expected = {
+            let access_lists = access_lists.lock();
+            blocks
+                .iter()
+                .map(|block| access_lists.get(&block.hash()).cloned().expect("access list exists"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(received_access_lists, Some(BlockAccessLists(expected)));
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_access_lists_preserves_empty_response() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.empty_first_response.store(true, Ordering::SeqCst);
+        let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let client = FullBlockClient::test_client(client);
+
+        let response = timeout(
+            Duration::from_secs(1),
+            client.get_full_block_range_with_optional_access_lists(header.hash(), 3),
+        )
+        .await
+        .expect("range request should complete without access lists");
+
+        let (blocks, received_access_lists) = response;
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(received_access_lists, Some(BlockAccessLists(Vec::new())));
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_access_lists_preserves_short_response() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.set_access_list_soft_limit(2);
+        let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..5);
+
+        let access_lists = Arc::clone(&client.access_lists);
+        let request_count = Arc::clone(&client.access_list_requests);
+        let client = FullBlockClient::test_client(client);
+
+        let (blocks, received_access_lists) = timeout(
+            Duration::from_secs(1),
+            client.get_full_block_range_with_optional_access_lists(header.hash(), 5),
+        )
+        .await
+        .expect("range request should complete without access lists");
+
+        assert_eq!(blocks.len(), 5);
+        let expected = {
+            let access_lists = access_lists.lock();
+            blocks
+                .iter()
+                .take(2)
+                .map(|block| access_lists.get(&block.hash()).cloned().expect("access list exists"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(received_access_lists, Some(BlockAccessLists(expected)));
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_access_lists_returns_none_when_unavailable() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.set_access_lists_unsupported(true);
+        let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let client = FullBlockClient::test_client(client);
+
+        let (blocks, received_access_lists) = timeout(
+            Duration::from_secs(1),
+            client.get_full_block_range_with_optional_access_lists(header.hash(), 3),
+        )
+        .await
+        .expect("range request should complete without access lists");
+
+        assert_eq!(blocks.len(), 3);
+        assert!(received_access_lists.is_none());
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_access_lists_rejects_long_response() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.set_extra_access_list_entries(1);
+        let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let bad_messages = Arc::clone(&client.bad_messages);
+        let client = FullBlockClient::test_client(client);
+
+        let (blocks, received_access_lists) = timeout(
+            Duration::from_secs(1),
+            client.get_full_block_range_with_optional_access_lists(header.hash(), 3),
+        )
+        .await
+        .expect("range request should complete without access lists");
+
+        assert_eq!(blocks.len(), 3);
+        assert!(received_access_lists.is_none());
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

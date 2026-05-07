@@ -120,6 +120,11 @@ impl Capability {
         Self::eth(EthVersion::Eth71)
     }
 
+    /// Returns the [`EthVersion::Eth72`] capability.
+    pub const fn eth_72() -> Self {
+        Self::eth(EthVersion::Eth72)
+    }
+
     /// Returns the `snap/1` capability.
     pub const fn snap_1() -> Self {
         Self::snap(SnapVersion::V1)
@@ -166,6 +171,12 @@ impl Capability {
         self.name == "eth" && self.version == 71
     }
 
+    /// Whether this is eth v72.
+    #[inline]
+    pub fn is_eth_v72(&self) -> bool {
+        self.name == "eth" && self.version == 72
+    }
+
     /// Whether this is any eth version.
     #[inline]
     pub fn is_eth(&self) -> bool {
@@ -174,7 +185,8 @@ impl Capability {
             self.is_eth_v68() ||
             self.is_eth_v69() ||
             self.is_eth_v70() ||
-            self.is_eth_v71()
+            self.is_eth_v71() ||
+            self.is_eth_v72()
     }
 }
 
@@ -211,6 +223,7 @@ pub struct Capabilities {
     eth_69: bool,
     eth_70: bool,
     eth_71: bool,
+    eth_72: bool,
 }
 
 impl Capabilities {
@@ -223,6 +236,7 @@ impl Capabilities {
             eth_69: value.iter().any(Capability::is_eth_v69),
             eth_70: value.iter().any(Capability::is_eth_v70),
             eth_71: value.iter().any(Capability::is_eth_v71),
+            eth_72: value.iter().any(Capability::is_eth_v72),
             inner: value,
         }
     }
@@ -244,15 +258,24 @@ impl Capabilities {
                     self.eth_68 ||
                     self.eth_69 ||
                     self.eth_70 ||
-                    self.eth_71
+                    self.eth_71 ||
+                    self.eth_72
             }
             EthVersion::Eth67 => {
-                self.eth_67 || self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71
+                self.eth_67 ||
+                    self.eth_68 ||
+                    self.eth_69 ||
+                    self.eth_70 ||
+                    self.eth_71 ||
+                    self.eth_72
             }
-            EthVersion::Eth68 => self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71,
-            EthVersion::Eth69 => self.eth_69 || self.eth_70 || self.eth_71,
-            EthVersion::Eth70 => self.eth_70 || self.eth_71,
-            EthVersion::Eth71 => self.eth_71,
+            EthVersion::Eth68 => {
+                self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72
+            }
+            EthVersion::Eth69 => self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72,
+            EthVersion::Eth70 => self.eth_70 || self.eth_71 || self.eth_72,
+            EthVersion::Eth71 => self.eth_71 || self.eth_72,
+            EthVersion::Eth72 => self.eth_72,
         }
     }
 
@@ -334,6 +357,7 @@ impl Decodable for Capabilities {
             eth_69: inner.iter().any(Capability::is_eth_v69),
             eth_70: inner.iter().any(Capability::is_eth_v70),
             eth_71: inner.iter().any(Capability::is_eth_v71),
+            eth_72: inner.iter().any(Capability::is_eth_v72),
             inner,
         })
     }

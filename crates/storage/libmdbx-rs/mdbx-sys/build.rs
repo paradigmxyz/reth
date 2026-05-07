@@ -97,6 +97,7 @@ fn generate_bindings(mdbx: &Path, out_file: &Path) {
     let bindings = bindgen::Builder::default()
         .header(mdbx.join("mdbx.h").to_string_lossy())
         .allowlist_var("^(MDBX|mdbx)_.*")
+        .blocklist_item("MDBX_NOTLS")
         .allowlist_type("^(MDBX|mdbx)_.*")
         .allowlist_function("^(MDBX|mdbx)_.*")
         .size_t_is_usize(true)

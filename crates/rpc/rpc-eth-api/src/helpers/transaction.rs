@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::TransactionInfo;
+use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
@@ -470,8 +470,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let chain_id = self.chain_id();
             request.as_mut().set_chain_id(chain_id.to());
 
-            let estimated_gas =
-                self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+            let estimated_gas = self
+                .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                .await?;
             let gas_limit = estimated_gas;
             request.as_mut().set_gas_limit(gas_limit.to());
 
@@ -533,8 +534,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             if request.as_ref().gas_limit().is_none() {
-                let estimated_gas =
-                    self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+                let estimated_gas = self
+                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                    .await?;
                 request.as_mut().set_gas_limit(estimated_gas.to());
             }
 

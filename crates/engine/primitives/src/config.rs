@@ -190,9 +190,9 @@ pub struct TreeConfig {
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
-    /// Whether to disable BAL (Block Access List) state prefetching during prewarm.
-    /// When disabled, BAL executor workers fetch state on demand instead of consuming
-    /// BAL-declared cache prefetches.
+    /// Whether to disable BAL (Block Access List) storage prefetch IO during prewarming.
+    /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
+    /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
