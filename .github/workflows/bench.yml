@@ -17,10 +17,10 @@ on:
         default: "500"
         type: string
       big_blocks:
-        description: "Use big blocks mode (generated in flight with reth-bb)"
+        description: "Use big blocks mode: false, true, or target gas like 100M/2G"
         required: false
         default: "false"
-        type: boolean
+        type: string
       bal:
         description: "Replay block access lists during big-block benchmarks"
         required: false
@@ -124,6 +124,7 @@ jobs:
       slack: ${{ steps.args.outputs.slack }}
       cores: ${{ steps.args.outputs.cores }}
       big-blocks: ${{ steps.args.outputs.big-blocks }}
+      big-blocks-target-gas: ${{ steps.args.outputs.big-blocks-target-gas }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
@@ -162,9 +163,18 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
+            let bigBlocksTargetGas = '';
             let explicitWarmup = false;
+
+            const parseBigBlocks = (value) => {
+              value = String(value || 'false');
+              if (value === 'true') return { enabled: 'true', targetGas: '' };
+              if (value === 'false') return { enabled: 'false', targetGas: '' };
+              if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
+              return null;
+            };
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -176,7 +186,13 @@ jobs:
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
               var slack = '${{ github.event.inputs.slack }}' || 'never';
               cores = '${{ github.event.inputs.cores }}' || '0';
-              bigBlocks = '${{ github.event.inputs.big_blocks }}' === 'true' ? 'true' : 'false';
+              const parsedBigBlocks = parseBigBlocks('${{ github.event.inputs.big_blocks }}');
+              if (!parsedBigBlocks) {
+                core.setFailed(`Invalid big_blocks value: ${{ github.event.inputs.big_blocks }} (must be false, true, or a gas value like 100M or 2G)`);
+                return;
+              }
+              bigBlocks = parsedBigBlocks.enabled;
+              bigBlocksTargetGas = parsedBigBlocks.targetGas;
               bal = '${{ github.event.inputs.bal }}' || 'false';
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
               var otlp = '${{ github.event.inputs.otlp }}' === 'true' ? 'true' : 'false';
@@ -204,7 +220,7 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['warmup', 'cores', 'blocks']);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply', 'big-blocks']);
+              const boolArgs = new Set(['samply']);
               const boolDefaultTrue = new Set(['abba']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
@@ -221,7 +237,9 @@ jobs:
               for (const part of parts) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
-                  if (boolArgs.has(part)) {
+                  if (part === 'big-blocks') {
+                    defaults[part] = 'true';
+                  } else if (boolArgs.has(part)) {
                     defaults[part] = 'true';
                   } else if (boolDefaultTrue.has(part)) {
                     defaults[part] = 'true';
@@ -236,7 +254,14 @@ jobs:
                 if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
                   value = value.slice(1, -1);
                 }
-                if (boolArgs.has(key) || boolDefaultTrue.has(key)) {
+                if (key === 'big-blocks') {
+                  const parsed = parseBigBlocks(value);
+                  if (parsed) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be false, true, or a gas value like 100M or 2G)`);
+                  }
+                } else if (boolArgs.has(key) || boolDefaultTrue.has(key)) {
                   if (value === 'true' || value === 'false') {
                     defaults[key] = value;
                   } else {
@@ -294,7 +319,9 @@ jobs:
               samply = defaults.samply;
               var slack = defaults.slack;
               cores = defaults.cores;
-              bigBlocks = defaults['big-blocks'];
+              const parsedBigBlocks = parseBigBlocks(defaults['big-blocks']);
+              bigBlocks = parsedBigBlocks.enabled;
+              bigBlocksTargetGas = parsedBigBlocks.targetGas;
               bal = defaults.bal;
               var abba = defaults.abba;
               var otlp = defaults.otlp;
@@ -361,6 +388,7 @@ jobs:
             core.setOutput('slack', slack);
             core.setOutput('cores', cores);
             core.setOutput('big-blocks', bigBlocks);
+            core.setOutput('big-blocks-target-gas', bigBlocksTargetGas);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
             core.setOutput('baseline-args', baselineNodeArgs);
@@ -565,6 +593,7 @@ jobs:
       BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
       BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
       BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
+      BENCH_BIG_BLOCKS_TARGET_GAS: ${{ needs.reth-bench-ack.outputs.big-blocks-target-gas }}
       BENCH_BAL: ${{ needs.reth-bench-ack.outputs.bal }}
       BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
       BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
