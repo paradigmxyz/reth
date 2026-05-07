@@ -28,7 +28,8 @@ use alloy_evm::{
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{
-    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor, block::BlockExecutorFactory, execute::ExecutableTxFor
+    block::BlockExecutorFactory, execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor,
+    ExecutionCtxFor,
 };
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
@@ -41,7 +42,7 @@ use revm::{
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
-use crate::tree::{payload_processor::receipt_root_task::IndexedReceipt};
+use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
@@ -294,7 +295,7 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{EthereumReceipt, Header, BlockHeader};
+    use alloy_consensus::{BlockHeader, EthereumReceipt, Header};
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
