@@ -38,15 +38,19 @@
 //! [`FullConsensus::validate_block_post_execution`]: reth_consensus::FullConsensus::validate_block_post_execution
 //! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
-use crate::tree::{
-    error::{InsertBlockError, InsertBlockErrorKind},
-    instrumented_state::{InstrumentedStateProvider, StateProviderStats},
-    multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    types::{InsertPayloadResult, ValidationOutput},
-    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+use crate::{
+    persistence::{RemoveBlocksHook, SaveBlocksHook},
+    tree::{
+        error::{InsertBlockError, InsertBlockErrorKind},
+        instrumented_state::{InstrumentedStateProvider, StateProviderStats},
+        multiproof::{StateRootComputeOutcome, StateRootHandle},
+        payload_processor::PayloadProcessor,
+        precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+        types::{InsertPayloadResult, ValidationOutput},
+        CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState,
+        ExecutionEnv, PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+        WaitForCaches,
+    },
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::bal::DecodedBal;
@@ -197,6 +201,12 @@ where
     runtime: reth_tasks::Runtime,
     /// Custom state root computation function.
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
+    /// Optional hook invoked before canonical block persistence is committed.
+    #[debug(skip)]
+    save_blocks_hook: Option<SaveBlocksHook<Evm::Primitives>>,
+    /// Optional hook invoked after canonical unwind persistence is committed.
+    #[debug(skip)]
+    remove_blocks_hook: Option<RemoveBlocksHook>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -253,12 +263,25 @@ where
             changeset_cache,
             runtime,
             custom_state_root: None,
+            save_blocks_hook: None,
+            remove_blocks_hook: None,
         }
     }
 
     /// Sets a custom state root computation handler.
     pub fn with_custom_state_root(mut self, custom_state_root: CustomStateRoot<N>) -> Self {
         self.custom_state_root = Some(custom_state_root);
+        self
+    }
+
+    /// Sets persistence hooks for a custom durable state store.
+    pub fn with_persistence_hooks(
+        mut self,
+        save_blocks_hook: Option<SaveBlocksHook<N>>,
+        remove_blocks_hook: Option<RemoveBlocksHook>,
+    ) -> Self {
+        self.save_blocks_hook = save_blocks_hook;
+        self.remove_blocks_hook = remove_blocks_hook;
         self
     }
 
@@ -806,7 +829,7 @@ where
             let (root, updates) = ensure_ok_post_block!(
                 provider_builder
                     .build()
-                    .and_then(|provider| Self::compute_state_root_serial(provider, &hashed_state)),
+                    .and_then(|provider| self.compute_state_root_serial(provider, &hashed_state)),
                 block
             );
 
@@ -1291,6 +1314,7 @@ where
     /// trie updates for this block directly via
     /// [`reth_provider::StateRootProvider::state_root_with_updates`].
     fn compute_state_root_serial(
+        &self,
         state_provider: StateProviderBox,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -1347,7 +1371,7 @@ where
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result = state_provider_builder.build().and_then(|provider| {
-                        Self::compute_state_root_serial(provider, &seq_hashed_state)
+                        provider.state_root_with_updates(seq_hashed_state.get().as_ref().clone())
                     });
                     let _ = seq_tx.send(result);
                 });
@@ -1422,7 +1446,7 @@ where
 
         match state_provider_builder
             .build()
-            .and_then(|provider| Self::compute_state_root_serial(provider, hashed_state))
+            .and_then(|provider| self.compute_state_root_serial(provider, hashed_state))
         {
             Ok((serial_root, serial_trie_updates)) => {
                 debug!(
@@ -2131,6 +2155,16 @@ pub trait EngineValidator<
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle>;
+
+    /// Hook invoked before a canonical block save is committed to the built-in stores.
+    fn persistence_save_blocks_hook(&self) -> Option<SaveBlocksHook<N>> {
+        None
+    }
+
+    /// Hook invoked after a canonical unwind is committed to the built-in stores.
+    fn persistence_remove_blocks_hook(&self) -> Option<RemoveBlocksHook> {
+        None
+    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2241,6 +2275,14 @@ where
             false,
             &self.config,
         ))
+    }
+
+    fn persistence_save_blocks_hook(&self) -> Option<SaveBlocksHook<N>> {
+        self.save_blocks_hook.clone()
+    }
+
+    fn persistence_remove_blocks_hook(&self) -> Option<RemoveBlocksHook> {
+        self.remove_blocks_hook.clone()
     }
 }
 

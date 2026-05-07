@@ -16,11 +16,15 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, AccountReader, BlockNumReader, ChangeSetReader,
+    DatabaseProviderFactory, HeaderProvider, ProviderFactory, StateReader, StorageChangeSetReader,
+    StorageReader,
+};
 use reth_stages::{
     prelude::DefaultStages,
     stages::{EraImportSource, ExecutionStage},
-    Pipeline, StageSet,
+    Pipeline, StageSet, StageSetBuilder,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -42,11 +46,25 @@ pub fn build_networked_pipeline<N, Client, Evm>(
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
+    customize_stages: impl FnOnce(
+        StageSetBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
+    ) -> eyre::Result<
+        StageSetBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
+    >,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW: HeaderProvider<Header = HeaderTy<N>>
+        + AccountReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageReader
+        + StateReader
+        + BlockNumReader
+        + Send
+        + 'static,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -70,6 +88,7 @@ where
         evm_config,
         exex_manager_handle,
         era_import_source,
+        customize_stages,
     )?;
 
     Ok(pipeline)
@@ -90,12 +109,26 @@ pub fn build_pipeline<N, H, B, Evm>(
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
+    customize_stages: impl FnOnce(
+        StageSetBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
+    ) -> eyre::Result<
+        StageSetBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
+    >,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = HeaderTy<N>> + 'static,
     B: BodyDownloader<Block = BlockTy<N>> + 'static,
     Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW: HeaderProvider<Header = HeaderTy<N>>
+        + AccountReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageReader
+        + StateReader
+        + BlockNumReader
+        + Send
+        + 'static,
 {
     let mut builder = Pipeline::<N>::builder();
 
@@ -106,29 +139,31 @@ where
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
+    let stages: StageSetBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW> =
+        DefaultStages::new(
+            provider_factory.clone(),
+            tip_rx,
+            Arc::clone(&consensus),
+            header_downloader,
+            body_downloader,
+            evm_config.clone(),
+            stage_config.clone(),
+            prune_config.segments,
+            era_import_source,
+        )
+        .set(ExecutionStage::new(
+            evm_config,
+            consensus,
+            stage_config.execution.into(),
+            stage_config.execution_external_clean_threshold(),
+            exex_manager_handle,
+        ));
+    let stages = customize_stages(stages)?;
+
     let pipeline = builder
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx)
-        .add_stages(
-            DefaultStages::new(
-                provider_factory.clone(),
-                tip_rx,
-                Arc::clone(&consensus),
-                header_downloader,
-                body_downloader,
-                evm_config.clone(),
-                stage_config.clone(),
-                prune_config.segments,
-                era_import_source,
-            )
-            .set(ExecutionStage::new(
-                evm_config,
-                consensus,
-                stage_config.execution.into(),
-                stage_config.execution_external_clean_threshold(),
-                exex_manager_handle,
-            )),
-        )
+        .add_stages(stages)
         .build(provider_factory, static_file_producer);
 
     Ok(pipeline)

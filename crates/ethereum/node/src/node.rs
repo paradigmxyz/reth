@@ -227,6 +227,18 @@ where
         EthereumAddOns::new(inner.with_engine_api(engine_api_builder))
     }
 
+    /// Replace the consensus engine validator builder.
+    pub fn with_engine_validator<T>(
+        self,
+        engine_validator_builder: T,
+    ) -> EthereumAddOns<N, EthB, PVB, EB, T, RpcMiddleware, AuthHttpMiddleware>
+    where
+        T: Send,
+    {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.with_engine_validator(engine_validator_builder))
+    }
+
     /// Replace the payload validator builder.
     pub fn with_payload_validator<V, T>(
         self,

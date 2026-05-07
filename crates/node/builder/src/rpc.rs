@@ -24,7 +24,8 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    NodeAddOns, NodePrimitives, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy,
+    TreeConfig,
 };
 use reth_node_core::{
     cli::config::RethTransactionPoolConfig,
@@ -32,6 +33,10 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_provider::{
+    AccountReader, BlockNumReader, ChangeSetReader, HeaderProvider, StateReader,
+    StorageChangeSetReader, StorageReader,
+};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -44,6 +49,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_stages::StageSetBuilder;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -1413,6 +1419,28 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
+
+    /// Customizes the default staged-sync pipeline for nodes that need an alternate state-root
+    /// stage.
+    fn customize_pipeline_stages<Provider>(
+        &self,
+        _config: &NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+        stages: StageSetBuilder<Provider>,
+    ) -> eyre::Result<StageSetBuilder<Provider>>
+    where
+        Provider: HeaderProvider<
+                Header = <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::BlockHeader,
+            > + AccountReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageReader
+            + StateReader
+            + BlockNumReader
+            + Send
+            + 'static,
+    {
+        Ok(stages)
+    }
 }
 
 /// Basic implementation of [`EngineValidatorBuilder`].

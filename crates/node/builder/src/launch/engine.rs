@@ -145,6 +145,7 @@ impl EngineNodeLauncher {
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
         let consensus = Arc::new(ctx.components().consensus().clone());
+        let validator_builder = add_ons.engine_validator_builder();
 
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
@@ -159,6 +160,7 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             ctx.era_import_source(),
+            |stages| validator_builder.customize_pipeline_stages(ctx.node_config(), stages),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -189,7 +191,6 @@ impl EngineNodeLauncher {
             jwt_secret,
             engine_events: event_sender.clone(),
         };
-        let validator_builder = add_ons.engine_validator_builder();
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder
@@ -369,9 +370,13 @@ impl EngineNodeLauncher {
                     shutdown_req = &mut shutdown_rx => {
                         if let Ok(req) = shutdown_req {
                             debug!(target: "reth::cli", "received engine shutdown request");
+                            let (done_tx, done_rx) = oneshot::channel();
                             orchestrator.handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                                FromOrchestrator::Terminate { tx: done_tx }.into()
                             );
+                            let _ = done_rx.await;
+                            let _ = req.done_tx.send(());
+                            break;
                         }
                     }
                     _guard = &mut on_graceful_shutdown => {

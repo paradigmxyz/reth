@@ -108,6 +108,7 @@ members = [
     "crates/storage/libmdbx-rs/mdbx-sys/",
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
+    "crates/storage/qmdb/",
     "crates/storage/storage-api/",
     "crates/tasks/",
     "crates/tokio-util/",
@@ -143,6 +144,7 @@ members = [
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
+    "examples/qmdb-node/",
     "examples/rpc-db/",
     "examples/precompile-cache/",
     "examples/txpool-tracing/",
@@ -397,6 +399,7 @@ reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
 reth-primitives-traits = { version = "0.3.1", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
+reth-qmdb = { path = "crates/storage/qmdb" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
 reth-revm = { path = "crates/revm", default-features = false }
@@ -483,6 +486,12 @@ alloy-transport = { version = "2.0.4" }
 alloy-transport-http = { version = "2.0.4", features = ["reqwest-rustls-tls"], default-features = false }
 alloy-transport-ipc = { version = "2.0.4", default-features = false }
 alloy-transport-ws = { version = "2.0.4", default-features = false }
+
+# commonware
+commonware-cryptography = { version = "2026.4.0" }
+commonware-runtime = { version = "2026.4.0" }
+commonware-storage = { version = "2026.4.0" }
+commonware-utils = { version = "2026.4.0" }
 
 # misc
 either = { version = "1.15.0", default-features = false }
