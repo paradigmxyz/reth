@@ -343,6 +343,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::BlockAccessLists(resp) => {
                 on_response!(resp, GetBlockAccessLists)
             }
+            EthMessage::Cells(resp)=> {
+                on_response!(resp, GetCells)
+            }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
                 if msg.earliest > msg.latest {
