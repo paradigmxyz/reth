@@ -402,6 +402,10 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
+    /// Maximum number of converted transactions buffered between the conversion, prewarm, and
+    /// execution tasks.
+    const TX_ITERATOR_QUEUE_CAP: usize = 128;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -414,8 +418,9 @@ where
         transactions: I,
         transaction_count: usize,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
-        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
-        let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let queue_capacity = transaction_count.min(Self::TX_ITERATOR_QUEUE_CAP);
+        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(queue_capacity);
+        let (execute_tx, execute_rx) = crossbeam_channel::bounded(queue_capacity);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
