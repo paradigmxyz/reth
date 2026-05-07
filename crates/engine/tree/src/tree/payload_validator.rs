@@ -600,9 +600,7 @@ where
             }
         } else {
             match self.execute_block(state_provider, env, &input, &mut handle) {
-                Ok((output, senders, receipt_root_rx, built_bal)) => {
-                    (output, senders, receipt_root_rx, built_bal)
-                }
+                Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             }
         };
