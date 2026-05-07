@@ -536,9 +536,12 @@ where
             num_children >= 2,
             "A branch must have at least two children, got {num_children}"
         );
+        let split_at = self.child_stack.len() - num_children;
+        rlp_nodes_buf.reserve(num_children);
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
-        for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+        while self.child_stack.len() > split_at {
+            let child = self.child_stack.pop().expect("split_at was checked above");
             let child_rlp_node = match child {
                 ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
                 uncommitted_child => {
@@ -554,6 +557,7 @@ where
             };
             rlp_nodes_buf.push(child_rlp_node);
         }
+        rlp_nodes_buf.reverse();
 
         debug_assert_eq!(
             rlp_nodes_buf.len(),
@@ -563,9 +567,10 @@ where
 
         // Calculate the short key of the parent extension (if the branch has a parent extension).
         // It's important to calculate this short key prior to modifying the `branch_path`.
+        let branch_path_len = self.branch_path.len();
         let short_key = trim_nibbles_prefix(
             &self.branch_path,
-            self.branch_path.len() - branch.ext_len as usize,
+            branch_path_len - branch.ext_len as usize,
         );
 
         // Compute hash for the branch node if it has a parent extension.
@@ -587,10 +592,9 @@ where
 
         // Update the branch_path. If this branch is the only branch then only its extension needs
         // to be trimmed, otherwise we also need to remove its nibble from its parent.
-        let new_path_len =
-            self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
+        let new_path_len = branch_path_len - branch.ext_len as usize - self.maybe_parent_nibble();
 
-        debug_assert!(self.branch_path.len() >= new_path_len);
+        debug_assert!(branch_path_len >= new_path_len);
         self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
 
         Ok(())
