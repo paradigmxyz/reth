@@ -17,7 +17,7 @@ use std::{
     collections::HashMap,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -25,6 +25,7 @@ use std::{
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
+const LONG_READ_TRANSACTION_OPERATION_CHECK_INTERVAL: u16 = 1024;
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -162,7 +163,7 @@ impl<K: TransactionKind> Tx<K> {
         f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
         if let Some(metrics_handler) = &self.metrics_handler {
-            metrics_handler.log_backtrace_on_long_read_transaction();
+            metrics_handler.maybe_log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
                 .record_operation(T::NAME, operation, value_size, || f(&self.inner))
@@ -189,6 +190,8 @@ struct MetricsHandler<K: TransactionKind> {
     /// If `true`, the backtrace of transaction has already been recorded and logged.
     /// See [`MetricsHandler::log_backtrace_on_long_read_transaction`].
     backtrace_recorded: AtomicBool,
+    /// Counts database operations between long-lived read transaction checks.
+    operation_check_counter: AtomicU16,
     /// Shared database environment metrics.
     env_metrics: Arc<DatabaseEnvMetrics>,
     /// Backtrace of the location where the transaction has been opened. Reported only with debug
@@ -207,6 +210,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
+            operation_check_counter: AtomicU16::new(0),
             #[cfg(debug_assertions)]
             open_backtrace: Backtrace::force_capture(),
             env_metrics,
@@ -240,6 +244,20 @@ impl<K: TransactionKind> MetricsHandler<K> {
     ///
     /// NOTE: Backtrace is recorded using [`Backtrace::force_capture`], so `RUST_BACKTRACE` env var
     /// is not needed.
+    fn maybe_log_backtrace_on_long_read_transaction(&self) {
+        if !self.transaction_mode().is_read_only() {
+            return;
+        }
+
+        let counter = self
+            .operation_check_counter
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        if counter == 1 || counter % LONG_READ_TRANSACTION_OPERATION_CHECK_INTERVAL == 0 {
+            self.log_backtrace_on_long_read_transaction();
+        }
+    }
+
     fn log_backtrace_on_long_read_transaction(&self) {
         if self.record_backtrace &&
             !self.backtrace_recorded.load(Ordering::Relaxed) &&
