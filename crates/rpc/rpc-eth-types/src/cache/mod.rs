@@ -9,8 +9,9 @@ use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives_traits::{Block, BlockBody, NodePrimitives, RecoveredBlock};
-use reth_storage_api::{BlockReader, TransactionVariant};
+use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
+use reth_revm::state::bal::Bal as RevmBal;
+use reth_storage_api::{BlockReader, RevmBalProvider, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
@@ -51,6 +52,9 @@ type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBloc
 /// The type that can send the response for a transaction hash lookup
 type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransaction<B, R>>>;
 
+/// The type that can send the response to a requested revm BAL.
+type BalResponseSender = oneshot::Sender<ProviderResult<Option<CachedRevmBal>>>;
+
 type BlockLruCache<B, L> =
     MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
 
@@ -58,6 +62,58 @@ type ReceiptsLruCache<R, L> =
     MultiConsumerLruCache<B256, Arc<Vec<R>>, L, ReceiptsResponseSender<R>>;
 
 type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
+
+type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
+
+/// Cached revm BAL.
+#[derive(Clone, Debug)]
+pub(crate) struct CachedRevmBal(Arc<RevmBal>);
+
+impl CachedRevmBal {
+    /// Creates a cached revm BAL from an owned BAL.
+    #[inline]
+    fn new(bal: RevmBal) -> Self {
+        Self(Arc::new(bal))
+    }
+
+    /// Returns the cached BAL as a shared pointer.
+    #[inline]
+    fn into_arc(self) -> Arc<RevmBal> {
+        self.0
+    }
+
+    /// Returns a reference to the cached BAL.
+    #[inline]
+    fn as_ref(&self) -> &RevmBal {
+        &self.0
+    }
+}
+
+impl InMemorySize for CachedRevmBal {
+    fn size(&self) -> usize {
+        // This is a heuristic aligned with the cache metrics model. It counts the indexed
+        // account map and the nested BAL write vectors, but avoids depending on revm internals
+        // beyond the public fields exposed for BAL consumption.
+        let bal = self.as_ref();
+        let mut size = core::mem::size_of::<RevmBal>();
+        size += bal.accounts.capacity() *
+            core::mem::size_of::<(alloy_primitives::Address, reth_revm::state::bal::AccountBal)>(
+            );
+        for account in bal.accounts.values() {
+            size +=
+                account.account_info.nonce.writes.capacity() * core::mem::size_of::<(u64, u64)>();
+            size += account.account_info.balance.writes.capacity() *
+                core::mem::size_of::<(u64, alloy_primitives::U256)>();
+            size += account.account_info.code.writes.capacity() *
+                core::mem::size_of::<(u64, (B256, reth_revm::state::Bytecode))>();
+            for writes in account.storage.storage.values() {
+                size += writes.writes.capacity() *
+                    core::mem::size_of::<(u64, alloy_primitives::U256)>();
+            }
+        }
+        size
+    }
+}
 
 /// Provides async access to cached eth data
 ///
@@ -82,11 +138,12 @@ impl<N: NodePrimitives> EthStateCache<N> {
         max_blocks: u32,
         max_receipts: u32,
         max_headers: u32,
+        max_bals: u32,
         max_concurrent_db_operations: usize,
         max_cached_tx_hashes: u32,
     ) -> (Self, EthStateCacheService<Provider, Runtime>)
     where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt>,
+        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + RevmBalProvider,
     {
         let (to_service, rx) = unbounded_channel();
 
@@ -95,6 +152,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             full_block_cache: BlockLruCache::new(max_blocks, "blocks"),
             receipts_cache: ReceiptsLruCache::new(max_receipts, "receipts"),
             headers_cache: HeaderLruCache::new(max_headers, "headers"),
+            bal_cache: BalLruCache::new(max_bals, "bals"),
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
@@ -115,12 +173,17 @@ impl<N: NodePrimitives> EthStateCache<N> {
         executor: Runtime,
     ) -> Self
     where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + Clone + Unpin + 'static,
+        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt>
+            + RevmBalProvider
+            + Clone
+            + Unpin
+            + 'static,
     {
         let EthStateCacheConfig {
             max_blocks,
             max_receipts,
             max_headers,
+            max_bals,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         } = config;
@@ -130,6 +193,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             max_blocks,
             max_receipts,
             max_headers,
+            max_bals,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         );
@@ -265,6 +329,17 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let _ = self.to_service.send(CacheAction::GetTransactionByHash { tx_hash, response_tx });
         rx.await.ok()?
     }
+
+    /// Requests the revm BAL for the block hash.
+    ///
+    /// Returns `None` if the BAL does not exist.
+    pub async fn get_bal(&self, block_hash: B256) -> ProviderResult<Option<Arc<RevmBal>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
+        rx.await
+            .map_err(|_| CacheServiceUnavailable)?
+            .map(|maybe_bal| maybe_bal.map(CachedRevmBal::into_arc))
+    }
 }
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
@@ -300,11 +375,13 @@ pub(crate) struct EthStateCacheService<
     LimitBlocks = ByLength,
     LimitReceipts = ByLength,
     LimitHeaders = ByLength,
+    LimitBals = ByLength,
 > where
-    Provider: BlockReader,
+    Provider: BlockReader + RevmBalProvider,
     LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
     LimitHeaders: Limiter<B256, Provider::Header>,
+    LimitBals: Limiter<B256, CachedRevmBal>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -317,6 +394,8 @@ pub(crate) struct EthStateCacheService<
     /// Headers are cached because they are required to populate the environment for execution
     /// (evm).
     headers_cache: HeaderLruCache<Provider::Header, LimitHeaders>,
+    /// The LRU cache for revm BALs grouped by the block hash.
+    bal_cache: BalLruCache<LimitBals>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
     /// Receiver half of the action channel.
@@ -333,7 +412,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider> EthStateCacheService<Provider, Runtime>
 where
-    Provider: BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + RevmBalProvider + Clone + Unpin + 'static,
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
@@ -386,6 +465,18 @@ where
         }
     }
 
+    fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+        if let Some(queued) = self.bal_cache.remove(&block_hash) {
+            for tx in queued {
+                let _ = tx.send(res.clone());
+            }
+        }
+
+        if let Ok(Some(bal)) = res {
+            self.bal_cache.insert(block_hash, bal);
+        }
+    }
+
     fn on_reorg_block(
         &mut self,
         block_hash: B256,
@@ -422,24 +513,34 @@ where
         }
     }
 
+    fn on_reorg_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+        if let Some(queued) = self.bal_cache.remove(&block_hash) {
+            for tx in queued {
+                let _ = tx.send(res.clone());
+            }
+        }
+    }
+
     /// Shrinks the queues but leaves some space for the next requests
     fn shrink_queues(&mut self) {
         let min_capacity = 2;
         self.full_block_cache.shrink_to(min_capacity);
         self.receipts_cache.shrink_to(min_capacity);
         self.headers_cache.shrink_to(min_capacity);
+        self.bal_cache.shrink_to(min_capacity);
     }
 
     fn update_cached_metrics(&self) {
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
         self.headers_cache.update_cached_metrics();
+        self.bal_cache.update_cached_metrics();
     }
 }
 
 impl<Provider> Future for EthStateCacheService<Provider, Runtime>
 where
-    Provider: BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + RevmBalProvider + Clone + Unpin + 'static,
 {
     type Output = ();
 
@@ -554,8 +655,32 @@ where
                                 });
                             }
                         }
+                        CacheAction::GetBal { block_hash, response_tx } => {
+                            if let Some(bal) = this.bal_cache.get(&block_hash).cloned() {
+                                let _ = response_tx.send(Ok(Some(bal)));
+                                continue
+                            }
+
+                            if this.bal_cache.queue(block_hash, response_tx) {
+                                let provider = this.provider.clone();
+                                let action_tx = this.action_tx.clone();
+                                let rate_limiter = this.rate_limiter.clone();
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Bal, block_hash, action_tx);
+                                this.action_task_spawner.spawn_blocking_task(async move {
+                                    let _permit = rate_limiter.acquire().await;
+                                    let res = provider
+                                        .revm_bal_by_hash(block_hash)
+                                        .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
+                                    action_sender.send_bal(res);
+                                });
+                            }
+                        }
                         CacheAction::ReceiptsResult { block_hash, res } => {
                             this.on_new_receipts(block_hash, res);
+                        }
+                        CacheAction::BalResult { block_hash, res } => {
+                            this.on_new_bal(block_hash, res);
                         }
                         CacheAction::BlockWithSendersResult { block_hash, res } => match res {
                             Ok(Some(block_with_senders)) => {
@@ -604,6 +729,7 @@ where
                                 this.remove_block_transactions(&block);
                                 this.on_reorg_block(block_hash, Ok(Some(block)));
                                 this.on_reorg_header(block_hash, Ok(header));
+                                this.on_reorg_bal(block_hash, Ok(None));
                             }
 
                             for block_receipts in chain_change.receipts {
@@ -668,6 +794,10 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         response_tx: ReceiptsResponseSender<R>,
     },
+    GetBal {
+        block_hash: B256,
+        response_tx: BalResponseSender,
+    },
     GetCachedBlock {
         block_hash: B256,
         response_tx: CachedBlockResponseSender<B>,
@@ -687,6 +817,10 @@ enum CacheAction<B: Block, R> {
     HeaderResult {
         block_hash: B256,
         res: Box<ProviderResult<B::Header>>,
+    },
+    BalResult {
+        block_hash: B256,
+        res: ProviderResult<Option<CachedRevmBal>>,
     },
     CacheNewCanonicalChain {
         chain_change: ChainChange<B, R>,
@@ -740,6 +874,7 @@ enum CacheKind {
     Block,
     Receipt,
     Header,
+    Bal,
 }
 
 /// Drop aware sender struct that ensures a response is always emitted even if the db task panics
@@ -782,6 +917,12 @@ impl<R: Send + Sync, B: Block> ActionSender<B, R> {
             });
         }
     }
+
+    fn send_bal(&mut self, bal: Result<Option<CachedRevmBal>, ProviderError>) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(CacheAction::BalResult { block_hash: self.blockhash, res: bal });
+        }
+    }
 }
 impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
     fn drop(&mut self) {
@@ -798,6 +939,10 @@ impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
                 CacheKind::Header => CacheAction::HeaderResult {
                     block_hash: self.blockhash,
                     res: Box::new(Err(CacheServiceUnavailable.into())),
+                },
+                CacheKind::Bal => CacheAction::BalResult {
+                    block_hash: self.blockhash,
+                    res: Err(CacheServiceUnavailable.into()),
                 },
             };
             let _ = tx.send(msg);
@@ -833,18 +978,27 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
-    use alloy_primitives::{Address, Signature};
+    use alloy_consensus::{transaction::TransactionMeta, Header};
+    use alloy_eips::BlockHashOrNumber;
+    use alloy_primitives::{Address, BlockHash, BlockNumber, Signature, TxHash, TxNumber};
+    use core::ops::{RangeBounds, RangeInclusive};
+    use reth_db_models::StoredBlockBodyIndices;
     use reth_ethereum_primitives::{
-        Block, BlockBody, EthPrimitives, Transaction, TransactionSigned,
+        Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
-    use reth_primitives_traits::RecoveredBlock;
-    use reth_storage_api::noop::NoopProvider;
+    use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+    use reth_storage_api::{
+        noop::NoopProvider, BlockBodyIndicesProvider, BlockHashReader, BlockNumReader, BlockReader,
+        BlockSource, HeaderProvider, ReceiptProvider, RevmBalProvider, TransactionVariant,
+        TransactionsProvider,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_service() -> EthStateCacheService<NoopProvider, Runtime> {
         let (_cache, service) = EthStateCache::<EthPrimitives>::create(
             NoopProvider::default(),
             Runtime::test(),
+            4,
             4,
             4,
             4,
@@ -913,5 +1067,336 @@ mod tests {
         service.remove_block_transactions(&block);
 
         assert!(service.tx_hash_index.get(&tx_hash).is_none());
+    }
+
+    #[test]
+    fn reorg_evicts_cached_bal() {
+        let mut service = test_service();
+        let block_hash = B256::repeat_byte(0x44);
+
+        assert!(service.bal_cache.insert(block_hash, CachedRevmBal::new(RevmBal::default())));
+        assert!(service.bal_cache.get(&block_hash).is_some());
+
+        service.on_reorg_bal(block_hash, Ok(None));
+
+        assert!(service.bal_cache.get(&block_hash).is_none());
+    }
+
+    #[test]
+    fn reorg_forwards_bal_to_queued_requests() {
+        let mut service = test_service();
+        let block_hash = B256::repeat_byte(0x55);
+        let (response_tx, mut response_rx) = oneshot::channel();
+        let bal = CachedRevmBal::new(RevmBal::default());
+
+        assert!(service.bal_cache.queue(block_hash, response_tx));
+
+        service.on_reorg_bal(block_hash, Ok(Some(bal)));
+
+        let bal = response_rx.try_recv().expect("queued BAL response").expect("BAL result");
+
+        assert!(bal.is_some());
+    }
+
+    #[tokio::test]
+    async fn get_bal_uses_cached_revm_bal() {
+        let provider = TestBalProvider::default();
+        let fetches = provider.fetches.clone();
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig {
+                max_blocks: 0,
+                max_receipts: 0,
+                max_headers: 0,
+                max_bals: 4,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 0,
+            },
+            Runtime::test(),
+        );
+        let block_hash = B256::repeat_byte(0x66);
+
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_get_bal_requests_share_fetch() {
+        let provider = TestBalProvider::default();
+        let fetches = provider.fetches.clone();
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig {
+                max_blocks: 0,
+                max_receipts: 0,
+                max_headers: 0,
+                max_bals: 4,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 0,
+            },
+            Runtime::test(),
+        );
+        let block_hash = B256::repeat_byte(0x77);
+
+        let (first, second) = tokio::join!(cache.get_bal(block_hash), cache.get_bal(block_hash));
+
+        assert!(first.unwrap().is_some());
+        assert!(second.unwrap().is_some());
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct TestBalProvider {
+        fetches: Arc<AtomicUsize>,
+    }
+
+    impl RevmBalProvider for TestBalProvider {
+        fn revm_bal_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<RevmBal>> {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(RevmBal::default()))
+        }
+    }
+
+    impl BlockHashReader for TestBalProvider {
+        fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok(None)
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: BlockNumber,
+            _end: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl BlockNumReader for TestBalProvider {
+        fn chain_info(&self) -> ProviderResult<reth_chainspec::ChainInfo> {
+            Ok(reth_chainspec::ChainInfo::default())
+        }
+
+        fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(0)
+        }
+
+        fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(0)
+        }
+
+        fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
+            Ok(None)
+        }
+    }
+
+    impl HeaderProvider for TestBalProvider {
+        type Header = Header;
+
+        fn header(&self, _block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
+            Ok(None)
+        }
+
+        fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Header>> {
+            Ok(None)
+        }
+
+        fn headers_range(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<Self::Header>> {
+            Ok(Vec::new())
+        }
+
+        fn sealed_header(
+            &self,
+            _number: BlockNumber,
+        ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+            Ok(None)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+        ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl BlockBodyIndicesProvider for TestBalProvider {
+        fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+            Ok(None)
+        }
+
+        fn block_body_indices_range(
+            &self,
+            _range: RangeInclusive<BlockNumber>,
+        ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl TransactionsProvider for TestBalProvider {
+        type Transaction = TransactionSigned;
+
+        fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+            Ok(None)
+        }
+
+        fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+            Ok(None)
+        }
+
+        fn transaction_by_id_unhashed(
+            &self,
+            _id: TxNumber,
+        ) -> ProviderResult<Option<Self::Transaction>> {
+            Ok(None)
+        }
+
+        fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+            Ok(None)
+        }
+
+        fn transaction_by_hash_with_meta(
+            &self,
+            _hash: TxHash,
+        ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+            Ok(None)
+        }
+
+        fn transactions_by_block(
+            &self,
+            _block: BlockHashOrNumber,
+        ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+            Ok(None)
+        }
+
+        fn transactions_by_block_range(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+            Ok(Vec::new())
+        }
+
+        fn transactions_by_tx_range(
+            &self,
+            _range: impl RangeBounds<TxNumber>,
+        ) -> ProviderResult<Vec<Self::Transaction>> {
+            Ok(Vec::new())
+        }
+
+        fn senders_by_tx_range(
+            &self,
+            _range: impl RangeBounds<TxNumber>,
+        ) -> ProviderResult<Vec<Address>> {
+            Ok(Vec::new())
+        }
+
+        fn transaction_sender(&self, _id: TxNumber) -> ProviderResult<Option<Address>> {
+            Ok(None)
+        }
+    }
+
+    impl ReceiptProvider for TestBalProvider {
+        type Receipt = Receipt;
+
+        fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+            Ok(None)
+        }
+
+        fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+            Ok(None)
+        }
+
+        fn receipts_by_block(
+            &self,
+            _block: BlockHashOrNumber,
+        ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+            Ok(None)
+        }
+
+        fn receipts_by_tx_range(
+            &self,
+            _range: impl RangeBounds<TxNumber>,
+        ) -> ProviderResult<Vec<Self::Receipt>> {
+            Ok(Vec::new())
+        }
+
+        fn receipts_by_block_range(
+            &self,
+            _block_range: RangeInclusive<BlockNumber>,
+        ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl BlockReader for TestBalProvider {
+        type Block = Block;
+
+        fn find_block_by_hash(
+            &self,
+            _hash: B256,
+            _source: BlockSource,
+        ) -> ProviderResult<Option<Self::Block>> {
+            Ok(None)
+        }
+
+        fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+            Ok(None)
+        }
+
+        fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+            Ok(None)
+        }
+
+        fn pending_block_and_receipts(
+            &self,
+        ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+            Ok(None)
+        }
+
+        fn recovered_block(
+            &self,
+            _id: BlockHashOrNumber,
+            _transaction_kind: TransactionVariant,
+        ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+            Ok(None)
+        }
+
+        fn sealed_block_with_senders(
+            &self,
+            _id: BlockHashOrNumber,
+            _transaction_kind: TransactionVariant,
+        ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+            Ok(None)
+        }
+
+        fn block_range(
+            &self,
+            _range: RangeInclusive<BlockNumber>,
+        ) -> ProviderResult<Vec<Self::Block>> {
+            Ok(Vec::new())
+        }
+
+        fn block_with_senders_range(
+            &self,
+            _range: RangeInclusive<BlockNumber>,
+        ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+            Ok(Vec::new())
+        }
+
+        fn recovered_block_range(
+            &self,
+            _range: RangeInclusive<BlockNumber>,
+        ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+            Ok(Vec::new())
+        }
+
+        fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+            Ok(None)
+        }
     }
 }

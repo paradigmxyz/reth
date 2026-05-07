@@ -123,6 +123,9 @@ pub mod cache {
     /// Default cache size for the header cache: 1000 headers.
     pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
 
+    /// Default cache size for the revm BAL cache: 1000 block access lists.
+    pub const DEFAULT_BAL_CACHE_MAX_LEN: u32 = 1000;
+
     /// Default number of concurrent database requests.
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
 

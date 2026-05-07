@@ -7,7 +7,7 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, EitherWriterDestination, HashedPostStateProvider, HeaderProvider,
-    HeaderSyncGapProvider, MetadataProvider, ProviderError, PruneCheckpointReader,
+    HeaderSyncGapProvider, MetadataProvider, ProviderError, PruneCheckpointReader, RevmBalProvider,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
@@ -589,6 +589,15 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
 impl<N: NodeTypesWithDB> BalProvider for ProviderFactory<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<N: NodeTypesWithDB> RevmBalProvider for ProviderFactory<N> {
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<revm_database::state::bal::Bal>> {
+        reth_storage_api::default_revm_bal_by_hash(&self.bal_store, block_hash)
     }
 }
 

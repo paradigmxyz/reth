@@ -10008,6 +10008,7 @@ dependencies = [
  "reqwest 0.13.2",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-db-models",
  "reth-errors",
  "reth-ethereum-primitives",
  "reth-evm",

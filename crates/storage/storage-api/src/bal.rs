@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
+use revm_database::state::bal::Bal as RevmBal;
 
 /// Raw BAL RLP bytes sealed by the BAL hash.
 pub type SealedBal = Sealed<Bytes>;
@@ -269,6 +270,27 @@ impl core::fmt::Debug for BalStoreHandle {
 pub trait BalProvider {
     /// Returns the configured BAL store handle.
     fn bal_store(&self) -> &BalStoreHandle;
+}
+
+/// Provider-side access to BALs in revm representation.
+pub trait RevmBalProvider {
+    /// Fetches the BAL for the given block hash in revm representation.
+    fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>>;
+}
+
+/// Default conversion from the BAL store to revm representation.
+pub fn default_revm_bal_by_hash(
+    bal_store: &BalStoreHandle,
+    block_hash: BlockHash,
+) -> ProviderResult<Option<RevmBal>> {
+    bal_store
+        .get_decoded_by_hash(block_hash)?
+        .map(|decoded| {
+            let (bal, _) = decoded.split();
+            RevmBal::try_from(Vec::from(bal))
+                .map_err(reth_storage_errors::provider::ProviderError::other)
+        })
+        .transpose()
 }
 
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.

@@ -6,9 +6,10 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
     ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RevmBalProvider,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, StorageRootProvider, TransactionVariant,
+    TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -114,6 +115,15 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
 impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<ChainSpec, N> RevmBalProvider for NoopProvider<ChainSpec, N> {
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<revm_database::state::bal::Bal>> {
+        crate::bal::default_revm_bal_by_hash(&self.bal_store, block_hash)
     }
 }
 

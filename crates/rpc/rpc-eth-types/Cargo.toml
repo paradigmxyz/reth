@@ -65,6 +65,7 @@ tracing.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]
+reth-db-models.workspace = true
 serde_json.workspace = true
 
 [features]

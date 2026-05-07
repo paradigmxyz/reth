@@ -8,8 +8,9 @@ use crate::{
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, InMemoryBalStore,
     ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    RevmBalProvider, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
+    StateProviderFactory, StateReader, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -146,6 +147,15 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
 impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<N: NodeTypesWithDB> RevmBalProvider for BlockchainProvider<N> {
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<revm_database::state::bal::Bal>> {
+        reth_storage_api::default_revm_bal_by_hash(&self.bal_store, block_hash)
     }
 }
 

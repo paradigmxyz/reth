@@ -2,7 +2,7 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, ReceiptProviderIdExt, StateProvider, StateProviderBox,
+    PruneCheckpointReader, ReceiptProviderIdExt, RevmBalProvider, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
@@ -220,6 +220,15 @@ impl Default for MockEthProvider {
 impl<T: NodePrimitives, ChainSpec> BalProvider for MockEthProvider<T, ChainSpec> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec> RevmBalProvider for MockEthProvider<T, ChainSpec> {
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<revm_database::state::bal::Bal>> {
+        reth_storage_api::default_revm_bal_by_hash(&self.bal_store, block_hash)
     }
 }
 
