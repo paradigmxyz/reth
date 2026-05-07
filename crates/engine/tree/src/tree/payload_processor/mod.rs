@@ -275,8 +275,9 @@ where
             config,
         );
         // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
-        // consumes the BAL. If BAL execution is disabled, treat the BAL as absent here so the
-        // block follows today's sequential execution and transaction-prewarm path.
+        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
+        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
+        // the block follows today's sequential execution and transaction-prewarm path.
         //
         // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
         // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
