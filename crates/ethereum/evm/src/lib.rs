@@ -37,7 +37,7 @@ use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
-    alloy_eips::Decodable2718,
+    alloy_eips::{eip2718::WithEncoded, Decodable2718},
     alloy_primitives::{Bytes, U256},
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
@@ -303,10 +303,10 @@ where
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let txs = payload.payload.transactions().clone();
         let convert = |tx: Bytes| {
-            let tx =
+            let decoded =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
-            Ok::<_, AnyError>(tx.with_signer(signer))
+            let signer = decoded.try_recover().map_err(AnyError::new)?;
+            Ok::<_, AnyError>(WithEncoded::new(tx, decoded.with_signer(signer)))
         };
 
         Ok((txs, convert))
