@@ -67,13 +67,25 @@ hex_to_dec() {
     printf '%d\n' "$((16#${1#0x}))"
 }
 
+pid_has_exited() {
+    local pid="$1"
+    local stat
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    stat=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+    [[ "$stat" == *Z* ]]
+}
+
 wait_for_pid_exit() {
     local pid="$1"
     local timeout="$2"
     local elapsed=0
 
     while (( elapsed < timeout )); do
-        if ! kill -0 "$pid" 2>/dev/null; then
+        if pid_has_exited "$pid"; then
             return 0
         fi
         sleep 1
@@ -81,6 +93,20 @@ wait_for_pid_exit() {
     done
 
     return 1
+}
+
+record_node_exit() {
+    if [[ -z "${NODE_PID:-}" ]]; then
+        return 0
+    fi
+
+    if wait "$NODE_PID"; then
+        NODE_EXIT_CODE=0
+    else
+        NODE_EXIT_CODE=$?
+    fi
+    log "reth node exited with code ${NODE_EXIT_CODE}"
+    NODE_PID=""
 }
 
 stop_pid() {
@@ -133,6 +159,7 @@ write_summary() {
         printf 'head_before=%s\n' "${HEAD_BEFORE:-unknown}"
         printf 'head_after=%s\n' "${HEAD_AFTER:-unknown}"
         printf 'bench_exit_code=%s\n' "${BENCH_EXIT_CODE:-unknown}"
+        printf 'node_exit_code=%s\n' "${NODE_EXIT_CODE:-unknown}"
         printf 'mismatch_source=%s\n' "${MISMATCH_SOURCE:-not_found}"
         printf 'mismatch_line=%s\n' "${MISMATCH_LINE:-not_found}"
         printf 'artifacts_dir=%s\n' "$ARTIFACTS_DIR"
@@ -142,14 +169,33 @@ write_summary() {
 }
 
 cleanup() {
+    if [[ -n "${BENCH_PID:-}" ]] && pid_has_exited "$BENCH_PID"; then
+        if wait "$BENCH_PID"; then
+            BENCH_EXIT_CODE=0
+        else
+            BENCH_EXIT_CODE=$?
+        fi
+        BENCH_PID=""
+    fi
+
     stop_pid "${BENCH_PID:-}" "reth-bench"
     if [[ -n "${BENCH_PID:-}" ]]; then
-        wait "${BENCH_PID}" 2>/dev/null || true
+        if wait "${BENCH_PID}" 2>/dev/null; then
+            BENCH_EXIT_CODE=0
+        else
+            BENCH_EXIT_CODE=$?
+        fi
+        BENCH_PID=""
+    fi
+
+    if [[ -n "${NODE_PID:-}" ]] && pid_has_exited "$NODE_PID"; then
+        record_node_exit
     fi
 
     stop_pid "${NODE_PID:-}" "reth node"
     if [[ -n "${NODE_PID:-}" ]]; then
         wait "${NODE_PID}" 2>/dev/null || true
+        NODE_PID=""
     fi
 
     write_summary
@@ -174,6 +220,7 @@ HEAD_AFTER=""
 NODE_PID=""
 BENCH_PID=""
 BENCH_EXIT_CODE=""
+NODE_EXIT_CODE=""
 MISMATCH_SOURCE=""
 MISMATCH_LINE=""
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
@@ -349,20 +396,22 @@ restore_snapshot() {
 }
 
 start_node() {
-    "$RETH_BIN" node \
-        --datadir "$DATADIR" \
-        --chain "$CHAIN" \
-        --http --http.addr 127.0.0.1 --http.port 8545 --http.api eth,net,web3,reth,testing \
-        --ws --ws.addr 127.0.0.1 --ws.port 8546 --ws.api eth,net,web3,reth \
-        --authrpc.addr 127.0.0.1 --authrpc.port 8551 --authrpc.jwtsecret "$JWT_SECRET" \
-        --disable-discovery \
-        --engine.persistence-threshold 10 \
-        --engine.deferred-trie-blocks 3 \
-        --engine.accept-execution-requests-hash \
-        --log.stdout.filter debug \
-        --color never \
-        >"$NODE_LOG" 2>&1 &
-    echo $!
+    (
+        ulimit -c 0
+        "$RETH_BIN" node \
+            --datadir "$DATADIR" \
+            --chain "$CHAIN" \
+            --http --http.addr 127.0.0.1 --http.port 8545 --http.api eth,net,web3,reth,testing \
+            --ws --ws.addr 127.0.0.1 --ws.port 8546 --ws.api eth,net,web3,reth \
+            --authrpc.addr 127.0.0.1 --authrpc.port 8551 --authrpc.jwtsecret "$JWT_SECRET" \
+            --disable-discovery \
+            --engine.persistence-threshold 10 \
+            --engine.deferred-trie-blocks 3 \
+            --engine.accept-execution-requests-hash \
+            --log.stdout.filter debug \
+            --color never
+    ) >"$NODE_LOG" 2>&1 &
+    NODE_PID=$!
 }
 
 wait_for_rpc_start() {
@@ -422,6 +471,13 @@ monitor_for_mismatch() {
     while true; do
         if find_mismatch node "$NODE_LOG" || find_mismatch bench "$BENCH_LOG"; then
             log "Observed state-root mismatch in ${MISMATCH_SOURCE} log"
+            if [[ -n "$NODE_PID" ]]; then
+                if wait_for_pid_exit "$NODE_PID" 5; then
+                    record_node_exit
+                else
+                    log "reth node is still running 5s after mismatch"
+                fi
+            fi
             return 0
         fi
 
@@ -430,7 +486,7 @@ monitor_for_mismatch() {
             HEAD_AFTER=$(hex_to_dec "$block_hex")
         fi
 
-        if [[ -n "$BENCH_PID" ]] && ! kill -0 "$BENCH_PID" 2>/dev/null; then
+        if [[ -n "$BENCH_PID" ]] && pid_has_exited "$BENCH_PID"; then
             if wait "$BENCH_PID"; then
                 BENCH_EXIT_CODE=0
                 RESULT="bench_completed_no_mismatch"
@@ -446,12 +502,14 @@ monitor_for_mismatch() {
             return 0
         fi
 
-        if [[ -n "$NODE_PID" ]] && ! kill -0 "$NODE_PID" 2>/dev/null; then
+        if [[ -n "$NODE_PID" ]] && pid_has_exited "$NODE_PID"; then
             if find_mismatch node "$NODE_LOG" || find_mismatch bench "$BENCH_LOG"; then
                 log "Observed state-root mismatch after node exit"
+                record_node_exit
                 return 0
             fi
             RESULT="node_exited_no_mismatch"
+            record_node_exit
             return 0
         fi
 
@@ -470,7 +528,7 @@ monitor_for_mismatch() {
 restore_snapshot
 
 log "Starting reth for reorg replay run"
-NODE_PID=$(start_node)
+start_node
 
 HEAD_HEX=$(wait_for_rpc_start "$NODE_PID" "$START_TIMEOUT") || exit 2
 HEAD_BEFORE=$(hex_to_dec "$HEAD_HEX")
@@ -495,6 +553,7 @@ BENCH_ARGS=(
     --engine-rpc-url http://127.0.0.1:8551
     --local-rpc-url http://127.0.0.1:8545
     --ws-rpc-url ws://127.0.0.1:8546
+    --output "$ARTIFACTS_DIR/reth-bench"
     --reorg "$REORG_DEPTH"
 )
 

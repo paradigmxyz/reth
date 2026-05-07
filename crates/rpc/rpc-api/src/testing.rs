@@ -5,10 +5,23 @@
 //! disabled by default and never be exposed on public-facing RPC without an
 //! explicit operator flag.
 
+use alloy_eips::eip7928::BlockAccessList;
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
 use jsonrpsee::proc_macros::rpc;
+use serde::{Deserialize, Serialize};
 
 pub use alloy_rpc_types_engine::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
+
+/// Temporary diagnostic response for `testing_buildBlockV1` that includes the BAL built while
+/// executing the block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestingBuildBlockResponseV1 {
+    /// The execution payload envelope produced by the testing builder.
+    pub execution_payload_envelope: ExecutionPayloadEnvelopeV5,
+    /// The diagnostic block access list built while executing this payload.
+    pub block_access_list: Option<BlockAccessList>,
+}
 
 /// Testing RPC interface for building a block in a single call.
 ///
@@ -33,5 +46,5 @@ pub trait TestingApi {
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
+    ) -> jsonrpsee::core::RpcResult<TestingBuildBlockResponseV1>;
 }

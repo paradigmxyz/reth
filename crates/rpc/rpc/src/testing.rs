@@ -15,11 +15,10 @@
 //! on public-facing RPC endpoints without proper authentication.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::eip2718::Decodable2718;
+use alloy_eips::{eip2718::Decodable2718, eip7928::total_bal_items};
 use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{map::HashSet, Address, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -33,7 +32,7 @@ use reth_primitives_traits::{
     AlloyBlockHeader as BlockTrait, TxTy,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
+use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, HeaderProvider};
@@ -86,7 +85,7 @@ where
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
+    ) -> Result<TestingBuildBlockResponseV1, Eth::Error> {
         let evm_config = self.evm_config.clone();
         let skip_invalid_transactions = self.skip_invalid_transactions;
         let gas_limit_override = self.gas_limit_override;
@@ -101,10 +100,6 @@ where
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
                 let state = state.database.0;
-                let mut db = State::builder()
-                    .with_bundle_update()
-                    .with_database(StateProviderDatabase::new(&state))
-                    .build();
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?
@@ -123,6 +118,11 @@ where
                 let chain_spec = eth_api.provider().chain_spec();
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+                let mut db = State::builder()
+                    .with_bundle_update()
+                    .with_database(StateProviderDatabase::new(&state))
+                    .with_bal_builder()
+                    .build();
 
                 let withdrawals = request.payload_attributes.withdrawals.clone();
                 let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
@@ -143,6 +143,7 @@ where
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
                 builder.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+                builder.evm_mut().db_mut().bump_bal_index();
 
                 let mut total_fees = U256::ZERO;
                 let base_fee = builder.evm_mut().block().basefee();
@@ -218,6 +219,7 @@ where
                             return Err(Eth::Error::from_eth_err(err));
                         }
                     };
+                    builder.evm_mut().db_mut().bump_bal_index();
 
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
@@ -230,6 +232,7 @@ where
                     "Finishing testing_buildBlockV1 with state provider root"
                 );
                 let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
+                let block_access_list = outcome.block_access_list;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let sealed_block = Arc::new(outcome.block.into_sealed_block());
@@ -244,10 +247,21 @@ where
 
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(sealed_block, total_fees, requests, None)
+                let execution_payload_envelope = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
                     .try_into_v5()
                     .map_err(RethError::other)
-                    .map_err(Eth::Error::from_eth_err)
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                debug!(
+                    target: "rpc::testing",
+                    parent_block_hash = %request.parent_block_hash,
+                    has_block_access_list = block_access_list.is_some(),
+                    block_access_list_accounts = block_access_list.as_ref().map(|bal| bal.len()),
+                    block_access_list_items = block_access_list.as_ref().map(|bal| total_bal_items(bal)),
+                    "Returning testing_buildBlockV1 payload with diagnostic BAL"
+                );
+
+                Ok(TestingBuildBlockResponseV1 { execution_payload_envelope, block_access_list })
             })
             .await
     }
@@ -267,7 +281,7 @@ where
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
+    ) -> RpcResult<TestingBuildBlockResponseV1> {
         self.build_block_v1(request).await.map_err(Into::into)
     }
 }

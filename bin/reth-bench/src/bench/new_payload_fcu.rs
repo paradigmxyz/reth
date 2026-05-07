@@ -15,24 +15,25 @@ use crate::{
     },
 };
 use alloy_consensus::TxEnvelope;
-use alloy_eips::Encodable2718;
+use alloy_eips::{eip7928::BlockAccessList, Encodable2718};
 use alloy_primitives::B256;
 use alloy_provider::{
     ext::DebugApi,
     network::{AnyNetwork, AnyRpcBlock},
     Provider, RootProvider,
 };
-use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes,
-};
+use alloy_rpc_types_engine::{ExecutionData, ForkchoiceState, PayloadAttributes};
 use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
-use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
-use std::time::{Duration, Instant};
+use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
@@ -175,6 +176,7 @@ impl Command {
         if let Some(depth) = self.reorg {
             info!(target: "reth-bench", depth, "Using testing_buildBlockV1 reorg mode");
         }
+        let output_dir = self.benchmark.output.clone();
 
         let BenchContext {
             benchmark_mode,
@@ -270,6 +272,7 @@ impl Command {
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
         let mut queued_fork_block = None;
+        let mut fetch_real_bal_artifacts = true;
         while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
@@ -291,10 +294,57 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let bal = if rlp.is_none() &&
-                (block.header.block_access_list_hash.is_some() || self.enable_bal)
-            {
-                Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+            let fetched_bal = if rlp.is_none() && fetch_real_bal_artifacts {
+                match fetch_block_access_list(&block_provider, block.header.number).await {
+                    Ok(bal) => {
+                        write_bal_artifact(
+                            output_dir.as_deref(),
+                            "real",
+                            block.header.number,
+                            block.header.hash,
+                            Some(&bal),
+                        )?;
+                        Some(bal)
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "reth-bench",
+                            block_number = block.header.number,
+                            block_hash = %block.header.hash,
+                            %err,
+                            "Failed to fetch real block BAL artifact"
+                        );
+                        if is_unsupported_bal_rpc_error(&err) {
+                            fetch_real_bal_artifacts = false;
+                            warn!(
+                                target: "reth-bench",
+                                "Remote RPC does not support BAL fetching; writing null real-block BAL artifacts for the remainder of the run"
+                            );
+                        }
+                        write_bal_artifact(
+                            output_dir.as_deref(),
+                            "real",
+                            block.header.number,
+                            block.header.hash,
+                            None,
+                        )?;
+                        None
+                    }
+                }
+            } else {
+                if rlp.is_none() {
+                    write_bal_artifact(
+                        output_dir.as_deref(),
+                        "real",
+                        block.header.number,
+                        block.header.hash,
+                        None,
+                    )?;
+                }
+                None
+            };
+            let bal = if block.header.block_access_list_hash.is_some() || self.enable_bal {
+                fetched_bal
             } else {
                 None
             };
@@ -361,6 +411,7 @@ impl Command {
                             block,
                             canonical_parent_hash,
                             no_wait_for_caches,
+                            output_dir.as_deref(),
                         )
                         .await?,
                     });
@@ -405,6 +456,7 @@ impl Command {
                         next_fork_block_number,
                         Some(prepared.block_hash),
                         no_wait_for_caches,
+                        output_dir.as_deref(),
                     )
                     .await?;
                 } else {
@@ -491,12 +543,13 @@ async fn prepare_built_block(
     block: &AnyRpcBlock,
     parent_block_hash: B256,
     no_wait_for_caches: bool,
+    output_dir: Option<&Path>,
 ) -> eyre::Result<PreparedBuiltBlock> {
     const MAX_BUILD_ATTEMPTS: usize = 10;
     const BUILD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     let request = build_block_request(block, parent_block_hash)?;
-    let built_payload: ExecutionPayloadEnvelopeV5 = {
+    let built_response: TestingBuildBlockResponseV1 = {
         let mut attempts_remaining = MAX_BUILD_ATTEMPTS;
 
         loop {
@@ -526,8 +579,16 @@ async fn prepare_built_block(
         }
     };
 
+    let built_payload = built_response.execution_payload_envelope;
     let payload = &built_payload.execution_payload.payload_inner.payload_inner;
     let block_hash = payload.block_hash;
+    write_bal_artifact(
+        output_dir,
+        "fork",
+        payload.block_number,
+        block_hash,
+        built_response.block_access_list.as_ref(),
+    )?;
     let (payload, sidecar) = built_payload
         .into_payload_and_sidecar(block.header.parent_beacon_block_root.unwrap_or_default());
     // Fork payloads are built immediately before the next `testing_buildBlockV1` call. Leaving
@@ -550,9 +611,10 @@ async fn queue_fork_block(
     block_number: u64,
     parent_block_hash: Option<B256>,
     no_wait_for_caches: bool,
+    output_dir: Option<&Path>,
 ) -> eyre::Result<Option<QueuedForkBlock>> {
     if !benchmark_mode.contains(block_number) {
-        return Ok(None)
+        return Ok(None);
     }
 
     let future_block = block_provider
@@ -570,15 +632,48 @@ async fn queue_fork_block(
             &future_block,
             parent_block_hash,
             no_wait_for_caches,
+            output_dir,
         )
         .await?,
     }))
+}
+
+fn write_bal_artifact(
+    output_dir: Option<&Path>,
+    kind: &str,
+    block_number: u64,
+    block_hash: B256,
+    block_access_list: Option<&BlockAccessList>,
+) -> eyre::Result<()> {
+    let Some(output_dir) = output_dir else { return Ok(()) };
+
+    let bal_dir = output_dir.join("block-access-lists");
+    std::fs::create_dir_all(&bal_dir)?;
+    let path = bal_dir.join(format!("bal-{kind}-{block_number}-{block_hash}.json"));
+    let value = serde_json::json!({
+        "kind": kind,
+        "blockNumber": block_number,
+        "blockHash": block_hash,
+        "blockAccessList": block_access_list,
+    });
+    let file = std::fs::File::create(&path)?;
+    serde_json::to_writer_pretty(file, &value)?;
+    debug!(target: "reth-bench", %kind, block_number, %block_hash, path = %path.display(), "Wrote BAL artifact");
+    Ok(())
 }
 
 fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool {
     let message = err.to_string();
     message.contains("block not found: hash") ||
         message.contains("block hash not found for block number")
+}
+
+fn is_unsupported_bal_rpc_error(err: &eyre::Report) -> bool {
+    let message = err.to_string();
+    message.contains("method ignored") ||
+        message.contains("Method not found") ||
+        message.contains("method not found") ||
+        message.contains("-32601")
 }
 
 fn build_block_request(
@@ -594,7 +689,7 @@ fn build_block_request(
             let tx: TxEnvelope =
                 tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type in RPC block"))?;
             if tx.is_eip4844() {
-                return Ok(None)
+                return Ok(None);
             }
             Ok(Some(tx.encoded_2718().into()))
         })
@@ -632,7 +727,7 @@ fn parse_reorg_depth(value: &str) -> Result<usize, String> {
         .map_err(|_| format!("invalid reorg depth {value:?}, expected a positive integer"))?;
 
     if depth == 0 {
-        return Err("reorg depth must be greater than 0".to_string())
+        return Err("reorg depth must be greater than 0".to_string());
     }
 
     Ok(depth)

@@ -712,10 +712,11 @@ where
                         if state_root == block.header().state_root() {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
+                            let block_state_root = block.header().state_root();
                             warn!(
                                 target: "engine::tree::payload_validator",
                                 ?state_root,
-                                block_state_root = ?block.header().state_root(),
+                                ?block_state_root,
                                 "State root task returned incorrect state root"
                             );
                             #[cfg(feature = "trie-debug")]
@@ -723,7 +724,7 @@ where
                                 block.header().number(),
                                 &trie_debug_recorders,
                             );
-                            state_root_task_failed = true;
+                            std::process::abort();
                         }
                     }
                     Err(error) => {

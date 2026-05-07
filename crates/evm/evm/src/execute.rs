@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_eips::{eip2718::WithEncoded, eip7928::BlockAccessList};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
@@ -295,6 +295,8 @@ pub trait BlockAssembler<F: BlockExecutorFactory> {
 pub struct BlockBuilderOutcome<N: NodePrimitives> {
     /// Result of block execution.
     pub execution_result: BlockExecutionResult<N::Receipt>,
+    /// Block access list built while executing the block, if BAL collection was enabled.
+    pub block_access_list: Option<BlockAccessList>,
     /// Hashed state after execution.
     pub hashed_state: HashedPostState,
     /// Trie updates collected during state root calculation.
@@ -482,6 +484,7 @@ where
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
+        let block_access_list = db.take_built_alloy_bal();
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = match state_root_precomputed {
@@ -507,7 +510,13 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+        Ok(BlockBuilderOutcome {
+            execution_result: result,
+            block_access_list,
+            hashed_state,
+            trie_updates,
+            block,
+        })
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
