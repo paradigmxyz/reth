@@ -34,7 +34,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage, RevmBalProvider};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -140,7 +140,6 @@ where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
-        Provider: RevmBalProvider,
     >,
     NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
     EthRpcConverterFor<N, NetworkT>: RpcConvert<
@@ -307,7 +306,6 @@ where
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-        Provider: RevmBalProvider,
     >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
@@ -382,7 +380,6 @@ where
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-        Provider: RevmBalProvider,
     >,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
@@ -429,7 +426,7 @@ where
 
 impl<N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Types = Self, Provider: RevmBalProvider>,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -454,7 +451,7 @@ where
 
 impl<N> DebugNode<N> for EthereumNode
 where
-    N: FullNodeComponents<Types = Self, Provider: RevmBalProvider>,
+    N: FullNodeComponents<Types = Self>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block;
 

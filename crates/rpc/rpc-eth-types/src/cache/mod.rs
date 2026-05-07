@@ -11,7 +11,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
 use reth_revm::state::bal::Bal as RevmBal;
-use reth_storage_api::{BlockReader, RevmBalProvider, TransactionVariant};
+use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
@@ -111,7 +111,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
         max_cached_tx_hashes: u32,
     ) -> (Self, EthStateCacheService<Provider, Runtime>)
     where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + RevmBalProvider,
+        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + BalProvider,
     {
         let (to_service, rx) = unbounded_channel();
 
@@ -142,7 +142,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     ) -> Self
     where
         Provider: BlockReader<Block = N::Block, Receipt = N::Receipt>
-            + RevmBalProvider
+            + BalProvider
             + Clone
             + Unpin
             + 'static,
@@ -345,7 +345,7 @@ pub(crate) struct EthStateCacheService<
     LimitHeaders = ByLength,
     LimitBals = ByLength,
 > where
-    Provider: BlockReader + RevmBalProvider,
+    Provider: BlockReader + BalProvider,
     LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
     LimitHeaders: Limiter<B256, Provider::Header>,
@@ -380,7 +380,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider> EthStateCacheService<Provider, Runtime>
 where
-    Provider: BlockReader + RevmBalProvider + Clone + Unpin + 'static,
+    Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
@@ -508,7 +508,7 @@ where
 
 impl<Provider> Future for EthStateCacheService<Provider, Runtime>
 where
-    Provider: BlockReader + RevmBalProvider + Clone + Unpin + 'static,
+    Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
     type Output = ();
 
@@ -638,6 +638,7 @@ where
                                 this.action_task_spawner.spawn_blocking_task(async move {
                                     let _permit = rate_limiter.acquire().await;
                                     let res = provider
+                                        .bal_store()
                                         .revm_bal_by_hash(block_hash)
                                         .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
                                     action_sender.send_bal(res);
@@ -947,8 +948,8 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
 mod tests {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Header};
-    use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{Address, BlockHash, BlockNumber, Signature, TxHash, TxNumber};
+    use alloy_eips::{BlockHashOrNumber, NumHash};
+    use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber};
     use core::ops::{RangeBounds, RangeInclusive};
     use reth_db_models::StoredBlockBodyIndices;
     use reth_ethereum_primitives::{
@@ -956,9 +957,9 @@ mod tests {
     };
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
-        noop::NoopProvider, BlockBodyIndicesProvider, BlockHashReader, BlockNumReader, BlockReader,
-        BlockSource, HeaderProvider, ReceiptProvider, RevmBalProvider, TransactionVariant,
-        TransactionsProvider,
+        noop::NoopProvider, BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider,
+        BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
+        TransactionVariant, TransactionsProvider,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1068,8 +1069,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_bal_uses_cached_revm_bal() {
-        let provider = TestBalProvider::default();
-        let fetches = provider.fetches.clone();
+        let fetches = Arc::new(AtomicUsize::default());
+        let provider = TestBalProvider::new(fetches.clone());
         let cache = EthStateCache::<EthPrimitives>::spawn_with(
             provider,
             EthStateCacheConfig {
@@ -1092,8 +1093,8 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_get_bal_requests_share_fetch() {
-        let provider = TestBalProvider::default();
-        let fetches = provider.fetches.clone();
+        let fetches = Arc::new(AtomicUsize::default());
+        let provider = TestBalProvider::new(fetches.clone());
         let cache = EthStateCache::<EthPrimitives>::spawn_with(
             provider,
             EthStateCacheConfig {
@@ -1117,13 +1118,46 @@ mod tests {
 
     #[derive(Clone, Debug, Default)]
     struct TestBalProvider {
+        bal_store: BalStoreHandle,
+    }
+
+    impl TestBalProvider {
+        fn new(fetches: Arc<AtomicUsize>) -> Self {
+            Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }) }
+        }
+    }
+
+    impl BalProvider for TestBalProvider {
+        fn bal_store(&self) -> &BalStoreHandle {
+            &self.bal_store
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestBalStore {
         fetches: Arc<AtomicUsize>,
     }
 
-    impl RevmBalProvider for TestBalProvider {
-        fn revm_bal_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<RevmBal>> {
+    impl BalStore for TestBalStore {
+        fn insert(
+            &self,
+            _num_hash: NumHash,
+            _bal: reth_storage_api::SealedBal,
+        ) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(block_hashes.iter().map(|_| None).collect())
+        }
+
+        fn revm_bal_by_hash(&self, _block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
             Ok(Some(RevmBal::default()))
+        }
+
+        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
+            Ok(Vec::new())
         }
     }
 

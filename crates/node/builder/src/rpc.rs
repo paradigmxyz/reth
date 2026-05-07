@@ -32,7 +32,6 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_provider::RevmBalProvider;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -937,7 +936,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
     RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
-    N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks> + RevmBalProvider,
+    N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1242,8 +1241,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> NodeAddOns<N>
     for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
-    <N as FullNodeTypes>::Provider:
-        ChainSpecProvider<ChainSpec: EthereumHardforks> + RevmBalProvider,
+    <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -1297,13 +1295,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
 
-impl<
-        'a,
-        N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
-            Provider: RevmBalProvider,
-        >,
-    > EthApiCtx<'a, N>
+impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>
+    EthApiCtx<'a, N>
 {
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {

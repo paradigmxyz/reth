@@ -87,6 +87,17 @@ pub trait BalStore: Send + Sync + 'static {
             .map_err(Into::into)
     }
 
+    /// Fetches the BAL for the given block hash in revm representation.
+    fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+        self.get_decoded_by_hash(block_hash)?
+            .map(|decoded| {
+                let (bal, _) = decoded.split();
+                RevmBal::try_from(Vec::from(bal))
+                    .map_err(reth_storage_errors::provider::ProviderError::other)
+            })
+            .transpose()
+    }
+
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
     /// exceeded.
     ///
@@ -217,6 +228,12 @@ impl BalStoreHandle {
         self.inner.get_decoded_by_hash(block_hash)
     }
 
+    /// Fetches the BAL for the given block hash in revm representation.
+    #[inline]
+    pub fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+        self.inner.revm_bal_by_hash(block_hash)
+    }
+
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
     /// exceeded.
     #[inline]
@@ -270,27 +287,6 @@ impl core::fmt::Debug for BalStoreHandle {
 pub trait BalProvider {
     /// Returns the configured BAL store handle.
     fn bal_store(&self) -> &BalStoreHandle;
-}
-
-/// Provider-side access to BALs in revm representation.
-pub trait RevmBalProvider {
-    /// Fetches the BAL for the given block hash in revm representation.
-    fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>>;
-}
-
-/// Default conversion from the BAL store to revm representation.
-pub fn default_revm_bal_by_hash(
-    bal_store: &BalStoreHandle,
-    block_hash: BlockHash,
-) -> ProviderResult<Option<RevmBal>> {
-    bal_store
-        .get_decoded_by_hash(block_hash)?
-        .map(|decoded| {
-            let (bal, _) = decoded.split();
-            RevmBal::try_from(Vec::from(bal))
-                .map_err(reth_storage_errors::provider::ProviderError::other)
-        })
-        .transpose()
 }
 
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.
