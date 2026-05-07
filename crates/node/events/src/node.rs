@@ -268,8 +268,8 @@ impl NodeState {
                 let block = executed.sealed_block();
                 info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
-            ConsensusEngineEvent::InvalidBlock(block) => {
-                warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
+            ConsensusEngineEvent::InvalidBlock { block, error } => {
+                warn!(number=block.number(), hash=?block.hash(), %error, "Encountered invalid block");
             }
             ConsensusEngineEvent::BlockReceived(num_hash) => {
                 info!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");

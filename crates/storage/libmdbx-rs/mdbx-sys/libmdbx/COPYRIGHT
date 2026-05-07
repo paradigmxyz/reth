@@ -1,0 +1,159 @@
+Copyright (c) 2015-2026 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+-----------------------------------------------------------------------
+
+СМЕНА ЛИЦЕНЗИИ (THE LICENSE CHANGE)
+
+OpenLDAP Public License → Apache 2.0
+
+Briefly:
+  Historically, in 2015 an early MDBX source code was derived from the
+  "LMDB engine" created by Howard Chu <hyc@symas.com> in 2011-2015,
+  which based on btree.c written by Martin Hedenfalk <martin@bzero.se>.
+
+  By 2024, MDBX source code has actually been rewritten and has so
+  little in common with the original LMDB that I thought it admissible
+  to change the license. Below are more detailed explanations.
+
+Кратко:
+
+  Исторически в 2015 году ранний исходный код MDBX был заимствован из
+  «LMDB engine», созданной Howard Chu <hyc@symas.com> в 2011-2015,
+  на основе btree.c, ранее созданного Martin Hedenfalk <martin@bzero.se>.
+
+  К 2024 году исходный код MDBX фактически переписан и имеет настолько
+  мало общего с первоначальным заимствованием из LMDB, что я счел
+  уместным сменить лицензию. Ниже более подробные пояснения.
+
+---
+
+Первоисточник текста формулирован на Русском языке, который является
+родным для автора. Предполагается что все заинтересованные могут легко
+воспользоваться машинным переводом, который при всех недостатках сможет
+донести суть, намерения и местами даже передать тональность.
+
+The original source of this text is in Russian, which is the author's
+native language. It is assumed that all concerned can easily use machine
+translation, which, with all the disadvantages, will be able to convey
+the essence, intentions and, in some places, even convey the tonality of
+a wording.
+
+1. Причины
+
+1.1. Лицензия Apache-2.0 является одной из самых популярных, так как
+содержит ряд уточнений, проясняющих и упрощающих использование исходного
+кода в производных работах и больших проектах. Эти особенности лицензии
+Apache-2.0 я нахожу достаточно ценными и удобными. Соответственно,
+переход на лицензию Apache-2.0 полезным в целом.
+
+1.2. Проект OpenLDAP имеет определенную известность, в том числе, к
+сожалению, среди специалистов славится кране плохим качеством кода и
+сбоями при отходе от простых/базовых сценариев использования. Поэтому
+использование лицензии OpenLDAP, в глазах части аудитории, бросает тень
+на качества кода libmdbx, несмотря на то, что исходный код библиотеки
+переписан, в том числе, с целью повышения качества, надежности,
+стабильности и пригодности к тестированию.
+
+Отмечу, что здесь не место для обсуждения объективности подобных мнений
+и причин, равно как и не место для оценки компетентности специалистов
+высказывающих такие суждения. Однако, здесь необходимо озвучить сам факт
+наличия такой негативной коннотации качества кода при упоминании
+OpenLDAP, совершенно без намерения как-либо задеть или обидеть
+контрибьюторов OpenLDAP.
+
+1.3. С точки зрения исходного кода, к настоящему времени libmdbx стала
+совсем другим продуктом, о котором сейчас правильнее сказать что
+разработка вдохновлена LMDB, нежели основывается на заимствовании кода.
+Смена лицензии на переписанный код подчеркивает, что это действительно
+новый исходный код.
+
+2. Легитимность
+
+2.1. Исходная лицензия OpenLDAP 2.8 и актуальная лицензия Apache 2.0
+совпадают по базовым условиям. При этом лицензия Apache 2.0 уточняет,
+определяет и проясняет многие аспекты. Поэтому смену лицензии я склонен
+трактовать как уточнение, но НЕ как принципиальное изменение, которое
+могло-бы нарушить чьи-либо права.
+
+2.2. С процедурной точки зрения, у меня есть право сменить лицензию на
+новый, написанный мной, исходный код. При этом объективно существует как
+техническая, так и юридическая проблемы отделения «нового кода» от
+«заимствованного», а также выделение/классификация кода, который
+является общественным достоянием и/или общеупотребительным воплощением
+«математических моделей и других публичных знаний».
+
+Основываясь на собственной субъективной оценке кодовой базы, включая
+соотношения «нового», «заимствованного» и «общеупотребительного»
+исходного кода, я считаю что смена лицензии допустима. Одновременно с
+этим, я понимаю и признаю, что можно найти повод, чтобы трактовать
+ситуацию как «стакан наполовину полон/пуст». Поэтому декларирую
+готовность принимать претензии и устранять их путем полного
+переписывания оставшегося исходного кода, который попадает под критерии
+«заимствованного» и кто-то из контрибьюторов которого будет против
+изменения лицензии.
+
+2.3. Вне зависимости от истории происхождения каждой строки исходного
+кода и её буквального авторства, прошу не считать производимую смену
+лицензии, и связанных с этим технических действий, как попытку плагиата,
+присвоения чужого труда, присвоения авторства или принижения вклада
+других авторов/контрибьторов. Безусловно проект MDBX/libmdbx не появился
+бы без LMDB и всех участников проекта LMDB, в особенности Говарда Чу
+(Howard Chu), Холлварда Фурусет (Hallvard Furuseth) и Мартина Хеденфок
+(Martin Hedenfalk). Как-бы исходный код не переписывался он всё равно
+будет основываться на базовых идеях и включать основные концепции LMDB.
+
+3. Последствия и актуальные требования
+
+Всё очень просто. Потребуется обеспечить требования новой лицензии в
+соответствии с 4-м пунктом лицензции Apache 2.0.
+
+В частности, при использовании/распространении libmdbx потребуется
+обеспечить наличие файлов с текстом лицензии и файла NOTICE, а также
+обеспечить пользователям возможность ознакомиться с их содержимым в
+работах/продуктах использующих libmdbx.
+
+-----------------------------------------------------------------------
+
+Далее в справочных целях приведены уведомления об авторских правах из
+первоначально заимствованного кода.
+
+---
+
+Original source code was derived from LMDB in 2015,
+and later evolutionarily rewritten in 2015-2024:
+Copyright (c) 2011-2015 Howard Chu, Symas Corp. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+
+LMDB itself devived code from btree.c written by Martin Hedenfalk:
+Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
+
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+ copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
