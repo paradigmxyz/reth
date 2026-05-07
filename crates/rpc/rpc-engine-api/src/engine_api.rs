@@ -3,11 +3,11 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, B128, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -253,6 +253,38 @@ where
         Ok(res?)
     }
 
+    /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post-Amsterdam payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    pub async fn new_payload_v5(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V5, payload_or_attrs)?;
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+    }
+
+    /// Metrics version of `new_payload_v5`
+    pub async fn new_payload_v5_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let res = Self::new_payload_v5(self, payload).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v5.record(elapsed);
+        Ok(res?)
+    }
+
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
@@ -342,6 +374,31 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        res
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ slot number,
+    /// but only _after_ amsterdam.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v4`
+    pub async fn fork_choice_updated_v4_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
     }
 
@@ -514,6 +571,29 @@ where
         let start = Instant::now();
         let res = Self::get_payload_v5(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
+        res
+    }
+
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// Post-Amsterdam payload handler that includes Block Access Lists (BAL).
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
+    pub async fn get_payload_v6(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
+    }
+
+    /// Metrics version of `get_payload_v6`
+    pub async fn get_payload_v6_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        let start = Instant::now();
+        let res = Self::get_payload_v6(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
         res
     }
 
@@ -759,24 +839,17 @@ where
             // MUST NOT begin a payload build process. In such an event, the forkchoiceState
             // update MUST NOT be rolled back.
             //
-            // NOTE: This will also apply to the validation result for the cancun or
-            // shanghai-specific fields provided in the payload attributes.
-            //
-            // To do this, we set the payload attrs to `None` if attribute validation failed, but
-            // we still apply the forkchoice update.
+            // NOTE: This also applies to cancun/shanghai-specific payload attributes.
             if let Err(err) = attr_validation_res {
-                let fcu_res =
-                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
-                // TODO: decide if we want this branch - the FCU INVALID response might be more
-                // useful than the payload attributes INVALID response
-                if fcu_res.is_invalid() {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                if fcu_res.is_invalid() || fcu_res.payload_status.is_syncing() {
                     return Ok(fcu_res)
                 }
                 return Err(err.into())
             }
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Returns reference to supported capabilities.
@@ -880,6 +953,35 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
+    fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        // Spec requires returning `null` if syncing.
+        if (*self.inner.is_syncing)() {
+            return Ok(None)
+        }
+
+        self.inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
+            .map(Some)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
     /// Metered version of `get_blobs_v2`.
     pub fn get_blobs_v2_metered(
         &self,
@@ -925,6 +1027,28 @@ where
         let start = Instant::now();
         let res = Self::get_blobs_v3(self, versioned_hashes);
         self.inner.metrics.latency.get_blobs_v3.record(start.elapsed());
+
+        if let Ok(Some(blobs)) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = hashes_len - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
+    }
+
+    /// Metered version of `get_blobs_v4`.
+    pub fn get_blobs_v4_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let hashes_len = versioned_hashes.len();
+        let start = Instant::now();
+        let res = Self::get_blobs_v4(self, versioned_hashes, indices_bitarray);
+        self.inner.metrics.latency.get_blobs_v4.record(start.elapsed());
 
         if let Ok(Some(blobs)) = &res {
             let blobs_found = blobs.iter().flatten().count();
@@ -1020,20 +1144,31 @@ where
 
     /// Handler for `engine_newPayloadV5`
     ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    /// Post Amsterdam payload handler.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     async fn new_payload_v5(
         &self,
-        _payload: ExecutionPayloadV4,
-        _versioned_hashes: Vec<B256>,
-        _parent_beacon_block_root: B256,
-        _execution_requests: RequestsOrHash,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        // Accept requests as a hash only if it is explicitly allowed.
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests },
+            ),
+        };
+
+        Ok(self.new_payload_v5_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -1070,6 +1205,18 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
+        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1166,12 +1313,10 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     async fn get_payload_v6(
         &self,
-        _payload_id: PayloadId,
+        payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        Ok(self.get_payload_v6_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -1281,6 +1426,15 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
+
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV4");
+        Ok(self.get_blobs_v4_metered(versioned_hashes, indices_bitarray)?)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1344,10 +1498,14 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
+    use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{Address, Bytes, B256};
+    use alloy_rpc_types_engine::{
+        ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
+    };
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-    use reth_engine_primitives::BeaconEngineMessage;
+    use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::Block;
     use reth_network_api::{
@@ -1435,6 +1593,63 @@ mod tests {
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
 
+    #[tokio::test]
+    async fn new_payload_v5_accepts_amsterdam_payloads() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+
+        tokio::spawn(async move {
+            let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
+            let payload = ExecutionPayloadV4 {
+                payload_inner: ExecutionPayloadV3 {
+                    payload_inner: ExecutionPayloadV2 {
+                        payload_inner: payload_v1,
+                        withdrawals: Vec::new(),
+                    },
+                    blob_gas_used: 0,
+                    excess_blob_gas: 0,
+                },
+                block_access_list: Bytes::from_static(b"bal"),
+                slot_number: 1,
+            };
+            let execution_data = ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        versioned_hashes: Vec::new(),
+                        parent_beacon_block_root: B256::ZERO,
+                    },
+                    PraguePayloadFields { requests: RequestsOrHash::Requests(Requests::default()) },
+                ),
+            };
+
+            api.new_payload_v5(execution_data).await.unwrap();
+        });
+
+        assert_matches!(engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
+    }
+
     #[derive(Clone)]
     struct TestNetworkInfo {
         syncing: bool,
@@ -1503,6 +1718,150 @@ mod tests {
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
         assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn get_blobs_v4_returns_null_when_syncing() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, _engine_rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            TestNetworkInfo { syncing: true },
+        );
+
+        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128));
+        assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn fcu_v3_syncing_precedes_invalid_payload_attributes_validation() {
+        let (mut handle, api) = setup_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x11; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
+            parent_beacon_block_root: None,
+            slot_number: None,
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+        });
+
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "FCU for syncing state should be evaluated before payload attributes"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+
+        response_tx.send(Ok(OnForkChoiceUpdated::syncing())).expect("send syncing response");
+
+        let response = api_task
+            .await
+            .expect("api task should not panic")
+            .expect("forkchoiceUpdatedV3 should return a syncing response");
+        assert!(response.payload_status.is_syncing());
+        assert!(response.payload_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn fcu_v3_valid_forkchoice_missing_beacon_root_returns_invalid_attributes() {
+        let (mut handle, api) = setup_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x22; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: None,
+            slot_number: None,
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+        });
+
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "when attrs are invalid, API should first evaluate forkchoice without attrs"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        let response = api_task.await.expect("api task should not panic");
+        assert_matches!(
+            response,
+            Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::PayloadAttributes(_)
+            ))
+        );
+
+        match tokio::time::timeout(std::time::Duration::from_millis(100), handle.from_api.recv())
+            .await
+        {
+            Err(_) | Ok(None) => {}
+            Ok(Some(BeaconEngineMessage::ForkchoiceUpdated { .. })) => {
+                panic!("no second forkchoiceUpdated call should be sent when attrs are invalid")
+            }
+            Ok(Some(other)) => panic!("unexpected engine message: {other:?}"),
+        }
     }
 
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`

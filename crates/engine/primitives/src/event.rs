@@ -1,7 +1,7 @@
 //! Events emitted by the beacon consensus engine.
 
 use crate::ForkchoiceStatus;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, string::String};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -9,7 +9,7 @@ use core::{
     fmt::{Display, Formatter, Result},
     time::Duration,
 };
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
@@ -31,7 +31,14 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
-    InvalidBlock(Box<SealedBlock<N::Block>>),
+    InvalidBlock {
+        /// The invalid block.
+        block: Box<SealedBlock<N::Block>>,
+        /// The validation error that caused the block to be rejected.
+        error: String,
+    },
+    /// A slow block was detected after persistence, with its timing statistics.
+    SlowBlock(SlowBlockInfo),
 }
 
 impl<N: NodePrimitives> ConsensusEngineEvent<N> {
@@ -67,12 +74,32 @@ where
             Self::CanonicalChainCommitted(block, duration) => {
                 write!(f, "CanonicalChainCommitted({:?}, {duration:?})", block.num_hash())
             }
-            Self::InvalidBlock(block) => {
-                write!(f, "InvalidBlock({:?})", block.num_hash())
+            Self::InvalidBlock { block, error } => {
+                write!(f, "InvalidBlock({:?}, {error})", block.num_hash())
             }
             Self::BlockReceived(num_hash) => {
                 write!(f, "BlockReceived({num_hash:?})")
             }
+            Self::SlowBlock(info) => {
+                write!(
+                    f,
+                    "SlowBlock(block={}, total={:?})",
+                    info.stats.block_number, info.total_duration
+                )
+            }
         }
     }
+}
+
+/// Information about a slow block detected after execution or persistence.
+#[derive(Clone, Debug)]
+pub struct SlowBlockInfo {
+    /// The timing statistics for the slow block.
+    pub stats: Box<ExecutionTimingStats>,
+    /// The commit duration for the batch containing this block.
+    /// `None` when emitted immediately after execution (before persistence).
+    pub commit_duration: Option<Duration>,
+    /// The total duration (execution + `state_root` + commit).
+    /// Note: `state_read` is a subset of execution and is not added separately.
+    pub total_duration: Duration,
 }

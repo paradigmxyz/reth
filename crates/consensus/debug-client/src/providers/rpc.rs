@@ -1,8 +1,8 @@
-use crate::BlockProvider;
+use crate::PayloadProvider;
 use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
 use alloy_transport::TransportResult;
 use futures::{Stream, StreamExt};
-use reth_node_api::Block;
+use reth_node_api::ExecutionPayload;
 use reth_tracing::tracing::{debug, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -10,19 +10,19 @@ use tokio::sync::mpsc::Sender;
 /// Block provider that fetches new blocks from an RPC endpoint using a connection that supports
 /// RPC subscriptions.
 #[derive(derive_more::Debug, Clone)]
-pub struct RpcBlockProvider<N: Network, PrimitiveBlock> {
+pub struct RpcBlockProvider<N: Network, ExecutionData> {
     #[debug(skip)]
     provider: Arc<dyn Provider<N>>,
     url: String,
     #[debug(skip)]
-    convert: Arc<dyn Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync>,
+    convert: Arc<dyn Fn(N::BlockResponse) -> ExecutionData + Send + Sync>,
 }
 
-impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
+impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
     /// Create a new RPC block provider with the given RPC URL.
     pub async fn new(
         rpc_url: &str,
-        convert: impl Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync + 'static,
+        convert: impl Fn(N::BlockResponse) -> ExecutionData + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider: Arc::new(
@@ -66,29 +66,36 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
     }
 }
 
-impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
+impl<N: Network, ExecutionData> PayloadProvider for RpcBlockProvider<N, ExecutionData>
 where
-    PrimitiveBlock: Block + 'static,
+    ExecutionData: ExecutionPayload,
 {
-    type Block = PrimitiveBlock;
+    type ExecutionData = ExecutionData;
 
-    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
+    async fn subscribe_payloads(&self, tx: Sender<Self::ExecutionData>) {
         loop {
             let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
                 warn!(
                     target: "consensus::debug-client",
                     %err,
                     url=%self.url,
-                    "Failed to subscribe to blocks",
+                    "Failed to subscribe to blocks, retrying in 5s",
                 );
             }) else {
-                return
+                // Exit if the receiver has been dropped (e.g. during shutdown) so we
+                // don't keep retrying after the consumer is gone.
+                if tx.is_closed() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue
             };
 
             while let Some(res) = stream.next().await {
                 match res {
                     Ok(block) => {
-                        if tx.send((self.convert)(block)).await.is_err() {
+                        let payload = (self.convert)(block);
+                        if tx.send(payload).await.is_err() {
                             // Channel closed - receiver dropped, exit completely.
                             return;
                         }
@@ -112,7 +119,7 @@ where
         }
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
+    async fn get_payload(&self, block_number: u64) -> eyre::Result<Self::ExecutionData> {
         let block = self
             .provider
             .get_block_by_number(block_number.into())

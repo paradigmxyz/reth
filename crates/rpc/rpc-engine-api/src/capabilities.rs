@@ -17,16 +17,19 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
+    "engine_forkchoiceUpdatedV4",
     "engine_getClientVersionV1",
     "engine_getPayloadV1",
     "engine_getPayloadV2",
     "engine_getPayloadV3",
     "engine_getPayloadV4",
     "engine_getPayloadV5",
+    "engine_getPayloadV6",
     "engine_newPayloadV1",
     "engine_newPayloadV2",
     "engine_newPayloadV3",
     "engine_newPayloadV4",
+    "engine_newPayloadV5",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByHashV2",
     "engine_getPayloadBodiesByRangeV1",
@@ -34,6 +37,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getBlobsV1",
     "engine_getBlobsV2",
     "engine_getBlobsV3",
+    "engine_getBlobsV4",
 ];
 
 /// Engine API capabilities set.
@@ -215,6 +219,7 @@ mod tests {
 
         assert!(!is_critical_method("engine_getBlobsV1"));
         assert!(!is_critical_method("engine_getBlobsV3"));
+        assert!(!is_critical_method("engine_getBlobsV4"));
         assert!(!is_critical_method("engine_getPayloadBodiesByHashV1"));
         assert!(!is_critical_method("engine_getPayloadBodiesByRangeV1"));
         assert!(!is_critical_method("engine_getClientVersionV1"));

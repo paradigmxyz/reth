@@ -1,7 +1,7 @@
 //! Payload builder service metrics.
 
 use reth_metrics::{
-    metrics::{Counter, Gauge},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 
@@ -23,6 +23,10 @@ pub(crate) struct PayloadBuilderServiceMetrics {
     pub(crate) resolved_revenue: Gauge,
     /// Current block returned as the resolved payload
     pub(crate) resolved_block: Gauge,
+    /// Histogram of payload resolve latency in seconds
+    pub(crate) resolve_duration_seconds: Histogram,
+    /// Histogram of new payload job creation latency in seconds
+    pub(crate) new_job_duration_seconds: Histogram,
 }
 
 impl PayloadBuilderServiceMetrics {

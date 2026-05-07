@@ -46,6 +46,7 @@ std = [
     "strum/std",
     "thiserror/std",
     "tracing/std",
+    "reth-codecs?/std",
 ]
 test-utils = [
     "std",

@@ -57,8 +57,8 @@ pub mod servers {
         web3::Web3ApiServer,
     };
     pub use reth_rpc_eth_api::{
-        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
-        EthPubSubApiServer, L2EthApiExtServer,
+        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthConfigApiServer,
+        EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
     };
 }
 
@@ -81,7 +81,7 @@ pub mod clients {
         otterscan::OtterscanClient,
         reth::RethApiClient,
         reth_engine::RethEngineApiClient,
-        rpc::RpcApiServer,
+        rpc::RpcApiClient,
         testing::TestingApiClient,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
@@ -89,7 +89,7 @@ pub mod clients {
         web3::Web3ApiClient,
     };
     pub use reth_rpc_eth_api::{
-        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
-        L2EthApiExtServer,
+        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthConfigApiClient,
+        EthFilterApiClient, L2EthApiExtClient,
     };
 }

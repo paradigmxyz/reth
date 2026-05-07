@@ -5,7 +5,7 @@
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
-    evm::EthEvmConfig,
+    evm::primitives::ConfigureEvm,
     node::{
         api::{FullNodeTypes, NodeTypes},
         builder::{components::PoolBuilder, BuilderContext},
@@ -50,16 +50,17 @@ pub struct CustomPoolBuilder {
 /// Implement the [`PoolBuilder`] trait for the custom pool builder
 ///
 /// This will be used to build the transaction pool and its maintenance tasks during launch.
-impl<Node> PoolBuilder<Node, EthEvmConfig> for CustomPoolBuilder
+impl<Node, Evm> PoolBuilder<Node, Evm> for CustomPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+    Evm: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
+    type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore, Evm>;
 
     async fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
-        evm_config: EthEvmConfig,
+        evm_config: Evm,
     ) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = InMemoryBlobStore::default();

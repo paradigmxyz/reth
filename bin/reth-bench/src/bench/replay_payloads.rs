@@ -1,49 +1,38 @@
 //! Command for replaying pre-generated payloads from disk.
-//!
-//! This command reads `ExecutionPayloadEnvelopeV4` files from a directory and replays them
-//! in sequence using `newPayload` followed by `forkchoiceUpdated`.
-//!
-//! Supports configurable waiting behavior:
-//! - **`--wait-time`**: Fixed sleep interval between blocks.
-//! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
-//!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence.
-//!
-//! Both options can be used together or independently.
 
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
+        generate_big_block::{compute_payload_block_hash, BigBlockPayload},
         helpers::parse_duration,
         metrics_scraper::MetricsScraper,
         output::{
-            write_benchmark_results, CombinedResult, GasRampPayloadFile, NewPayloadResult,
-            TotalGasOutput, TotalGasRow,
-        },
-        persistence_waiter::{
-            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
+            write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
     },
     valid_payload::{call_forkchoice_updated_with_reth, call_new_payload_with_reth},
 };
+use alloy_eip7928::bal::Bal;
+use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar,
-    ForkchoiceState, JwtSecret, PraguePayloadFields,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV6,
+    ExecutionPayloadSidecar, ExecutionPayloadV4, ForkchoiceState, JwtSecret, PraguePayloadFields,
 };
 use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
-use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
+use reth_engine_primitives::BigBlockData;
 use reth_node_api::EngineApiMessageVersion;
+use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use url::Url;
 
 /// `reth bench replay-payloads` command
@@ -73,9 +62,8 @@ pub struct Command {
     #[arg(long, value_name = "SKIP", default_value = "0")]
     skip: usize,
 
-    /// Optional directory containing gas ramp payloads to replay first.
-    /// These are replayed before the main payloads to warm up the gas limit.
-    #[arg(long, value_name = "GAS_RAMP_DIR")]
+    /// Deprecated: gas ramp is no longer needed. This flag is accepted but ignored.
+    #[arg(long, value_name = "GAS_RAMP_DIR", hide = true)]
     gas_ramp_dir: Option<PathBuf>,
 
     /// Optional output directory for benchmark results (CSV files).
@@ -89,47 +77,6 @@ pub struct Command {
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
-    /// Wait for blocks to be persisted before sending the next batch.
-    ///
-    /// When enabled, waits for every Nth block to be persisted using the
-    /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
-    /// doesn't outpace persistence.
-    ///
-    /// The subscription uses the regular RPC websocket endpoint (no JWT required).
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
-    wait_for_persistence: bool,
-
-    /// Engine persistence threshold used for deciding when to wait for persistence.
-    ///
-    /// The benchmark waits after every `(threshold + 1)` blocks. By default this
-    /// matches the engine's `DEFAULT_PERSISTENCE_THRESHOLD` (2), so waits occur
-    /// at blocks 3, 6, 9, etc.
-    #[arg(
-        long = "persistence-threshold",
-        value_name = "PERSISTENCE_THRESHOLD",
-        default_value_t = DEFAULT_PERSISTENCE_THRESHOLD,
-        verbatim_doc_comment
-    )]
-    persistence_threshold: u64,
-
-    /// Timeout for waiting on persistence at each checkpoint.
-    ///
-    /// Must be long enough to account for the persistence thread being blocked
-    /// by pruning after the previous save.
-    #[arg(
-        long = "persistence-timeout",
-        value_name = "PERSISTENCE_TIMEOUT",
-        value_parser = parse_duration,
-        default_value = "120s",
-        verbatim_doc_comment
-    )]
-    persistence_timeout: Duration,
-
-    /// Optional `WebSocket` RPC URL for persistence subscription.
-    /// If not provided, derives from engine RPC URL by changing scheme to ws and port to 8546.
-    #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
-    ws_rpc_url: Option<String>,
-
     /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     ///
     /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
@@ -137,6 +84,38 @@ pub struct Command {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
+
+    /// Forward embedded block access lists to `reth_newPayload` when payload files contain them.
+    ///
+    /// Disabled by default so the same payload set can be replayed with or without BALs.
+    ///
+    /// Requires `--reth-new-payload`.
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
+    bal: bool,
+
+    /// Control when `reth_newPayload` waits for in-flight persistence.
+    ///
+    /// Accepts `always` (default — wait on every block), `never`, or a number N
+    /// to wait every N blocks and skip the rest.
+    ///
+    /// Requires `--reth-new-payload`.
+    #[arg(
+        long = "wait-for-persistence",
+        value_name = "MODE",
+        num_args = 0..=1,
+        default_missing_value = "always",
+        value_parser = clap::value_parser!(WaitForPersistence),
+        requires = "reth_new_payload",
+        verbatim_doc_comment
+    )]
+    wait_for_persistence: Option<WaitForPersistence>,
+
+    /// Skip waiting for execution cache and sparse trie locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_caches: false`
+    /// to the `reth_newPayload` endpoint.
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
+    no_wait_for_caches: bool,
 
     /// Optional Prometheus metrics endpoint to scrape after each block.
     ///
@@ -151,22 +130,14 @@ pub struct Command {
 struct LoadedPayload {
     /// The index (from filename).
     index: u64,
-    /// The payload envelope.
-    envelope: ExecutionPayloadEnvelopeV4,
+    /// The execution data for the block.
+    execution_data: ExecutionData,
     /// The block hash.
     block_hash: B256,
-}
-
-/// A gas ramp payload loaded from disk.
-struct GasRampPayload {
-    /// Block number from filename.
-    block_number: u64,
-    /// Engine API version for newPayload.
-    ///
-    /// `None` indicates that `reth_newPayload` should be used.
-    version: Option<EngineApiMessageVersion>,
-    /// The file contents.
-    file: GasRampPayloadFile,
+    /// Big block data containing environment switches and prior block hashes.
+    big_block_data: BigBlockData<ExecutionData>,
+    /// Optional BAL flattened into the payload file.
+    block_access_list: Option<BlockAccessList>,
 }
 
 impl Command {
@@ -176,45 +147,14 @@ impl Command {
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
-        }
-        if self.wait_for_persistence {
-            info!(
-                target: "reth-bench",
-                "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
-                self.persistence_threshold + 1,
-                self.persistence_threshold
-            );
+            info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
         }
         if self.reth_new_payload {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
+            if self.bal {
+                info!(target: "reth-bench", "Forwarding embedded block_access_list data");
+            }
         }
-
-        // Set up waiter based on configured options
-        // When both are set: wait at least wait_time, and also wait for persistence if needed
-        let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), true) => {
-                let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
-                Some(PersistenceWaiter::with_duration_and_subscription(
-                    duration,
-                    sub,
-                    self.persistence_threshold,
-                    self.persistence_timeout,
-                ))
-            }
-            (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
-            (None, true) => {
-                let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
-                Some(PersistenceWaiter::with_subscription(
-                    sub,
-                    self.persistence_threshold,
-                    self.persistence_timeout,
-                ))
-            }
-            (None, false) => None,
-        };
 
         let mut metrics_scraper = MetricsScraper::maybe_new(self.metrics_url.clone());
 
@@ -245,78 +185,63 @@ impl Command {
             "Using initial parent block"
         );
 
-        // Load all payloads upfront to avoid I/O delays between phases
-        let gas_ramp_payloads = if let Some(ref gas_ramp_dir) = self.gas_ramp_dir {
-            let payloads = self.load_gas_ramp_payloads(gas_ramp_dir)?;
-            if payloads.is_empty() {
-                return Err(eyre::eyre!("No gas ramp payload files found in {:?}", gas_ramp_dir));
-            }
-            info!(target: "reth-bench", count = payloads.len(), "Loaded gas ramp payloads from disk");
-            payloads
-        } else {
-            Vec::new()
-        };
+        // Warn if deprecated --gas-ramp-dir is passed
+        if self.gas_ramp_dir.is_some() {
+            warn!(
+                target: "reth-bench",
+                "--gas-ramp-dir is deprecated and ignored."
+            );
+        }
 
+        // Load all payloads upfront to avoid I/O delays between phases
         let payloads = self.load_payloads()?;
         if payloads.is_empty() {
             return Err(eyre::eyre!("No payload files found in {:?}", self.payload_dir));
         }
         info!(target: "reth-bench", count = payloads.len(), "Loaded main payloads from disk");
 
-        let mut parent_hash = initial_parent_hash;
+        let has_env_switches = payloads.iter().any(|p| !p.big_block_data.env_switches.is_empty());
+        let has_block_access_lists = payloads.iter().any(|p| {
+            p.block_access_list.as_ref().is_some_and(|bal: &BlockAccessList| !bal.is_empty())
+        });
 
-        // Replay gas ramp payloads first
-        for (i, payload) in gas_ramp_payloads.iter().enumerate() {
+        // If any payload has env_switches but we're not using reth_newPayload, warn the user
+        if !self.reth_new_payload {
+            if has_env_switches {
+                warn!(
+                    target: "reth-bench",
+                    "Payloads contain env_switches but --reth-new-payload is not set. \
+                     env_switches are only supported with reth_newPayload and will be ignored."
+                );
+            }
+            if has_block_access_lists {
+                warn!(
+                    target: "reth-bench",
+                    "Payloads contain block_access_list data but --reth-new-payload is not set. \
+                     BALs are only forwarded with reth_newPayload and will be ignored."
+                );
+            }
+        } else if has_block_access_lists && !self.bal {
             info!(
                 target: "reth-bench",
-                gas_ramp_payload = i + 1,
-                total = gas_ramp_payloads.len(),
-                block_number = payload.block_number,
-                block_hash = %payload.file.block_hash,
-                "Executing gas ramp payload (newPayload + FCU)"
+                "Payloads contain block_access_list data but --bal is not set. BALs will be ignored."
             );
-
-            let _ = call_new_payload_with_reth(
-                &auth_provider,
-                payload.version,
-                payload.file.params.clone(),
-            )
-            .await?;
-
-            let fcu_state = ForkchoiceState {
-                head_block_hash: payload.file.block_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
-            call_forkchoice_updated_with_reth(&auth_provider, payload.version, fcu_state).await?;
-
-            info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
-
-            if let Some(w) = &mut waiter {
-                w.on_block(payload.block_number).await?;
-            }
-
-            parent_hash = payload.file.block_hash;
         }
 
-        if !gas_ramp_payloads.is_empty() {
-            info!(target: "reth-bench", count = gas_ramp_payloads.len(), "All gas ramp payloads replayed");
-        }
+        let mut parent_hash = initial_parent_hash;
 
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
 
         for (i, payload) in payloads.iter().enumerate() {
-            let envelope = &payload.envelope;
-            let block_hash = payload.block_hash;
-            let execution_payload = &envelope.envelope_inner.execution_payload;
-            let inner_payload = &execution_payload.payload_inner.payload_inner;
+            let execution_data = &payload.execution_data;
+            let mut block_hash = payload.block_hash;
+            let v1 = execution_data.payload.as_v1();
 
-            let gas_used = inner_payload.gas_used;
-            let gas_limit = inner_payload.gas_limit;
-            let block_number = inner_payload.block_number;
-            let transaction_count =
-                execution_payload.payload_inner.payload_inner.transactions.len() as u64;
+            let gas_used = v1.gas_used;
+            let gas_limit = v1.gas_limit;
+            let block_number = v1.block_number;
+            let transaction_count = v1.transactions.len() as u64;
 
             debug!(
                 target: "reth-bench",
@@ -337,27 +262,65 @@ impl Command {
             );
 
             let (version, params) = if self.reth_new_payload {
-                let reth_data = ExecutionData {
-                    payload: execution_payload.clone().into(),
-                    sidecar: ExecutionPayloadSidecar::v4(
-                        CancunPayloadFields {
-                            versioned_hashes: Vec::new(),
-                            parent_beacon_block_root: B256::ZERO,
-                        },
-                        PraguePayloadFields {
-                            requests: envelope.execution_requests.clone().into(),
-                        },
-                    ),
+                let big_block_data_param = if payload.big_block_data.env_switches.is_empty() &&
+                    payload.big_block_data.prior_block_hashes.is_empty()
+                {
+                    None
+                } else {
+                    Some(payload.big_block_data.clone())
                 };
-                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data),))?)
-            } else {
+                let wait_for_persistence = self
+                    .wait_for_persistence
+                    .unwrap_or(WaitForPersistence::Never)
+                    .rpc_value(block_number);
+
+                // Inject sidecar BAL into the inline V4 payload field when --bal is set.
+                // If the payload is not already V4 we upgrade it (V3→V4) so the BAL
+                // can be carried inline. This changes the block hash, so we recompute
+                // it and patch parent_hash to maintain the chain.
+                let mut execution_data = execution_data.clone();
+                if self.bal &&
+                    let Some(bal) = &payload.block_access_list
+                {
+                    let encoded_bal: alloy_primitives::Bytes =
+                        alloy_rlp::encode(Bal::from(bal.clone())).into();
+
+                    // Upgrade to V4 if necessary, then set the BAL field.
+                    if execution_data.payload.as_v4().is_none() {
+                        execution_data.payload = upgrade_to_v4(execution_data.payload, encoded_bal);
+                    } else {
+                        execution_data.payload.as_v4_mut().unwrap().block_access_list = encoded_bal;
+                    }
+
+                    // Patch parent_hash so this block chains off the (possibly
+                    // rehashed) previous block.
+                    execution_data.payload.as_v1_mut().parent_hash = parent_hash;
+
+                    // Recompute block hash after payload modification and update
+                    // the hash stored in the payload itself.
+                    block_hash = compute_payload_block_hash(&execution_data)?;
+                    execution_data.payload.as_v1_mut().block_hash = block_hash;
+                }
+
                 (
-                    Some(EngineApiMessageVersion::V4),
+                    None,
                     serde_json::to_value((
-                        execution_payload.clone(),
+                        RethNewPayloadInput::ExecutionData(execution_data),
+                        wait_for_persistence,
+                        self.no_wait_for_caches.then_some(false),
+                        big_block_data_param,
+                    ))?,
+                )
+            } else {
+                let requests =
+                    execution_data.sidecar.requests().cloned().unwrap_or_default().to_vec();
+                (
+                    Some(EngineApiMessageVersion::V6),
+                    serde_json::to_value((
+                        execution_data.payload.clone(),
                         Vec::<B256>::new(),
                         B256::ZERO,
-                        envelope.execution_requests.to_vec(),
+                        requests,
                     ))?,
                 )
             };
@@ -370,7 +333,10 @@ impl Command {
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
-                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
                 execution_cache_wait: server_timings
                     .as_ref()
                     .map(|t| t.execution_cache_wait)
@@ -413,8 +379,11 @@ impl Command {
                 tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
 
-            if let Some(w) = &mut waiter {
-                w.on_block(block_number).await?;
+            if let Some(wait_time) = self.wait_time {
+                let remaining = wait_time.saturating_sub(start.elapsed());
+                if !remaining.is_zero() {
+                    tokio::time::sleep(remaining).await;
+                }
             }
 
             let gas_row =
@@ -423,10 +392,6 @@ impl Command {
 
             parent_hash = block_hash;
         }
-
-        // Drop waiter - we don't need to wait for final blocks to persist
-        // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
-        drop(waiter);
 
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
             results.into_iter().unzip();
@@ -456,28 +421,41 @@ impl Command {
     }
 
     /// Load and parse all payload files from the directory.
+    ///
+    /// Tries to load each file as a [`BigBlockPayload`] first (which includes `env_switches`),
+    /// falling back to [`ExecutionPayloadEnvelopeV6`] for backwards compatibility.
     fn load_payloads(&self) -> eyre::Result<Vec<LoadedPayload>> {
         let mut payloads = Vec::new();
 
-        // Read directory entries
+        // Read directory entries — match both legacy "payload_block_*.json" and new
+        // "big_block_*.json" formats
         let entries: Vec<_> = std::fs::read_dir(&self.payload_dir)
             .wrap_err_with(|| format!("Failed to read directory {:?}", self.payload_dir))?
             .filter_map(|e| e.ok())
             .filter(|e| {
+                let name = e.file_name();
+                let name_str = name.to_string_lossy();
                 e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
+                    (name_str.starts_with("payload_block_") ||
+                        name_str.starts_with("big_block_"))
             })
             .collect();
 
-        // Parse filenames to get indices and sort
+        // Parse filenames to get indices and sort.
+        // Supports "payload_block_N.json" and "big_block_FROM_to_TO.json" naming.
         let mut indexed_paths: Vec<(u64, PathBuf)> = entries
             .into_iter()
             .filter_map(|e| {
                 let name = e.file_name();
                 let name_str = name.to_string_lossy();
-                // Extract index from "payload_NNN.json"
-                let index_str = name_str.strip_prefix("payload_block_")?.strip_suffix(".json")?;
-                let index: u64 = index_str.parse().ok()?;
+                let index = if let Some(rest) = name_str.strip_prefix("payload_block_") {
+                    rest.strip_suffix(".json")?.parse::<u64>().ok()?
+                } else {
+                    let rest = name_str.strip_prefix("big_block_")?;
+                    // "big_block_FROM_to_TO.json" — use FROM as the index
+                    let rest = rest.strip_suffix(".json")?;
+                    rest.split("_to_").next()?.parse::<u64>().ok()?
+                };
                 Some((index, e.path()))
             })
             .collect();
@@ -495,84 +473,80 @@ impl Command {
         for (index, path) in indexed_paths {
             let content = std::fs::read_to_string(&path)
                 .wrap_err_with(|| format!("Failed to read {:?}", path))?;
-            let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
-                .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
 
-            let block_hash =
-                envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
+            // Try BigBlockPayload first, then fall back to legacy ExecutionPayloadEnvelopeV4
+            let (execution_data, big_block_data, block_access_list) = if let Ok(big_block) =
+                serde_json::from_str::<BigBlockPayload>(&content)
+            {
+                (big_block.execution_data, big_block.big_block_data, big_block.block_access_list)
+            } else {
+                let envelope: ExecutionPayloadEnvelopeV6 = serde_json::from_str(&content)
+                    .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
+                let execution_data = ExecutionData {
+                    payload: envelope.execution_payload.clone().into(),
+                    sidecar: ExecutionPayloadSidecar::v4(
+                        CancunPayloadFields {
+                            versioned_hashes: Vec::new(),
+                            parent_beacon_block_root: B256::ZERO,
+                        },
+                        PraguePayloadFields {
+                            requests: envelope.execution_requests.clone().into(),
+                        },
+                    ),
+                };
+                (execution_data, BigBlockData::default(), None)
+            };
+
+            let block_hash = execution_data.payload.as_v1().block_hash;
 
             debug!(
                 target: "reth-bench",
                 index = index,
                 block_hash = %block_hash,
+                env_switches = big_block_data.env_switches.len(),
+                prior_block_hashes = big_block_data.prior_block_hashes.len(),
+                bal_accounts = block_access_list.as_ref().map_or(0, Vec::len),
                 path = %path.display(),
                 "Loaded payload"
             );
 
-            payloads.push(LoadedPayload { index, envelope, block_hash });
+            payloads.push(LoadedPayload {
+                index,
+                execution_data,
+                block_hash,
+                big_block_data,
+                block_access_list,
+            });
         }
 
         Ok(payloads)
     }
+}
 
-    /// Load and parse gas ramp payload files from a directory.
-    fn load_gas_ramp_payloads(&self, dir: &PathBuf) -> eyre::Result<Vec<GasRampPayload>> {
-        let mut payloads = Vec::new();
+/// Upgrades an [`ExecutionPayload`] to V4 by wrapping the inner V3 payload (constructing
+/// default V2/V3 layers for V1 payloads if needed) and setting the provided BAL bytes.
+fn upgrade_to_v4(
+    payload: ExecutionPayload,
+    block_access_list: alloy_primitives::Bytes,
+) -> ExecutionPayload {
+    use alloy_rpc_types_engine::{ExecutionPayloadV2, ExecutionPayloadV3};
 
-        let entries: Vec<_> = std::fs::read_dir(dir)
-            .wrap_err_with(|| format!("Failed to read directory {:?}", dir))?
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
-            })
-            .collect();
-
-        // Parse filenames to get block numbers and sort
-        let mut indexed_paths: Vec<(u64, PathBuf)> = entries
-            .into_iter()
-            .filter_map(|e| {
-                let name = e.file_name();
-                let name_str = name.to_string_lossy();
-                // Extract block number from "payload_block_NNN.json"
-                let block_str = name_str.strip_prefix("payload_block_")?.strip_suffix(".json")?;
-                let block_number: u64 = block_str.parse().ok()?;
-                Some((block_number, e.path()))
-            })
-            .collect();
-
-        indexed_paths.sort_by_key(|(num, _)| *num);
-
-        for (block_number, path) in indexed_paths {
-            let content = std::fs::read_to_string(&path)
-                .wrap_err_with(|| format!("Failed to read {:?}", path))?;
-            let file: GasRampPayloadFile = serde_json::from_str(&content)
-                .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
-
-            let version = if let Some(version) = file.version {
-                match version {
-                    1 => EngineApiMessageVersion::V1,
-                    2 => EngineApiMessageVersion::V2,
-                    3 => EngineApiMessageVersion::V3,
-                    4 => EngineApiMessageVersion::V4,
-                    5 => EngineApiMessageVersion::V5,
-                    v => return Err(eyre::eyre!("Invalid version {} in {:?}", v, path)),
-                }
-                .into()
-            } else {
-                None
-            };
-
-            info!(
-                block_number,
-                block_hash = %file.block_hash,
-                path = %path.display(),
-                "Loaded gas ramp payload"
-            );
-
-            payloads.push(GasRampPayload { block_number, version, file });
+    let v3 = match payload {
+        ExecutionPayload::V4(_) => unreachable!("caller checks as_v4().is_none()"),
+        ExecutionPayload::V3(v3) => v3,
+        ExecutionPayload::V2(v2) => {
+            ExecutionPayloadV3 { payload_inner: v2, blob_gas_used: 0, excess_blob_gas: 0 }
         }
+        ExecutionPayload::V1(v1) => ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 { payload_inner: v1, withdrawals: Vec::new() },
+            blob_gas_used: 0,
+            excess_blob_gas: 0,
+        },
+    };
 
-        Ok(payloads)
-    }
+    ExecutionPayload::V4(ExecutionPayloadV4 {
+        payload_inner: v3,
+        block_access_list,
+        slot_number: 0,
+    })
 }

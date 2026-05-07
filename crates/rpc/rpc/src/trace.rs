@@ -295,6 +295,7 @@ where
     fn extract_reward_traces<H: BlockHeader>(
         &self,
         header: &H,
+        block_hash: BlockHash,
         ommers: Option<&[H]>,
         base_block_reward: u128,
     ) -> Vec<LocalizedTransactionTrace> {
@@ -303,6 +304,7 @@ where
 
         let block_reward = block_reward(base_block_reward, ommers_cnt);
         traces.push(reward_trace(
+            block_hash,
             header,
             RewardAction {
                 author: header.beneficiary(),
@@ -316,6 +318,7 @@ where
         for uncle in ommers {
             let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
             traces.push(reward_trace(
+                block_hash,
                 header,
                 RewardAction {
                     author: uncle.beneficiary(),
@@ -416,7 +419,7 @@ where
                 block_traces.push(traces);
             }
 
-            #[allow(clippy::iter_with_drain)]
+            #[expect(clippy::iter_with_drain)]
             let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
             all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
                 traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
@@ -428,6 +431,7 @@ where
                     all_traces.extend(
                         self.extract_reward_traces(
                             block.header(),
+                            block.hash(),
                             block.body().ommers(),
                             base_block_reward,
                         )
@@ -450,14 +454,16 @@ where
                 after = None;
             }
 
-            // Return at most `count` of traces
-            if let Some(count) = count {
+            // Return at most `count` traces after `after` has been consumed.
+            if after.is_none() &&
+                let Some(count) = count
+            {
                 let count = count as usize;
                 if count < all_traces.len() {
                     all_traces.truncate(count);
                     return Ok(all_traces)
                 }
-            };
+            }
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an
@@ -502,6 +508,7 @@ where
         {
             traces.extend(self.extract_reward_traces(
                 block.header(),
+                block.hash(),
                 block.body().ommers(),
                 base_block_reward,
             ));
@@ -598,12 +605,14 @@ where
                 block_id,
                 Some(block.clone()),
                 StorageInspector::default,
-                move |tx_info, ctx| {
+                move |tx_info, mut ctx| {
+                    let unique_loads = ctx.inspector.unique_loads();
+                    let warm_loads = ctx.inspector.warm_loads();
                     let trace = TransactionStorageAccess {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        storage_access: ctx.inspector.accessed_slots().clone(),
-                        unique_loads: ctx.inspector.unique_loads(),
-                        warm_loads: ctx.inspector.warm_loads(),
+                        storage_access: ctx.take_inspector().into_accessed_slots(),
+                        unique_loads,
+                        warm_loads,
                     };
                     Ok(trace)
                 },
@@ -795,9 +804,13 @@ pub struct BlockStorageAccess {
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
-fn reward_trace<H: BlockHeader>(header: &H, reward: RewardAction) -> LocalizedTransactionTrace {
+fn reward_trace<H: BlockHeader>(
+    block_hash: BlockHash,
+    header: &H,
+    reward: RewardAction,
+) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
-        block_hash: Some(header.hash_slow()),
+        block_hash: Some(block_hash),
         block_number: Some(header.number()),
         transaction_hash: None,
         transaction_position: None,

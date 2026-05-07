@@ -16,6 +16,7 @@ mod copy;
 mod diff;
 mod get;
 mod list;
+mod migrate_v2;
 mod prune_checkpoints;
 mod repair_trie;
 mod settings;
@@ -77,6 +78,9 @@ pub enum Subcommands {
     AccountStorage(account_storage::Command),
     /// Gets account state and storage at a specific block
     State(state::Command),
+    /// Migrate storage layout from v1 (MDBX-only) to v2 (static files + RocksDB)
+    #[command(name = "migrate-v2")]
+    MigrateV2(migrate_v2::Command),
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -102,14 +106,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let static_files_path = data_dir.static_files();
         let exex_wal_path = data_dir.exex_wal();
 
-        // ensure the provided datadir exist
+        // ensure the provided datadir exists
         eyre::ensure!(
             data_dir.data_dir().is_dir(),
             "Datadir does not exist: {:?}",
             data_dir.data_dir()
         );
 
-        // ensure the provided database exist
+        // ensure the provided database exists
         eyre::ensure!(db_path.is_dir(), "Database does not exist: {:?}", db_path);
 
         match self.command {
@@ -230,6 +234,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
+            }
+            Subcommands::MigrateV2(command) => {
+                let Environment { provider_factory, .. } =
+                    self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
+
+                // Migrate changesets+receipts, clear tables, compact MDBX
+                command.execute::<N>(provider_factory).await?;
             }
         }
 

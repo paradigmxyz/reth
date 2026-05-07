@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+fixture_variant="${1:-osaka}"
+
+case "${fixture_variant}" in
+    amsterdam)
+        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/snobal-devnet-5@v8037.0.0/fixtures_snobal-devnet-5.tar.gz"
+        eels_branch="devnets/snobal/5"
+        ;;
+    osaka)
+        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
+        eels_branch="forks/osaka"
+        ;;
+    *)
+        echo "unknown hive fixture variant: ${fixture_variant}"
+        exit 1
+        ;;
+esac
+
 # Create the hive_assets directory
 mkdir hive_assets/
 
@@ -11,8 +28,14 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-# TODO: test code has been moved from https://github.com/ethereum/execution-spec-tests to https://github.com/ethereum/execution-specs  we need to pin eels branch with `--sim.buildarg branch=<release-branch-name>` once we have the fusaka release tagged on the new repo
-./hive -client reth --sim "ethereum/eels" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eels/consume-engine" \
+    --sim.buildarg fixtures="${eels_fixtures}" \
+    --sim.buildarg branch="${eels_branch}" \
+    --sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eels/consume-rlp" \
+    --sim.buildarg fixtures="${eels_fixtures}" \
+    --sim.buildarg branch="${eels_branch}" \
+    --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &

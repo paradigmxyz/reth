@@ -1,4 +1,3 @@
-use crate::proof_v2::increment_and_strip_trailing_zeros;
 use reth_trie_common::{Nibbles, ProofV2Target};
 
 // A helper function for getting the largest prefix of the sub-trie which contains a particular
@@ -29,7 +28,7 @@ pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
 // A helper function which returns the first path following a sub-trie in lexicographical order.
 #[inline]
 fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
-    increment_and_strip_trailing_zeros(sub_trie_prefix)
+    sub_trie_prefix.next_without_prefix()
 }
 
 /// Describes a set of targets which all apply to a single sub-trie, ie a section of the overall

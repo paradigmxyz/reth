@@ -39,6 +39,7 @@ thiserror.workspace = true
 
 [features]
 default = ["std"]
+trie-debug = []
 std = [
     "reth-execution-types/std",
     "reth-ethereum-primitives/std",

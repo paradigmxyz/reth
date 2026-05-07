@@ -206,6 +206,27 @@ impl<V> TransactionValidationTaskExecutor<V> {
             task,
         )
     }
+
+    /// Creates a new executor and spawns the validation tasks on the given runtime.
+    ///
+    /// This spawns `additional_tasks` extra blocking tasks plus one critical blocking task
+    /// for the validation service.
+    pub fn spawn(validator: V, tasks: &Runtime, additional_tasks: usize) -> Self {
+        let (tx, task) = ValidationTask::new();
+
+        for _ in 0..additional_tasks {
+            let task = task.clone();
+            tasks.spawn_blocking_task(async move {
+                task.run().await;
+            });
+        }
+
+        tasks.spawn_critical_blocking_task("transaction-validation-service", async move {
+            task.run().await;
+        });
+
+        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+    }
 }
 
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>

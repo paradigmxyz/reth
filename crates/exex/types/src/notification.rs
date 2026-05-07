@@ -96,8 +96,8 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     ///
-    /// This enum mirrors [`super::ExExNotification`] but uses borrowed [`Chain`] types
-    /// instead of `Arc<Chain>` for bincode compatibility.
+    /// This enum mirrors [`super::ExExNotification`] but uses [`Chain`] wrapper types
+    /// instead of `Arc<Chain>` for serialization compatibility.
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(bound = "")]
     #[expect(clippy::large_enum_variant)]

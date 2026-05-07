@@ -25,6 +25,7 @@ pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use ext::L2EthApiExtServer;
 pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};
+pub use helpers::config::EthConfigApiServer;
 pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;
 pub use reth_rpc_convert::*;
@@ -41,5 +42,7 @@ pub use core::EthApiClient;
 pub use ext::L2EthApiExtClient;
 #[cfg(feature = "client")]
 pub use filter::EthFilterApiClient;
+#[cfg(feature = "client")]
+pub use helpers::config::EthConfigApiClient;
 
 use reth_trie_common as _;

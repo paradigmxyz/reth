@@ -7,7 +7,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
+    message::{
+        EthBroadcastMessage, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -16,7 +19,7 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
+use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
@@ -27,10 +30,6 @@ use std::{
 use tokio::time::timeout;
 use tokio_stream::Stream;
 use tracing::{debug, trace};
-
-/// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
-// https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
-pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
 /// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
 /// `Status` handshake is completed.
@@ -110,6 +109,11 @@ where
 pub struct EthStreamInner<N> {
     /// Negotiated eth version
     version: EthVersion,
+    /// Maximum allowed ETH message size.
+    max_message_size: usize,
+    /// When true, `NewBlock` (0x07) and `NewBlockHashes` (0x01) messages are rejected before RLP
+    /// decoding to avoid any memory impact for non-PoW networks.
+    reject_block_announcements: bool,
     _pd: std::marker::PhantomData<N>,
 }
 
@@ -119,7 +123,17 @@ where
 {
     /// Creates a new [`EthStreamInner`] with the given eth version
     pub const fn new(version: EthVersion) -> Self {
-        Self { version, _pd: std::marker::PhantomData }
+        Self::with_max_message_size(version, MAX_MESSAGE_SIZE)
+    }
+
+    /// Creates a new [`EthStreamInner`] with the given eth version and message size limit.
+    pub const fn with_max_message_size(version: EthVersion, max_message_size: usize) -> Self {
+        Self {
+            version,
+            max_message_size,
+            reject_block_announcements: false,
+            _pd: std::marker::PhantomData,
+        }
     }
 
     /// Returns the eth version
@@ -128,13 +142,30 @@ where
         self.version
     }
 
+    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
+    /// RLP decoding.
+    pub const fn set_reject_block_announcements(&mut self, reject: bool) {
+        self.reject_block_announcements = reject;
+    }
+
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
-        if bytes.len() > MAX_MESSAGE_SIZE {
+        if bytes.len() > self.max_message_size {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
 
-        let msg = match ProtocolMessage::decode_message(self.version, &mut bytes.as_ref()) {
+        if self.reject_block_announcements &&
+            let Some(&id) = bytes.first() &&
+            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
+        {
+            return Err(EthStreamError::UnsupportedMessage { message_id: id });
+        }
+
+        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+            self.version,
+            &mut bytes.as_ref(),
+            self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+        ) {
             Ok(m) => m,
             Err(err) => {
                 let msg = if bytes.len() > 50 {
@@ -186,13 +217,29 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
     /// to manually handshake a peer.
     #[inline]
     pub const fn new(version: EthVersion, inner: S) -> Self {
-        Self { eth: EthStreamInner::new(version), inner }
+        Self::with_max_message_size(version, inner, MAX_MESSAGE_SIZE)
+    }
+
+    /// Creates a new unauthed [`EthStream`] with a custom max message size.
+    #[inline]
+    pub const fn with_max_message_size(
+        version: EthVersion,
+        inner: S,
+        max_message_size: usize,
+    ) -> Self {
+        Self { eth: EthStreamInner::with_max_message_size(version, max_message_size), inner }
     }
 
     /// Returns the eth version.
     #[inline]
     pub const fn version(&self) -> EthVersion {
         self.eth.version()
+    }
+
+    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
+    /// RLP decoding.
+    pub const fn set_reject_block_announcements(&mut self, reject: bool) {
+        self.eth.set_reject_block_announcements(reject);
     }
 
     /// Returns the underlying stream.

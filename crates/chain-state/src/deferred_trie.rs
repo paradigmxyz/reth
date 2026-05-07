@@ -9,7 +9,7 @@ use std::{
     fmt,
     sync::{Arc, LazyLock},
 };
-use tracing::instrument;
+use tracing::{debug_span, instrument};
 
 /// Shared handle to asynchronously populated trie data.
 ///
@@ -163,6 +163,8 @@ impl DeferredTrieData {
         anchor_hash: B256,
         ancestors: &[Self],
     ) -> ComputedTrieData {
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
+
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
             || match Arc::try_unwrap(hashed_state) {
@@ -187,6 +189,10 @@ impl DeferredTrieData {
             },
         );
 
+        drop(_span);
+
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "build_overlay").entered();
+
         // Reuse parent's overlay if available and anchors match.
         // We can only reuse the parent's overlay if it was built on top of the same
         // persisted anchor. If the anchor has changed (e.g., due to persistence),
@@ -205,6 +211,9 @@ impl DeferredTrieData {
                         Arc::clone(&trie_input.state),
                         Default::default(), // prefix_sets are per-block, not cumulative
                     );
+                    let _span =
+                        debug_span!(target: "engine::tree::deferred_trie", "extend_overlay")
+                            .entered();
                     // Only trigger COW clone if there's actually data to add.
                     #[cfg(feature = "rayon")]
                     {
@@ -265,13 +274,60 @@ impl DeferredTrieData {
     /// In normal operation, the parent always has a cached overlay and this
     /// function is never called.
     ///
-    /// Iterates ancestors oldest -> newest, then extends with current block's data,
-    /// so later state takes precedence.
+    /// When the `rayon` feature is enabled:
+    /// 1. Collects ancestor data (states and updates)
+    /// 2. Merges states and trie updates in parallel using k-way merge
+    #[cfg(feature = "rayon")]
     fn merge_ancestors_into_overlay(
         ancestors: &[Self],
         sorted_hashed_state: &HashedPostStateSorted,
         sorted_trie_updates: &TrieUpdatesSorted,
     ) -> TrieInputSorted {
+        // Early exit: no ancestors means just wrap current block's data
+        if ancestors.is_empty() {
+            return TrieInputSorted::new(
+                Arc::new(sorted_trie_updates.clone()),
+                Arc::new(sorted_hashed_state.clone()),
+                Default::default(),
+            );
+        }
+
+        // Collect ancestor data in reverse (newest to oldest) for merge_slice
+        let (states, updates): (Vec<_>, Vec<_>) = ancestors
+            .iter()
+            .rev()
+            .map(|a| {
+                // Note: we can assume that this trie data has already been computed
+                let data = a.wait_cloned();
+                (data.hashed_state, data.trie_updates)
+            })
+            .unzip();
+
+        // Merge state and nodes in parallel using k-way merge
+        let (state, nodes) = rayon::join(
+            || {
+                let mut merged = HashedPostStateSorted::merge_slice(&states);
+                merged.extend_ref_and_sort(sorted_hashed_state);
+                merged
+            },
+            || {
+                let mut merged = TrieUpdatesSorted::merge_slice(&updates);
+                merged.extend_ref_and_sort(sorted_trie_updates);
+                merged
+            },
+        );
+
+        TrieInputSorted::new(Arc::new(nodes), Arc::new(state), Default::default())
+    }
+
+    /// Sequential fallback when rayon is not available.
+    #[cfg(not(feature = "rayon"))]
+    fn merge_ancestors_into_overlay(
+        ancestors: &[Self],
+        sorted_hashed_state: &HashedPostStateSorted,
+        sorted_trie_updates: &TrieUpdatesSorted,
+    ) -> TrieInputSorted {
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "merge_ancestors", num_ancestors = ancestors.len()).entered();
         let mut overlay = TrieInputSorted::default();
 
         let state_mut = Arc::make_mut(&mut overlay.state);
@@ -283,18 +339,8 @@ impl DeferredTrieData {
             nodes_mut.extend_ref_and_sort(ancestor_data.trie_updates.as_ref());
         }
 
-        // Extend with current block's sorted data last (takes precedence)
-        #[cfg(feature = "rayon")]
-        rayon::join(
-            || state_mut.extend_ref_and_sort(sorted_hashed_state),
-            || nodes_mut.extend_ref_and_sort(sorted_trie_updates),
-        );
-
-        #[cfg(not(feature = "rayon"))]
-        {
-            state_mut.extend_ref_and_sort(sorted_hashed_state);
-            nodes_mut.extend_ref_and_sort(sorted_trie_updates);
-        }
+        state_mut.extend_ref_and_sort(sorted_hashed_state);
+        nodes_mut.extend_ref_and_sort(sorted_trie_updates);
 
         overlay
     }

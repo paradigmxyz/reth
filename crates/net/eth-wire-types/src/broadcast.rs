@@ -7,13 +7,14 @@ use alloy_primitives::{
     Bytes, TxHash, B256, U128,
 };
 use alloy_rlp::{
-    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
+    Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    RlpEncodableWrapper,
 };
 use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Block, SignedTransaction};
+use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
@@ -25,6 +26,7 @@ use reth_primitives_traits::{Block, SignedTransaction};
     RlpDecodableWrapper,
     Default,
     Deref,
+    DerefMut,
     IntoIterator,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -142,6 +144,53 @@ impl<T> From<Transactions<T>> for Vec<T> {
     }
 }
 
+impl<T: Decodable + InMemorySize> Transactions<T> {
+    /// Decodes the RLP list of transactions, stopping once the cumulative
+    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
+    /// Any remaining transactions in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
+
+/// Decodes an RLP list, stopping once the cumulative [`InMemorySize`] of decoded items exceeds
+/// `memory_budget` bytes. Any remaining items in the payload are skipped.
+pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
+    buf: &mut &[u8],
+    memory_budget: usize,
+) -> alloy_rlp::Result<Vec<T>> {
+    let header = Header::decode(buf)?;
+    if !header.list {
+        return Err(alloy_rlp::Error::UnexpectedString);
+    }
+    if buf.len() < header.payload_length {
+        return Err(alloy_rlp::Error::InputTooShort);
+    }
+
+    let (payload, rest) = buf.split_at(header.payload_length);
+    let mut payload = payload;
+
+    let mut txs = Vec::new();
+    let mut total_size = 0usize;
+
+    while !payload.is_empty() {
+        let item = T::decode(&mut payload)?;
+        total_size = total_size.saturating_add(item.size());
+
+        if total_size > memory_budget {
+            break;
+        }
+
+        txs.push(item);
+    }
+
+    *buf = rest;
+    Ok(txs)
+}
+
 /// Same as [`Transactions`] but this is intended as egress message send from local to _many_ peers.
 ///
 /// The list of transactions is constructed on per-peers basis, but the underlying transaction
@@ -188,7 +237,11 @@ impl NewPooledTransactionHashes {
             Self::Eth68(_) => {
                 matches!(
                     version,
-                    EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71
+                    EthVersion::Eth68 |
+                        EthVersion::Eth69 |
+                        EthVersion::Eth70 |
+                        EthVersion::Eth71 |
+                        EthVersion::Eth72
                 )
             }
         }
@@ -238,7 +291,7 @@ impl NewPooledTransactionHashes {
     /// the rest. If `len` is greater than the number of hashes, this has no effect.
     pub fn truncate(&mut self, len: usize) {
         match self {
-            Self::Eth66(msg) => msg.0.truncate(len),
+            Self::Eth66(msg) => msg.truncate(len),
             Self::Eth68(msg) => {
                 msg.types.truncate(len);
                 msg.sizes.truncate(len);
@@ -263,7 +316,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns an immutable reference to the inner type if this an eth68 announcement.
+    /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -271,7 +324,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -279,7 +332,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth66 announcement.
     pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
@@ -287,7 +340,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth68 announcement.
+    /// Returns the inner type if this is an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -295,7 +348,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth66 announcement.
+    /// Returns the inner type if this is an eth66 announcement.
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),
@@ -336,6 +389,7 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     RlpDecodableWrapper,
     Default,
     Deref,
+    DerefMut,
     IntoIterator,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -835,6 +889,19 @@ pub struct BlockRangeUpdate {
     pub latest_hash: B256,
 }
 
+impl InMemorySize for NewPooledTransactionHashes {
+    fn size(&self) -> usize {
+        match self {
+            Self::Eth66(msg) => msg.0.len() * core::mem::size_of::<B256>(),
+            Self::Eth68(msg) => {
+                msg.types.len() * core::mem::size_of::<u8>() +
+                    msg.sizes.len() * core::mem::size_of::<usize>() +
+                    msg.hashes.len() * core::mem::size_of::<B256>()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -865,8 +932,8 @@ mod tests {
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 0);
 
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 100 });
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 2 });
+        blocks.push(BlockHashNumber { hash: B256::random(), number: 100 });
+        blocks.push(BlockHashNumber { hash: B256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
     }

@@ -1,10 +1,12 @@
 //! Loads a receipt from database. Helper trait for `eth_` block and transaction RPC methods, that
 //! loads receipt data w.r.t. network.
 
+use std::sync::Arc;
+
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
 use futures::Future;
-use reth_primitives_traits::SignerRecoverable;
+use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_types::{
     error::FromEthApiError, utils::calculate_gas_used_and_next_log_index, EthApiError,
@@ -18,21 +20,27 @@ pub trait LoadReceipt:
     EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>> + RpcNodeCoreExt + Send + Sync
 {
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
+    ///
+    /// If `all_receipts` is `Some`, skips the cache lookup for receipts entirely.
     fn build_transaction_receipt(
         &self,
-        tx: ProviderTx<Self::Provider>,
+        tx: Recovered<ProviderTx<Self::Provider>>,
         meta: TransactionMeta,
         receipt: ProviderReceipt<Self::Provider>,
+        all_receipts: Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
         async move {
             let hash = meta.block_hash;
-            // get all receipts for the block
-            let all_receipts = self
-                .cache()
-                .get_receipts(hash)
-                .await
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+            // Use pre-fetched receipts if available, otherwise fetch from cache.
+            let all_receipts = match all_receipts {
+                Some(receipts) => receipts,
+                None => self
+                    .cache()
+                    .get_receipts(hash)
+                    .await
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?,
+            };
 
             let (gas_used, next_log_index) =
                 calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
@@ -40,10 +48,7 @@ pub trait LoadReceipt:
             Ok(self
                 .converter()
                 .convert_receipts(vec![ConvertReceiptInput {
-                    tx: tx
-                        .try_into_recovered_unchecked()
-                        .map_err(Self::Error::from_eth_err)?
-                        .as_recovered_ref(),
+                    tx: tx.as_recovered_ref(),
                     gas_used: receipt.cumulative_gas_used() - gas_used,
                     receipt,
                     next_log_index,

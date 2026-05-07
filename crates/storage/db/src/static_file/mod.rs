@@ -48,7 +48,7 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
 
     // Sort by block end range.
     for range_list in static_files.values_mut() {
-        range_list.sort_by_key(|(block_range, _)| block_range.end());
+        range_list.sort_unstable_by_key(|(block_range, _)| block_range.end());
     }
 
     Ok(static_files)

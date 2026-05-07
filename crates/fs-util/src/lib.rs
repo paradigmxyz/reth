@@ -260,6 +260,17 @@ pub fn remove_file(path: impl AsRef<Path>) -> Result<()> {
     fs::remove_file(path).map_err(|err| FsPathError::remove_file(err, path))
 }
 
+/// Removes a file at the given path, ignoring the error if the file does not exist
+/// (`ErrorKind::NotFound`).
+pub fn remove_file_if_exists(path: impl AsRef<Path>) -> Result<()> {
+    match remove_file(&path) {
+        Err(FsPathError::RemoveFile { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            Ok(())
+        }
+        result => result,
+    }
+}
+
 /// Wrapper for `std::fs::create_dir_all`
 pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();

@@ -23,6 +23,12 @@ pub struct ProofTrieNodeV2 {
 }
 
 impl ProofTrieNodeV2 {
+    /// Creates an empty `ProofTrieNodeV2` with an empty root node. Useful as a placeholder when
+    /// taking a node out of a slice via [`core::mem::replace`].
+    pub fn empty() -> Self {
+        Self { path: Nibbles::default(), node: TrieNodeV2::EmptyRoot, masks: None }
+    }
+
     /// Converts an iterator of `(path, TrieNode, masks)` tuples into `Vec<ProofTrieNodeV2>`,
     /// merging extension nodes into their child branch nodes.
     ///

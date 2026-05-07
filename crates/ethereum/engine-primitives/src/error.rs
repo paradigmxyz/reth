@@ -10,4 +10,7 @@ pub enum BuiltPayloadConversionError {
     /// Unexpected EIP-7594 sidecars in the built payload.
     #[error("unexpected EIP-7594 sidecars")]
     UnexpectedEip7594Sidecars,
+    /// Missing block access list (required for V6 envelope).
+    #[error("missing block access list")]
+    MissingBlockAccessList,
 }

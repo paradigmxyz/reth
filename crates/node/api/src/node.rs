@@ -48,7 +48,7 @@ where
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
 pub trait PayloadBuilderFor<N: NodeTypes>:
     PayloadBuilder<
-    Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
+    Attributes = <N::Payload as PayloadTypes>::PayloadAttributes,
     BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
 >
 {
@@ -56,7 +56,7 @@ pub trait PayloadBuilderFor<N: NodeTypes>:
 
 impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
     T: PayloadBuilder<
-        Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
+        Attributes = <N::Payload as PayloadTypes>::PayloadAttributes,
         BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
     >
 {

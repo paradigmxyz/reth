@@ -85,6 +85,7 @@ std = [
     "serde_json/std",
     "revm-database/std",
     "revm-state/std",
+    "reth-codecs?/std",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
@@ -104,7 +105,6 @@ serde = [
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
     "serde",
-    "reth-primitives-traits/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
     "dep:serde_with",
     "alloy-genesis/serde-bincode-compat",

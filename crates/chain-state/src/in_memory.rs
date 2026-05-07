@@ -992,7 +992,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlock<N::Block> {
+    pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => {
                 new.last().expect("non empty blocks").recovered_block()
@@ -1169,6 +1169,7 @@ mod tests {
             &self,
             _input: TrieInput,
             _target: HashedPostState,
+            _mode: reth_trie::ExecutionWitnessMode,
         ) -> ProviderResult<Vec<Bytes>> {
             Ok(Vec::default())
         }

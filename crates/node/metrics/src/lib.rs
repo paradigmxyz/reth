@@ -10,9 +10,11 @@
 pub mod chain;
 /// The metrics hooks for prometheus.
 pub mod hooks;
+pub mod process;
 pub mod recorder;
 /// The metric server serving the metrics.
 pub mod server;
+pub mod storage;
 pub mod version;
 
 pub use metrics_exporter_prometheus::*;

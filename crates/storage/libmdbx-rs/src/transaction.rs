@@ -232,7 +232,7 @@ where
         }
 
         // The types are not the same on Windows. Great!
-        #[cfg_attr(not(windows), allow(clippy::useless_conversion))]
+        #[cfg_attr(not(windows), expect(clippy::useless_conversion))]
         Ok(DatabaseFlags::from_bits_truncate(flags.try_into().unwrap()))
     }
 
@@ -426,7 +426,7 @@ impl Transaction<RW> {
     /// The caller must ensure that the returned buffer is not used after the transaction is
     /// committed or aborted, or if another value is inserted. To be clear: the second call to
     /// this function is not permitted while the returned slice is reachable.
-    #[allow(clippy::mut_from_ref)]
+    #[expect(clippy::mut_from_ref)]
     pub unsafe fn reserve(
         &self,
         dbi: ffi::MDBX_dbi,

@@ -202,7 +202,7 @@ where
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(&block, &output, None)?;
+        self.consensus.validate_block_post_execution(&block, &output, None, None)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -589,7 +589,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
 /// insertion order, then computes a SHA256 hash of the concatenated addresses.
 fn hash_disallow_list(disallow: &AddressSet) -> String {
     let mut sorted: Vec<_> = disallow.iter().collect();
-    sorted.sort(); // sort for deterministic hashing
+    sorted.sort_unstable(); // sort for deterministic hashing
 
     let mut hasher = Sha256::new();
     for addr in sorted {

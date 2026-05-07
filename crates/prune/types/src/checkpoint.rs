@@ -1,4 +1,6 @@
 use crate::PruneMode;
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_primitives::bytes;
 use alloy_primitives::{BlockNumber, TxNumber};
 
 /// Saves the pruning progress of a stage.
@@ -15,3 +17,6 @@ pub struct PruneCheckpoint {
     /// Prune mode.
     pub prune_mode: PruneMode,
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(PruneCheckpoint);

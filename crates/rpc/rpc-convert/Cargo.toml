@@ -15,19 +15,15 @@ workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-evm.workspace = true
+reth-rpc-traits.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
-alloy-signer.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-json-rpc.workspace = true
 alloy-evm = { workspace = true, features = ["rpc"] }
-
-# optimism
-op-alloy-consensus = { workspace = true, optional = true }
-op-alloy-rpc-types = { workspace = true, optional = true }
 
 # io
 jsonrpsee-types.workspace = true
@@ -43,10 +39,3 @@ serde_json.workspace = true
 
 [features]
 default = []
-op = [
-    "dep:op-alloy-consensus",
-    "dep:op-alloy-rpc-types",
-    "reth-evm/op",
-    "reth-primitives-traits/op",
-    "alloy-evm/op",
-]

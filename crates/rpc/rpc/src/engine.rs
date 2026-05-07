@@ -13,6 +13,7 @@ pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{
     EngineEthFilter, FullEthApiTypes, QueryLimits, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
+use serde_json::Value;
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -144,5 +145,23 @@ where
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
         self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
+    }
+
+    /// Handler for `eth_getBlockAccessListByBlockHash`
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> Result<Option<Value>> {
+        self.eth.block_access_list_by_block_hash(hash).instrument(engine_span!()).await
+    }
+
+    /// Handler for `eth_getBlockAccessListByBlockNumber`
+    async fn block_access_list_by_block_number(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> Result<Option<Value>> {
+        self.eth.block_access_list_by_block_number(block_number).instrument(engine_span!()).await
+    }
+
+    /// Handler for `getBlockAccessListRaw`
+    async fn block_access_list_raw(&self, block: BlockId) -> Result<Option<Bytes>> {
+        self.eth.block_access_list_raw(block).instrument(engine_span!()).await
     }
 }

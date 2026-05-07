@@ -2,7 +2,7 @@
 
 /// NetworkArg struct for configuring the network
 mod network;
-pub use network::{DiscoveryArgs, NetworkArgs};
+pub use network::{DefaultDiscoveryArgs, DefaultNetworkArgs, DiscoveryArgs, NetworkArgs};
 
 /// RpcServerArg struct for configuring the RPC
 mod rpc_server;
@@ -22,7 +22,7 @@ pub use database::DatabaseArgs;
 
 /// LogArgs struct for configuring the logger
 mod log;
-pub use log::{ColorMode, LogArgs, Verbosity};
+pub use log::{ColorMode, DefaultLogArgs, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
@@ -54,7 +54,7 @@ pub use dev::DevArgs;
 
 /// PruneArgs for configuring the pruning and full node
 mod pruning;
-pub use pruning::{DefaultPruningValues, PruningArgs};
+pub use pruning::{DefaultPruningValues, PruneConfigKind, PruningArgs};
 
 /// DatadirArgs for configuring data storage paths
 mod datadir_args;
@@ -62,7 +62,7 @@ pub use datadir_args::DatadirArgs;
 
 /// BenchmarkArgs struct for configuring the benchmark to run
 mod benchmark_args;
-pub use benchmark_args::BenchmarkArgs;
+pub use benchmark_args::{BenchmarkArgs, RpcBlockFetchRetries, WaitForPersistence};
 
 /// EngineArgs for configuring the engine
 mod engine;
@@ -78,7 +78,7 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
 /// `StorageArgs` for configuring storage settings.
 mod storage;
-pub use storage::StorageArgs;
+pub use storage::{DefaultStorageValues, StorageArgs};
 
 mod error;
 pub mod types;

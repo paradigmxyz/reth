@@ -66,8 +66,6 @@ secp256k1.workspace = true
 tempfile.workspace = true
 
 [features]
-default = []
-edge = ["reth-provider/edge"]
 serde = [
     "reth-exex-types/serde",
     "reth-revm/serde",

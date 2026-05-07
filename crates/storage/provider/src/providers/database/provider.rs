@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -37,7 +37,7 @@ use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    database::Database,
+    database::{Database, ReaderTxnTracker},
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
@@ -46,7 +46,7 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, PlainAccountState, PlainStorageState,
+    BlockNumberList,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -61,8 +61,8 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader, StoragePath,
-    StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
+    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
@@ -205,7 +205,6 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Path to the database directory.
     db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
-    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
     /// Commit order for database operations.
     commit_order: CommitOrder,
@@ -213,6 +212,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
+    /// Database handle used to inspect active MDBX readers during unwind commits.
+    reader_txn_tracker: Option<Arc<dyn ReaderTxnTracker>>,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -230,6 +231,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
+            .field("reader_txn_tracker", &"<reader txn tracker>")
             .finish()
     }
 }
@@ -239,9 +241,54 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+
+    /// Sets the minimum pruning distance.
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.minimum_pruning_distance = distance;
+        self
+    }
+
+    /// Attaches reader tracking so unwind commits can wait on active readers.
+    pub(crate) fn with_reader_txn_tracker<T>(mut self, reader_txn_tracker: T) -> Self
+    where
+        T: ReaderTxnTracker + 'static,
+    {
+        self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
+        self
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
+    ///
+    /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
+    /// truncating static files from checkpoints on the next startup.
+    ///
+    /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
+    /// later cross-store unwind steps.
+    ///
+    /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
+    /// so no additional post-`RocksDB` wait is needed before static-file commit.
+    fn commit_unwind(self) -> ProviderResult<()> {
+        let storage_v2 = self.cached_storage_settings().storage_v2;
+        let reader_txn_tracker = self.reader_txn_tracker.clone();
+        self.tx.commit()?;
+
+        if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+            reader_txn_tracker.wait_for_pre_commit_readers();
+        }
+
+        if storage_v2 {
+            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            for batch in batches {
+                self.rocksdb_provider.commit_batch(batch)?;
+            }
+        }
+
+        self.static_file_provider.commit()?;
+        Ok(())
+    }
+
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -253,8 +300,16 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         &'a self,
         block_hash: BlockHash,
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        let mut block_number =
+        let block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        self.history_by_block_number(block_number)
+    }
+
+    /// Storage provider for state at that given block number
+    pub fn history_by_block_number<'a>(
+        &'a self,
+        mut block_number: BlockNumber,
+    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
@@ -269,8 +324,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(self, block_number);
-
+        let mut state_provider =
+            HistoricalStateProviderRef::new(self, block_number, self.changeset_cache.clone());
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
         if let Some(prune_checkpoint_block_number) =
@@ -323,12 +378,10 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
         self.rocksdb_provider.clone()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
         self.pending_rocksdb_batches.lock().push(batch);
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
         for batch in batches {
@@ -350,7 +403,7 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new_rw_inner(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -379,11 +432,12 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            reader_txn_tracker: None,
         }
     }
 
     /// Creates a provider with an inner read-write transaction using normal commit order.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -412,7 +466,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 
     /// Creates a provider with an inner read-write transaction using unwind commit order.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_unwind_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -455,16 +509,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     where
         F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
     {
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = self.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_batch = rocksdb.batch();
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
 
         let (result, raw_batch) = f(rocksdb_batch)?;
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         if let Some(batch) = raw_batch {
             self.set_pending_rocksdb_batch(batch);
         }
@@ -503,7 +552,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for `RocksDB` writes.
-    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
@@ -557,20 +605,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             nums
         };
 
-        let mut timings = metrics::SaveBlocksTimings { block_count, ..Default::default() };
+        let mut timings =
+            metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_provider = self.rocksdb_provider.clone();
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
 
         let mut sf_result = None;
-        #[cfg(all(unix, feature = "rocksdb"))]
         let mut rocksdb_result = None;
 
         // Write to all backends in parallel.
@@ -591,7 +636,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // RocksDB writes
-            #[cfg(all(unix, feature = "rocksdb"))]
             if rocksdb_enabled {
                 s.spawn(|_| {
                     let _guard = span.enter();
@@ -713,7 +757,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Collect results from spawned tasks
         timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         if rocksdb_enabled {
             timings.rocksdb = rocksdb_result.ok_or_else(|| {
                 ProviderError::Database(reth_db_api::DatabaseError::Other(
@@ -898,8 +941,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
             self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+        let changeset_cache = self.changeset_cache.clone();
 
-        let mut state_provider = HistoricalStateProvider::new(self, block_number);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number, changeset_cache);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -987,7 +1031,7 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -1015,6 +1059,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            reader_txn_tracker: None,
         }
     }
 
@@ -1124,7 +1169,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
-        let len = range.end().saturating_sub(*range.start()) as usize;
+        let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range.clone())?;
@@ -1209,19 +1254,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
-    /// [`PlainAccountState`] and [`PlainStorageState`] tables, based on the given storage and
-    /// account changesets.
-    fn populate_bundle_state<A, S>(
+    /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
+    /// storage and account changesets.
+    fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        plain_accounts_cursor: &mut A,
-        plain_storage_cursor: &mut S,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)>
-    where
-        A: DbCursorRO<PlainAccountState>,
-        S: DbDupCursorRO<PlainStorageState>,
-    {
+        mut get_account: impl FnMut(Address) -> ProviderResult<Option<Account>>,
+        mut get_storage: impl FnMut(Address, StorageKey) -> ProviderResult<Option<StorageValue>>,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
@@ -1239,7 +1280,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let AccountBeforeTx { info: old_info, address } = account_before;
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    let new_info = get_account(address)?;
                     entry.insert((old_info, new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
@@ -1257,7 +1298,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             // get account state or insert from plain state.
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    let present_info = get_account(address)?;
                     entry.insert((present_info, present_info, HashMap::default()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -1266,11 +1307,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             // match storage.
             match account_state.2.entry(old_storage.key) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
+                    let new_storage = get_storage(address, old_storage.key)?.unwrap_or_default();
+                    entry.insert((old_storage.value, new_storage));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     entry.get_mut().0 = old_storage.value;
@@ -1289,6 +1327,28 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         Ok((state, reverts))
     }
 
+    /// Invokes [`populate_bundle_state`](Self::populate_bundle_state) with the given plain state
+    /// cursors.
+    fn populate_bundle_state_plain(
+        &self,
+        account_changeset: Vec<(u64, AccountBeforeTx)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+        plain_accounts_cursor: &mut impl DbCursorRO<tables::PlainAccountState>,
+        plain_storage_cursor: &mut impl DbDupCursorRO<tables::PlainStorageState>,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+        self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            |address| Ok(plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1)),
+            |address, storage_key| {
+                Ok(plain_storage_cursor
+                    .seek_by_key_subkey(address, storage_key)?
+                    .filter(|s| s.key == storage_key)
+                    .map(|s| s.value))
+            },
+        )
+    }
+
     /// Like [`populate_bundle_state`](Self::populate_bundle_state), but reads current values from
     /// `HashedAccounts`/`HashedStorages`. Addresses and storage keys are hashed via `keccak256`
     /// for DB lookups. The output `BundleStateInit`/`RevertsInit` structures remain keyed by
@@ -1300,65 +1360,32 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         hashed_accounts_cursor: &mut impl DbCursorRO<tables::HashedAccounts>,
         hashed_storage_cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        let mut state: BundleStateInit = HashMap::default();
-        let mut reverts: RevertsInit = HashMap::default();
+        self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            |address| Ok(hashed_accounts_cursor.seek_exact(keccak256(address))?.map(|kv| kv.1)),
+            |address, storage_key| {
+                let hashed_storage_key = keccak256(storage_key);
+                Ok(hashed_storage_cursor
+                    .seek_by_key_subkey(keccak256(address), hashed_storage_key)?
+                    .filter(|s| s.key == hashed_storage_key)
+                    .map(|s| s.value))
+            },
+        )
+    }
 
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let hashed_address = keccak256(address);
-                    let new_info =
-                        hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::default()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let hashed_address = keccak256(address);
-                    let present_info =
-                        hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::default()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // Storage keys in changesets are plain; hash them for HashedStorages lookup.
-            let hashed_storage_key = keccak256(old_storage.key);
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let hashed_address = keccak256(address);
-                    let new_storage = hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, hashed_storage_key)?
-                        .filter(|storage| storage.key == hashed_storage_key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
-
-        Ok((state, reverts))
+    fn populate_bundle_state_with_provider(
+        &self,
+        account_changeset: Vec<(u64, AccountBeforeTx)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+        state_provider: impl StateProvider,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+        self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            |address| state_provider.basic_account(&address),
+            |address, storage_key| state_provider.storage(address, storage_key),
+        )
     }
 }
 
@@ -1566,14 +1593,6 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changeset_count()
-        } else {
-            Ok(self.tx.entries::<tables::StorageChangeSets>()?)
-        }
-    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1629,15 +1648,42 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .collect()
         }
     }
+}
 
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        // check if account changesets are in static files, otherwise just count the changeset
-        // entries in the DB
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changeset_count()
-        } else {
-            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
-        }
+impl<Tx: DbTx + 'static, N: NodeTypesForProvider> StateReader for DatabaseProvider<Tx, N> {
+    type Receipt = ReceiptTy<N>;
+
+    fn get_state(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+        let Some(block_body) = self.block_body_indices(block)? else { return Ok(None) };
+
+        let from_transaction_num = block_body.first_tx_num();
+        let to_transaction_num = block_body.last_tx_num();
+
+        let account_changeset = self.account_changesets_range(block..=block)?;
+        let storage_changeset = self.storage_changeset(block)?;
+
+        let Some(block_hash) = self.block_hash(block)? else { return Ok(None) };
+        let state_provider = self.history_by_block_hash(block_hash)?;
+        let (state, reverts) = self.populate_bundle_state_with_provider(
+            account_changeset,
+            storage_changeset,
+            state_provider,
+        )?;
+
+        let receipts = self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+
+        Ok(Some(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            // We skip new contracts since we never delete them from the database
+            Vec::new(),
+            vec![receipts],
+            block,
+            Vec::new(),
+        )))
     }
 }
 
@@ -1940,8 +1986,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.with_rocksdb_tx(|tx_ref| {
-            let mut reader = EitherReader::new_transaction_hash_numbers(self, tx_ref)?;
+        self.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_transaction_hash_numbers(self, rocksdb_ref)?;
             reader.get_transaction_hash_number(tx_hash)
         })
     }
@@ -2775,7 +2821,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-            let (state, _) = self.populate_bundle_state(
+            let (state, _) = self.populate_bundle_state_plain(
                 account_changeset,
                 storage_changeset,
                 &mut plain_accounts_cursor,
@@ -2940,7 +2986,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-            let (state, reverts) = self.populate_bundle_state(
+            let (state, reverts) = self.populate_bundle_state_plain(
                 account_changeset,
                 storage_changeset,
                 &mut plain_accounts_cursor,
@@ -3271,11 +3317,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         last_indices.sort_unstable_by_key(|(a, _)| *a);
 
         if self.cached_storage_settings().storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
-                self.pending_rocksdb_batches.lock().push(batch);
-            }
+            let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
+            self.pending_rocksdb_batches.lock().push(batch);
         } else {
             // Unwind the account history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
@@ -3328,15 +3371,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .into_iter()
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
-        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
+        storage_changesets.sort_unstable_by_key(|(address, key, _)| (*address, *key));
 
         if self.cached_storage_settings().storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let batch =
-                    self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
-                self.pending_rocksdb_batches.lock().push(batch);
-            }
+            let batch =
+                self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
+            self.pending_rocksdb_batches.lock().push(batch);
         } else {
             // Unwind the storage history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
@@ -3693,7 +3733,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // append_*_history_shard which handles read-merge-write internally.
         let storage_settings = self.cached_storage_settings();
         if storage_settings.storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
             self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
                     batch.append_account_history_shard(address, blocks)?;
@@ -3704,7 +3743,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             self.insert_account_history_index(account_transitions)?;
         }
         if storage_settings.storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
             self.with_rocksdb_batch(|mut batch| {
                 for ((address, key), blocks) in storage_transitions {
                     batch.append_storage_history_shard(address, key, blocks)?;
@@ -3834,22 +3872,8 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         skip_all
     )]
     fn commit(self) -> ProviderResult<()> {
-        // For unwinding it makes more sense to commit the database first, since if
-        // it is interrupted before the static files commit, we can just
-        // truncate the static files according to the
-        // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() || self.commit_order.is_unwind() {
-            self.tx.commit()?;
-
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-                for batch in batches {
-                    self.rocksdb_provider.commit_batch(batch)?;
-                }
-            }
-
-            self.static_file_provider.commit()?;
+            self.commit_unwind()?;
         } else {
             // Normal path: finalize() will call sync_all() if not already synced
             let mut timings = metrics::CommitTimings::default();
@@ -3858,15 +3882,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             self.static_file_provider.finalize()?;
             timings.sf = start.elapsed();
 
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let start = Instant::now();
-                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-                for batch in batches {
-                    self.rocksdb_provider.commit_batch(batch)?;
-                }
-                timings.rocksdb = start.elapsed();
+            let start = Instant::now();
+            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            for batch in batches {
+                self.rocksdb_provider.commit_batch(batch)?;
             }
+            timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
             self.tx.commit()?;
@@ -3920,15 +3941,18 @@ mod tests {
         U256,
     };
     use reth_chain_state::ExecutedBlock;
+    use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
+    use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
+    use std::{sync::mpsc, time::Duration};
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -3940,6 +3964,31 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn unwind_commit_waits_for_pre_commit_readers() {
+        let factory = create_test_provider_factory();
+
+        let reader = factory.provider().unwrap();
+        let provider_rw = factory.unwind_provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-wait-test", vec![1]).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let result = provider_rw.commit();
+            done_tx.send(result).unwrap();
+        });
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "unwind commit should wait while an older read transaction is still open"
+        );
+
+        drop(reader);
+
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
+        handle.join().unwrap();
     }
 
     #[test]
@@ -4929,7 +4978,9 @@ mod tests {
         assert_eq!(account_cs[0].address, address);
 
         let historical_value =
-            HistoricalStateProviderRef::new(&*provider_rw, 0).storage(address, slot_key).unwrap();
+            HistoricalStateProviderRef::new(&*provider_rw, 0, ChangesetCache::new())
+                .storage(address, slot_key)
+                .unwrap();
         assert_eq!(historical_value, None);
     }
 
@@ -4940,7 +4991,7 @@ mod tests {
     }
 
     fn run_save_blocks_and_verify(mode: StorageMode) {
-        use alloy_primitives::map::HashMap;
+        use alloy_primitives::map::{FbBuildHasher, HashMap};
 
         let factory = create_test_provider_factory();
 
@@ -4992,7 +5043,8 @@ mod tests {
                     ..Default::default()
                 };
 
-                let storage: HashMap<U256, (U256, U256)> = (1..=slots_per_account as u64)
+                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1..=
+                    slots_per_account as u64)
                     .map(|s| {
                         (
                             U256::from(s + acct_idx as u64 * 100),
@@ -5134,28 +5186,24 @@ mod tests {
                 }
             }
 
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let rocksdb = factory.rocksdb_provider();
-                for block_num in 1..=num_blocks {
-                    for acct_idx in 0..accounts_per_block {
-                        let address =
-                            Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
-                        let shards = rocksdb.account_history_shards(address).unwrap();
+            let rocksdb = factory.rocksdb_provider();
+            for block_num in 1..=num_blocks {
+                for acct_idx in 0..accounts_per_block {
+                    let address = Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
+                    let shards = rocksdb.account_history_shards(address).unwrap();
+                    assert!(
+                        !shards.is_empty(),
+                        "v2: RocksDB AccountsHistory missing for block {block_num} acct {acct_idx}"
+                    );
+
+                    for s in 1..=slots_per_account as u64 {
+                        let slot = U256::from(s + acct_idx as u64 * 100);
+                        let slot_key = B256::from(slot);
+                        let shards = rocksdb.storage_history_shards(address, slot_key).unwrap();
                         assert!(
                             !shards.is_empty(),
-                            "v2: RocksDB AccountsHistory missing for block {block_num} acct {acct_idx}"
+                            "v2: RocksDB StoragesHistory missing for block {block_num} acct {acct_idx} slot {s}"
                         );
-
-                        for s in 1..=slots_per_account as u64 {
-                            let slot = U256::from(s + acct_idx as u64 * 100);
-                            let slot_key = B256::from(slot);
-                            let shards = rocksdb.storage_history_shards(address, slot_key).unwrap();
-                            assert!(
-                                !shards.is_empty(),
-                                "v2: RocksDB StoragesHistory missing for block {block_num} acct {acct_idx} slot {s}"
-                            );
-                        }
                     }
                 }
             }
@@ -5366,7 +5414,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn test_unwind_storage_history_indices_v2() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
