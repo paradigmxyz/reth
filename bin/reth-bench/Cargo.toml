@@ -20,7 +20,6 @@ reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-ethereum-cli.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true

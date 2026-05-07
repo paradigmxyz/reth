@@ -241,8 +241,8 @@ def main():
     parser = argparse.ArgumentParser(description="Prometheus metrics proxy with label injection")
     parser.add_argument("--labels", default="/tmp/bench-metrics-labels.json",
                         help="Path to JSON file with labels to inject (default: /tmp/bench-metrics-labels.json)")
-    parser.add_argument("--upstream", default="http://127.0.0.1:9100/",
-                        help="Upstream reth metrics URL (default: http://127.0.0.1:9100/)")
+    parser.add_argument("--upstream", default="http://127.0.0.1:9001/",
+                        help="Upstream reth metrics URL (default: http://127.0.0.1:9001/)")
 
     bind_group = parser.add_mutually_exclusive_group()
     bind_group.add_argument("--bind", default=None,
