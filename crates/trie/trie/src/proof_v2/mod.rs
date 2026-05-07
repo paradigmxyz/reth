@@ -875,6 +875,9 @@ where
                 child_path.push_unchecked(nibble);
                 if !self.prefix_set.contains(&child_path) {
                     num_unmatched += 1;
+                    if num_unmatched > 1 {
+                        return false;
+                    }
                 }
             }
         }
