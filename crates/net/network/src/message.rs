@@ -8,7 +8,10 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, BlockRangeUpdate, Cells, EthMessage, EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions, message::RequestPair
+    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, Cells, EthMessage,
+    EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetReceipts,
+    NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -175,7 +178,7 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         response: oneshot::Receiver<RequestResult<BlockAccessLists>>,
     },
     ///
-     /// Represents a response to a request for cells.
+    /// Represents a response to a request for cells.
     Cells {
         /// The receiver channel for the response to a cells request.
         response: oneshot::Receiver<RequestResult<Cells>>,
@@ -310,7 +313,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
                     Ok(EthMessage::Cells(request))
                 }
                 Err(err) => Err(err),
-            }
+            },
         }
     }
 

@@ -72,11 +72,10 @@ impl EthVersion {
         matches!(self, Self::Eth71)
     }
 
-     /// Returns true if the version is eth/71
+    /// Returns true if the version is eth/71
     pub const fn is_eth72(&self) -> bool {
         matches!(self, Self::Eth72)
     }
-
 
     /// Returns true if the version is eth/69 or newer.
     pub const fn is_eth69_or_newer(&self) -> bool {

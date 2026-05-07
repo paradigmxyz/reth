@@ -13,8 +13,7 @@ use super::{
     PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
-    status::StatusMessage, Cells, EthNetworkPrimitives, EthVersion,
-   BlockRangeUpdate GetCells,
+    status::StatusMessage, BlockRangeUpdate, Cells, EthNetworkPrimitives, EthVersion, GetCells,
     NetworkPrimitives, RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
 use alloc::{boxed::Box, string::String, sync::Arc};
@@ -212,7 +211,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     return Err(MessageError::Invalid(version, EthMessageID::Cells))
                 }
                 EthMessage::Cells(RequestPair::decode(buf)?)
-          }
+            }
             EthMessageID::GetCells => {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetCells))
@@ -459,7 +458,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::BlockAccessLists(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
-                Self::NodeData(_)|
+                Self::NodeData(_) |
                 Self::Cells(_)
         )
     }
@@ -649,7 +648,7 @@ pub enum EthMessageID {
     ///
     /// Introduced in Eth72
     GetCells = 0x14,
-      /// Represents Cells
+    /// Represents Cells
     ///
     /// Introduced in Eth72
     Cells = 0x15,
@@ -680,7 +679,7 @@ impl EthMessageID {
             Self::GetBlockAccessLists => 0x12,
             Self::BlockAccessLists => 0x13,
             Self::GetCells => 0x14,
-                      Self::Cells => 0x15,
+            Self::Cells => 0x15,
             Self::Other(value) => *value, // Return the stored `u8`
         }
     }
@@ -738,7 +737,7 @@ impl Decodable for EthMessageID {
             0x11 => Self::BlockRangeUpdate,
             0x12 => Self::GetBlockAccessLists,
             0x13 => Self::BlockAccessLists,
-                      0x14 => Self::GetCells,
+            0x14 => Self::GetCells,
             0x15 => Self::Cells,
             unknown => Self::Other(*unknown),
         };

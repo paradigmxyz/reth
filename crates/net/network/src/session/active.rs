@@ -343,7 +343,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::BlockAccessLists(resp) => {
                 on_response!(resp, GetBlockAccessLists)
             }
-            EthMessage::Cells(resp)=> {
+            EthMessage::Cells(resp) => {
                 on_response!(resp, GetCells)
             }
             EthMessage::BlockRangeUpdate(msg) => {
