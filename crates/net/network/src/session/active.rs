@@ -374,6 +374,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
                 OnIncomingMessageOutcome::Ok
             }
+            EthMessage::GetCells(resp) => {
+                on_request!(resp, Cells, GetCells)
+            }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
     }
