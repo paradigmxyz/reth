@@ -21,6 +21,8 @@ pub(crate) struct BenchContext {
     pub(crate) auth_provider: RootProvider<AnyNetwork>,
     /// The block provider is used for block queries.
     pub(crate) block_provider: RootProvider<AnyNetwork>,
+    /// The local regular RPC provider is used for non-authenticated node RPCs like `testing_*`.
+    pub(crate) local_rpc_provider: RootProvider<AnyNetwork>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
     pub(crate) benchmark_mode: BenchMode,
@@ -83,6 +85,11 @@ impl BenchContext {
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
 
+        let local_rpc_url = Url::parse(&bench_args.local_rpc_url)?;
+        info!(target: "reth-bench", "Connecting to local regular RPC at {} for testing namespace calls", local_rpc_url);
+        let local_rpc_provider =
+            RootProvider::<AnyNetwork>::new(ClientBuilder::default().http(local_rpc_url));
+
         // Computes the block range for the benchmark.
         //
         // - If `--advance` is provided, fetches the latest block from the engine and sets:
@@ -109,6 +116,13 @@ impl BenchContext {
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
             let head_number = head_block.header.number;
             info!(target: "reth-bench", "No --from provided, derived from engine head: {}", head_number);
+            (Some(head_number), bench_args.to)
+        } else if bench_args.big_blocks.is_some() && bench_args.from.is_none() {
+            let head_block = auth_provider
+                .get_block_by_number(BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
+            let head_number = head_block.header.number;
             (Some(head_number), bench_args.to)
         } else {
             (bench_args.from, bench_args.to)
@@ -159,6 +173,7 @@ impl BenchContext {
         Ok(Self {
             auth_provider,
             block_provider,
+            local_rpc_provider,
             benchmark_mode,
             next_block,
             use_reth_namespace,

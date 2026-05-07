@@ -3,6 +3,7 @@
 //! before sending additional calls.
 
 use alloy_consensus::TxEnvelope;
+use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
@@ -39,6 +40,14 @@ pub trait EngineApiValidWaitExt<N>: Send + Sync {
     /// Calls `engine_forkChoiceUpdatedV3` with the given [`ForkchoiceState`] and optional
     /// [`PayloadAttributes`], and waits until the response is VALID.
     async fn fork_choice_updated_v3_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated>;
+
+    /// Calls `engine_forkChoiceUpdatedV4` with the given [`ForkchoiceState`] and optional
+    /// [`PayloadAttributes`], and waits until the response is VALID.
+    async fn fork_choice_updated_v4_wait(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
@@ -162,6 +171,40 @@ where
 
         Ok(status)
     }
+
+    async fn fork_choice_updated_v4_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated> {
+        debug!(
+            target: "reth-bench",
+            method = "engine_forkchoiceUpdatedV3",
+            ?fork_choice_state,
+            ?payload_attributes,
+            "Sending forkchoiceUpdated"
+        );
+
+        let mut status =
+            self.fork_choice_updated_v4(fork_choice_state, payload_attributes.clone()).await?;
+
+        while !status.is_valid() {
+            if status.is_invalid() {
+                error!(
+                    target: "reth-bench",
+                    ?status,
+                    ?fork_choice_state,
+                    ?payload_attributes,
+                    "Invalid forkchoiceUpdatedV4 message",
+                );
+                panic!("Invalid forkchoiceUpdatedV4: {status:?}");
+            }
+            status =
+                self.fork_choice_updated_v4(fork_choice_state, payload_attributes.clone()).await?;
+        }
+
+        Ok(status)
+    }
 }
 
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
@@ -176,6 +219,7 @@ pub(crate) fn block_to_new_payload(
     reth_new_payload: bool,
     wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
+    bal: Option<BlockAccessList>,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
     let block_number = block.header.number;
     let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
@@ -198,7 +242,11 @@ pub(crate) fn block_to_new_payload(
             tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
         })?
         .into_consensus();
-    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+
+    let block_access_list = alloy_rlp::encode(bal.unwrap_or_default());
+
+    let (payload, sidecar) =
+        ExecutionPayload::from_block_slow_with_bal(&block, block_access_list.into());
     let (version, params, execution_data) = payload_to_new_payload(payload, sidecar, None)?;
 
     if reth_new_payload {
@@ -227,6 +275,22 @@ pub(crate) fn payload_to_new_payload(
     let execution_data = ExecutionData { payload: payload.clone(), sidecar: sidecar.clone() };
 
     let (version, params) = match payload {
+        ExecutionPayload::V4(payload) => {
+            let cancun = sidecar
+                .cancun()
+                .ok_or_else(|| eyre::eyre!("missing cancun sidecar for V4 payload"))?;
+            let version = target_version.unwrap_or(EngineApiMessageVersion::V6);
+            let requests = sidecar.prague().map(|p| p.requests.clone()).unwrap_or_default();
+            (
+                version,
+                serde_json::to_value((
+                    payload,
+                    cancun.versioned_hashes.clone(),
+                    cancun.parent_beacon_block_root,
+                    requests,
+                ))?,
+            )
+        }
         ExecutionPayload::V3(payload) => {
             let cancun = sidecar
                 .cancun()
@@ -265,22 +329,6 @@ pub(crate) fn payload_to_new_payload(
         }
         ExecutionPayload::V1(payload) => {
             (EngineApiMessageVersion::V1, serde_json::to_value((payload,))?)
-        }
-        ExecutionPayload::V4(payload) => {
-            let cancun = sidecar
-                .cancun()
-                .ok_or_else(|| eyre::eyre!("missing cancun sidecar for V4 payload"))?;
-            let version = target_version.unwrap_or(EngineApiMessageVersion::V4);
-            let requests = sidecar.prague().map(|p| p.requests.clone()).unwrap_or_default();
-            (
-                version,
-                serde_json::to_value((
-                    payload,
-                    cancun.versioned_hashes.clone(),
-                    cancun.parent_beacon_block_root,
-                    requests,
-                ))?,
-            )
         }
     };
 
@@ -386,10 +434,10 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
 ) -> TransportResult<ForkchoiceUpdated> {
     // FCU V3 is used for both Cancun and Prague (there is no FCU V4)
     match message_version {
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 |
         EngineApiMessageVersion::V6 => {
+            provider.fork_choice_updated_v4_wait(forkchoice_state, payload_attributes).await
+        }
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {

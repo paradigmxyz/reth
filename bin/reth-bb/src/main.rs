@@ -176,6 +176,7 @@ impl BbAddOns {
             BasicEngineApiBuilder::default(),
             BasicEngineValidatorBuilder::default(),
             Default::default(),
+            Default::default(),
         )
     }
 }

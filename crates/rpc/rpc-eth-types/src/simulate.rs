@@ -315,9 +315,9 @@ where
                         ..SimulateError::invalid_params()
                     }),
                     gas_used: gas.tx_gas_used(),
+                    max_used_gas: Some(gas.total_gas_spent()),
                     logs: Vec::new(),
                     status: false,
-                    ..Default::default()
                 }
             }
             ExecutionResult::Revert { output, gas, .. } => {
@@ -330,15 +330,16 @@ where
                         ..SimulateError::invalid_params()
                     }),
                     gas_used: gas.tx_gas_used(),
+                    max_used_gas: Some(gas.total_gas_spent()),
                     status: false,
                     logs: Vec::new(),
-                    ..Default::default()
                 }
             }
             ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
                 return_data: output.into_data(),
                 error: None,
                 gas_used: gas.tx_gas_used(),
+                max_used_gas: Some(gas.total_gas_spent()),
                 logs: logs
                     .into_iter()
                     .map(|log| {
@@ -356,7 +357,6 @@ where
                     })
                     .collect(),
                 status: true,
-                ..Default::default()
             },
         };
 

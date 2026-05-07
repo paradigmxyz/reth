@@ -150,16 +150,22 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             // commands can proceed.
             debug!(target: "reth::cli", ?rocksdb_path, "RocksDB not found, initializing empty database");
             reth_fs_util::create_dir_all(&rocksdb_path)?;
-            RocksDBProvider::builder(data_dir.rocksdb())
+            let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
-                .with_database_log_level(self.db.log_level)
-                .build()?
+                .with_database_log_level(self.db.log_level);
+            if let Some(cache_size) = self.db.rocksdb_block_cache_size {
+                builder = builder.with_block_cache_size(cache_size);
+            }
+            builder.build()?
         } else {
-            RocksDBProvider::builder(data_dir.rocksdb())
+            let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
                 .with_database_log_level(self.db.log_level)
-                .with_read_only(!access.is_read_write())
-                .build()?
+                .with_read_only(!access.is_read_write());
+            if let Some(cache_size) = self.db.rocksdb_block_cache_size {
+                builder = builder.with_block_cache_size(cache_size);
+            }
+            builder.build()?
         };
 
         let provider_factory =

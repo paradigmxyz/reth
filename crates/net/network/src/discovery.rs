@@ -23,7 +23,7 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::{debug, trace};
 
@@ -54,6 +54,9 @@ pub struct Discovery {
     discv5: Option<Discv5>,
     /// All KAD table updates from the discv5 service.
     discv5_updates: Option<ReceiverStream<discv5::Event>>,
+    /// Background task that, in shared-port mode, drains `UnrecognizedFrame`s from discv5 and
+    /// feeds them into the discv4 ingress so packets advance without polling `Discovery`.
+    _discv5_forwarder: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
     _dns_discovery: Option<DnsDiscoveryHandle>,
     /// Updates from the DNS discovery service.
@@ -76,39 +79,138 @@ impl Discovery {
         discovery_v4_addr: SocketAddr,
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
-        discv5_config: Option<reth_discv5::Config>, // contains discv5 listen address
+        mut discv5_config: Option<reth_discv5::Config>, // contains discv5 listen address
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         // setup discv4 with the discovery address and tcp port
         let local_enr =
             NodeRecord::from_secret_key(discovery_v4_addr, &sk).with_tcp_port(tcp_addr.port());
 
-        let discv4_future = async {
-            let Some(disc_config) = discv4_config else { return Ok((None, None, None)) };
-            let (discv4, mut discv4_service) =
-                Discv4::bind(discovery_v4_addr, local_enr, sk, disc_config).await.map_err(
-                    |err| {
+        // For IPv6 we set IPV6_V6ONLY=true so an IPv4 sibling socket on the same port doesn't
+        // clash with the IPv6 one (Linux's default of V6ONLY=0 has IPv6 also claim the IPv4
+        // port via mapped addresses), matching how discv5 binds its `DualStack` sockets.
+        let bind_socket = async |addr: SocketAddr| {
+            let result = match addr {
+                SocketAddr::V4(_) => UdpSocket::bind(addr).await,
+                SocketAddr::V6(_) => {
+                    use socket2::{Domain, Protocol, Socket, Type};
+                    (|| {
+                        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+                        socket.set_only_v6(true)?;
+                        socket.set_nonblocking(true)?;
+                        socket.bind(&addr.into())?;
+                        UdpSocket::from_std(socket.into())
+                    })()
+                }
+            };
+            result
+                .map(Arc::new)
+                .map_err(|err| NetworkError::from_io_error(err, ServiceKind::Discovery(addr)))
+        };
+
+        // In shared-port mode, bind the shared socket and start discv4 without its own receive
+        // loop. Unrecognized frames from discv5 will be forwarded to the ingress handler.
+        let (discv4, discv4_updates, _discv4_service, discv4_ingress, shared_socket) =
+            if let Some(config) = discv4_config {
+                if let Some(discv5_config) = &mut discv5_config &&
+                    discv5_config.has_matching_socket(discovery_v4_addr)
+                {
+                    let socket = bind_socket(discovery_v4_addr).await?;
+
+                    let (discv4, mut discv4_service, ingress) = Discv4::bind_shared(
+                        socket.clone(),
+                        local_enr,
+                        sk,
+                        config,
+                    )
+                    .map_err(|err| {
                         NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_v4_addr))
-                    },
-                )?;
-            let discv4_updates = discv4_service.update_stream();
-            // spawn the service
-            let discv4_service = discv4_service.spawn();
+                    })?;
 
-            debug!(target:"net", ?discovery_v4_addr, "started discovery v4");
+                    let discv4_updates = discv4_service.update_stream();
+                    let discv4_service = discv4_service.spawn();
+                    debug!(target:"net", ?discovery_v4_addr, "started discovery v4 (shared port)");
+                    (
+                        Some(discv4),
+                        Some(discv4_updates),
+                        Some(discv4_service),
+                        Some(ingress),
+                        Some(socket),
+                    )
+                } else {
+                    let (discv4, mut discv4_service) =
+                        Discv4::bind(discovery_v4_addr, local_enr, sk, config).await.map_err(
+                            |err| {
+                                NetworkError::from_io_error(
+                                    err,
+                                    ServiceKind::Discovery(discovery_v4_addr),
+                                )
+                            },
+                        )?;
+                    let discv4_updates = discv4_service.update_stream();
+                    // spawn the service
+                    let discv4_service = discv4_service.spawn();
 
-            Ok((Some(discv4), Some(discv4_updates), Some(discv4_service)))
-        };
+                    debug!(target:"net", ?discovery_v4_addr, "started discovery v4");
 
-        let discv5_future = async {
-            let Some(config) = discv5_config else { return Ok::<_, NetworkError>((None, None)) };
+                    (Some(discv4), Some(discv4_updates), Some(discv4_service), None, None)
+                }
+            } else {
+                (None, None, None, None, None)
+            };
+
+        // Start discv5, wiring in the shared socket if in shared-port mode.
+        let (discv5, discv5_updates) = if let Some(mut config) = discv5_config {
+            if let Some(socket) = shared_socket {
+                let discv5_cfg = config.discv5_config_mut();
+
+                // The shared socket covers discv4's address family; bind the opposite family
+                // only if discv5 was configured for dual-stack.
+                let (mut ipv4, mut ipv6) = (None, None);
+                if discovery_v4_addr.is_ipv4() {
+                    ipv4 = Some(socket);
+                    if let Some(addr) = reth_discv5::config::ipv6(&discv5_cfg.listen_config) {
+                        ipv6 = Some(bind_socket(SocketAddr::V6(addr)).await?);
+                    }
+                } else {
+                    ipv6 = Some(socket);
+                    if let Some(addr) = reth_discv5::config::ipv4(&discv5_cfg.listen_config) {
+                        ipv4 = Some(bind_socket(SocketAddr::V4(addr)).await?);
+                    }
+                }
+
+                discv5_cfg.listen_config = discv5::ListenConfig::FromSockets { ipv4, ipv6 };
+            }
+
             let (discv5, discv5_updates) = Discv5::start(&sk, config).await?;
-            debug!(target:"net", discovery_v5_enr=? discv5.local_enr(), "started discovery v5");
-            Ok((Some(discv5), Some(discv5_updates.into())))
+            debug!(target:"net", discovery_v5_enr=?discv5.local_enr(), "started discovery v5");
+            (Some(discv5), Some(discv5_updates))
+        } else {
+            (None, None)
         };
 
-        let ((discv4, discv4_updates, _discv4_service), (discv5, discv5_updates)) =
-            tokio::try_join!(discv4_future, discv5_future)?;
+        // In shared-port mode, spawn a task that peels `UnrecognizedFrame` events off the discv5
+        // update stream and feeds them into discv4's ingress. Other events are forwarded through
+        // a new channel that `Discovery::poll` reads. This keeps both protocols moving without
+        // requiring the main `Discovery::poll` loop to be driven for packets to be routed.
+        let (discv5_updates, _discv5_forwarder) = match (discv4_ingress, discv5_updates) {
+            (Some(mut ingress), Some(mut updates)) => {
+                let (tx, rx) = mpsc::channel(updates.max_capacity());
+                let handle = tokio::spawn(async move {
+                    while let Some(event) = updates.recv().await {
+                        if let discv5::Event::UnrecognizedFrame(frame) = &event {
+                            ingress.handle_packet(&frame.packet, frame.src_address).await;
+                            continue;
+                        }
+                        if tx.send(event).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+                (Some(ReceiverStream::new(rx)), Some(handle))
+            }
+            (_, updates) => (updates.map(ReceiverStream::new), None),
+        };
 
         // setup DNS discovery
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
@@ -132,6 +234,7 @@ impl Discovery {
             _discv4_service,
             discv5,
             discv5_updates,
+            _discv5_forwarder,
             discovered_nodes: LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE),
             queued_events: Default::default(),
             _dns_disc_service,
@@ -309,6 +412,9 @@ impl Drop for Discovery {
         if let Some(handle) = self._discv4_service.take() {
             handle.abort();
         }
+        if let Some(handle) = self._discv5_forwarder.take() {
+            handle.abort();
+        }
         if let Some(handle) = self._dns_disc_service.take() {
             handle.abort();
         }
@@ -342,10 +448,11 @@ impl Discovery {
             },
             discv4: Default::default(),
             discv4_updates: Default::default(),
+            _discv4_service: Default::default(),
+            _discv5_forwarder: None,
             discv5: None,
             discv5_updates: None,
             queued_events: Default::default(),
-            _discv4_service: Default::default(),
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
@@ -486,5 +593,180 @@ mod tests {
         // number of nodes stored for each node on this level remains 1.
         assert_eq!(1, node_1.discovered_nodes.len());
         assert_eq!(1, node_2.discovered_nodes.len());
+    }
+
+    /// Starts a discovery node with discv4 and discv5 sharing the same UDP port.
+    async fn start_shared_port_node(port: u16) -> Discovery {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let disc_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        // Use a non-zero TCP port so the node record isn't filtered out by
+        // `on_node_record_update` (which drops peers with tcp port == 0).
+        let tcp_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
+
+        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+
+        let discv5_listen_config = discv5::ListenConfig::from(disc_addr);
+        let discv5_config = reth_discv5::Config::builder(tcp_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        // Both protocols use the same address, triggering shared-port mode
+        Discovery::new(
+            tcp_addr,
+            disc_addr,
+            secret_key,
+            Some(discv4_config),
+            Some(discv5_config),
+            None,
+        )
+        .await
+        .expect("should start with shared port")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shared_port_setup() {
+        reth_tracing::init_test_tracing();
+
+        // Use port 0 so the OS picks a free port
+        let node = start_shared_port_node(0).await;
+
+        // Both protocols should be active
+        assert!(node.discv4.is_some(), "discv4 should be running");
+        assert!(node.discv5.is_some(), "discv5 should be running");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shared_port_discv5_discovery() {
+        reth_tracing::init_test_tracing();
+
+        let mut node_1 = start_shared_port_node(0).await;
+        let mut node_2 = start_shared_port_node(0).await;
+
+        let discv5_enr_1 = node_1.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let discv5_enr_2 = node_2.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+
+        let peer_id_1 = enr_to_discv4_id(&discv5_enr_1).unwrap();
+        let peer_id_2 = enr_to_discv4_id(&discv5_enr_2).unwrap();
+
+        // Add node_2's ENR to node_1's discv5 kbuckets and trigger a ping to establish a session.
+        // send_ping awaits the PONG, so the handshake completes before we poll the Discovery
+        // stream. The discv5 service runs its own background task.
+        node_1.add_discv5_node(EnrCombinedKeyWrapper(discv5_enr_2.clone()).into()).unwrap();
+        node_1
+            .discv5
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.send_ping(discv5_enr_2))
+            .await
+            .unwrap();
+
+        // Both SessionEstablished events should now be buffered in the update channels.
+        // Drive both nodes concurrently to collect them.
+        let mut event_1 = None;
+        let mut event_2 = None;
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+        tokio::pin!(timeout);
+        loop {
+            tokio::select! {
+                ev = node_1.next(), if event_1.is_none() => {
+                    event_1 = ev;
+                }
+                ev = node_2.next(), if event_2.is_none() => {
+                    event_2 = ev;
+                }
+                _ = &mut timeout => {
+                    panic!("timed out waiting for discv5 discovery events");
+                }
+            }
+            if event_1.is_some() && event_2.is_some() {
+                break;
+            }
+        }
+
+        assert!(matches!(
+            event_1.unwrap(),
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, .. })
+                if peer_id == peer_id_2
+        ));
+        assert!(matches!(
+            event_2.unwrap(),
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, .. })
+                if peer_id == peer_id_1
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shared_port_discv4_discovery() {
+        reth_tracing::init_test_tracing();
+
+        let mut node_1 = start_shared_port_node(0).await;
+        let mut node_2 = start_shared_port_node(0).await;
+
+        let enr_1 = node_1.discv4.as_ref().unwrap().node_record();
+        let enr_2 = node_2.discv4.as_ref().unwrap().node_record();
+
+        // Introduce node_2 to node_1 via discv4
+        node_1.add_discv4_node(enr_2);
+
+        // Both nodes should discover each other via discv4 ping/pong
+        let event_1 = node_1.next().await.unwrap();
+        let event_2 = node_2.next().await.unwrap();
+
+        assert_eq!(
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: enr_2.id,
+                addr: PeerAddr::new(enr_2.tcp_addr(), Some(enr_2.udp_addr())),
+                fork_id: None
+            }),
+            event_1
+        );
+        assert_eq!(
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: enr_1.id,
+                addr: PeerAddr::new(enr_1.tcp_addr(), Some(enr_1.udp_addr())),
+                fork_id: None
+            }),
+            event_2
+        );
+    }
+
+    /// Verifies that shared-port mode binds correctly when discv5 is configured for dual-stack.
+    /// On Linux this exercises the IPv6 V6ONLY path: without it, the IPv4 sibling would clash
+    /// with the IPv6 socket bound to the same port.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shared_port_dual_stack() {
+        reth_tracing::init_test_tracing();
+
+        // Find a port that's free on the v4 wildcard so we can use it for both v4 and v6.
+        let probe = UdpSocket::bind("0.0.0.0:0").await.expect("probe bind");
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let v4_addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
+        let tcp_addr: SocketAddr = "0.0.0.0:30303".parse().unwrap();
+
+        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+
+        let discv5_listen_config = discv5::ListenConfig::DualStack {
+            ipv4: std::net::Ipv4Addr::UNSPECIFIED,
+            ipv4_port: port,
+            ipv6: std::net::Ipv6Addr::UNSPECIFIED,
+            ipv6_port: port,
+        };
+        let discv5_config = reth_discv5::Config::builder(tcp_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        Discovery::new(
+            tcp_addr,
+            v4_addr,
+            secret_key,
+            Some(discv4_config),
+            Some(discv5_config),
+            None,
+        )
+        .await
+        .expect("discovery should start with shared port + dual-stack");
     }
 }

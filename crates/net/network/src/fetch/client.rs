@@ -6,7 +6,7 @@ use futures::{future, future::Either};
 use reth_eth_wire::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
-    block_access_lists::client::BlockAccessListsClient,
+    block_access_lists::client::{BalRequirement, BlockAccessListsClient},
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
@@ -136,10 +136,28 @@ impl<N: NetworkPrimitives> BlockAccessListsClient for FetchClient<N> {
         hashes: Vec<B256>,
         priority: Priority,
     ) -> Self::Output {
+        self.get_block_access_lists_with_priority_and_requirement(
+            hashes,
+            priority,
+            BalRequirement::Mandatory,
+        )
+    }
+
+    fn get_block_access_lists_with_priority_and_requirement(
+        &self,
+        hashes: Vec<B256>,
+        priority: Priority,
+        requirement: BalRequirement,
+    ) -> Self::Output {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx
-            .send(DownloadRequest::GetBlockAccessLists { request: hashes, response, priority })
+            .send(DownloadRequest::GetBlockAccessLists {
+                request: hashes,
+                response,
+                priority,
+                requirement,
+            })
             .is_ok()
         {
             Box::pin(FlattenedResponse::from(rx))

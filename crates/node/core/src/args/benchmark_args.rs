@@ -46,6 +46,15 @@ pub struct BenchmarkArgs {
     )]
     pub engine_rpc_url: String,
 
+    /// The RPC url to use for non-authenticated node RPC requests.
+    #[arg(
+        long,
+        value_name = "LOCAL_RPC_URL",
+        verbatim_doc_comment,
+        default_value = "http://localhost:8545"
+    )]
+    pub local_rpc_url: String,
+
     /// The `WebSocket` RPC URL to use for persistence subscriptions.
     ///
     /// If not provided, will attempt to derive from engine-rpc-url by:
@@ -121,6 +130,11 @@ pub struct BenchmarkArgs {
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub rlp_blocks: bool,
+
+    /// If provided, the benchmark will generate the specified number of big blocks and use them
+    /// instead of regular blocks.
+    #[arg(long, verbatim_doc_comment)]
+    pub big_blocks: Option<usize>,
 }
 
 /// Retry strategy for fetching blocks from the benchmark RPC provider.
@@ -241,6 +255,7 @@ mod tests {
     fn test_parse_benchmark_args() {
         let default_args = BenchmarkArgs {
             engine_rpc_url: "http://localhost:8551".to_string(),
+            local_rpc_url: "http://localhost:8545".to_string(),
             ..Default::default()
         };
         let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;

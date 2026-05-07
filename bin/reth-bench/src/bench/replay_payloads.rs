@@ -18,7 +18,7 @@ use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV4,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV6,
     ExecutionPayloadSidecar, ExecutionPayloadV4, ForkchoiceState, JwtSecret, PraguePayloadFields,
 };
 use clap::Parser;
@@ -315,7 +315,7 @@ impl Command {
                 let requests =
                     execution_data.sidecar.requests().cloned().unwrap_or_default().to_vec();
                 (
-                    Some(EngineApiMessageVersion::V4),
+                    Some(EngineApiMessageVersion::V6),
                     serde_json::to_value((
                         execution_data.payload.clone(),
                         Vec::<B256>::new(),
@@ -423,7 +423,7 @@ impl Command {
     /// Load and parse all payload files from the directory.
     ///
     /// Tries to load each file as a [`BigBlockPayload`] first (which includes `env_switches`),
-    /// falling back to [`ExecutionPayloadEnvelopeV4`] for backwards compatibility.
+    /// falling back to [`ExecutionPayloadEnvelopeV6`] for backwards compatibility.
     fn load_payloads(&self) -> eyre::Result<Vec<LoadedPayload>> {
         let mut payloads = Vec::new();
 
@@ -450,12 +450,11 @@ impl Command {
                 let name_str = name.to_string_lossy();
                 let index = if let Some(rest) = name_str.strip_prefix("payload_block_") {
                     rest.strip_suffix(".json")?.parse::<u64>().ok()?
-                } else if let Some(rest) = name_str.strip_prefix("big_block_") {
+                } else {
+                    let rest = name_str.strip_prefix("big_block_")?;
                     // "big_block_FROM_to_TO.json" — use FROM as the index
                     let rest = rest.strip_suffix(".json")?;
                     rest.split("_to_").next()?.parse::<u64>().ok()?
-                } else {
-                    return None;
                 };
                 Some((index, e.path()))
             })
@@ -481,10 +480,10 @@ impl Command {
             {
                 (big_block.execution_data, big_block.big_block_data, big_block.block_access_list)
             } else {
-                let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
+                let envelope: ExecutionPayloadEnvelopeV6 = serde_json::from_str(&content)
                     .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
                 let execution_data = ExecutionData {
-                    payload: envelope.envelope_inner.execution_payload.clone().into(),
+                    payload: envelope.execution_payload.clone().into(),
                     sidecar: ExecutionPayloadSidecar::v4(
                         CancunPayloadFields {
                             versioned_hashes: Vec::new(),

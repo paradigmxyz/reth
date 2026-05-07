@@ -2,7 +2,7 @@
 
 /// NetworkArg struct for configuring the network
 mod network;
-pub use network::{DefaultNetworkArgs, DiscoveryArgs, NetworkArgs};
+pub use network::{DefaultDiscoveryArgs, DefaultNetworkArgs, DiscoveryArgs, NetworkArgs};
 
 /// RpcServerArg struct for configuring the RPC
 mod rpc_server;
@@ -54,7 +54,7 @@ pub use dev::DevArgs;
 
 /// PruneArgs for configuring the pruning and full node
 mod pruning;
-pub use pruning::{DefaultPruningValues, PruningArgs};
+pub use pruning::{DefaultPruningValues, PruneConfigKind, PruningArgs};
 
 /// DatadirArgs for configuring data storage paths
 mod datadir_args;

@@ -14,10 +14,11 @@
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache, StateProviderBuilder,
+    CachedStateMetrics, CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache,
+    StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
@@ -47,7 +48,7 @@ pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
     Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
-    BlockAccessList(Arc<BlockAccessList>),
+    BlockAccessList(Arc<DecodedBal>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
@@ -276,19 +277,20 @@ where
     ) {
         let start = Instant::now();
 
-        let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
-            self;
+        let Self {
+            execution_cache,
+            ctx: PrewarmContext { env, metrics, cache_metrics, saved_cache, .. },
+            ..
+        } = self;
         let hash = env.hash;
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
                 // guard
-                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
+                let caches = saved_cache.cache().clone();
+                let new_cache = SavedCache::new(hash, caches);
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
@@ -299,7 +301,7 @@ where
                     return;
                 }
 
-                new_cache.update_metrics();
+                new_cache.update_metrics(cache_metrics.as_ref());
 
                 if valid_block_rx.recv().is_ok() {
                     // Replace the shared cache with the new one; the previous cache (if any) is
@@ -329,9 +331,10 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
-        bal: Arc<BlockAccessList>,
+        decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) {
+        let bal = decoded_bal.as_bal();
         if bal.is_empty() {
             if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
@@ -353,27 +356,63 @@ where
         let parent_span = Span::current();
         let prefetch_parent_span = parent_span.clone();
         let stream_parent_span = parent_span;
-        let prefetch_bal = Arc::clone(&bal);
-        let stream_bal = Arc::clone(&bal);
+        let prefetch_bal = Arc::clone(&decoded_bal);
+        let stream_bal = Arc::clone(&decoded_bal);
         let (prefetch_tx, prefetch_rx) = oneshot::channel();
         let (stream_tx, stream_rx) = oneshot::channel();
 
+        if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+            let stream_ctx = ctx.clone();
+            executor.bal_streaming_pool().spawn(move || {
+                let branch_span = debug_span!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    parent: &stream_parent_span,
+                    "bal_hashed_state_stream",
+                    bal_accounts = stream_bal.as_bal().len(),
+                );
+                let provider_parent_span = branch_span.clone();
+                let _span = branch_span.entered();
+
+                stream_bal.as_bal().par_iter().for_each_init(
+                    || {
+                        (
+                            stream_ctx.clone(),
+                            None::<Box<dyn AccountReader>>,
+                            provider_parent_span.clone(),
+                        )
+                    },
+                    |(ctx, provider, parent_span), account_changes| {
+                        ctx.send_bal_hashed_state(
+                            parent_span,
+                            provider,
+                            account_changes,
+                            &to_sparse_trie_task,
+                        );
+                    },
+                );
+
+                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                let _ = stream_tx.send(());
+            });
+        } else {
+            let _ = stream_tx.send(());
+        }
+
         if ctx.saved_cache.is_some() {
-            let prefetch_ctx = ctx.clone();
             executor.prewarming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &prefetch_parent_span,
                     "bal_prefetch_storage",
-                    bal_accounts = prefetch_bal.len(),
+                    bal_accounts = prefetch_bal.as_bal().len(),
                 );
                 let provider_parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                prefetch_bal.par_iter().for_each_init(
+                prefetch_bal.as_bal().par_iter().for_each_init(
                     || {
                         (
-                            prefetch_ctx.clone(),
+                            ctx.clone(),
                             None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
                             provider_parent_span.clone(),
                         )
@@ -390,36 +429,6 @@ where
             });
         } else {
             let _ = prefetch_tx.send(());
-        }
-
-        if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-            executor.bal_streaming_pool().spawn(move || {
-                let branch_span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: &stream_parent_span,
-                    "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.len(),
-                );
-                let provider_parent_span = branch_span.clone();
-                let _span = branch_span.entered();
-
-                stream_bal.par_iter().for_each_init(
-                    || (ctx.clone(), None::<Box<dyn AccountReader>>, provider_parent_span.clone()),
-                    |(ctx, provider, parent_span), account_changes| {
-                        ctx.send_bal_hashed_state(
-                            parent_span,
-                            provider,
-                            account_changes,
-                            &to_sparse_trie_task,
-                        );
-                    },
-                );
-
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
-                let _ = stream_tx.send(());
-            });
-        } else {
-            let _ = stream_tx.send(());
         }
 
         prefetch_rx
@@ -521,6 +530,9 @@ where
     pub provider: StateProviderBuilder<N, P>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
+    /// Metrics for the execution cache.
+    /// Metrics for the execution cache. `None` disables metrics recording.
+    pub cache_metrics: Option<CachedStateMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -531,6 +543,10 @@ where
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// Whether to disable BAL-driven parallel state root computation.
+    pub disable_bal_parallel_state_root: bool,
+    /// Whether BAL batched IO is disabled.
+    pub disable_bal_batch_io: bool,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -562,9 +578,11 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            let cache_metrics = saved_cache.metrics().clone();
-            state_provider =
-                Box::new(CachedStateProvider::new_prewarm(state_provider, caches, cache_metrics));
+            state_provider = Box::new(CachedStateProvider::new_prewarm(
+                state_provider,
+                caches,
+                self.cache_metrics.clone().unwrap_or_default(),
+            ));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -624,6 +642,9 @@ where
         account_changes: &alloy_eip7928::AccountChanges,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
+        if self.disable_bal_parallel_state_root {
+            return;
+        }
         let address = account_changes.address;
         let mut hashed_address = None;
 
@@ -665,8 +686,11 @@ where
             };
             let boxed: Box<dyn AccountReader> = if let Some(saved) = &self.saved_cache {
                 let caches = saved.cache().clone();
-                let cache_metrics = saved.metrics().clone();
-                Box::new(CachedStateProvider::new_prewarm(inner, caches, cache_metrics))
+                Box::new(CachedStateProvider::new_prewarm(
+                    inner,
+                    caches,
+                    self.cache_metrics.clone().unwrap_or_default(),
+                ))
             } else {
                 Box::new(inner)
             };
@@ -733,7 +757,9 @@ where
         provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
-        if account.storage_changes.is_empty() && account.storage_reads.is_empty() {
+        if self.disable_bal_batch_io ||
+            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
+        {
             return;
         }
 
@@ -761,8 +787,11 @@ where
                 let saved_cache =
                     self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
                 let caches = saved_cache.cache().clone();
-                let cache_metrics = saved_cache.metrics().clone();
-                slot.insert(CachedStateProvider::new_prewarm(built, caches, cache_metrics))
+                slot.insert(CachedStateProvider::new_prewarm(
+                    built,
+                    caches,
+                    self.cache_metrics.clone().unwrap_or_default(),
+                ))
             }
         };
 

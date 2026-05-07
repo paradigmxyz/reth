@@ -1,129 +1,169 @@
 #!/usr/bin/env bash
 #
-# Downloads the latest snapshot into the schelk volume using
-# `reth download` with progress reporting to the GitHub PR comment.
-#
-# Skips the download if the manifest content hasn't changed since
-# the last successful download (checked via SHA-256 of the manifest).
+# Ensures the benchmark snapshot in the schelk volume matches the configured
+# manifest. If the local manifest marker differs from the remote manifest, the
+# snapshot is replaced via `reth download` and promoted as the new schelk
+# baseline.
 #
 # Usage: bench-reth-snapshot.sh [--check]
-#   --check   Only check if a download is needed; exits 0 if up-to-date, 10 if not.
+#   --check   Exit 0 if the local snapshot is current, 10 if it needs refresh.
 #
 # Required env:
-#   SCHELK_MOUNT       – schelk mount point (e.g. /reth-bench)
-#   BENCH_RETH_BINARY  – path to the reth binary
-#   GITHUB_TOKEN       – token for GitHub API calls (only for download)
-#   BENCH_COMMENT_ID   – PR comment ID to update (optional)
-#   BENCH_REPO         – owner/repo (e.g. paradigmxyz/reth)
-#   BENCH_JOB_URL      – link to the Actions job
-#   BENCH_ACTOR        – user who triggered the benchmark
-#   BENCH_CONFIG       – config summary line
-set -euxo pipefail
+#   SCHELK_MOUNT       - schelk mount point (e.g. /reth-bench)
+#   BENCH_SNAPSHOT_MANIFEST_URL - exact manifest URL to sync from
+#   BENCH_RETH_BINARY  - path to the reth-compatible binary (required to refresh)
+#
+# Optional env:
+#   BENCH_BIG_BLOCKS            - true when syncing the big-blocks datadir
+#   BENCH_SNAPSHOT_NAME         - expected snapshot label for log/error output
+set -euo pipefail
 
-MC="mc"
-BUCKET="minio/reth-snapshots"
-# Allow overriding the snapshot name (e.g. for big-blocks mode where the
-# big-blocks manifest specifies which base snapshot to use).
-SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable}"
-MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
+: "${SCHELK_MOUNT:?SCHELK_MOUNT must be set}"
+
+if [ "${1:-}" != "" ] && [ "${1:-}" != "--check" ]; then
+  echo "Usage: $0 [--check]"
+  exit 1
+fi
+
+CHECK_ONLY=false
+if [ "${1:-}" = "--check" ]; then
+  CHECK_ONLY=true
+fi
+
 DATADIR_NAME="datadir"
-HASH_MODE_SUFFIX=""
 if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
   DATADIR_NAME="datadir-big-blocks"
-  HASH_MODE_SUFFIX="-big-blocks"
 fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
-HASH_FILE="$HOME/.reth-bench-snapshot-hash${HASH_MODE_SUFFIX}"
+LOCAL_MANIFEST="$DATADIR/manifest.json"
 
-# Fetch manifest and compute content hash for reliable freshness check
-MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
-  echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
-  exit 2
+describe_snapshot() {
+  if [ -n "${BENCH_SNAPSHOT_NAME:-}" ]; then
+    printf '%s' "${BENCH_SNAPSHOT_NAME}"
+  elif [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+    printf '%s' 'big-block weekly snapshot'
+  else
+    printf '%s' 'benchmark snapshot'
+  fi
 }
-REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
+
+EXPECTED_SNAPSHOT="$(describe_snapshot)"
+
+sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+sudo schelk mount -y
+
+if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+  if [ -d "$DATADIR/db" ] && [ -d "$DATADIR/static_files" ]; then
+    echo "Found local ${EXPECTED_SNAPSHOT} at ${DATADIR}; skipping manifest sync for big-block benchmarks"
+    exit 0
+  fi
+
+  echo "::error::Missing local ${EXPECTED_SNAPSHOT} at ${DATADIR}. Big-block benchmarks require a pre-populated schelk data volume."
+  ls -la "$SCHELK_MOUNT" || true
+  ls -la "$DATADIR" || true
+
+  if [ "$CHECK_ONLY" = true ]; then
+    exit 10
+  fi
+
+  exit 1
+fi
+
+: "${BENCH_SNAPSHOT_MANIFEST_URL:?BENCH_SNAPSHOT_MANIFEST_URL must be set}"
+
+MANIFEST_URL="$BENCH_SNAPSHOT_MANIFEST_URL"
+MANIFEST_BASE_URL="${MANIFEST_URL%/*}"
+
+REMOTE_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/reth-bench-remote-manifest.XXXXXX")"
+REMOTE_CANONICAL="$(mktemp "${TMPDIR:-/tmp}/reth-bench-remote-canonical.XXXXXX")"
+LOCAL_CANONICAL="$(mktemp "${TMPDIR:-/tmp}/reth-bench-local-canonical.XXXXXX")"
+DOWNLOAD_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/reth-bench-download-manifest.XXXXXX")"
+trap 'rm -f "$REMOTE_MANIFEST" "$REMOTE_CANONICAL" "$LOCAL_CANONICAL" "$DOWNLOAD_MANIFEST"' EXIT
+
+snapshot_ready() {
+  [ -d "$DATADIR/db" ] && [ -d "$DATADIR/static_files" ]
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+echo "Using snapshot manifest from BENCH_SNAPSHOT_MANIFEST_URL"
+
+if ! curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 10 "$MANIFEST_URL" -o "$REMOTE_MANIFEST"; then
+  echo "::error::Failed to fetch snapshot manifest from BENCH_SNAPSHOT_MANIFEST_URL"
+  exit 2
+fi
+
+if ! jq -S . "$REMOTE_MANIFEST" > "$REMOTE_CANONICAL"; then
+  echo "::error::Snapshot manifest is not valid JSON"
+  exit 2
+fi
+REMOTE_HASH="$(sha256_file "$REMOTE_CANONICAL")"
 
 LOCAL_HASH=""
-[ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
+LOCAL_MATCH=false
+if [ -f "$LOCAL_MANIFEST" ] && jq -S . "$LOCAL_MANIFEST" > "$LOCAL_CANONICAL"; then
+  LOCAL_HASH="$(sha256_file "$LOCAL_CANONICAL")"
+  if cmp -s "$REMOTE_CANONICAL" "$LOCAL_CANONICAL"; then
+    LOCAL_MATCH=true
+  fi
+fi
 
-if [ "$REMOTE_HASH" = "$LOCAL_HASH" ]; then
-  echo "Snapshot is up-to-date (manifest hash: ${REMOTE_HASH:0:16}…)"
+if [ "$LOCAL_MATCH" = true ] && snapshot_ready; then
+  echo "Snapshot is up-to-date (manifest hash: ${REMOTE_HASH:0:16})"
   exit 0
 fi
 
-echo "Snapshot needs update (local: ${LOCAL_HASH:+${LOCAL_HASH:0:16}…}${LOCAL_HASH:-<none>}, remote: ${REMOTE_HASH:0:16}…)"
-if [ "${1:-}" = "--check" ]; then
+if ! snapshot_ready; then
+  echo "Snapshot needs refresh: missing expected db/ or static_files/ under ${DATADIR}"
+elif [ ! -f "$LOCAL_MANIFEST" ]; then
+  echo "Snapshot needs refresh: missing local manifest marker at ${LOCAL_MANIFEST}"
+elif [ -z "$LOCAL_HASH" ]; then
+  echo "Snapshot needs refresh: local manifest marker is not valid JSON"
+else
+  echo "Snapshot needs refresh (local: ${LOCAL_HASH:0:16}, remote: ${REMOTE_HASH:0:16})"
+fi
+
+if [ "$CHECK_ONLY" = true ]; then
   exit 10
 fi
 
-RETH="${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set}"
+RETH="${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set when refreshing the snapshot}"
 if [ ! -x "$RETH" ]; then
-  echo "::error::reth binary not found or not executable at $RETH"
+  echo "::error::reth binary not found or not executable at ${RETH}"
   exit 1
 fi
 
-# Resolve the MinIO HTTP endpoint from the mc alias so reth can
-# fetch archives over HTTP (the manifest's embedded base_url points
-# to the cluster-internal address which is unreachable from runners).
-MINIO_ENDPOINT=$($MC alias list minio --json 2>/dev/null | jq -r '.URL // empty') || true
-if [ -z "$MINIO_ENDPOINT" ]; then
-  echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
-  exit 1
-fi
-BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/${SNAPSHOT_NAME}"
+# Force archive URLs to resolve relative to the configured manifest endpoint.
+# Some published manifests carry a base_url that is valid for publishers but
+# not for benchmark runners.
+jq --arg base "$MANIFEST_BASE_URL" '.base_url = $base' "$REMOTE_MANIFEST" > "$DOWNLOAD_MANIFEST"
 
-# Rewrite manifest's base_url with the runner-reachable endpoint
-MANIFEST_TMP=$(mktemp --suffix=.json)
-trap 'rm -f -- "$MANIFEST_TMP"' EXIT
-echo "$MANIFEST_CONTENT" \
-  | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
-
-# Prepare mount. If a previous run left the volume mounted, recover first.
-sudo schelk recover -y --kill || true
-sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"
-# reth download runs as current user (not root), needs write access
+# reth download runs as the current user and needs write access.
 sudo chown -R "$(id -u):$(id -g)" "$DATADIR"
 
-update_comment() {
-  local status="$1"
-  [ -z "${BENCH_COMMENT_ID:-}" ] && return 0
-  local body
-  body="$(printf 'cc @%s\n\n🚀 Benchmark started! [View job](%s)\n\n⏳ **Status:** %s\n\n%s' \
-    "$BENCH_ACTOR" "$BENCH_JOB_URL" "$status" "$BENCH_CONFIG")"
-  curl -sf -X PATCH \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/${BENCH_REPO}/issues/comments/${BENCH_COMMENT_ID}" \
-    -d "$(jq -nc --arg body "$body" '{body: $body}')" \
-    > /dev/null 2>&1 || true
-}
-
-update_comment "Downloading snapshot…"
-
-# Download using reth download (manifest-path with rewritten base_url)
 "$RETH" download \
-  --manifest-path "$MANIFEST_TMP" \
+  --manifest-path "$DOWNLOAD_MANIFEST" \
   -y \
   --minimal \
   --datadir "$DATADIR"
 
-update_comment "Downloading snapshot… done"
-echo "Snapshot download complete"
-
-# Sanity check: verify expected directories exist
-if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
+if ! snapshot_ready; then
   echo "::error::Snapshot download did not produce expected directory layout (missing db/ or static_files/)"
   ls -la "$DATADIR" || true
   exit 1
 fi
 
-# Promote the new snapshot to become the schelk baseline (virgin volume).
-# This copies changed blocks from scratch → virgin so that future
-# `schelk recover` calls restore to this new state.
+cp "$REMOTE_MANIFEST" "$LOCAL_MANIFEST"
+
 sync
 sudo schelk promote -y
 
-# Save manifest hash
-echo "$REMOTE_HASH" > "$HASH_FILE"
-echo "Snapshot promoted to schelk baseline (manifest hash: ${REMOTE_HASH:0:16}…)"
+echo "Snapshot promoted to schelk baseline (manifest hash: ${REMOTE_HASH:0:16})"

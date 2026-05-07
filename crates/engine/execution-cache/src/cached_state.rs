@@ -19,6 +19,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
+    fmt,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -147,6 +148,29 @@ pub enum CachedStatus<T> {
     Cached(T),
 }
 
+/// The source that is using the execution cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachedStateMetricsSource {
+    /// Engine (validation).
+    Engine,
+    /// Payload builder.
+    Builder,
+    /// Tests.
+    #[cfg(any(test, feature = "test-utils"))]
+    Test,
+}
+
+impl fmt::Display for CachedStateMetricsSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Engine => f.write_str("engine"),
+            Self::Builder => f.write_str("builder"),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Test => f.write_str("test"),
+        }
+    }
+}
+
 /// Metrics for the cached state provider, showing hits / misses for each cache
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
@@ -222,9 +246,10 @@ impl CachedStateMetrics {
         self.account_cache_collisions.set(0);
     }
 
-    /// Returns a new zeroed-out instance of [`CachedStateMetrics`].
-    pub fn zeroed() -> Self {
-        let zeroed = Self::default();
+    /// Returns a new zeroed-out instance of [`CachedStateMetrics`] with a `source` label
+    /// to distinguish between different callers (e.g., engine vs builder).
+    pub fn zeroed(source: CachedStateMetricsSource) -> Self {
+        let zeroed = Self::new_with_labels(&[("source", source.to_string())]);
         zeroed.reset();
         zeroed
     }
@@ -919,37 +944,20 @@ pub struct SavedCache {
     /// The caches used for the provider.
     caches: ExecutionCache,
 
-    /// Metrics for the cached state provider (includes size/capacity/collisions from fixed-cache)
-    metrics: CachedStateMetrics,
-
     /// A guard to track in-flight usage of this cache.
     /// The cache is considered available if the strong count is 1.
     usage_guard: Arc<()>,
-
-    /// Whether to skip cache metrics recording (can be expensive with large cached state).
-    disable_cache_metrics: bool,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
-        Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
-    }
-
-    /// Sets whether to disable cache metrics recording.
-    pub const fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
-        self.disable_cache_metrics = disable;
-        self
+    pub fn new(hash: B256, caches: ExecutionCache) -> Self {
+        Self { hash, caches, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
     pub const fn executed_block_hash(&self) -> B256 {
         self.hash
-    }
-
-    /// Splits the cache into its caches, metrics, and `disable_cache_metrics` flag, consuming it.
-    pub fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
-        (self.caches, self.metrics, self.disable_cache_metrics)
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
@@ -967,20 +975,11 @@ impl SavedCache {
         &self.caches
     }
 
-    /// Returns the metrics associated with this cache.
-    pub const fn metrics(&self) -> &CachedStateMetrics {
-        &self.metrics
-    }
-
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
-    ///
-    /// Note: This can be expensive with large cached state. Use
-    /// `with_disable_cache_metrics(true)` to skip.
-    pub fn update_metrics(&self) {
-        if self.disable_cache_metrics {
-            return
+    pub fn update_metrics(&self, metrics: Option<&CachedStateMetrics>) {
+        if let Some(metrics) = metrics {
+            self.caches.update_metrics(metrics);
         }
-        self.caches.update_metrics(&self.metrics);
     }
 
     /// Clears all caches, resetting them to empty state,
@@ -1017,8 +1016,11 @@ mod tests {
         provider.extend_accounts(vec![(address, account)]);
 
         let caches = ExecutionCache::new(1000);
-        let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
+        let state_provider = CachedStateProvider::new(
+            provider,
+            caches,
+            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+        );
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -1037,8 +1039,11 @@ mod tests {
         provider.extend_accounts(vec![(address, account)]);
 
         let caches = ExecutionCache::new(1000);
-        let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
+        let state_provider = CachedStateProvider::new(
+            provider,
+            caches,
+            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+        );
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -1075,7 +1080,7 @@ mod tests {
     #[test]
     fn test_saved_cache_is_available() {
         let execution_cache = ExecutionCache::new(1000);
-        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
+        let cache = SavedCache::new(B256::ZERO, execution_cache);
 
         assert!(cache.is_available(), "Cache should be available initially");
 
@@ -1087,8 +1092,7 @@ mod tests {
     #[test]
     fn test_saved_cache_multiple_references() {
         let execution_cache = ExecutionCache::new(1000);
-        let cache =
-            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+        let cache = SavedCache::new(B256::from([2u8; 32]), execution_cache);
 
         let guard1 = cache.clone_guard_for_test();
         let guard2 = cache.clone_guard_for_test();

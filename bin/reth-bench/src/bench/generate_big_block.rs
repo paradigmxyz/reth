@@ -5,15 +5,16 @@
 //! and saves the result to disk as a [`BigBlockPayload`] JSON file containing the merged
 //! [`ExecutionData`] and environment switches at each block boundary.
 
-use alloy_consensus::{TxEnvelope, TxReceipt};
+use alloy_consensus::TxEnvelope;
 use alloy_eips::{
-    eip1559::BaseFeeParams,
-    eip7840::BlobParams,
     eip7928::{AccountChanges, BlockAccessList, SlotChanges},
-    BlockNumberOrTag, Typed2718,
+    Typed2718,
 };
-use alloy_primitives::{Bloom, Bytes, B256};
-use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
+use alloy_primitives::{Bytes, B256};
+use alloy_provider::{
+    network::{AnyNetwork, AnyRpcBlock},
+    Provider, RootProvider,
+};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -21,15 +22,17 @@ use alloy_rpc_types_engine::{
 };
 use clap::Parser;
 use eyre::Context;
+use futures::{stream, Stream, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::BigBlockData;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-use reth_ethereum_primitives::Receipt;
-use reth_primitives_traits::proofs;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 use tracing::{info, warn};
 
 /// A single transaction with its gas used and raw encoded bytes.
@@ -265,6 +268,15 @@ pub struct Command {
     /// the flattened BAL on the stored payload.
     #[arg(long, default_value_t = false)]
     bal: bool,
+
+    /// Maximum number of in-flight RPC fetches to keep buffered ahead of the merger.
+    ///
+    /// Each entry is one full per-block fetch (block + receipts, plus BAL when `--bal` is
+    /// set). Larger values absorb RPC latency at the cost of more concurrent connections
+    /// and memory; the buffer persists across `--num-big-blocks` so prefetching continues
+    /// across big-block boundaries.
+    #[arg(long, value_name = "PREFETCH_BUFFER", default_value_t = 32)]
+    prefetch_buffer: usize,
 }
 
 impl Command {
@@ -303,89 +315,109 @@ impl Command {
             .http(self.rpc_url.parse()?);
         let provider = RootProvider::<AnyNetwork>::new(client);
 
-        let mut prev_big_block_hash: Option<B256> = None;
-        let mut accumulated_block_hashes: Vec<(u64, B256)> = Vec::new();
+        // Persistent prefetch stream: keeps `prefetch_buffer` per-block fetches in flight
+        // ahead of the merger across all big blocks. Each item is a fully materialized
+        // `FetchedBlock` (or `None` once the chain tip is reached on this fetch).
+        let prefetch_buffer = self.prefetch_buffer.max(1);
+        let bal_enabled = self.bal;
+        let block_stream = stream::iter(self.from_block..)
+            .map(|block_number| {
+                let provider = provider.clone();
+                async move { fetch_one_block(provider, block_number, bal_enabled).await }
+            })
+            .buffered(prefetch_buffer);
 
-        // Track previous big block's merged header fields for deriving basefee and
-        // excess_blob_gas on subsequent big blocks.
-        struct PrevBigBlockHeader {
-            gas_used: u64,
-            gas_limit: u64,
-            base_fee_per_gas: u64,
-            blob_gas_used: u64,
-            excess_blob_gas: u64,
+        let mut big_blocks_stream =
+            Box::pin(big_blocks_stream(self.num_big_blocks, self.target_gas, block_stream));
+
+        while let Some(big_block) = big_blocks_stream.next().await {
+            let big_block = big_block?;
+            // Save to disk
+            let range_start = big_block.big_block_data.env_switches[0].1.block_number();
+            let range_end = big_block.big_block_data.env_switches.last().unwrap().1.block_number();
+            let block_hash = big_block.execution_data.payload.as_v1().block_hash;
+            let filename = format!("big_block_{range_start}_to_{range_end}.json");
+            let filepath = self.output_dir.join(&filename);
+            let json = serde_json::to_string_pretty(&big_block)?;
+            std::fs::write(&filepath, &json)
+                .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
+
+            info!(
+                target: "reth-bench",
+                path = %filepath.display(),
+                block_hash = %block_hash,
+                total_txs = big_block.execution_data.payload.transactions().len(),
+                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
+                env_switches = big_block.big_block_data.env_switches.len(),
+                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
+                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
+                "Big block payload saved"
+            );
         }
-        let mut prev_big_block_header: Option<PrevBigBlockHeader> = None;
 
-        // Track the next block to fetch across big blocks so they don't overlap.
-        let mut next_block = self.from_block;
+        Ok(())
+    }
+}
 
-        for big_block_idx in 0..self.num_big_blocks {
-            let range_start = next_block;
+/// Produces a stream of big block payloads given a stream of regular blocks.
+pub(crate) fn big_blocks_stream(
+    num_big_blocks: u64,
+    target_gas: u64,
+    block_stream: impl Stream<Item = eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>>>
+        + Unpin,
+) -> impl Stream<Item = eyre::Result<BigBlockPayload>> {
+    futures::stream::try_unfold(
+        (block_stream, Vec::new(), 0, None, false, 0),
+        move |(
+            mut block_stream,
+            mut accumulated_block_hashes,
+            mut big_block_idx,
+            mut prev_big_block_hash,
+            mut reached_chain_tip,
+            mut first_block,
+        )| async move {
+            if reached_chain_tip || num_big_blocks == big_block_idx {
+                warn!(
+                    target: "reth-bench",
+                    generated = big_block_idx + 1,
+                    requested = num_big_blocks,
+                    "Reached chain tip, stopping generation early"
+                );
+                return Ok(None);
+            }
 
-            // Fetch consecutive blocks until the gas target is reached.
+            // Drain the prefetch stream until the gas target is reached for this big block.
             let mut blocks = Vec::new();
-            let mut block_receipts: Vec<Vec<Receipt>> = Vec::new();
             let mut block_access_lists: Vec<Option<BlockAccessList>> = Vec::new();
             let mut accumulated_block_gas: u64 = 0;
 
-            let mut reached_chain_tip = false;
-            while accumulated_block_gas < self.target_gas {
-                let block_number = next_block;
-                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Fetching block");
+            while accumulated_block_gas < target_gas {
+                info!(target: "reth-bench", big_block = big_block_idx, "Awaiting prefetched block");
 
-                let fetch_result = tokio::try_join!(
-                    provider.get_block_by_number(block_number.into()).full(),
-                    provider.get_block_receipts(block_number.into()),
-                );
-
-                let (rpc_block, receipts) = match fetch_result {
-                    Ok((Some(block), Some(receipts))) => (block, receipts),
-                    Ok((None, _) | (_, None)) => {
+                let (block, block_access_list) = match block_stream.next().await {
+                    Some(Ok(Some(fetched))) => fetched,
+                    Some(Ok(None)) => {
                         warn!(
                             target: "reth-bench",
-                            block_number,
                             "Block not found — reached chain tip"
                         );
                         reached_chain_tip = true;
                         break;
                     }
-                    Err(e) => return Err(e.into()),
+                    Some(Err(e)) => return Err(e),
+                    // The block-number stream is open-ended; this only fires if the
+                    // upstream `iter(from..)` is somehow exhausted.
+                    None => {
+                        reached_chain_tip = true;
+                        break;
+                    }
                 };
 
-                let block_access_list = if self.bal {
-                    Some(fetch_block_access_list(&provider, block_number).await.wrap_err_with(
-                        || format!("Failed to fetch BAL for block {block_number}"),
-                    )?)
-                } else {
-                    None
-                };
+                if first_block == 0 {
+                    first_block = block.header.number;
+                }
 
-                // Convert RPC receipts to consensus receipts
-                let consensus_receipts: Vec<Receipt> = receipts
-                    .iter()
-                    .map(|r| {
-                        let inner = &r.inner.inner.inner;
-                        let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
-                        Receipt {
-                            tx_type,
-                            success: inner.receipt.status.coerce_status(),
-                            cumulative_gas_used: inner.receipt.cumulative_gas_used,
-                            logs: inner
-                                .receipt
-                                .logs
-                                .iter()
-                                .map(|log| alloy_primitives::Log {
-                                    address: log.inner.address,
-                                    data: log.inner.data.clone(),
-                                })
-                                .collect(),
-                        }
-                    })
-                    .collect();
-
-                // Convert to consensus block
-                let block = rpc_block
+                let block = block
                     .into_inner()
                     .map_header(|header| header.map(|h| h.into_header_with_defaults()))
                     .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
@@ -393,29 +425,22 @@ impl Command {
                     })?
                     .into_consensus();
 
-                // Convert to ExecutionData
                 let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
                 let execution_data = ExecutionData { payload, sidecar };
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
-                let block_blob_gas =
-                    execution_data.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0);
 
                 info!(
                     target: "reth-bench",
-                    block_number,
+                    block_number = block.header.number,
                     gas_used = block_gas,
-                    blob_gas_used = block_blob_gas,
                     tx_count = execution_data.payload.transactions().len(),
-                    receipts = consensus_receipts.len(),
                     "Fetched block"
                 );
 
                 accumulated_block_gas += block_gas;
                 blocks.push(execution_data);
-                block_receipts.push(consensus_receipts);
                 block_access_lists.push(block_access_list);
-                next_block += 1;
             }
 
             // If we hit the chain tip without fetching any blocks, stop generating.
@@ -423,32 +448,16 @@ impl Command {
                 warn!(
                     target: "reth-bench",
                     big_block = big_block_idx,
-                    requested = self.num_big_blocks,
+                    requested = num_big_blocks,
                     "No blocks available, stopping generation early"
                 );
-                break;
+                return Ok(None);
             }
 
             // Block 0 is the base
             let mut base = blocks.remove(0);
-            let base_receipts = block_receipts.remove(0);
             let mut merged_block_access_list = block_access_lists.remove(0);
             let mut env_switches = Vec::new();
-
-            // Accumulate all receipts with corrected cumulative_gas_used.
-            // Each block's receipts have cumulative gas relative to that block;
-            // we add the prior blocks' total gas to make them globally correct.
-            let mut all_receipts: Vec<Receipt> = Vec::new();
-            let mut cumulative_gas_offset: u64 = 0;
-            {
-                // Base block receipts (block 0) — no offset needed
-                let base_block_gas = base.payload.as_v1().gas_used;
-                all_receipts.extend(base_receipts.into_iter().map(|mut r| {
-                    r.cumulative_gas_used += cumulative_gas_offset;
-                    r
-                }));
-                cumulative_gas_offset += base_block_gas;
-            }
 
             if !blocks.is_empty() {
                 // Store the original unmutated base block as env_switch at index 0.
@@ -468,9 +477,12 @@ impl Command {
                 let mut total_gas_limit = base.payload.as_v1().gas_limit;
 
                 // Concatenate transactions from subsequent blocks and build env_switches
-                for ((block_data, receipts), block_access_list) in
-                    blocks.into_iter().zip(block_receipts).zip(block_access_lists)
+                for (block_idx, (block_data, block_access_list)) in
+                    blocks.into_iter().zip(block_access_lists).enumerate()
                 {
+                    // Segment index in the merged big block. The base block is
+                    // segment 0; subsequent blocks are segments 1, 2, ...
+                    let segment_idx = (block_idx + 1) as u64;
                     let block_v1 = block_data.payload.as_v1();
                     let block_gas = block_v1.gas_used;
                     total_gas_used += block_gas;
@@ -481,15 +493,9 @@ impl Command {
                             merged_block_access_list.get_or_insert_with(Default::default),
                             block_access_list,
                             cumulative_tx_count as u64,
+                            segment_idx,
                         );
                     }
-
-                    // Accumulate receipts with corrected cumulative_gas_used
-                    all_receipts.extend(receipts.into_iter().map(|mut r| {
-                        r.cumulative_gas_used += cumulative_gas_offset;
-                        r
-                    }));
-                    cumulative_gas_offset += block_gas;
 
                     // Record environment switch at this block boundary
                     env_switches.push((cumulative_tx_count, block_data.clone()));
@@ -500,80 +506,33 @@ impl Command {
                     base.payload.transactions_mut().extend(txs);
                 }
 
-                // Compute merged receipts_root and logs_bloom from all accumulated
-                // receipts (with globally-correct cumulative_gas_used).
-                let receipts_with_bloom: Vec<_> =
-                    all_receipts.iter().map(|r| r.with_bloom_ref()).collect();
-                let merged_receipts_root = proofs::calculate_receipt_root(&receipts_with_bloom);
-                let merged_logs_bloom =
-                    receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r.bloom_ref());
-
                 // Mutate the base payload header
                 let base_v1 = base.payload.as_v1_mut();
                 base_v1.state_root = final_state_root;
                 base_v1.gas_used = total_gas_used;
                 base_v1.gas_limit = total_gas_limit;
-                base_v1.receipts_root = merged_receipts_root;
-                base_v1.logs_bloom = merged_logs_bloom;
             }
 
-            // Chain sequential big blocks: set parent_hash, block_number, basefee,
-            // and excess_blob_gas for sequential continuity. The engine validates
-            // each big block against its parent, so these fields must be
+            // Chain sequential big blocks: set parent_hash, block_number.
+            // The engine validates each big block against its parent, so these fields must be
             // derivable from the previous big block's merged header.
             if let Some(prev_hash) = prev_big_block_hash {
                 base.payload.as_v1_mut().parent_hash = prev_hash;
                 // First big block keeps its original block number (from_block).
                 // Subsequent big blocks increment from there.
-                base.payload.as_v1_mut().block_number = self.from_block + big_block_idx;
-            }
-            if let Some(prev) = &prev_big_block_header {
-                // Derive basefee from the previous big block's merged header using
-                // the standard EIP-1559 formula so validate_against_parent_eip1559_base_fee passes.
-                let next_base_fee = alloy_eips::calc_next_block_base_fee(
-                    prev.gas_used,
-                    prev.gas_limit,
-                    prev.base_fee_per_gas,
-                    BaseFeeParams::ethereum(),
-                );
-                base.payload.as_v1_mut().base_fee_per_gas =
-                    alloy_primitives::U256::from(next_base_fee);
-
-                // Derive excess_blob_gas from the previous big block's merged header
-                // so validate_against_parent_4844 passes.
-                let timestamp = base.payload.as_v1().timestamp;
-                let blob_params = chain_spec
-                    .blob_params_at_timestamp(timestamp)
-                    .unwrap_or_else(BlobParams::cancun);
-                let next_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
-                    prev.excess_blob_gas,
-                    prev.blob_gas_used,
-                    prev.base_fee_per_gas,
-                );
-                if let Some(v3) = base.payload.as_v3_mut() {
-                    v3.excess_blob_gas = next_excess_blob_gas;
-                }
+                base.payload.as_v1_mut().block_number = first_block + big_block_idx;
             }
 
-            // Merge blob data from all constituent blocks: sum blob_gas_used
-            // and concatenate versioned hashes so the sidecar matches the blob
-            // transactions in the merged payload body.
+            // Merge blob data from all constituent blocks:  concatenate versioned
+            // hashes so the sidecar matches the blob transactions in the merged payload body.
             {
                 let mut all_versioned_hashes: Vec<B256> =
                     base.sidecar.cancun().map(|c| c.versioned_hashes.clone()).unwrap_or_default();
-                let mut total_blob_gas =
-                    base.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0);
                 // Skip env_switch[0] (base block clone) to avoid double-counting
                 for (_, switch_data) in env_switches.iter().skip(1) {
                     if let Some(cancun) = switch_data.sidecar.cancun() {
                         all_versioned_hashes.extend_from_slice(&cancun.versioned_hashes);
                     }
-                    if let Some(v3) = switch_data.payload.as_v3() {
-                        total_blob_gas += v3.blob_gas_used;
-                    }
-                }
-                if let Some(v3) = base.payload.as_v3_mut() {
-                    v3.blob_gas_used = total_blob_gas;
                 }
                 let cancun = base.sidecar.cancun().map(|c| CancunPayloadFields {
                     versioned_hashes: all_versioned_hashes,
@@ -599,19 +558,6 @@ impl Command {
             base.payload.as_v1_mut().block_hash = block_hash;
             prev_big_block_hash = Some(block_hash);
 
-            // Record this big block's merged header fields so the next big block
-            // can derive its basefee and excess_blob_gas correctly.
-            {
-                let v1 = base.payload.as_v1();
-                prev_big_block_header = Some(PrevBigBlockHeader {
-                    gas_used: v1.gas_used,
-                    gas_limit: v1.gas_limit,
-                    base_fee_per_gas: v1.base_fee_per_gas.to::<u64>(),
-                    blob_gas_used: base.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0),
-                    excess_blob_gas: base.payload.as_v3().map(|v3| v3.excess_blob_gas).unwrap_or(0),
-                });
-            }
-
             let big_block = BigBlockPayload {
                 execution_data: base,
                 big_block_data: BigBlockData {
@@ -634,59 +580,49 @@ impl Command {
                 accumulated_block_hashes.drain(..excess);
             }
 
-            // Save to disk
-            let range_end = next_block - 1;
-            let filename = format!("big_block_{range_start}_to_{range_end}.json");
-            let filepath = self.output_dir.join(&filename);
-            let json = serde_json::to_string_pretty(&big_block)?;
-            std::fs::write(&filepath, &json)
-                .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-
-            info!(
-                target: "reth-bench",
-                path = %filepath.display(),
-                block_hash = %block_hash,
-                total_txs = big_block.execution_data.payload.transactions().len(),
-                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
-                env_switches = big_block.big_block_data.env_switches.len(),
-                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
-                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
-                "Big block payload saved"
-            );
-
-            if reached_chain_tip {
-                warn!(
-                    target: "reth-bench",
-                    generated = big_block_idx + 1,
-                    requested = self.num_big_blocks,
-                    "Reached chain tip, stopping generation early"
-                );
-                break;
-            }
-        }
-
-        Ok(())
-    }
+            big_block_idx += 1;
+            Ok(Some((
+                big_block,
+                (
+                    block_stream,
+                    accumulated_block_hashes,
+                    big_block_idx,
+                    prev_big_block_hash,
+                    reached_chain_tip,
+                    first_block,
+                ),
+            )))
+        },
+    )
 }
 
-async fn fetch_block_access_list(
-    provider: &RootProvider<AnyNetwork>,
+/// Fetches one block + receipts (and optionally its BAL) from the RPC. Returns `Ok(None)`
+/// when the block doesn't exist yet (chain-tip reached).
+async fn fetch_one_block(
+    provider: RootProvider<AnyNetwork>,
     block_number: u64,
-) -> eyre::Result<BlockAccessList> {
-    provider
-        .client()
-        .request("eth_getBlockAccessListByBlockNumber", (BlockNumberOrTag::Number(block_number),))
-        .await
-        .map_err(Into::into)
-        .and_then(|block_access_list: Option<BlockAccessList>| {
-            block_access_list.ok_or_else(|| eyre::eyre!("BAL not found for block {block_number}"))
-        })
+    bal_enabled: bool,
+) -> eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>> {
+    let (rpc_block, block_access_list) =
+        tokio::try_join!(provider.get_block_by_number(block_number.into()).full(), async {
+            if bal_enabled {
+                provider.get_block_access_list_by_number(block_number.into()).await
+            } else {
+                Ok(None)
+            }
+        })?;
+    let Some(rpc_block) = rpc_block else {
+        return Ok(None);
+    };
+
+    Ok(Some((rpc_block, block_access_list)))
 }
 
 fn merge_block_access_list(
     merged: &mut BlockAccessList,
     incoming: BlockAccessList,
     tx_index_offset: u64,
+    segment_idx: u64,
 ) {
     let mut account_positions = merged
         .iter()
@@ -695,7 +631,7 @@ fn merge_block_access_list(
         .collect::<HashMap<_, _>>();
 
     for mut account_changes in incoming {
-        shift_account_changes(&mut account_changes, tx_index_offset);
+        shift_account_changes(&mut account_changes, tx_index_offset, segment_idx);
 
         if let Some(&idx) = account_positions.get(&account_changes.address) {
             merge_account_changes(&mut merged[idx], account_changes);
@@ -706,20 +642,37 @@ fn merge_block_access_list(
     }
 }
 
-fn shift_account_changes(account_changes: &mut AccountChanges, tx_index_offset: u64) {
+fn shift_account_changes(
+    account_changes: &mut AccountChanges,
+    tx_index_offset: u64,
+    segment_idx: u64,
+) {
+    // Per-block BALs use block_access_index = 0 for pre-execution writes
+    // (system contract calls before any tx), 1..tx_count for tx commits, and
+    // tx_count+1 for post-execution.
+    //
+    // Renumbering: each segment boundary reserves two distinct bal_indexes —
+    // one for the prior segment's `finish()` (post-execution withdrawals +
+    // EIP-7002/7251 system calls) and one for the new segment's
+    // `apply_pre_execution_changes()` (EIP-2935/EIP-4788). The renumbered
+    // bal_index for a block-local idx in segment `k` is
+    // `idx + tx_index_offset + 2*k`. This ensures BAL workers reading via
+    // `BalWrites::get` (strict less-than) see all prior segments' boundary
+    // writes.
+    let shift = tx_index_offset + 2 * segment_idx;
     for slot_changes in &mut account_changes.storage_changes {
         for change in &mut slot_changes.changes {
-            change.block_access_index += tx_index_offset;
+            change.block_access_index += shift;
         }
     }
     for change in &mut account_changes.balance_changes {
-        change.block_access_index += tx_index_offset;
+        change.block_access_index += shift;
     }
     for change in &mut account_changes.nonce_changes {
-        change.block_access_index += tx_index_offset;
+        change.block_access_index += shift;
     }
     for change in &mut account_changes.code_changes {
-        change.block_access_index += tx_index_offset;
+        change.block_access_index += shift;
     }
 }
 
@@ -729,6 +682,17 @@ fn merge_account_changes(existing: &mut AccountChanges, incoming: AccountChanges
     existing.balance_changes.extend(incoming.balance_changes);
     existing.nonce_changes.extend(incoming.nonce_changes);
     existing.code_changes.extend(incoming.code_changes);
+
+    // EIP-7928 invariant: a slot must appear in either storage_changes or storage_reads,
+    // not both. Per-block BALs respect this, but merging blocks can produce a slot
+    // that is read in one block and changed in another. Without this normalization,
+    // an empty read entry can shadow the real writes during BAL deserialization,
+    // making reads of that slot fall through to stale snapshot state.
+    let written: HashSet<_> =
+        existing.storage_changes.iter().map(|slot_changes| slot_changes.slot).collect();
+    existing.storage_reads.retain(|slot| !written.contains(slot));
+    let mut seen = HashSet::with_capacity(existing.storage_reads.len());
+    existing.storage_reads.retain(|slot| seen.insert(*slot));
 }
 
 fn merge_slot_changes(existing: &mut Vec<SlotChanges>, incoming: Vec<SlotChanges>) {
@@ -807,7 +771,7 @@ mod tests {
             },
         ];
 
-        merge_block_access_list(&mut merged, incoming, 3);
+        merge_block_access_list(&mut merged, incoming, 3, 0);
 
         assert_eq!(merged.len(), 2);
 
@@ -847,5 +811,55 @@ mod tests {
         let other = &merged[1];
         assert_eq!(other.address, Address::repeat_byte(0x22));
         assert_eq!(other.storage_changes[0].changes[0].block_access_index, 3);
+    }
+
+    #[test]
+    fn merge_account_changes_normalizes_storage_reads_after_cross_block_merge() {
+        let address = Address::repeat_byte(0x33);
+        const A: U256 = U256::from_limbs([1, 0, 0, 0]);
+        const B: U256 = U256::from_limbs([2, 0, 0, 0]);
+        const C: U256 = U256::from_limbs([3, 0, 0, 0]);
+        const D: U256 = U256::from_limbs([4, 0, 0, 0]);
+
+        // Each AccountChanges value is valid on its own: storage slots only appear in
+        // either reads or changes. The invalid read/change overlap is introduced when
+        // these per-block BAL entries are merged for a standalone big block.
+        let mut existing = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges::new(A, vec![StorageChange::new(0, U256::from(10))])],
+            storage_reads: vec![B, C],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        // B is read before it is written by the incoming block, and A is written before
+        // it appears as a read in the incoming block. C is read in both blocks, so the
+        // merge should also dedupe it. D remains read-only.
+        let incoming = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges::new(B, vec![StorageChange::new(1, U256::from(20))])],
+            storage_reads: vec![A, C, D],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        merge_account_changes(&mut existing, incoming);
+
+        // Written slots remain represented by storage_changes, while storage_reads only
+        // keeps unique read-only slots in first-seen order.
+        assert_eq!(
+            existing
+                .storage_changes
+                .iter()
+                .map(|slot_changes| slot_changes.slot)
+                .collect::<Vec<_>>(),
+            vec![A, B]
+        );
+        assert_eq!(existing.storage_reads, vec![C, D]);
+        assert!(existing.storage_reads.iter().all(|read_slot| {
+            !existing.storage_changes.iter().any(|slot_changes| slot_changes.slot == *read_slot)
+        }));
     }
 }

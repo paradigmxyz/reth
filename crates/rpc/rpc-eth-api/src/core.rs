@@ -295,6 +295,7 @@ pub trait EthApi<
         request: TxReq,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<U256>;
 
     /// Returns the current price per gas in wei.
@@ -419,7 +420,7 @@ pub trait EthApi<
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
-    async fn block_access_list_raw(&self, number: BlockNumberOrTag) -> RpcResult<Option<Bytes>>;
+    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
 #[async_trait::async_trait]
@@ -773,13 +774,14 @@ where
         request: RpcTxReq<T::NetworkTypes>,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(EthCall::estimate_gas_at(
             self,
             request,
             block_number.unwrap_or_default(),
-            state_override,
+            EvmOverrides::new(state_override, block_overrides),
         )
         .await?)
     }
@@ -942,10 +944,10 @@ where
         Ok(Some(json))
     }
     /// Handler for: `eth_getBlockAccessListRaw`
-    async fn block_access_list_raw(&self, number: BlockNumberOrTag) -> RpcResult<Option<Bytes>> {
-        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListRaw");
+    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
 
-        let bal = self.get_block_access_list(number.into()).await?;
+        let bal = self.get_block_access_list(block).await?;
         Ok(bal.map(|b: BlockAccessList| alloy_rlp::encode(b).into()))
     }
 }

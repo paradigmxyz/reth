@@ -54,6 +54,12 @@ function balModeLabel(mode) {
 
 function blocksLabel(summary) {
   const parts = [];
+  const driver = summary.driver || process.env.BENCH_DRIVER || '';
+  const driverReason = summary.driver_reason || process.env.BENCH_DRIVER_REASON || '';
+  if (driver) {
+    const value = driverReason ? `${driver} (fallback: ${driverReason})` : driver;
+    parts.push({ key: 'Driver', value });
+  }
   if (summary.big_blocks) {
     parts.push({ key: 'Big Blocks', value: summary.blocks });
     const balMode = balModeLabel(summary.bal_mode || summary.bal || process.env.BENCH_BAL || 'false');
@@ -83,6 +89,7 @@ function metricRows(summary) {
     { label: 'P99',        baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
     { label: 'Mgas/s',     baseline: fmtMgas(b.mean_mgas_s), feature: fmtMgas(f.mean_mgas_s), change: fmtChange(c.mgas_s) },
     { label: 'Wall Clock', baseline: fmtS(b.wall_clock_s),   feature: fmtS(f.wall_clock_s),   change: fmtChange(c.wall_clock) },
+    { label: 'Persist Wait', baseline: fmtMs(b.mean_persist_ms || 0), feature: fmtMs(f.mean_persist_ms || 0), change: fmtChange(c.persist_wait) },
   ];
 }
 
