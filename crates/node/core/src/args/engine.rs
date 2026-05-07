@@ -8,6 +8,7 @@ use reth_engine_primitives::{
     DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
     DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
+use reth_tasks::{DEFAULT_PROOF_ACCOUNT_WORKER_THREADS, DEFAULT_PROOF_STORAGE_WORKER_THREADS};
 use std::{sync::OnceLock, time::Duration};
 
 use crate::node_config::{
@@ -277,8 +278,8 @@ impl Default for DefaultEngineValues {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
-            storage_worker_count: None,
-            account_worker_count: None,
+            storage_worker_count: Some(DEFAULT_PROOF_STORAGE_WORKER_THREADS),
+            account_worker_count: Some(DEFAULT_PROOF_ACCOUNT_WORKER_THREADS),
             prewarming_threads: None,
             cache_metrics_disabled: false,
             sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
@@ -411,13 +412,13 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value_t = DefaultEngineValues::get_global().allow_unwind_canonical_header)]
     pub allow_unwind_canonical_header: bool,
 
-    /// Configure the number of storage proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 2x available parallelism.
+    /// Configure the number of storage proof workers.
+    /// If not specified, defaults to 128.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
-    /// Configure the number of account proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to the same count as storage workers.
+    /// Configure the number of account proof workers.
+    /// If not specified, defaults to 128.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
@@ -696,6 +697,8 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+        assert_eq!(args.storage_worker_count, Some(DEFAULT_PROOF_STORAGE_WORKER_THREADS));
+        assert_eq!(args.account_worker_count, Some(DEFAULT_PROOF_ACCOUNT_WORKER_THREADS));
     }
 
     #[test]

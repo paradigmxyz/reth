@@ -41,6 +41,12 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 2;
 /// Default number of threads for the storage I/O pool.
 pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
 
+/// Default number of threads for the proof storage worker pool.
+pub const DEFAULT_PROOF_STORAGE_WORKER_THREADS: usize = 128;
+
+/// Default number of threads for the proof account worker pool.
+pub const DEFAULT_PROOF_ACCOUNT_WORKER_THREADS: usize = 128;
+
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
@@ -104,10 +110,10 @@ pub struct RayonConfig {
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, uses [`DEFAULT_PROOF_STORAGE_WORKER_THREADS`].
     pub proof_storage_worker_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, uses [`DEFAULT_PROOF_ACCOUNT_WORKER_THREADS`].
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
@@ -850,13 +856,17 @@ impl RuntimeBuilder {
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
-            let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
+            let proof_storage_worker_threads = config
+                .rayon
+                .proof_storage_worker_threads
+                .unwrap_or(DEFAULT_PROOF_STORAGE_WORKER_THREADS);
             let proof_storage_worker_pool =
                 WorkerPool::new(proof_storage_worker_threads, "proof-strg");
 
-            let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
+            let proof_account_worker_threads = config
+                .rayon
+                .proof_account_worker_threads
+                .unwrap_or(DEFAULT_PROOF_ACCOUNT_WORKER_THREADS);
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
