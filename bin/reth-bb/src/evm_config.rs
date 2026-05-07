@@ -107,7 +107,7 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
 
 /// Reads the BAL index from a `&mut State<DB>`.
 ///
-/// Used as a [`BalIndexReader`](crate::evm::BalIndexReader) callback so the
+/// Used as a [`BalIndexReader`] callback so the
 /// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
 /// starting segment without a trait bound on `DB`.
 fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
