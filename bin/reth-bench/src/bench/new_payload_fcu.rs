@@ -29,7 +29,6 @@ use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
-use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
 use std::time::{Duration, Instant};
@@ -64,32 +63,6 @@ pub struct Command {
     /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
-
-    /// Engine persistence threshold used for deciding when to wait for persistence.
-    ///
-    /// The benchmark waits after every `(threshold + 1)` blocks. By default this
-    /// matches the engine's `DEFAULT_PERSISTENCE_THRESHOLD` (2), so waits occur
-    /// at blocks 3, 6, 9, etc.
-    #[arg(
-        long = "persistence-threshold",
-        value_name = "PERSISTENCE_THRESHOLD",
-        default_value_t = DEFAULT_PERSISTENCE_THRESHOLD,
-        verbatim_doc_comment
-    )]
-    persistence_threshold: u64,
-
-    /// Timeout for waiting on persistence at each checkpoint.
-    ///
-    /// Must be long enough to account for the persistence thread being blocked
-    /// by pruning after the previous save.
-    #[arg(
-        long = "persistence-timeout",
-        value_name = "PERSISTENCE_TIMEOUT",
-        value_parser = parse_duration,
-        default_value = "120s",
-        verbatim_doc_comment
-    )]
-    persistence_timeout: Duration,
 
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
