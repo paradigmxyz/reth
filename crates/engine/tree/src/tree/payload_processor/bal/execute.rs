@@ -57,6 +57,7 @@ pub struct BalExecutionOutput<Evm: ConfigureEvm> {
 }
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
+#[expect(clippy::too_many_arguments)]
 pub fn execute_block<Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
     evm_config: Evm,
@@ -95,6 +96,7 @@ where
     })
 }
 
+#[expect(clippy::too_many_arguments)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     evm_config: Evm,

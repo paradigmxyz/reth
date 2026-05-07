@@ -583,7 +583,7 @@ where
                 state_provider,
                 env,
                 &block,
-                &mut handle,
+                &handle,
                 decoded_bal,
                 provider_builder,
             ) {
@@ -1084,7 +1084,7 @@ where
         _state_provider: S,
         env: ExecutionEnv<Evm>,
         block: &SealedBlock<N::Block>,
-        handle: &mut PayloadHandle<Tx, Err, N::Receipt>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt>,
         decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<

@@ -87,6 +87,9 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     <N as NodePrimitives>::Receipt,
 >;
 
+type ExecuteTxSender<TxEnv, Recovered, Err> =
+    CrossbeamSender<(usize, Result<WithTxEnv<TxEnv, Recovered>, Err>)>;
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -737,7 +740,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
-    execute_tx: &CrossbeamSender<(usize, Result<WithTxEnv<TxEnv, Recovered>, Err>)>,
+    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,

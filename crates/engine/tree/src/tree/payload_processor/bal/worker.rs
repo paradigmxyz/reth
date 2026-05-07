@@ -21,18 +21,18 @@ pub(super) struct BalWorkerOutput<R> {
     pub(super) result: R,
 }
 
+type WorkerExecutorResult<'scope, Cfg, DB> =
+    <reth_evm::BlockExecutorForEvm<'scope, Cfg, DB> as BlockExecutor>::Result;
+
+type WorkerResultSender<'scope, Cfg, DB> =
+    Sender<Result<BalWorkerOutput<WorkerExecutorResult<'scope, Cfg, DB>>, BalExecutionError>>;
+
+#[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
-    result_tx: Sender<
-        Result<
-            BalWorkerOutput<
-                <reth_evm::BlockExecutorForEvm<'scope, Evm, DB> as alloy_evm::block::BlockExecutor>::Result,
-            >,
-            BalExecutionError,
-        >,
-    >,
+    result_tx: WorkerResultSender<'scope, Evm, DB>,
     evm_config: Evm,
     make_db: &'scope MakeDb,
     received_bal_revm: Arc<RevmBal>,
