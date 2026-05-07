@@ -78,6 +78,7 @@ tokio.workspace = true
 serde_json.workspace = true
 rand.workspace = true
 serde.workspace = true
+enr = { workspace = true, features = ["rust-secp256k1"] }
 alloy-rpc-types-trace.workspace = true
 similar-asserts.workspace = true
 

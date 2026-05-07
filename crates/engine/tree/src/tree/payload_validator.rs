@@ -110,13 +110,17 @@ pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
     Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
-type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
+type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
 /// Result type for block validation with optional timing stats.
 type InsertPayloadResult<N> = Result<
     (ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>),
     InsertPayloadError<<N as NodePrimitives>::Block>,
 >;
+
+type ReceiptRootSender<N> =
+    crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
+type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -601,7 +605,7 @@ where
                     "hashed_post_state",
                 )
                 .entered();
-                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+                Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
             });
 
         let block = convert_to_block(input)?;
@@ -905,11 +909,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
         InsertBlockErrorKind,
     >
     where
@@ -958,17 +958,8 @@ where
             );
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
-        let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
-
         let transaction_count = input.transaction_count();
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let executor = executor.with_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
@@ -1005,6 +996,21 @@ where
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
         Ok((output, senders, result_rx))
+    }
+
+    fn spawn_receipt_root_task(
+        &self,
+        receipts_len: usize,
+    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+        // Unbounded channel is used since tx count bounds capacity anyway.
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+
+        (receipt_tx, result_rx)
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
@@ -1127,7 +1133,7 @@ where
         state_provider: StateProviderBox,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        state_provider.state_root_with_updates(hashed_state.get().clone())
+        state_provider.state_root_with_updates(hashed_state.get().as_ref().clone())
     }
 
     /// Awaits the state root from the background task, with an optional timeout fallback.
@@ -1641,8 +1647,8 @@ where
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
         // already been computed and used for state root verification, so .get() returns instantly.
         let hashed_state = match hashed_state.try_into_inner() {
-            Ok(state) => Arc::new(state),
-            Err(handle) => Arc::new(handle.get().clone()),
+            Ok(state) => state,
+            Err(handle) => handle.get().clone(),
         };
         let deferred_trie_data =
             DeferredTrieData::pending(hashed_state, trie_output, anchor_hash, ancestors);
@@ -2034,7 +2040,7 @@ where
             block.recovered_block,
             block.execution_output,
             state,
-            LazyHashedPostState::ready(Arc::unwrap_or_clone(block.hashed_state)),
+            LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
             changeset_provider,
         ))
