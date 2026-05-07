@@ -50,7 +50,7 @@ use crate::tree::{
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
-    BlockAccessList,
+    compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
@@ -1572,13 +1572,14 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
+        let block_access_list_hash =
+            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
             output,
             receipt_root_bloom,
-            built_bal,
-            None,
+            block_access_list_hash,
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());

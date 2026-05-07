@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip7928::compute_block_access_list_hash;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -358,6 +359,7 @@ where
             })?;
 
             let bal = executor.take_bal().unwrap_or_default();
+            let block_access_list_hash = Some(compute_block_access_list_hash(&bal));
             if block.header().block_access_list_hash().is_some() &&
                 let Err(err) = validate_block_access_list_gas(Some(&bal), block.gas_limit())
             {
@@ -367,9 +369,12 @@ where
                 })
             }
 
-            if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, Some(bal), None)
-            {
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                &result,
+                None,
+                block_access_list_hash,
+            ) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),

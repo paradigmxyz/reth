@@ -38,7 +38,6 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::Header;
-use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::{error::Error, fmt::Display};
 
@@ -86,7 +85,6 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        block_access_list: Option<BlockAccessList>,
         block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError>;
 }
