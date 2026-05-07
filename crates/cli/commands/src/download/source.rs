@@ -20,15 +20,28 @@ pub(crate) struct SnapshotApiEntry {
     date: Option<String>,
     #[serde(default)]
     profile: Option<String>,
-    metadata_url: String,
+    #[serde(default)]
+    metadata_url: Option<String>,
+    #[serde(default)]
+    manifest_url: Option<String>,
+    #[serde(default)]
+    is_modular: Option<bool>,
     #[serde(default)]
     size: u64,
 }
 
 impl SnapshotApiEntry {
+    /// Returns the modular manifest URL exposed by this entry.
+    fn manifest_url(&self) -> Option<&str> {
+        self.manifest_url.as_deref().or(self.metadata_url.as_deref()).filter(|url| !url.is_empty())
+    }
+
     /// Returns whether this discovery entry points to a modular manifest.
     fn is_modular(&self) -> bool {
-        self.metadata_url.ends_with("manifest.json")
+        match self.is_modular {
+            Some(is_modular) => is_modular && self.manifest_url().is_some(),
+            None => self.manifest_url().is_some_and(|url| url.ends_with("manifest.json")),
+        }
     }
 }
 
@@ -57,13 +70,15 @@ pub(crate) async fn discover_manifest_url(chain_id: u64) -> Result<String> {
             )
         })?;
 
+    let manifest_url = entry.manifest_url().expect("modular entries have manifest URLs");
+
     info!(target: "reth::cli",
         block = entry.block,
-        url = %entry.metadata_url,
+        url = %manifest_url,
         "Found latest snapshot manifest"
     );
 
-    Ok(entry.metadata_url.clone())
+    Ok(manifest_url.to_string())
 }
 
 /// Deserializes a JSON value that may be either a number or a string-encoded number.
@@ -112,16 +127,14 @@ pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64
     for entry in &modular {
         let date = entry.date.as_deref().unwrap_or("-");
         let profile = entry.profile.as_deref().unwrap_or("-");
+        let manifest_url = entry.manifest_url().unwrap_or("-");
         let size = if entry.size > 0 {
             DownloadProgress::format_size(entry.size)
         } else {
             "-".to_string()
         };
 
-        println!(
-            "{date:<12}  {:>10}  {profile:<10}  {size:>10}  {}",
-            entry.block, entry.metadata_url
-        );
+        println!("{date:<12}  {:>10}  {profile:<10}  {size:>10}  {}", entry.block, manifest_url);
     }
 
     if modular.is_empty() {
@@ -229,4 +242,57 @@ pub(crate) fn resolve_manifest_base_url(
         base.pop();
     }
     Ok(base)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_api_entry_accepts_manifest_url() {
+        let entry: SnapshotApiEntry = serde_json::from_str(
+            r#"{
+                "chainId": "4217",
+                "block": "123",
+                "manifestUrl": "https://snapshots.tempoxyz.dev/4217/manifest.json",
+                "isModular": true
+            }"#,
+        )
+        .unwrap();
+
+        assert!(entry.is_modular());
+        assert_eq!(entry.chain_id, 4217);
+        assert_eq!(entry.block, 123);
+        assert_eq!(entry.manifest_url(), Some("https://snapshots.tempoxyz.dev/4217/manifest.json"));
+    }
+
+    #[test]
+    fn snapshot_api_entry_falls_back_to_metadata_url() {
+        let entry: SnapshotApiEntry = serde_json::from_str(
+            r#"{
+                "chainId": 1,
+                "block": 123,
+                "metadataUrl": "https://snapshots-r2.reth.rs/1/manifest.json"
+            }"#,
+        )
+        .unwrap();
+
+        assert!(entry.is_modular());
+        assert_eq!(entry.manifest_url(), Some("https://snapshots-r2.reth.rs/1/manifest.json"));
+    }
+
+    #[test]
+    fn snapshot_api_entry_respects_is_modular_flag() {
+        let entry: SnapshotApiEntry = serde_json::from_str(
+            r#"{
+                "chainId": 1,
+                "block": 123,
+                "manifestUrl": "https://snapshots-r2.reth.rs/1/manifest.json",
+                "isModular": false
+            }"#,
+        )
+        .unwrap();
+
+        assert!(!entry.is_modular());
+    }
 }
