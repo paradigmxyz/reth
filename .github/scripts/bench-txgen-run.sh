@@ -49,14 +49,25 @@ start_perf_stat() {
     exit 1
   fi
 
+  local perf_bin
+  perf_bin="$(command -v perf)"
+  PERF_STAT_PID_FILE="$OUTPUT_DIR/perf-stat.pid"
+
   echo "Starting perf stat for ${node_process_name} pid ${reth_pid}..."
-  sudo perf stat \
-    -x, \
-    -e "$PERF_STAT_EVENTS" \
-    -p "$reth_pid" \
-    -o "$OUTPUT_DIR/perf-stat.csv" \
-    -- sleep infinity &
+  sudo bash -c 'echo $$ > "$1"; exec "$2" stat -x, -e "$3" -p "$4" -o "$5"' \
+    _ \
+    "$PERF_STAT_PID_FILE" \
+    "$perf_bin" \
+    "$PERF_STAT_EVENTS" \
+    "$reth_pid" \
+    "$OUTPUT_DIR/perf-stat.csv" &
   PERF_PID=$!
+  for _ in $(seq 1 10); do
+    if [ -s "$PERF_STAT_PID_FILE" ]; then
+      break
+    fi
+    sleep 0.1
+  done
   sleep 0.5
   if ! kill -0 "$PERF_PID" 2>/dev/null; then
     wait "$PERF_PID" 2>/dev/null || true
@@ -68,7 +79,15 @@ start_perf_stat() {
 stop_perf_stat() {
   if [ -n "${PERF_PID:-}" ] && kill -0 "$PERF_PID" 2>/dev/null; then
     echo "Stopping perf stat..."
-    sudo kill -INT "$PERF_PID" 2>/dev/null || kill -INT "$PERF_PID" 2>/dev/null || true
+    local perf_stat_pid=""
+    if [ -n "${PERF_STAT_PID_FILE:-}" ] && [ -f "$PERF_STAT_PID_FILE" ]; then
+      perf_stat_pid="$(cat "$PERF_STAT_PID_FILE" 2>/dev/null || true)"
+    fi
+    if [ -z "$perf_stat_pid" ]; then
+      perf_stat_pid="$PERF_PID"
+    fi
+
+    sudo kill -INT "$perf_stat_pid" 2>/dev/null || kill -INT "$perf_stat_pid" 2>/dev/null || true
     for i in $(seq 1 30); do
       kill -0 "$PERF_PID" 2>/dev/null || break
       if [ $((i % 10)) -eq 0 ]; then
@@ -78,10 +97,12 @@ stop_perf_stat() {
     done
     if kill -0 "$PERF_PID" 2>/dev/null; then
       echo "perf stat still running after 30s, killing..."
+      sudo kill -TERM "$perf_stat_pid" 2>/dev/null || kill -TERM "$perf_stat_pid" 2>/dev/null || true
       sudo kill -TERM "$PERF_PID" 2>/dev/null || kill -TERM "$PERF_PID" 2>/dev/null || true
     fi
     wait "$PERF_PID" 2>/dev/null || true
     PERF_PID=
+    PERF_STAT_PID_FILE=
   fi
 }
 
@@ -137,6 +158,7 @@ cleanup() {
 TAIL_PID=
 TRACY_PID=
 PERF_PID=
+PERF_STAT_PID_FILE=
 trap cleanup EXIT
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
