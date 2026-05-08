@@ -3,7 +3,7 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip7928::bal::DecodedBal, BlockHashOrNumber};
 use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -276,7 +276,10 @@ impl<N: NodePrimitives> EthStateCache<N> {
     /// Requests the revm BAL for the block hash.
     ///
     /// Returns `None` if the BAL does not exist.
-    pub async fn get_bal(&self, block_hash: B256) -> ProviderResult<Option<Arc<RevmBal>>> {
+    pub async fn get_bal(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<DecodedBal<RevmBal>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
         rx.await
@@ -919,22 +922,26 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     }
 }
 
-/// Cached revm BAL.
+/// Cached decoded revm BAL.
 #[derive(Clone, Debug)]
-pub(crate) struct CachedRevmBal(Arc<RevmBal>);
+pub(crate) struct CachedRevmBal(Arc<DecodedBal<RevmBal>>);
 
 impl CachedRevmBal {
-    /// Creates a cached revm BAL from an owned BAL.
+    /// Creates a cached revm BAL from an owned decoded BAL.
     #[inline]
-    fn new(bal: RevmBal) -> Self {
+    fn new(bal: DecodedBal<RevmBal>) -> Self {
         Self(Arc::new(bal))
     }
 }
 
 impl InMemorySize for CachedRevmBal {
     fn size(&self) -> usize {
-        core::mem::size_of::<Self>() + revm_bal_size(&self.0)
+        core::mem::size_of::<Self>() + decoded_revm_bal_size(&self.0)
     }
+}
+
+fn decoded_revm_bal_size(bal: &DecodedBal<RevmBal>) -> usize {
+    core::mem::size_of::<DecodedBal<RevmBal>>() + bal.as_raw().len() + revm_bal_size(bal.as_bal())
 }
 
 fn revm_bal_size(bal: &RevmBal) -> usize {
@@ -1011,6 +1018,10 @@ mod tests {
         service
     }
 
+    fn test_decoded_revm_bal() -> DecodedBal<RevmBal> {
+        DecodedBal::new(RevmBal::default(), Bytes::from_static(&[0xc0]))
+    }
+
     fn test_block() -> RecoveredBlock<Block> {
         RecoveredBlock::new_unhashed(
             Block {
@@ -1077,7 +1088,7 @@ mod tests {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x44);
 
-        assert!(service.bal_cache.insert(block_hash, CachedRevmBal::new(RevmBal::default())));
+        assert!(service.bal_cache.insert(block_hash, CachedRevmBal::new(test_decoded_revm_bal())));
         assert!(service.bal_cache.get(&block_hash).is_some());
 
         service.on_reorg_bal(block_hash, Ok(None));
@@ -1090,7 +1101,7 @@ mod tests {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x55);
         let (response_tx, mut response_rx) = oneshot::channel();
-        let bal = CachedRevmBal::new(RevmBal::default());
+        let bal = CachedRevmBal::new(test_decoded_revm_bal());
 
         assert!(service.bal_cache.queue(block_hash, response_tx));
 
@@ -1118,9 +1129,12 @@ mod tests {
         let mut bal = RevmBal::default();
         bal.accounts.insert(Address::ZERO, account);
 
-        let previous_estimate =
-            core::mem::size_of::<CachedRevmBal>() + core::mem::size_of::<RevmBal>();
-        assert!(CachedRevmBal::new(bal).size() > previous_estimate);
+        let raw = Bytes::from_static(&[0xc0, 0x01, 0x02]);
+        let previous_estimate = core::mem::size_of::<CachedRevmBal>() +
+            core::mem::size_of::<DecodedBal<RevmBal>>() +
+            raw.len() +
+            core::mem::size_of::<RevmBal>();
+        assert!(CachedRevmBal::new(DecodedBal::new(bal, raw)).size() > previous_estimate);
     }
 
     #[tokio::test]
@@ -1211,9 +1225,12 @@ mod tests {
             Ok(block_hashes.iter().map(|_| None).collect())
         }
 
-        fn revm_bal_by_hash(&self, _block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+        fn revm_bal_by_hash(
+            &self,
+            _block_hash: BlockHash,
+        ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(RevmBal::default()))
+            Ok(Some(test_decoded_revm_bal()))
         }
 
         fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
