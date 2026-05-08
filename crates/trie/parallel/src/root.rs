@@ -7,7 +7,6 @@ use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
@@ -37,8 +36,6 @@ pub struct ParallelStateRoot<Factory> {
     factory: Factory,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
-    /// The runtime handle for spawning blocking tasks.
-    runtime: Runtime,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -46,11 +43,10 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(factory: Factory, prefix_sets: TriePrefixSets, runtime: Runtime) -> Self {
+    pub fn new(factory: Factory, prefix_sets: TriePrefixSets) -> Self {
         Self {
             factory,
             prefix_sets,
-            runtime,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -101,8 +97,6 @@ where
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
-        let handle = self.runtime.handle().clone();
-
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -112,8 +106,10 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            // Spawn a blocking task to calculate account's storage root from database I/O
-            drop(handle.spawn_blocking(move || {
+            // Dispatch storage-root computation onto the global rayon pool so a bounded set of
+            // worker threads (≈ CPU cores) consumes targets via work-stealing, matching the
+            // stage-level parallelism pattern used by `sender_recovery` and `hashing_storage`.
+            rayon::spawn(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider = factory.database_provider_ro()?;
                     Ok(StorageRoot::new_hashed(
@@ -127,7 +123,7 @@ where
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
-            }));
+            });
             storage_roots.insert(hashed_address, rx);
         }
 
@@ -337,9 +333,8 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let runtime = reth_tasks::Runtime::test();
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory.clone(), Default::default(), runtime.clone())
+            ParallelStateRoot::new(overlay_factory.clone(), Default::default())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -375,7 +370,7 @@ mod tests {
             overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
 
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze(), runtime)
+            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)
