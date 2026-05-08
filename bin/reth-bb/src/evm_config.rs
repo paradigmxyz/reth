@@ -226,7 +226,7 @@ where
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
         // Compute the env from the first segment BEFORE removing the
         // entry (stage_plan_for_payload removes it).
-        let first_exec_data = &payload.env_switches[0].1;
+        let first_exec_data = &payload.env_switches[0];
         let mut env = self.inner.evm_env_for_payload(first_exec_data)?;
 
         // Disable basefee validation: transactions from different
@@ -241,14 +241,17 @@ where
         &self,
         payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        let mut current_tx = 0;
         let segments: Vec<_> = payload
             .env_switches
             .iter()
-            .map(|(start_tx, exec_data)| {
+            .map(|exec_data| {
+                let start_tx = current_tx;
                 let mut evm_env = self.inner.evm_env_for_payload(exec_data)?;
                 evm_env.cfg_env.disable_base_fee = true;
                 let ctx = self.inner.context_for_payload(exec_data)?;
-                Ok(BigBlockSegment { start_tx: *start_tx, evm_env, ctx })
+                current_tx += exec_data.payload.transactions().len();
+                Ok(BigBlockSegment { start_tx, evm_env, ctx })
             })
             .collect::<Result<_, Self::Error>>()?;
 
@@ -268,7 +271,7 @@ where
         let transactions = payload
             .env_switches
             .iter()
-            .flat_map(|(_, exec_data)| exec_data.payload.transactions().clone())
+            .flat_map(|exec_data| exec_data.payload.transactions().clone())
             .collect::<Vec<_>>();
 
         let convert = |tx: Bytes| {

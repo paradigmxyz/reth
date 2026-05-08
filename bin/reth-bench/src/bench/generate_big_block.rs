@@ -16,19 +16,15 @@ use alloy_provider::{
     Provider, RootProvider,
 };
 use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    PraguePayloadFields,
-};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 use clap::Parser;
 use eyre::Context;
 use futures::{stream, Stream, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_engine_primitives::BigBlockData;
+use reth_engine_primitives::{BigBlockData, ExecutionPayload as _};
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -215,25 +211,11 @@ pub struct CollectionResult {
     pub next_block: u64,
 }
 
-/// A merged big block payload with environment switches at block boundaries.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BigBlockPayload {
-    /// The primary execution data with all concatenated transactions.
-    pub execution_data: ExecutionData,
-    /// Big block data containing environment switches and prior block hashes.
-    pub big_block_data: BigBlockData<ExecutionData>,
-    /// Flattened BAL across all constituent blocks, if requested during generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub block_access_list: Option<BlockAccessList>,
-}
-
 /// State used to continue generated big block replay from the benchmark node's current tip.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BigBlocksInitialState {
     /// Real block hashes from previous big blocks, used for BLOCKHASH lookups.
     pub prior_block_hashes: Vec<(u64, B256)>,
-    /// Hash of the previous synthetic big block.
-    pub parent_hash: B256,
     /// Block number to assign to the first generated synthetic block.
     pub next_synthetic_block_number: u64,
 }
@@ -343,9 +325,9 @@ impl Command {
         while let Some(big_block) = big_blocks_stream.next().await {
             let big_block = big_block?;
             // Save to disk
-            let range_start = big_block.big_block_data.env_switches[0].1.block_number();
-            let range_end = big_block.big_block_data.env_switches.last().unwrap().1.block_number();
-            let block_hash = big_block.execution_data.payload.as_v1().block_hash;
+            let range_start = big_block.env_switches[0].block_number();
+            let range_end = big_block.env_switches.last().unwrap().block_number();
+            let block_hash = big_block.block_hash();
             let filename = format!("big_block_{range_start}_to_{range_end}.json");
             let filepath = self.output_dir.join(&filename);
             let json = serde_json::to_string_pretty(&big_block)?;
@@ -371,13 +353,12 @@ pub(crate) fn big_blocks_stream(
     block_stream: impl Stream<Item = eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>>>
         + Unpin,
     initial_state: Option<BigBlocksInitialState>,
-) -> impl Stream<Item = eyre::Result<BigBlockPayload>> {
+) -> impl Stream<Item = eyre::Result<BigBlockData<ExecutionData>>> {
     futures::stream::try_unfold(
         (
             block_stream,
             initial_state.as_ref().map(|s| s.prior_block_hashes.clone()).unwrap_or_default(),
             0,
-            initial_state.as_ref().map(|s| s.parent_hash),
             initial_state.as_ref().map(|s| s.next_synthetic_block_number),
             false,
             0,
@@ -386,7 +367,6 @@ pub(crate) fn big_blocks_stream(
             mut block_stream,
             mut accumulated_block_hashes,
             mut big_block_idx,
-            mut prev_big_block_hash,
             next_synthetic_block_number,
             mut reached_chain_tip,
             mut first_block,
@@ -460,38 +440,18 @@ pub(crate) fn big_blocks_stream(
             }
 
             // Block 0 is the base
-            let mut base = blocks.remove(0);
             let mut merged_block_access_list = block_access_lists.remove(0);
-            let mut env_switches = Vec::new();
 
             if !blocks.is_empty() {
-                // Store the original unmutated base block as env_switch at index 0.
-                // This preserves the real gas_limit, basefee, etc. for segment 0's
-                // EVM environment, which would otherwise be lost when we mutate the
-                // base payload header below.
-                env_switches.push((0, base.clone()));
-
-                let mut cumulative_tx_count = base.payload.transactions().len();
-
-                // Collect state from the last block for header fields
-                let last = blocks.last().unwrap();
-                let last_v1 = last.payload.as_v1();
-                let final_state_root = last_v1.state_root;
-
-                let mut total_gas_used = base.payload.as_v1().gas_used;
-                let mut total_gas_limit = base.payload.as_v1().gas_limit;
+                let mut cumulative_tx_count = blocks[0].transaction_count();
 
                 // Concatenate transactions from subsequent blocks and build env_switches
                 for (block_idx, (block_data, block_access_list)) in
-                    blocks.into_iter().zip(block_access_lists).enumerate()
+                    blocks.iter().zip(block_access_lists).enumerate()
                 {
                     // Segment index in the merged big block. The base block is
                     // segment 0; subsequent blocks are segments 1, 2, ...
                     let segment_idx = (block_idx + 1) as u64;
-                    let block_v1 = block_data.payload.as_v1();
-                    let block_gas = block_v1.gas_used;
-                    total_gas_used += block_gas;
-                    total_gas_limit += block_v1.gas_limit;
 
                     if let Some(block_access_list) = block_access_list {
                         merge_block_access_list(
@@ -502,85 +462,23 @@ pub(crate) fn big_blocks_stream(
                         );
                     }
 
-                    // Record environment switch at this block boundary
-                    env_switches.push((cumulative_tx_count, block_data.clone()));
-
-                    // Append this block's transactions to the base payload
-                    let txs = block_data.payload.transactions().clone();
-                    cumulative_tx_count += txs.len();
-                    base.payload.transactions_mut().extend(txs);
+                    cumulative_tx_count += block_data.transaction_count();
                 }
-
-                // Mutate the base payload header
-                let base_v1 = base.payload.as_v1_mut();
-                base_v1.state_root = final_state_root;
-                base_v1.gas_used = total_gas_used;
-                base_v1.gas_limit = total_gas_limit;
             }
 
-            // Chain sequential big blocks: set parent_hash, block_number.
-            // The engine validates each big block against its parent, so these fields must be
-            // derivable from the previous big block's merged header.
-            if let Some(prev_hash) = prev_big_block_hash {
-                base.payload.as_v1_mut().parent_hash = prev_hash;
-                // First big block keeps its original block number (from_block).
-                // Subsequent big blocks increment from there.
-                let synthetic_block_number =
-                    next_synthetic_block_number.unwrap_or(first_block) + big_block_idx;
-                base.payload.as_v1_mut().block_number = synthetic_block_number;
-            }
-
-            // Merge blob data from all constituent blocks:  concatenate versioned
-            // hashes so the sidecar matches the blob transactions in the merged payload body.
-            {
-                let mut all_versioned_hashes: Vec<B256> =
-                    base.sidecar.cancun().map(|c| c.versioned_hashes.clone()).unwrap_or_default();
-                // Skip env_switch[0] (base block clone) to avoid double-counting
-                for (_, switch_data) in env_switches.iter().skip(1) {
-                    if let Some(cancun) = switch_data.sidecar.cancun() {
-                        all_versioned_hashes.extend_from_slice(&cancun.versioned_hashes);
-                    }
-                }
-                let cancun = base.sidecar.cancun().map(|c| CancunPayloadFields {
-                    versioned_hashes: all_versioned_hashes,
-                    parent_beacon_block_root: c.parent_beacon_block_root,
-                });
-                // For merged blocks, set an empty requests hash in the Prague sidecar.
-                // The correct requests_hash cannot be computed from RPC data alone
-                // (raw execution layer requests are not exposed via eth_getBlockByNumber).
-                // Use --testing.skip-requests-hash-check when validating big block payloads.
-                let prague = base
-                    .sidecar
-                    .prague()
-                    .map(|_| PraguePayloadFields::new(alloy_eips::eip7685::Requests::default()));
-                base.sidecar = match (cancun, prague) {
-                    (Some(c), Some(p)) => ExecutionPayloadSidecar::v4(c, p),
-                    (Some(c), None) => ExecutionPayloadSidecar::v3(c),
-                    _ => ExecutionPayloadSidecar::none(),
-                };
-            }
-
-            // Compute the real block hash from the mutated payload
-            let block_hash = compute_payload_block_hash(&base)?;
-            base.payload.as_v1_mut().block_hash = block_hash;
-            prev_big_block_hash = Some(block_hash);
-
-            let big_block = BigBlockPayload {
-                big_block_data: BigBlockData {
-                    env_switches,
-                    prior_block_hashes: accumulated_block_hashes.clone(),
-                    block_number: base.block_number(),
-                },
-                execution_data: base,
-                block_access_list: merged_block_access_list,
+            let big_block = BigBlockData {
+                env_switches: blocks,
+                prior_block_hashes: accumulated_block_hashes.clone(),
+                block_number: next_synthetic_block_number.unwrap_or(first_block) + big_block_idx,
+                merged_block_access_list,
             };
 
             // Accumulate real block hashes from this big block's env_switches for
             // subsequent big blocks' BLOCKHASH lookups. Cap at 256 entries since the
             // BLOCKHASH opcode only looks back 256 blocks.
-            for (_, switch_data) in &big_block.big_block_data.env_switches {
-                let block_number = switch_data.payload.as_v1().block_number;
-                let block_hash = switch_data.payload.as_v1().block_hash;
+            for switch_data in &big_block.env_switches {
+                let block_number = switch_data.block_number();
+                let block_hash = switch_data.block_hash();
                 accumulated_block_hashes.push((block_number, block_hash));
             }
             if accumulated_block_hashes.len() > 256 {
@@ -590,12 +488,12 @@ pub(crate) fn big_blocks_stream(
 
             info!(
                 target: "reth-bench",
-                block_hash = %big_block.execution_data.payload.as_v1().block_hash,
-                total_txs = %big_block.execution_data.payload.transactions().len(),
-                total_gas_used = %big_block.execution_data.payload.as_v1().gas_used,
-                env_switches = %big_block.big_block_data.env_switches.len(),
-                prior_block_hashes = %big_block.big_block_data.prior_block_hashes.len(),
-                bal_accounts = %big_block.block_access_list.as_ref().map_or(0, Vec::len),
+                block_hash = %big_block.block_hash(),
+                total_txs = %big_block.transaction_count(),
+                total_gas_used = %big_block.gas_used(),
+                env_switches = %big_block.env_switches.len(),
+                prior_block_hashes = %big_block.prior_block_hashes.len(),
+                bal_accounts = %big_block.merged_block_access_list.as_ref().map_or(0, Vec::len),
                 "Generated big block"
             );
 
@@ -606,7 +504,6 @@ pub(crate) fn big_blocks_stream(
                     block_stream,
                     accumulated_block_hashes,
                     big_block_idx,
-                    prev_big_block_hash,
                     next_synthetic_block_number,
                     reached_chain_tip,
                     first_block,

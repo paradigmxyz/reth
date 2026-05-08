@@ -81,7 +81,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         let mut blocks = payload
             .env_switches
             .into_iter()
-            .map(|(_, data)| {
+            .map(|data| {
                 PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)
             })
             .collect::<Result<Vec<SealedBlock<Block>>, NewPayloadError>>()?;
@@ -100,7 +100,8 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         // Update block's gas usage to make sure metrics are correct
         block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
 
-        // Prepend transactions from previous blocks to make sure that persistence indices are correct.
+        // Prepend transactions from previous blocks to make sure that persistence indices are
+        // correct.
         block.body.transactions = blocks
             .into_iter()
             .flat_map(|b| b.into_body().transactions)

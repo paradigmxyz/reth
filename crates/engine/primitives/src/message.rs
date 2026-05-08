@@ -1,7 +1,7 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
-use alloy_eips::eip4895::Withdrawal;
+use alloy_eips::{eip4895::Withdrawal, eip7928::BlockAccessList};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     ExecutionData, ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError,
@@ -175,23 +175,25 @@ pub struct BigBlockData<ExecutionData> {
     ///
     /// The first entry at index 0 represents the **original unmutated** base block's
     /// `ExecutionData`, which must be used to derive the initial EVM environment.
-    pub env_switches: Vec<(usize, ExecutionData)>,
+    pub env_switches: Vec<ExecutionData>,
     /// Block number → real block hash for blocks covered by previous big blocks in a sequence.
     /// When replaying chained big blocks, the BLOCKHASH opcode needs real hashes for blocks
     /// that were merged into earlier big blocks (and thus not individually persisted).
     pub prior_block_hashes: Vec<(u64, alloy_primitives::B256)>,
     /// Block number for this big block.
-    #[serde(default)]
     pub block_number: u64,
+    /// Merged block access list for this big block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_block_access_list: Option<BlockAccessList>,
 }
 
 impl ExecutionPayload for BigBlockData<ExecutionData> {
     fn parent_hash(&self) -> B256 {
-        self.env_switches[0].1.parent_hash()
+        self.env_switches[0].parent_hash()
     }
 
     fn block_hash(&self) -> B256 {
-        self.env_switches.last().unwrap().1.block_hash()
+        self.env_switches.last().unwrap().block_hash()
     }
 
     fn block_number(&self) -> u64 {
@@ -199,35 +201,35 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
     }
 
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.env_switches[0].1.withdrawals()
+        self.env_switches[0].withdrawals()
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        self.env_switches[0].1.block_access_list()
+        self.env_switches[0].block_access_list()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.env_switches[0].1.parent_beacon_block_root()
+        self.env_switches[0].parent_beacon_block_root()
     }
 
     fn timestamp(&self) -> u64 {
-        self.env_switches[0].1.timestamp()
+        self.env_switches[0].timestamp()
     }
 
     fn gas_used(&self) -> u64 {
-        self.env_switches.iter().map(|(_, data)| data.gas_used()).sum()
+        self.env_switches.iter().map(|data| data.gas_used()).sum()
     }
 
     fn gas_limit(&self) -> u64 {
-        self.env_switches[0].1.gas_limit()
+        self.env_switches[0].gas_limit()
     }
 
     fn transaction_count(&self) -> usize {
-        self.env_switches.iter().map(|(_, data)| data.transaction_count()).sum()
+        self.env_switches.iter().map(|data| data.transaction_count()).sum()
     }
 
     fn slot_number(&self) -> Option<u64> {
-        self.env_switches[0].1.payload.slot_number()
+        self.env_switches[0].payload.slot_number()
     }
 }
 
