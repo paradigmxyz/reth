@@ -4,7 +4,7 @@
 use crate::{
     bench::{
         context::BenchContext,
-        generate_big_block::big_blocks_stream,
+        generate_big_block::{big_blocks_stream, compute_payload_block_hash},
         helpers::{fetch_block_access_list, parse_duration},
         metrics_scraper::MetricsScraper,
         output::{
@@ -633,7 +633,7 @@ async fn prepare_built_block(
 
     let built_payload = built_response.execution_payload_envelope;
     let payload = &built_payload.execution_payload.payload_inner.payload_inner;
-    let block_hash = payload.block_hash;
+    let mut block_hash = payload.block_hash;
     write_bal_artifact(
         output_dir,
         "fork",
@@ -646,6 +646,8 @@ async fn prepare_built_block(
     let mut execution_data = ExecutionData { payload, sidecar };
     if let Some(block_access_list) = &built_response.block_access_list {
         execution_data.payload = payload_with_bal(execution_data.payload, block_access_list);
+        block_hash = compute_payload_block_hash(&execution_data)?;
+        execution_data.payload.as_v1_mut().block_hash = block_hash;
     }
     let artifact = BigBlockPayload {
         execution_data: execution_data.clone(),
