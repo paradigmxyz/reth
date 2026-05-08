@@ -1367,11 +1367,9 @@ where
             return
         }
 
-        // NOTE: checked non-empty above
         let highest_num_hash = blocks_to_persist
-            .iter()
-            .max_by_key(|block| block.recovered_block().number())
-            .map(|b| b.recovered_block().num_hash())
+            .last()
+            .map(|block| block.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
@@ -2086,7 +2084,6 @@ where
         // changes
         debug_assert!(!self.persistence_state.in_progress());
 
-        let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
@@ -2097,6 +2094,9 @@ where
                 canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
             }
         };
+        let mut blocks_to_persist = Vec::with_capacity(
+            target_number.saturating_sub(last_persisted_number).min(canonical_head_number) as usize,
+        );
 
         debug!(
             target: "engine::tree",
