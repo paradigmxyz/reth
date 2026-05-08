@@ -339,22 +339,23 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
-            // clear all numbers
+            let retained_numbers = persisted_height
+                .checked_add(1)
+                .map(|next_height| numbers.split_off(&next_height))
+                .unwrap_or_default();
+
+            for hash in numbers.values() {
+                blocks.remove(hash);
+            }
+
             numbers.clear();
 
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
-                .map(|(_, b)| b.block.clone())
-                .collect::<Vec<_>>();
-
-            // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
-
-            // re-insert the blocks in natural order and connect them to their parent blocks
-            for block in old_blocks {
+            // Re-insert the retained blocks in number order and connect them to retained parents.
+            for (_, hash) in retained_numbers {
+                let block = match blocks.remove(&hash) {
+                    Some(block_state) => block_state.block.clone(),
+                    None => continue,
+                };
                 let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
