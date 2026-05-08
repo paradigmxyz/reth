@@ -128,22 +128,84 @@ def main():
             print(f"Error: 'gas_used' column not found in {args.comparison_csv} (required for gas graph)", file=sys.stderr)
             sys.exit(1)
 
-    if len(df1) != len(df2):
-        print("Warning: CSV files have different number of rows. Using minimum length.", file=sys.stderr)
-        min_len = min(len(df1), len(df2))
-        df1 = df1.head(min_len)
-        df2 = df2.head(min_len)
+    has_block_numbers = 'block_number' in df1.columns and 'block_number' in df2.columns
+
+    # Prefer aligning on block_number to avoid row-index drift when CSV lengths differ
+    # (for example due to warmup/skip differences).
+    if has_block_numbers:
+        df1_aligned = df1.sort_values('block_number').drop_duplicates(subset='block_number', keep='last')
+        df2_aligned = df2.sort_values('block_number').drop_duplicates(subset='block_number', keep='last')
+
+        deduped1 = len(df1) - len(df1_aligned)
+        deduped2 = len(df2) - len(df2_aligned)
+        if deduped1 > 0 or deduped2 > 0:
+            print(
+                f"Warning: duplicate block_number rows found (baseline: {deduped1}, comparison: {deduped2}). "
+                "Keeping last occurrence per block.",
+                file=sys.stderr
+            )
+
+        merged = pd.merge(
+            df1_aligned,
+            df2_aligned,
+            on='block_number',
+            how='inner',
+            suffixes=('_baseline', '_comparison')
+        ).sort_values('block_number')
+
+        if merged.empty:
+            print("Error: No overlapping block_number values between input CSV files", file=sys.stderr)
+            sys.exit(1)
+
+        if len(merged) != len(df1_aligned) or len(merged) != len(df2_aligned):
+            print(
+                "Warning: CSV files have different block ranges. "
+                f"Using {len(merged)} overlapping blocks by block_number alignment.",
+                file=sys.stderr
+            )
+
+        block_numbers = merged['block_number'].values
+        latency1_us = merged['total_latency_baseline'].values
+        latency2_us = merged['total_latency_comparison'].values
+        if 'gas' in selected_graphs:
+            gas1 = merged['gas_used_baseline'].values
+            gas2 = merged['gas_used_comparison'].values
+    else:
+        if len(df1) != len(df2):
+            print("Warning: CSV files have different number of rows. Using minimum length.", file=sys.stderr)
+            min_len = min(len(df1), len(df2))
+            df1 = df1.head(min_len)
+            df2 = df2.head(min_len)
+        latency1_us = df1['total_latency'].values
+        latency2_us = df2['total_latency'].values
+        if 'gas' in selected_graphs:
+            gas1 = df1['gas_used'].values
+            gas2 = df2['gas_used'].values
 
     # Convert from microseconds to milliseconds for better readability
-    latency1 = df1['total_latency'].values / 1000.0
-    latency2 = df2['total_latency'].values / 1000.0
+    latency1 = latency1_us / 1000.0
+    latency2 = latency2_us / 1000.0
 
     # Handle division by zero
     with np.errstate(divide='ignore', invalid='ignore'):
         percent_diff = ((latency2 - latency1) / latency1) * 100
 
-    # Remove infinite and NaN values
-    percent_diff = percent_diff[np.isfinite(percent_diff)]
+    # Remove infinite and NaN values while keeping arrays aligned.
+    valid_mask = np.isfinite(percent_diff)
+    dropped = np.count_nonzero(~valid_mask)
+    if dropped > 0:
+        print(f"Warning: Dropping {dropped} rows with invalid percent difference values", file=sys.stderr)
+
+    percent_diff = percent_diff[valid_mask]
+    latency1 = latency1[valid_mask]
+    latency2 = latency2[valid_mask]
+    latency1_us = latency1_us[valid_mask]
+    latency2_us = latency2_us[valid_mask]
+    if 'gas' in selected_graphs:
+        gas1 = gas1[valid_mask]
+        gas2 = gas2[valid_mask]
+    if has_block_numbers:
+        block_numbers = block_numbers[valid_mask]
 
     if len(percent_diff) == 0:
         print("Error: No valid percent differences could be calculated", file=sys.stderr)
@@ -220,14 +282,13 @@ def main():
         comparison_color = 'green' if median_diff < 0 else 'red'
 
         # Apply moving average if requested
-        plot_latency1 = latency1[:len(percent_diff)]
-        plot_latency2 = latency2[:len(percent_diff)]
+        plot_latency1 = latency1
+        plot_latency2 = latency2
         
         if args.average:
             plot_latency1 = moving_average(plot_latency1, args.average)
             plot_latency2 = moving_average(plot_latency2, args.average)
-        if 'block_number' in df1.columns and 'block_number' in df2.columns:
-            block_numbers = df1['block_number'].values[:len(percent_diff)]
+        if has_block_numbers:
             ax.plot(block_numbers, plot_latency1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(block_numbers, plot_latency2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Number')
@@ -270,12 +331,8 @@ def main():
             
         # Calculate gas per second (gas/s)
         # latency is in microseconds, so convert to seconds for gas/s calculation
-        gas1 = df1['gas_used'].values[:len(percent_diff)]
-        gas2 = df2['gas_used'].values[:len(percent_diff)]
-        
-        # Convert latency from microseconds to seconds
-        latency1_sec = df1['total_latency'].values[:len(percent_diff)] / 1_000_000.0
-        latency2_sec = df2['total_latency'].values[:len(percent_diff)] / 1_000_000.0
+        latency1_sec = latency1_us / 1_000_000.0
+        latency2_sec = latency2_us / 1_000_000.0
         
         # Calculate gas per second
         gas_per_sec1 = gas1 / latency1_sec
@@ -295,8 +352,7 @@ def main():
         median_gas_per_sec2 = np.median(original_gas_per_sec2)
         comparison_color = 'green' if median_gas_per_sec2 > median_gas_per_sec1 else 'red'
         
-        if 'block_number' in df1.columns and 'block_number' in df2.columns:
-            block_numbers = df1['block_number'].values[:len(percent_diff)]
+        if has_block_numbers:
             ax.plot(block_numbers, gas_per_sec1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(block_numbers, gas_per_sec2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Number')
