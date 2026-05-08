@@ -66,7 +66,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     pub fn request_handler<Client>(
         self,
         client: Client,
-    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N>
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, crate::eth_requests::NoopBlobFetcher, N>, N>
     where
         Client: BalProvider,
     {
@@ -84,7 +84,11 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         self,
         client: Client,
         pool: Pool,
-    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, Pool, N>, N>
+    ) -> NetworkBuilder<
+        Tx,
+        EthRequestHandler<Client, crate::eth_requests::PoolBlobFetcher<Pool>, N>,
+        N,
+    >
     where
         Client: BalProvider,
         Pool: TransactionPool,
@@ -93,7 +97,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
-        let request_handler = EthRequestHandler::with_blob_fetcher(client, pool, peers, rx);
+        let request_handler = EthRequestHandler::with_pool(client, pool, peers, rx);
         NetworkBuilder { network, request_handler, transactions }
     }
 

@@ -5,7 +5,10 @@ use crate::{
     metrics::EthRequestHandlerMetrics,
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
-use alloy_eips::{eip7594::BlobCellMask, BlockHashOrNumber};
+use alloy_eips::{
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
+    BlockHashOrNumber,
+};
 use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -19,10 +22,7 @@ use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
-use reth_transaction_pool::{
-    blobstore::{BlobStoreError, BlobTransactionSidecarVariant},
-    TransactionPool,
-};
+use reth_transaction_pool::{blobstore::BlobStoreError, TransactionPool};
 use std::{
     future::Future,
     pin::Pin,
@@ -59,14 +59,20 @@ pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
-trait BlobFetcher: Clone + Send + Sync + 'static {
+/// Fetches blob sidecars for serving `eth/72` `GetCells` requests.
+pub trait BlobFetcher: Clone + Send + Sync + 'static {
+    /// Returns the blob sidecar for the given transaction hash if it is available locally.
     fn get_blob(
         &self,
         tx_hash: alloy_primitives::TxHash,
     ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 }
 
-impl BlobFetcher for () {
+#[derive(Clone, Copy, Debug, Default)]
+/// A blob fetcher that never serves any blob sidecars.
+pub struct NoopBlobFetcher;
+
+impl BlobFetcher for NoopBlobFetcher {
     fn get_blob(
         &self,
         _tx_hash: alloy_primitives::TxHash,
@@ -75,15 +81,19 @@ impl BlobFetcher for () {
     }
 }
 
-impl<P> BlobFetcher for P
+#[derive(Clone, Debug)]
+/// A [`BlobFetcher`] backed by a transaction pool.
+pub struct PoolBlobFetcher<P>(P);
+
+impl<P> BlobFetcher for PoolBlobFetcher<P>
 where
-    P: TransactionPool,
+    P: TransactionPool + 'static,
 {
     fn get_blob(
         &self,
         tx_hash: alloy_primitives::TxHash,
     ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        TransactionPool::get_blob(self, tx_hash)
+        self.0.get_blob(tx_hash)
     }
 }
 
@@ -92,7 +102,7 @@ where
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C, B = (), N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct EthRequestHandler<C, B = NoopBlobFetcher, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used to serve blob cells for `eth/72` requests.
@@ -108,10 +118,10 @@ pub struct EthRequestHandler<C, B = (), N: NetworkPrimitives = EthNetworkPrimiti
 }
 
 // === impl EthRequestHandler ===
-impl<C, N: NetworkPrimitives> EthRequestHandler<C, (), N> {
+impl<C, N: NetworkPrimitives> EthRequestHandler<C, NoopBlobFetcher, N> {
     /// Create a new instance
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
-        Self::with_blob_fetcher(client, (), peers, incoming)
+        Self::with_blob_fetcher(client, NoopBlobFetcher, peers, incoming)
     }
 }
 
@@ -130,6 +140,21 @@ impl<C, B, N: NetworkPrimitives> EthRequestHandler<C, B, N> {
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
         }
+    }
+}
+
+impl<C, P, N: NetworkPrimitives> EthRequestHandler<C, PoolBlobFetcher<P>, N>
+where
+    P: TransactionPool,
+{
+    /// Create a new instance with transaction-pool-backed blob fetching.
+    pub fn with_pool(
+        client: C,
+        pool: P,
+        peers: PeersHandle,
+        incoming: Receiver<IncomingEthRequest<N>>,
+    ) -> Self {
+        Self::with_blob_fetcher(client, PoolBlobFetcher(pool), peers, incoming)
     }
 }
 
@@ -385,11 +410,11 @@ where
             };
 
             let versioned_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();
-            let Ok(mut matches) = sidecar.match_versioned_hashes_cells(&versioned_hashes, request_mask)
+            let Ok(matches) = sidecar.match_versioned_hashes_cells(&versioned_hashes, request_mask)
             else {
                 continue;
             };
-
+            let mut matches = matches.collect::<Vec<_>>();
             matches.sort_by_key(|(idx, _)| *idx);
 
             let mut tx_cells = Vec::new();
@@ -422,11 +447,8 @@ where
             response_cells.push(tx_cells);
         }
 
-        let _ = response.send(Ok(Cells {
-            hashes: response_hashes,
-            cells: response_cells,
-            cell_mask,
-        }));
+        let _ =
+            response.send(Ok(Cells { hashes: response_hashes, cells: response_cells, cell_mask }));
     }
 }
 
@@ -637,14 +659,13 @@ mod tests {
     use super::*;
     use alloy_eips::{
         eip4844::{kzg_to_versioned_hash, Blob, Bytes48},
-        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB},
+        eip7594::{
+            BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB,
+        },
     };
     use alloy_primitives::B256;
     use reth_storage_api::noop::NoopProvider;
-    use reth_transaction_pool::{
-        blobstore::BlobStore,
-        test_utils::testing_pool,
-    };
+    use reth_transaction_pool::{blobstore::BlobStore, test_utils::testing_pool};
 
     fn eip7594_single_blob_sidecar() -> (BlobTransactionSidecarVariant, B256) {
         let blob = Blob::default();
@@ -664,7 +685,7 @@ mod tests {
         let tx_hash = B256::random();
         pool.blob_store().insert(tx_hash, sidecar).unwrap();
 
-        let handler = EthRequestHandler::with_blob_fetcher(
+        let handler = EthRequestHandler::with_pool(
             client,
             pool,
             PeersHandle::default(),

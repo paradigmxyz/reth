@@ -3,7 +3,7 @@
 use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
-    eth_requests::EthRequestHandler,
+    eth_requests::{EthRequestHandler, NoopBlobFetcher},
     protocol::IntoRlpxSubProtocol,
     transactions::{
         config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
@@ -405,7 +405,7 @@ pub struct Peer<C, Pool = TestPool> {
     #[pin]
     network: NetworkManager<EthNetworkPrimitives>,
     #[pin]
-    request_handler: Option<EthRequestHandler<C, EthNetworkPrimitives>>,
+    request_handler: Option<EthRequestHandler<C, NoopBlobFetcher, EthNetworkPrimitives>>,
     #[pin]
     transactions_manager: Option<TransactionsManager<Pool, EthNetworkPrimitives>>,
     pool: Option<Pool>,
