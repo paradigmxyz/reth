@@ -166,6 +166,21 @@ impl OrderedTrieRootEncodedBuilder {
     /// - [`OrderedRootError::DuplicateIndex`] if an item was already pushed at this index
     #[inline]
     pub fn push(&mut self, index: usize, bytes: &[u8]) -> Result<(), OrderedRootError> {
+        self.push_owned(index, bytes.to_vec())
+    }
+
+    /// Pushes an owned pre-encoded item at the given index to the builder.
+    ///
+    /// Items can be pushed in any order. The builder will automatically
+    /// flush items to the underlying [`HashBuilder`] when they become
+    /// available in the correct order.
+    ///
+    /// # Errors
+    ///
+    /// - [`OrderedRootError::IndexOutOfBounds`] if `index >= len`
+    /// - [`OrderedRootError::DuplicateIndex`] if an item was already pushed at this index
+    #[inline]
+    pub fn push_owned(&mut self, index: usize, bytes: Vec<u8>) -> Result<(), OrderedRootError> {
         if index >= self.len {
             return Err(OrderedRootError::IndexOutOfBounds { index, len: self.len });
         }
@@ -174,7 +189,7 @@ impl OrderedTrieRootEncodedBuilder {
             return Err(OrderedRootError::DuplicateIndex { index });
         }
 
-        self.push_unchecked(index, bytes);
+        self.push_owned_unchecked(index, bytes);
         Ok(())
     }
 
@@ -192,7 +207,22 @@ impl OrderedTrieRootEncodedBuilder {
         debug_assert!(index < self.len, "index {index} out of bounds for length {}", self.len);
         debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
 
-        self.pending[index] = Some(bytes.to_vec());
+        self.push_owned_unchecked(index, bytes.to_vec());
+    }
+
+    /// Pushes an owned pre-encoded item at the given index without bounds or duplicate checking.
+    ///
+    /// This avoids copying already-owned encoded payloads before they are buffered by the builder.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug mode if `index >= len`.
+    #[inline]
+    pub fn push_owned_unchecked(&mut self, index: usize, bytes: Vec<u8>) {
+        debug_assert!(index < self.len, "index {index} out of bounds for length {}", self.len);
+        debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
+
+        self.pending[index] = Some(bytes);
         self.received += 1;
 
         self.flush();
