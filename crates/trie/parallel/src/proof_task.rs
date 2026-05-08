@@ -352,7 +352,7 @@ impl ProofWorkerHandle {
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
         self.account_work_tx
-            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
+            .send(AccountWorkerJob::AccountMultiproof { input })
             .map_err(|err| {
                 let error =
                     ProviderError::other(std::io::Error::other("account workers unavailable"));
@@ -922,7 +922,7 @@ where
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
                         &mut v2_account_calculator,
                         v2_storage_calculator.clone(),
-                        *input,
+                        input,
                         &mut account_proofs_processed,
                     );
                     total_idle_time += value_encoder_stats.storage_wait_time;
@@ -1144,7 +1144,7 @@ enum AccountWorkerJob {
     /// Account multiproof computation request
     AccountMultiproof {
         /// Account multiproof input parameters
-        input: Box<AccountMultiproofInput>,
+        input: AccountMultiproofInput,
     },
 }
 
