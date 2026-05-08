@@ -5,7 +5,7 @@ use crate::{
     metrics::EthRequestHandlerMetrics,
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip7594::BlobCellMask, BlockHashOrNumber};
 use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -19,9 +19,14 @@ use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
+use reth_transaction_pool::{
+    blobstore::{BlobStoreError, BlobTransactionSidecarVariant},
+    TransactionPool,
+};
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -54,14 +59,44 @@ pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
+trait BlobFetcher: Clone + Send + Sync + 'static {
+    fn get_blob(
+        &self,
+        tx_hash: alloy_primitives::TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
+}
+
+impl BlobFetcher for () {
+    fn get_blob(
+        &self,
+        _tx_hash: alloy_primitives::TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        Ok(None)
+    }
+}
+
+impl<P> BlobFetcher for P
+where
+    P: TransactionPool,
+{
+    fn get_blob(
+        &self,
+        tx_hash: alloy_primitives::TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        TransactionPool::get_blob(self, tx_hash)
+    }
+}
+
 /// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct EthRequestHandler<C, B = (), N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
+    /// Used to serve blob cells for `eth/72` requests.
+    blob_fetcher: B,
     /// Used for reporting peers.
     // TODO use to report spammers
     #[expect(dead_code)]
@@ -73,11 +108,24 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 }
 
 // === impl EthRequestHandler ===
-impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
+impl<C, N: NetworkPrimitives> EthRequestHandler<C, (), N> {
     /// Create a new instance
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
+        Self::with_blob_fetcher(client, (), peers, incoming)
+    }
+}
+
+impl<C, B, N: NetworkPrimitives> EthRequestHandler<C, B, N> {
+    /// Create a new instance with blob-backed cell serving support.
+    pub fn with_blob_fetcher(
+        client: C,
+        blob_fetcher: B,
+        peers: PeersHandle,
+        incoming: Receiver<IncomingEthRequest<N>>,
+    ) -> Self {
         Self {
             client,
+            blob_fetcher,
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
@@ -85,10 +133,11 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     }
 }
 
-impl<C, N> EthRequestHandler<C, N>
+impl<C, B, N> EthRequestHandler<C, B, N>
 where
     N: NetworkPrimitives,
     C: BlockReader,
+    B: BlobFetcher,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
@@ -318,14 +367,70 @@ where
     fn on_cells_request(
         &self,
         _peer_id: PeerId,
-        _request: GetCells,
+        request: GetCells,
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
-        let _ = response.send(Ok(Cells::default()));
+        let GetCells { hashes, cell_mask } = request;
+        let request_mask = BlobCellMask::new(cell_mask);
+        let mut response_hashes = Vec::new();
+        let mut response_cells = Vec::new();
+        let mut total_bytes = 0usize;
+
+        for tx_hash in hashes {
+            let Ok(Some(sidecar)) = self.blob_fetcher.get_blob(tx_hash) else {
+                continue;
+            };
+            let Some(sidecar) = sidecar.as_eip7594() else {
+                continue;
+            };
+
+            let versioned_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();
+            let Ok(mut matches) = sidecar.match_versioned_hashes_cells(&versioned_hashes, request_mask)
+            else {
+                continue;
+            };
+
+            matches.sort_by_key(|(idx, _)| *idx);
+
+            let mut tx_cells = Vec::new();
+            let mut complete = matches.len() == versioned_hashes.len();
+            for (_, cells_and_proofs) in matches {
+                for cell in cells_and_proofs.blob_cells {
+                    let Some(cell) = cell else {
+                        complete = false;
+                        break;
+                    };
+                    tx_cells.push(cell);
+                }
+
+                if !complete {
+                    break;
+                }
+            }
+
+            if !complete {
+                continue;
+            }
+
+            let tx_cells_len = tx_cells.length();
+            if total_bytes + tx_cells_len > SOFT_RESPONSE_LIMIT {
+                break;
+            }
+
+            total_bytes += tx_cells_len;
+            response_hashes.push(tx_hash);
+            response_cells.push(tx_cells);
+        }
+
+        let _ = response.send(Ok(Cells {
+            hashes: response_hashes,
+            cells: response_cells,
+            cell_mask,
+        }));
     }
 }
 
-impl<C, N> EthRequestHandler<C, N>
+impl<C, B, N> EthRequestHandler<C, B, N>
 where
     N: NetworkPrimitives,
     C: BalProvider,
@@ -371,13 +476,14 @@ fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLi
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
-impl<C, N> Future for EthRequestHandler<C, N>
+impl<C, B, N> Future for EthRequestHandler<C, B, N>
 where
     N: NetworkPrimitives,
     C: BalProvider
         + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
+    B: BlobFetcher + Unpin,
 {
     type Output = ();
 
@@ -524,4 +630,60 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel sender for the response containing cells.
         response: oneshot::Sender<RequestResult<Cells>>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::{
+        eip4844::{kzg_to_versioned_hash, Blob, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB},
+    };
+    use alloy_primitives::B256;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_transaction_pool::{
+        blobstore::BlobStore,
+        test_utils::testing_pool,
+    };
+
+    fn eip7594_single_blob_sidecar() -> (BlobTransactionSidecarVariant, B256) {
+        let blob = Blob::default();
+        let commitment = Bytes48::default();
+        let cell_proofs = vec![Bytes48::default(); CELLS_PER_EXT_BLOB];
+        let versioned_hash = kzg_to_versioned_hash(commitment.as_slice());
+        let sidecar = BlobTransactionSidecarEip7594::new(vec![blob], vec![commitment], cell_proofs);
+
+        (BlobTransactionSidecarVariant::Eip7594(sidecar), versioned_hash)
+    }
+
+    #[test]
+    fn serves_requested_cells_from_blob_pool() {
+        let client = NoopProvider::default();
+        let pool = testing_pool();
+        let (sidecar, versioned_hash) = eip7594_single_blob_sidecar();
+        let tx_hash = B256::random();
+        pool.blob_store().insert(tx_hash, sidecar).unwrap();
+
+        let handler = EthRequestHandler::with_blob_fetcher(
+            client,
+            pool,
+            PeersHandle::default(),
+            tokio::sync::mpsc::channel(1).1,
+        );
+        let (tx, rx) = oneshot::channel();
+        let cell_mask = ((1u128 << 0) | (1u128 << 7)).into();
+
+        handler.on_cells_request(
+            PeerId::random(),
+            GetCells { hashes: vec![tx_hash, B256::ZERO], cell_mask },
+            tx,
+        );
+
+        let response = rx.blocking_recv().unwrap().unwrap();
+        assert_eq!(response.hashes, vec![tx_hash]);
+        assert_eq!(response.cell_mask, cell_mask);
+        assert_eq!(response.cells.len(), 1);
+        assert_eq!(response.cells[0].len(), 2);
+        assert_ne!(versioned_hash, B256::ZERO);
+    }
 }
