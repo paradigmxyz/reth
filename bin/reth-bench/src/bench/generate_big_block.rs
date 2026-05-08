@@ -450,7 +450,7 @@ pub(crate) fn big_blocks_stream(
                         merged_block_access_list.get_or_insert_with(Default::default),
                         block_access_list,
                         cumulative_tx_count as u64,
-                        block_idx,
+                        segment_idx as u64,
                     );
                 }
 
