@@ -245,7 +245,9 @@ impl Command {
                             };
 
 
-                        let fetched_bal = if !rlp_blocks {
+                        let should_fetch_bal =
+                            block.header.block_access_list_hash.is_some() || self.enable_bal;
+                        let bal = if !rlp_blocks && should_fetch_bal {
                             match fetch_block_access_list(&block_provider, block.header.number).await {
                                 Ok(bal) => {
                                     write_bal_artifact(
@@ -276,11 +278,13 @@ impl Command {
                                 }
                             }
                         } else {
-                            None
-                        };
-                        let bal = if block.header.block_access_list_hash.is_some() || self.enable_bal {
-                            fetched_bal
-                        } else {
+                            write_bal_artifact(
+                                artifact_output_dir.as_deref(),
+                                "real",
+                                block.header.number,
+                                block.header.hash,
+                                None,
+                            )?;
                             None
                         };
 
