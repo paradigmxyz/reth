@@ -228,6 +228,17 @@ pub struct BigBlockPayload {
     pub block_access_list: Option<BlockAccessList>,
 }
 
+/// State used to continue generated big block replay from the benchmark node's current tip.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BigBlocksInitialState {
+    /// Real block hashes from previous big blocks, used for BLOCKHASH lookups.
+    pub prior_block_hashes: Vec<(u64, B256)>,
+    /// Hash of the previous synthetic big block.
+    pub parent_hash: B256,
+    /// Block number to assign to the first generated synthetic block.
+    pub next_synthetic_block_number: u64,
+}
+
 /// `reth bench generate-big-block` command
 ///
 /// Generates a large block by fetching consecutive blocks from an RPC, merging their
@@ -328,7 +339,7 @@ impl Command {
             .buffered(prefetch_buffer);
 
         let mut big_blocks_stream =
-            Box::pin(big_blocks_stream(self.num_big_blocks, self.target_gas, block_stream));
+            Box::pin(big_blocks_stream(self.num_big_blocks, self.target_gas, block_stream, None));
 
         while let Some(big_block) = big_blocks_stream.next().await {
             let big_block = big_block?;
@@ -346,11 +357,6 @@ impl Command {
                 target: "reth-bench",
                 path = %filepath.display(),
                 block_hash = %block_hash,
-                total_txs = big_block.execution_data.payload.transactions().len(),
-                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
-                env_switches = big_block.big_block_data.env_switches.len(),
-                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
-                bal_accounts = big_block.block_access_list.as_ref().map_or(0, Vec::len),
                 "Big block payload saved"
             );
         }
@@ -365,14 +371,24 @@ pub(crate) fn big_blocks_stream(
     target_gas: u64,
     block_stream: impl Stream<Item = eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>>>
         + Unpin,
+    initial_state: Option<BigBlocksInitialState>,
 ) -> impl Stream<Item = eyre::Result<BigBlockPayload>> {
     futures::stream::try_unfold(
-        (block_stream, Vec::new(), 0, None, false, 0),
+        (
+            block_stream,
+            initial_state.as_ref().map(|s| s.prior_block_hashes.clone()).unwrap_or_default(),
+            0,
+            initial_state.as_ref().map(|s| s.parent_hash),
+            initial_state.as_ref().map(|s| s.next_synthetic_block_number),
+            false,
+            0,
+        ),
         move |(
             mut block_stream,
             mut accumulated_block_hashes,
             mut big_block_idx,
             mut prev_big_block_hash,
+            next_synthetic_block_number,
             mut reached_chain_tip,
             mut first_block,
         )| async move {
@@ -392,8 +408,6 @@ pub(crate) fn big_blocks_stream(
             let mut accumulated_block_gas: u64 = 0;
 
             while accumulated_block_gas < target_gas {
-                info!(target: "reth-bench", big_block = big_block_idx, "Awaiting prefetched block");
-
                 let (block, block_access_list) = match block_stream.next().await {
                     Some(Ok(Some(fetched))) => fetched,
                     Some(Ok(None)) => {
@@ -429,14 +443,6 @@ pub(crate) fn big_blocks_stream(
                 let execution_data = ExecutionData { payload, sidecar };
 
                 let block_gas = execution_data.payload.as_v1().gas_used;
-
-                info!(
-                    target: "reth-bench",
-                    block_number = block.header.number,
-                    gas_used = block_gas,
-                    tx_count = execution_data.payload.transactions().len(),
-                    "Fetched block"
-                );
 
                 accumulated_block_gas += block_gas;
                 blocks.push(execution_data);
@@ -520,7 +526,9 @@ pub(crate) fn big_blocks_stream(
                 base.payload.as_v1_mut().parent_hash = prev_hash;
                 // First big block keeps its original block number (from_block).
                 // Subsequent big blocks increment from there.
-                base.payload.as_v1_mut().block_number = first_block + big_block_idx;
+                let synthetic_block_number =
+                    next_synthetic_block_number.unwrap_or(first_block) + big_block_idx;
+                base.payload.as_v1_mut().block_number = synthetic_block_number;
             }
 
             // Merge blob data from all constituent blocks:  concatenate versioned
@@ -580,6 +588,17 @@ pub(crate) fn big_blocks_stream(
                 accumulated_block_hashes.drain(..excess);
             }
 
+            info!(
+                target: "reth-bench",
+                block_hash = %big_block.execution_data.payload.as_v1().block_hash,
+                total_txs = %big_block.execution_data.payload.transactions().len(),
+                total_gas_used = %big_block.execution_data.payload.as_v1().gas_used,
+                env_switches = %big_block.big_block_data.env_switches.len(),
+                prior_block_hashes = %big_block.big_block_data.prior_block_hashes.len(),
+                bal_accounts = %big_block.block_access_list.as_ref().map_or(0, Vec::len),
+                "Generated big block"
+            );
+
             big_block_idx += 1;
             Ok(Some((
                 big_block,
@@ -588,6 +607,7 @@ pub(crate) fn big_blocks_stream(
                     accumulated_block_hashes,
                     big_block_idx,
                     prev_big_block_hash,
+                    next_synthetic_block_number,
                     reached_chain_tip,
                     first_block,
                 ),
