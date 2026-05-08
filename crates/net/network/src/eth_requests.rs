@@ -684,13 +684,11 @@ mod tests {
         let (sidecar, versioned_hash) = eip7594_single_blob_sidecar();
         let tx_hash = B256::random();
         pool.blob_store().insert(tx_hash, sidecar).unwrap();
+        let (peer_tx, _peer_rx) = tokio::sync::mpsc::unbounded_channel();
+        let peers = PeersHandle::new(peer_tx);
 
-        let handler = EthRequestHandler::with_pool(
-            client,
-            pool,
-            PeersHandle::default(),
-            tokio::sync::mpsc::channel(1).1,
-        );
+        let handler =
+            EthRequestHandler::with_pool(client, pool, peers, tokio::sync::mpsc::channel(1).1);
         let (tx, rx) = oneshot::channel();
         let cell_mask = ((1u128 << 0) | (1u128 << 7)).into();
 
