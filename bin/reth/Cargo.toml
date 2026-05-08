@@ -81,7 +81,7 @@ toml.workspace = true
 
 [features]
 default = [
-    "jemalloc",
+   # "jemalloc",
     "otlp",
     "otlp-logs",
     "reth-revm/portable",

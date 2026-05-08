@@ -4,7 +4,7 @@ use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    Bytes, TxHash, B256, U128,
+    Bytes, TxHash, B128, B256, U128,
 };
 use alloy_rlp::{
     Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
@@ -215,6 +215,8 @@ pub enum NewPooledTransactionHashes {
     ///
     /// Note: it is assumed that the payload is valid (all vectors have the same length)
     Eth68(NewPooledTransactionHashes68),
+    /// A list of transaction hashes valid from [72..]
+    Eth72(NewPooledTransactionHashes72),
 }
 
 // === impl NewPooledTransactionHashes ===
@@ -225,6 +227,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(_) => EthVersion::Eth66,
             Self::Eth68(_) => EthVersion::Eth68,
+            Self::Eth72(_) => EthVersion::Eth72,
         }
     }
 
@@ -237,12 +240,11 @@ impl NewPooledTransactionHashes {
             Self::Eth68(_) => {
                 matches!(
                     version,
-                    EthVersion::Eth68 |
-                        EthVersion::Eth69 |
-                        EthVersion::Eth70 |
-                        EthVersion::Eth71 |
-                        EthVersion::Eth72
+                    EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71
                 )
+            }
+            Self::Eth72(_) => {
+                matches!(version, EthVersion::Eth72)
             }
         }
     }
@@ -252,6 +254,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.iter(),
             Self::Eth68(msg) => msg.hashes.iter(),
+            Self::Eth72(msg) => msg.hashes.iter(),
         }
     }
 
@@ -260,6 +263,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => &msg.0,
             Self::Eth68(msg) => &msg.hashes,
+            Self::Eth72(msg) => &msg.hashes,
         }
     }
 
@@ -268,6 +272,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => &mut msg.0,
             Self::Eth68(msg) => &mut msg.hashes,
+            Self::Eth72(msg) => &mut msg.hashes,
         }
     }
 
@@ -276,6 +281,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.0,
             Self::Eth68(msg) => msg.hashes,
+            Self::Eth72(msg) => msg.hashes,
         }
     }
 
@@ -284,6 +290,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.into_iter(),
             Self::Eth68(msg) => msg.hashes.into_iter(),
+            Self::Eth72(msg) => msg.hashes.into_iter(),
         }
     }
 
@@ -297,6 +304,11 @@ impl NewPooledTransactionHashes {
                 msg.sizes.truncate(len);
                 msg.hashes.truncate(len);
             }
+            Self::Eth72(msg) => {
+                msg.types.truncate(len);
+                msg.sizes.truncate(len);
+                msg.hashes.truncate(len);
+            }
         }
     }
 
@@ -305,6 +317,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.0.is_empty(),
             Self::Eth68(msg) => msg.hashes.is_empty(),
+            Self::Eth72(msg) => msg.hashes.is_empty(),
         }
     }
 
@@ -313,6 +326,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.0.len(),
             Self::Eth68(msg) => msg.hashes.len(),
+            Self::Eth72(msg) => msg.hashes.len(),
         }
     }
 
@@ -321,6 +335,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(_) => None,
             Self::Eth68(msg) => Some(msg),
+            Self::Eth72(_) => None,
         }
     }
 
@@ -329,6 +344,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(_) => None,
             Self::Eth68(msg) => Some(msg),
+            Self::Eth72(_) => None,
         }
     }
 
@@ -337,6 +353,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => Some(msg),
             Self::Eth68(_) => None,
+            Self::Eth72(_) => None,
         }
     }
 
@@ -345,6 +362,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(_) => None,
             Self::Eth68(msg) => Some(mem::take(msg)),
+            Self::Eth72(_) => None,
         }
     }
 
@@ -353,6 +371,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),
             Self::Eth68(_) => None,
+            Self::Eth72(_) => None,
         }
     }
 }
@@ -362,6 +381,7 @@ impl<N: NetworkPrimitives> From<NewPooledTransactionHashes> for EthMessage<N> {
         match value {
             NewPooledTransactionHashes::Eth66(msg) => Self::NewPooledTransactionHashes66(msg),
             NewPooledTransactionHashes::Eth68(msg) => Self::NewPooledTransactionHashes68(msg),
+            NewPooledTransactionHashes::Eth72(msg) => Self::NewPooledTransactionHashes72(msg),
         }
     }
 }
@@ -584,6 +604,175 @@ impl Decodable for NewPooledTransactionHashes68 {
     }
 }
 
+/// Same as [`NewPooledTransactionHashes68`] but adds cell mask of B128.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NewPooledTransactionHashes72 {
+    /// Transaction types for new transactions that have appeared on the network.
+    ///
+    /// ## Note on RLP encoding and decoding
+    ///
+    /// In the [eth/72 spec](https://eips.ethereum.org/EIPS/eip-8070#specification) this is defined
+    /// the following way:
+    ///  * `[types: B, [size_0: P, size_1: P, ...], [hash_0: B_32, hash_1: B_32, ...], cell_mask:
+    ///    B_16]`
+    pub types: Vec<u8>,
+    /// Transaction sizes for new transactions that have appeared on the network.
+    pub sizes: Vec<usize>,
+    /// Transaction hashes for new transactions that have appeared on the network.
+    pub hashes: Vec<B256>,
+    /// Cell mask for new transactions that have appeared on the network.
+    pub cell_mask: B128,
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
+    type Parameters = ();
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
+        // Generate a single random length for all vectors
+        let vec_length = any::<usize>().prop_map(|x| x % 100 + 1); // Lengths between 1 and 100
+
+        vec_length
+            .prop_flat_map(|len| {
+                // Use the generated length to create vectors of TxType, usize, and B256
+                let types_vec = vec(
+                    proptest_arbitrary_interop::arb::<reth_ethereum_primitives::TxType>()
+                        .prop_map(|ty| ty as u8),
+                    len..=len,
+                );
+
+                // Map the usize values to the range 0..131072(0x20000)
+                let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
+                let hashes_vec = vec(any::<B256>(), len..=len);
+                let cell_mask = any::<B128>();
+
+                (types_vec, sizes_vec, hashes_vec, cell_mask)
+            })
+            .prop_map(|(types, sizes, hashes, cell_mask)| Self { types, sizes, hashes, cell_mask })
+            .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+impl NewPooledTransactionHashes72 {
+    /// Returns an iterator over tx hashes zipped with corresponding metadata.
+    pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
+        self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
+    }
+
+    /// Appends a transaction
+    pub fn push<T: SignedTransaction>(&mut self, tx: &T) {
+        self.hashes.push(*tx.tx_hash());
+        self.sizes.push(tx.encode_2718_len());
+        self.types.push(tx.ty());
+    }
+
+    /// Appends the provided transactions
+    pub fn extend<'a, T: SignedTransaction>(&mut self, txs: impl IntoIterator<Item = &'a T>) {
+        for tx in txs {
+            self.push(tx);
+        }
+    }
+
+    /// Shrinks the capacity of the message vectors as much as possible.
+    pub fn shrink_to_fit(&mut self) {
+        self.hashes.shrink_to_fit();
+        self.sizes.shrink_to_fit();
+        self.types.shrink_to_fit()
+    }
+
+    /// Consumes and appends a transaction
+    pub fn with_transaction<T: SignedTransaction>(mut self, tx: &T) -> Self {
+        self.push(tx);
+        self
+    }
+
+    /// Consumes and appends the provided transactions
+    pub fn with_transactions<'a, T: SignedTransaction>(
+        mut self,
+        txs: impl IntoIterator<Item = &'a T>,
+    ) -> Self {
+        self.extend(txs);
+        self
+    }
+}
+
+impl Encodable for NewPooledTransactionHashes72 {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        #[derive(RlpEncodable)]
+        struct EncodableNewPooledTransactionHashes72<'a> {
+            types: &'a [u8],
+            sizes: &'a Vec<usize>,
+            hashes: &'a Vec<B256>,
+            cell_mask: &'a B128,
+        }
+
+        let encodable = EncodableNewPooledTransactionHashes72 {
+            types: &self.types[..],
+            sizes: &self.sizes,
+            hashes: &self.hashes,
+            cell_mask: &self.cell_mask,
+        };
+
+        encodable.encode(out);
+    }
+    fn length(&self) -> usize {
+        #[derive(RlpEncodable)]
+        struct EncodableNewPooledTransactionHashes72<'a> {
+            types: &'a [u8],
+            sizes: &'a Vec<usize>,
+            hashes: &'a Vec<B256>,
+            cell_mask: &'a B128,
+        }
+
+        let encodable = EncodableNewPooledTransactionHashes72 {
+            types: &self.types[..],
+            sizes: &self.sizes,
+            hashes: &self.hashes,
+            cell_mask: &self.cell_mask,
+        };
+
+        encodable.length()
+    }
+}
+
+impl Decodable for NewPooledTransactionHashes72 {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        #[derive(RlpDecodable)]
+        struct EncodableNewPooledTransactionHashes72 {
+            types: Bytes,
+            sizes: Vec<usize>,
+            hashes: Vec<B256>,
+            cell_mask: B128,
+        }
+
+        let encodable = EncodableNewPooledTransactionHashes72::decode(buf)?;
+        let msg = Self {
+            types: encodable.types.into(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+            cell_mask: encodable.cell_mask,
+        };
+
+        if msg.hashes.len() != msg.types.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.types.len(),
+            })
+        }
+        if msg.hashes.len() != msg.sizes.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.sizes.len(),
+            })
+        }
+
+        Ok(msg)
+    }
+}
+
 /// Validation pass that checks for unique transaction hashes.
 pub trait DedupPayload {
     /// Value type in [`PartiallyValidData`] map.
@@ -602,6 +791,9 @@ pub trait DedupPayload {
 /// Value in [`PartiallyValidData`] map obtained from an announcement.
 pub type Eth68TxMetadata = Option<(u8, usize)>;
 
+/// Value in [`PartiallyValidData`] map obtained from an announcement.
+pub type Eth72TxMetadata = Option<(u8, usize)>;
+
 impl DedupPayload for NewPooledTransactionHashes {
     type Value = Eth68TxMetadata;
 
@@ -617,7 +809,34 @@ impl DedupPayload for NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.dedup(),
             Self::Eth68(msg) => msg.dedup(),
+            Self::Eth72(msg) => msg.dedup(),
         }
+    }
+}
+
+impl DedupPayload for NewPooledTransactionHashes72 {
+    type Value = Eth72TxMetadata;
+
+    fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    fn dedup(self) -> PartiallyValidData<Self::Value> {
+        let Self { hashes, mut sizes, mut types, mut cell_mask } = self;
+
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+
+        for hash in hashes.into_iter().rev() {
+            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
+                deduped_data.insert(hash, Some((ty, size)));
+            }
+        }
+
+        PartiallyValidData::from_raw_data_eth68(deduped_data)
     }
 }
 
@@ -897,6 +1116,12 @@ impl InMemorySize for NewPooledTransactionHashes {
                 msg.types.len() * core::mem::size_of::<u8>() +
                     msg.sizes.len() * core::mem::size_of::<usize>() +
                     msg.hashes.len() * core::mem::size_of::<B256>()
+            }
+            Self::Eth72(msg) => {
+                msg.types.len() * core::mem::size_of::<u8>() +
+                    msg.sizes.len() * core::mem::size_of::<usize>() +
+                    msg.hashes.len() * core::mem::size_of::<B256>() +
+                    core::mem::size_of::<B128>()
             }
         }
     }

@@ -294,6 +294,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
+            EthMessage::NewPooledTransactionHashes72(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
             }
