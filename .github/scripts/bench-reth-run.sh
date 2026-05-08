@@ -11,6 +11,8 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_PERF_STAT (true to collect perf stat counters during measured run)
+#               BENCH_PERF_STAT_EVENTS (perf event list, default: task-clock,cycles,...)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 #               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
@@ -28,9 +30,72 @@ mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+PERF_STAT_EVENTS="${BENCH_PERF_STAT_EVENTS:-task-clock,cycles,instructions,branches,branch-misses,cache-references,cache-misses,context-switches,cpu-migrations,page-faults,major-faults}"
+
+start_perf_stat() {
+  if [ "${BENCH_PERF_STAT:-false}" != "true" ]; then
+    return
+  fi
+
+  if ! command -v perf >/dev/null 2>&1; then
+    echo "::error::BENCH_PERF_STAT requested but perf is not installed"
+    exit 1
+  fi
+
+  local node_process_name
+  node_process_name="$(basename "$BINARY")"
+  local reth_pid=""
+  for _ in $(seq 1 10); do
+    reth_pid="$(sudo pgrep -n -x "$node_process_name" 2>/dev/null || true)"
+    if [ -n "$reth_pid" ]; then
+      break
+    fi
+    sleep 1
+  done
+  if [ -z "$reth_pid" ]; then
+    echo "::error::BENCH_PERF_STAT requested but no ${node_process_name} process was found"
+    exit 1
+  fi
+
+  echo "Starting perf stat for ${node_process_name} pid ${reth_pid}..."
+  sudo perf stat \
+    -x, \
+    -e "$PERF_STAT_EVENTS" \
+    -p "$reth_pid" \
+    -o "$OUTPUT_DIR/perf-stat.csv" \
+    -- sleep infinity &
+  PERF_PID=$!
+  sleep 0.5
+  if ! kill -0 "$PERF_PID" 2>/dev/null; then
+    wait "$PERF_PID" 2>/dev/null || true
+    echo "::error::perf stat exited before benchmark started"
+    exit 1
+  fi
+}
+
+stop_perf_stat() {
+  if [ -n "${PERF_PID:-}" ] && kill -0 "$PERF_PID" 2>/dev/null; then
+    echo "Stopping perf stat..."
+    sudo kill -INT "$PERF_PID" 2>/dev/null || kill -INT "$PERF_PID" 2>/dev/null || true
+    for i in $(seq 1 30); do
+      kill -0 "$PERF_PID" 2>/dev/null || break
+      if [ $((i % 10)) -eq 0 ]; then
+        echo "Waiting for perf stat to finish writing... (${i}s)"
+      fi
+      sleep 1
+    done
+    if kill -0 "$PERF_PID" 2>/dev/null; then
+      echo "perf stat still running after 30s, killing..."
+      sudo kill -TERM "$PERF_PID" 2>/dev/null || kill -TERM "$PERF_PID" 2>/dev/null || true
+    fi
+    wait "$PERF_PID" 2>/dev/null || true
+    PERF_PID=
+  fi
+}
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
+  stop_perf_stat
   # Stop tracy-capture first (SIGINT makes it disconnect and flush to disk)
   # Must happen before killing reth, otherwise reth keeps streaming data.
   if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
@@ -82,6 +147,7 @@ cleanup() {
 }
 TAIL_PID=
 TRACY_PID=
+PERF_PID=
 trap cleanup EXIT
 
 # Clean up stale state from a previous cancelled run.
@@ -304,6 +370,7 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     TRACY_PID=$!
     sleep 0.5  # give tracy-capture time to connect
   fi
+  start_perf_stat
 
   if [ "${BENCH_BLOCKS:-0}" -le 0 ] 2>/dev/null; then
     echo "::error::BENCH_BLOCKS must be greater than 0 for big-block benchmarks"
@@ -318,6 +385,7 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+  stop_perf_stat
 else
   # Standard mode: warmup + new-payload-fcu
   WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
@@ -340,6 +408,7 @@ else
     TRACY_PID=$!
     sleep 0.5  # give tracy-capture time to connect
   fi
+  start_perf_stat
 
   # Benchmark
   $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
@@ -349,6 +418,7 @@ else
     --advance "$BENCH_BLOCKS" \
     "${EXTRA_BENCH_ARGS[@]}" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+  stop_perf_stat
 fi
 
 # cleanup runs via trap

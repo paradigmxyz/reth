@@ -10,7 +10,8 @@
 # Optional env: BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
-#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ
+#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_PERF_STAT, BENCH_PERF_STAT_EVENTS
 set -euxo pipefail
 
 LABEL="$1"
@@ -21,6 +22,68 @@ mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+PERF_STAT_EVENTS="${BENCH_PERF_STAT_EVENTS:-task-clock,cycles,instructions,branches,branch-misses,cache-references,cache-misses,context-switches,cpu-migrations,page-faults,major-faults}"
+
+start_perf_stat() {
+  if [ "${BENCH_PERF_STAT:-false}" != "true" ]; then
+    return
+  fi
+
+  if ! command -v perf >/dev/null 2>&1; then
+    echo "::error::BENCH_PERF_STAT requested but perf is not installed"
+    exit 1
+  fi
+
+  local node_process_name
+  node_process_name="$(basename "$BINARY")"
+  local reth_pid=""
+  for _ in $(seq 1 10); do
+    reth_pid="$(sudo pgrep -n -x "$node_process_name" 2>/dev/null || true)"
+    if [ -n "$reth_pid" ]; then
+      break
+    fi
+    sleep 1
+  done
+  if [ -z "$reth_pid" ]; then
+    echo "::error::BENCH_PERF_STAT requested but no ${node_process_name} process was found"
+    exit 1
+  fi
+
+  echo "Starting perf stat for ${node_process_name} pid ${reth_pid}..."
+  sudo perf stat \
+    -x, \
+    -e "$PERF_STAT_EVENTS" \
+    -p "$reth_pid" \
+    -o "$OUTPUT_DIR/perf-stat.csv" \
+    -- sleep infinity &
+  PERF_PID=$!
+  sleep 0.5
+  if ! kill -0 "$PERF_PID" 2>/dev/null; then
+    wait "$PERF_PID" 2>/dev/null || true
+    echo "::error::perf stat exited before benchmark started"
+    exit 1
+  fi
+}
+
+stop_perf_stat() {
+  if [ -n "${PERF_PID:-}" ] && kill -0 "$PERF_PID" 2>/dev/null; then
+    echo "Stopping perf stat..."
+    sudo kill -INT "$PERF_PID" 2>/dev/null || kill -INT "$PERF_PID" 2>/dev/null || true
+    for i in $(seq 1 30); do
+      kill -0 "$PERF_PID" 2>/dev/null || break
+      if [ $((i % 10)) -eq 0 ]; then
+        echo "Waiting for perf stat to finish writing... (${i}s)"
+      fi
+      sleep 1
+    done
+    if kill -0 "$PERF_PID" 2>/dev/null; then
+      echo "perf stat still running after 30s, killing..."
+      sudo kill -TERM "$PERF_PID" 2>/dev/null || kill -TERM "$PERF_PID" 2>/dev/null || true
+    fi
+    wait "$PERF_PID" 2>/dev/null || true
+    PERF_PID=
+  fi
+}
 
 # Unsupported txgen-path behavior is made explicit here. Keep these checks near
 # the top so new txgen support can be added one feature at a time.
@@ -35,6 +98,7 @@ fi
 
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
+  stop_perf_stat
   if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
     echo "Stopping tracy-capture..."
     kill -INT "$TRACY_PID" 2>/dev/null || true
@@ -72,6 +136,7 @@ cleanup() {
 }
 TAIL_PID=
 TRACY_PID=
+PERF_PID=
 trap cleanup EXIT
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
@@ -278,6 +343,7 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   TRACY_PID=$!
   sleep 0.5
 fi
+start_perf_stat
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
 # TODO(txgen): support reth-bb payload/env-switch/BAL replay so big-blocks can move here.
@@ -289,5 +355,6 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   "${TXGEN_SEND_ARGS[@]}" \
   --wait-for-persistence never \
   --report json:"$OUTPUT_DIR/report.json" 2>&1 | sed -u "s/^/[bench] /"
+stop_perf_stat
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"

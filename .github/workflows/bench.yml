@@ -66,6 +66,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      perf_stat:
+        description: "Collect perf stat counters during measured runs"
+        required: false
+        default: "false"
+        type: boolean
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
@@ -121,6 +126,7 @@ jobs:
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
+      perf-stat: ${{ steps.args.outputs.perf-stat }}
       slack: ${{ steps.args.outputs.slack }}
       cores: ${{ steps.args.outputs.cores }}
       big-blocks: ${{ steps.args.outputs.big-blocks }}
@@ -163,8 +169,8 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
-            let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [perf-stat] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            let pr, actor, blocks, warmup, baseline, feature, samply, perfStat, cores, bigBlocks, bal;
             let bigBlocksTargetGas = '';
             let explicitWarmup = false;
 
@@ -184,6 +190,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
+              perfStat = '${{ github.event.inputs.perf_stat }}' === 'true' ? 'true' : 'false';
               var slack = '${{ github.event.inputs.slack }}' || 'never';
               cores = '${{ github.event.inputs.cores }}' || '0';
               const parsedBigBlocks = parseBigBlocks('${{ github.event.inputs.big_blocks }}');
@@ -220,12 +227,12 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['warmup', 'cores', 'blocks']);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply']);
+              const boolArgs = new Set(['samply', 'perf-stat']);
               const boolDefaultTrue = new Set(['abba']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', 'perf-stat': 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -317,6 +324,7 @@ jobs:
               baseline = defaults.baseline;
               feature = defaults.feature;
               samply = defaults.samply;
+              perfStat = defaults['perf-stat'];
               var slack = defaults.slack;
               cores = defaults.cores;
               const parsedBigBlocks = parseBigBlocks(defaults['big-blocks']);
@@ -385,6 +393,7 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
+            core.setOutput('perf-stat', perfStat);
             core.setOutput('slack', slack);
             core.setOutput('cores', cores);
             core.setOutput('big-blocks', bigBlocks);
@@ -459,6 +468,8 @@ jobs:
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const perfStatEnabled = '${{ steps.args.outputs.perf-stat }}' === 'true';
+            const perfStatNote = perfStatEnabled ? ', perf-stat: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
@@ -477,7 +488,7 @@ jobs:
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${perfStatNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -506,6 +517,8 @@ jobs:
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const perfStatEnabled = '${{ steps.args.outputs.perf-stat }}' === 'true';
+            const perfStatNote = perfStatEnabled ? ', perf-stat: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
@@ -524,7 +537,7 @@ jobs:
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${perfStatNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -591,6 +604,7 @@ jobs:
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
+      BENCH_PERF_STAT: ${{ needs.reth-bench-ack.outputs.perf-stat }}
       BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
       BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
       BENCH_BIG_BLOCKS_TARGET_GAS: ${{ needs.reth-bench-ack.outputs.big-blocks-target-gas }}
@@ -666,6 +680,8 @@ jobs:
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const bal = process.env.BENCH_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const perfStatEnabled = process.env.BENCH_PERF_STAT === 'true';
+            const perfStatNote = perfStatEnabled ? ', perf-stat: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
@@ -684,7 +700,7 @@ jobs:
             const driverReason = process.env.BENCH_DRIVER_REASON || '';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${perfStatNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -745,6 +761,11 @@ jobs:
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
 
+          if [ "${BENCH_PERF_STAT:-false}" = "true" ] && ! command -v perf &>/dev/null; then
+            echo "::error::perf stat requested but perf is unavailable after installing linux-tools"
+            exit 1
+          fi
+
       # Verify all required tools are available
       - name: Check dependencies
         run: |
@@ -755,6 +776,9 @@ jobs:
           for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
+          if [ "${BENCH_PERF_STAT:-false}" = "true" ]; then
+            command -v perf &>/dev/null || missing+=("perf")
+          fi
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required tools: ${missing[*]}"
             exit 1
