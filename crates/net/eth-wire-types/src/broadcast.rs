@@ -333,8 +333,7 @@ impl NewPooledTransactionHashes {
     /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth72(&self) -> Option<&NewPooledTransactionHashes72> {
         match self {
-            Self::Eth66(_) => None,
-            Self::Eth68(_) => None,
+            Self::Eth66(_) | Self::Eth68(_) => None,
             Self::Eth72(msg) => Some(msg),
         }
     }
@@ -342,8 +341,7 @@ impl NewPooledTransactionHashes {
     /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth72_mut(&mut self) -> Option<&mut NewPooledTransactionHashes72> {
         match self {
-            Self::Eth66(_) => None,
-            Self::Eth68(_) => None,
+            Self::Eth66(_) | Self::Eth68(_) => None,
             Self::Eth72(msg) => Some(msg),
         }
     }
@@ -351,18 +349,16 @@ impl NewPooledTransactionHashes {
     /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
-            Self::Eth66(_) => None,
+            Self::Eth66(_) | Self::Eth72(_) => None,
             Self::Eth68(msg) => Some(msg),
-            Self::Eth72(_) => None,
         }
     }
 
     /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
-            Self::Eth66(_) => None,
+            Self::Eth66(_) | Self::Eth72(_) => None,
             Self::Eth68(msg) => Some(msg),
-            Self::Eth72(_) => None,
         }
     }
 
@@ -370,17 +366,15 @@ impl NewPooledTransactionHashes {
     pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
-            Self::Eth68(_) => None,
-            Self::Eth72(_) => None,
+            Self::Eth68(_) | Self::Eth72(_) => None,
         }
     }
 
     /// Returns the inner type if this is an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
-            Self::Eth66(_) => None,
+            Self::Eth66(_) | Self::Eth72(_) => None,
             Self::Eth68(msg) => Some(mem::take(msg)),
-            Self::Eth72(_) => None,
         }
     }
 
@@ -388,8 +382,7 @@ impl NewPooledTransactionHashes {
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),
-            Self::Eth68(_) => None,
-            Self::Eth72(_) => None,
+            Self::Eth68(_) | Self::Eth72(_) => None,
         }
     }
 }
