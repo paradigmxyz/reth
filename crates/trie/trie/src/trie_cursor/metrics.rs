@@ -1,7 +1,6 @@
 use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
-use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 use tracing::trace_span;
@@ -148,30 +147,21 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.seek_exact_count += 1;
-        let result = self.cursor.seek_exact(key);
-        self.metrics.total_duration += start.elapsed();
-        result
+        self.cursor.seek_exact(key)
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.seek_count += 1;
-        let result = self.cursor.seek(key);
-        self.metrics.total_duration += start.elapsed();
-        result
+        self.cursor.seek(key)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.next_count += 1;
-        let result = self.cursor.next();
-        self.metrics.total_duration += start.elapsed();
-        result
+        self.cursor.next()
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
