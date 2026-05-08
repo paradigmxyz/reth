@@ -64,13 +64,6 @@ impl<B: Block, T> SealedBlockWith<B, T> {
     }
 }
 
-impl<B: Block> SealedBlockWith<B> {
-    /// Creates a sealed block without associated BAL data.
-    pub const fn without_data(block: SealedBlock<B>) -> Self {
-        Self::new(block, None)
-    }
-}
-
 impl<B: Block> SealedBlockWith<B, Option<BlockAccessLists>> {
     /// Creates a full block response without block access-list data.
     pub const fn from_block(block: SealedBlock<B>) -> Self {
@@ -85,7 +78,7 @@ impl<B: Block> SealedBlockWith<B, Option<BlockAccessLists>> {
 
 impl<B: Block> From<SealedBlock<B>> for SealedBlockWith<B> {
     fn from(block: SealedBlock<B>) -> Self {
-        Self::without_data(block)
+        Self::new(block, None)
     }
 }
 
