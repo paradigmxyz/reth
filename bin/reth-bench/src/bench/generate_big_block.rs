@@ -439,31 +439,26 @@ pub(crate) fn big_blocks_stream(
                 return Ok(None);
             }
 
-            // Block 0 is the base
-            let mut merged_block_access_list = block_access_lists.remove(0);
+            let mut merged_block_access_list = None;
+            let mut cumulative_tx_count = 0;
 
-            if !blocks.is_empty() {
-                let mut cumulative_tx_count = blocks[0].transaction_count();
+            for (block_idx, (block_data, block_access_list)) in
+                blocks.iter().zip(block_access_lists).enumerate()
+            {
+                // Segment index in the merged big block. The base block is
+                // segment 0; subsequent blocks are segments 1, 2, ...
+                let segment_idx = (block_idx + 1) as u64;
 
-                // Concatenate transactions from subsequent blocks and build env_switches
-                for (block_idx, (block_data, block_access_list)) in
-                    blocks.iter().zip(block_access_lists).enumerate()
-                {
-                    // Segment index in the merged big block. The base block is
-                    // segment 0; subsequent blocks are segments 1, 2, ...
-                    let segment_idx = (block_idx + 1) as u64;
-
-                    if let Some(block_access_list) = block_access_list {
-                        merge_block_access_list(
-                            merged_block_access_list.get_or_insert_with(Default::default),
-                            block_access_list,
-                            cumulative_tx_count as u64,
-                            segment_idx,
-                        );
-                    }
-
-                    cumulative_tx_count += block_data.transaction_count();
+                if let Some(block_access_list) = block_access_list {
+                    merge_block_access_list(
+                        merged_block_access_list.get_or_insert_with(Default::default),
+                        block_access_list,
+                        cumulative_tx_count as u64,
+                        segment_idx,
+                    );
                 }
+
+                cumulative_tx_count += block_data.transaction_count();
             }
 
             let big_block = BigBlockData {
