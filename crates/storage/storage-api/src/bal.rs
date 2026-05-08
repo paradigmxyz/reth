@@ -88,12 +88,16 @@ pub trait BalStore: Send + Sync + 'static {
     }
 
     /// Fetches the BAL for the given block hash in revm representation.
-    fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
         self.get_decoded_by_hash(block_hash)?
             .map(|decoded| {
-                let (bal, _) = decoded.split();
-                RevmBal::try_from(Vec::from(bal))
-                    .map_err(reth_storage_errors::provider::ProviderError::other)
+                decoded.try_map(|bal| {
+                    RevmBal::try_from(Vec::from(bal))
+                        .map_err(reth_storage_errors::provider::ProviderError::other)
+                })
             })
             .transpose()
     }
@@ -230,7 +234,10 @@ impl BalStoreHandle {
 
     /// Fetches the BAL for the given block hash in revm representation.
     #[inline]
-    pub fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+    pub fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
         self.inner.revm_bal_by_hash(block_hash)
     }
 
@@ -385,6 +392,11 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+
+        let revm_bal = store.revm_bal_by_hash(hash).unwrap().unwrap();
+
+        assert_eq!(revm_bal.as_raw(), &raw_bal);
+        assert!(revm_bal.as_bal().accounts.is_empty());
     }
 
     #[test]
