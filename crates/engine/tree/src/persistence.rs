@@ -6,8 +6,8 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, warn};
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]
@@ -179,6 +179,9 @@ where
             }
 
             provider_rw.commit()?;
+            let _ = self.provider.bal_store().flush().inspect_err(|err| {
+                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+            });
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
         }
 
