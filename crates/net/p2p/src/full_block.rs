@@ -73,7 +73,7 @@ impl<B: Block> SealedBlockWith<B> {
 
 impl<B: Block> SealedBlockWith<B, Option<BlockAccessLists>> {
     /// Creates a full block response without block access-list data.
-    pub const fn without_access_lists(block: SealedBlock<B>) -> Self {
+    pub const fn from_block(block: SealedBlock<B>) -> Self {
         Self::new(block, None)
     }
 
