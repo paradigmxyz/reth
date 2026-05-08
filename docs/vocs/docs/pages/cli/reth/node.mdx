@@ -1094,10 +1094,10 @@ Engine:
           When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
       --engine.disable-bal-parallel-execution
-          Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled, falling back to transaction-based prewarming even when a BAL is available
+          Disable BAL (Block Access List, EIP-7928) based parallel execution
 
       --engine.disable-bal-parallel-state-root
-          Disable BAL-driven parallel state root computation. When set, the BAL hashed post state is not sent to the multiproof task for early parallel state root computation
+          Disable BAL-driven parallel state root computation. This is only valid together with `--engine.disable-bal-parallel-execution`
 
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache

@@ -44,6 +44,7 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
+pub mod bal;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -142,11 +143,10 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-    /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
-    disable_bal_parallel_execution: bool,
     /// Whether to disable BAL-driven parallel state root computation.
+    /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
-    /// Whether BAL batched IO is disabled.
+    /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
 }
 
@@ -183,7 +183,6 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
-            disable_bal_parallel_execution: config.disable_bal_parallel_execution(),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
         }
@@ -292,12 +291,24 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = env.decoded_bal.is_none();
+        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
+        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
+        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
+        // the block follows today's sequential execution and transaction-prewarm path.
+        //
+        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
+        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
+        // prewarm, not this dispatch decision.
+        let parallel_bal_execution = !config.disable_state_cache() &&
+            !config.disable_bal_parallel_execution() &&
+            env.decoded_bal.is_some();
+        let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
+            parallel_bal_execution,
         );
 
         PayloadHandle {
@@ -324,7 +335,8 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -474,29 +486,36 @@ where
     }
 
     /// Spawn prewarming optionally wired to the sparse trie task for target updates.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor",
-        skip_all,
-        fields(bal=%env.decoded_bal.is_some())
-    )]
+    ///
+    /// `parallel_bal_execution` is true when the BAL execute path will execute this block. In
+    /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
+    /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        parallel_bal_execution: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
-
+        let mode = if parallel_bal_execution {
+            PrewarmMode::BlockAccessList(
+                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+            )
+        } else if self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        {
+            PrewarmMode::Skipped
+        } else {
+            PrewarmMode::Transactions(transactions)
+        };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
-        let maybe_decoded_bal = env.decoded_bal.clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -521,17 +540,7 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
-                let mode = if skip_prewarm {
-                    PrewarmMode::Skipped
-                } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
-                {
-                    PrewarmMode::BlockAccessList(decoded_bal)
-                } else {
-                    PrewarmMode::Transactions(transactions)
-                };
                 prewarm_task.run(mode, to_prewarm_task);
             });
         }
@@ -814,11 +823,18 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a state hook to stream execution state updates to the sparse trie cache task.
     ///
-    /// Returns `None` when execution should not send state updates, such as BAL-driven execution.
+    /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
         self.install_state_hook
             .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
             .flatten()
+    }
+
+    /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL
+    /// execute path uses this to spawn its own sparse-trie streaming task fed from the
+    /// snapshot.
+    pub fn sparse_trie_updates_tx(&self) -> Option<CrossbeamSender<StateRootMessage>> {
+        self.state_root_handle.as_ref().map(|handle| handle.updates_tx().clone())
     }
 
     /// Returns a clone of the caches used by prewarming
