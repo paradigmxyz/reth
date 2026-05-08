@@ -1,6 +1,7 @@
 use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 use tracing::trace_span;
@@ -9,6 +10,9 @@ use tracing::trace_span;
 use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
+
+/// Time one in every 100 cursor operations and scale the elapsed time to estimate total duration.
+const CURSOR_DURATION_SAMPLE_RATE: u32 = 100;
 
 /// Prometheus metrics for trie cursor operations.
 ///
@@ -106,6 +110,23 @@ impl TrieCursorMetricsCache {
         self.total_duration += other.total_duration;
     }
 
+    fn record_sampled_duration<R>(&mut self, f: impl FnOnce() -> R) -> R {
+        if self.should_sample_duration() {
+            let start = Instant::now();
+            let result = f();
+            self.total_duration += start.elapsed().saturating_mul(CURSOR_DURATION_SAMPLE_RATE);
+            result
+        } else {
+            f()
+        }
+    }
+
+    fn should_sample_duration(&self) -> bool {
+        (self.next_count + self.seek_count + self.seek_exact_count) %
+            CURSOR_DURATION_SAMPLE_RATE as usize ==
+            0
+    }
+
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
@@ -148,7 +169,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         self.metrics.seek_exact_count += 1;
-        self.cursor.seek_exact(key)
+        self.metrics.record_sampled_duration(|| self.cursor.seek_exact(key))
     }
 
     fn seek(
@@ -156,12 +177,12 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         self.metrics.seek_count += 1;
-        self.cursor.seek(key)
+        self.metrics.record_sampled_duration(|| self.cursor.seek(key))
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         self.metrics.next_count += 1;
-        self.cursor.next()
+        self.metrics.record_sampled_duration(|| self.cursor.next())
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {

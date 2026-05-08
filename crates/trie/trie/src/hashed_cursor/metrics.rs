@@ -1,5 +1,6 @@
 use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 use tracing::trace_span;
@@ -8,6 +9,9 @@ use tracing::trace_span;
 use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
+
+/// Time one in every 100 cursor operations and scale the elapsed time to estimate total duration.
+const CURSOR_DURATION_SAMPLE_RATE: u32 = 100;
 
 /// Prometheus metrics for hashed cursor operations.
 ///
@@ -110,6 +114,23 @@ impl HashedCursorMetricsCache {
         self.total_duration += other.total_duration;
     }
 
+    fn record_sampled_duration<R>(&mut self, f: impl FnOnce() -> R) -> R {
+        if self.should_sample_duration() {
+            let start = Instant::now();
+            let result = f();
+            self.total_duration += start.elapsed().saturating_mul(CURSOR_DURATION_SAMPLE_RATE);
+            result
+        } else {
+            f()
+        }
+    }
+
+    fn should_sample_duration(&self) -> bool {
+        (self.next_count + self.seek_count + self.is_storage_empty_count) %
+            CURSOR_DURATION_SAMPLE_RATE as usize ==
+            0
+    }
+
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
@@ -153,12 +174,12 @@ where
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.metrics.seek_count += 1;
-        self.cursor.seek(key)
+        self.metrics.record_sampled_duration(|| self.cursor.seek(key))
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.metrics.next_count += 1;
-        self.cursor.next()
+        self.metrics.record_sampled_duration(|| self.cursor.next())
     }
 
     fn reset(&mut self) {
@@ -172,7 +193,7 @@ where
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         self.metrics.is_storage_empty_count += 1;
-        self.cursor.is_storage_empty()
+        self.metrics.record_sampled_duration(|| self.cursor.is_storage_empty())
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
