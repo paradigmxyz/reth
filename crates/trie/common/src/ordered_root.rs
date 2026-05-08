@@ -178,6 +178,29 @@ impl OrderedTrieRootEncodedBuilder {
         Ok(())
     }
 
+    /// Pushes an already-owned pre-encoded item at the given index to the builder.
+    ///
+    /// This avoids copying encoded bytes for streaming callers that do not need to retain their
+    /// encoding buffer after pushing it into the ordered root.
+    ///
+    /// # Errors
+    ///
+    /// - [`OrderedRootError::IndexOutOfBounds`] if `index >= len`
+    /// - [`OrderedRootError::DuplicateIndex`] if an item was already pushed at this index
+    #[inline]
+    pub fn push_owned(&mut self, index: usize, bytes: Vec<u8>) -> Result<(), OrderedRootError> {
+        if index >= self.len {
+            return Err(OrderedRootError::IndexOutOfBounds { index, len: self.len });
+        }
+
+        if self.pending[index].is_some() {
+            return Err(OrderedRootError::DuplicateIndex { index });
+        }
+
+        self.push_owned_unchecked(index, bytes);
+        Ok(())
+    }
+
     /// Pushes a pre-encoded item at the given index without bounds or duplicate checking.
     ///
     /// This is a performance-critical method for callers that can guarantee:
@@ -193,6 +216,26 @@ impl OrderedTrieRootEncodedBuilder {
         debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
 
         self.pending[index] = Some(bytes.to_vec());
+        self.received += 1;
+
+        self.flush();
+    }
+
+    /// Pushes an owned pre-encoded item at the given index without bounds or duplicate checking.
+    ///
+    /// This is a performance-critical method for callers that can guarantee:
+    /// - `index < len`
+    /// - No item has been pushed at this index before
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug mode if `index >= len`.
+    #[inline]
+    pub fn push_owned_unchecked(&mut self, index: usize, bytes: Vec<u8>) {
+        debug_assert!(index < self.len, "index {index} out of bounds for length {}", self.len);
+        debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
+
+        self.pending[index] = Some(bytes);
         self.received += 1;
 
         self.flush();

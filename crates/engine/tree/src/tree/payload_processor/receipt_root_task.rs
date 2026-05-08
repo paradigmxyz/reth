@@ -85,7 +85,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            match builder.push(indexed_receipt.index, &encode_buf) {
+            match builder.push_owned(indexed_receipt.index, std::mem::take(&mut encode_buf)) {
                 Ok(()) => {
                     received_count += 1;
                 }
