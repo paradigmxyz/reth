@@ -216,7 +216,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetCells))
                 }
-                EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
+                EthMessage::GetCells(RequestPair::decode(buf)?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
