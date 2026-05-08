@@ -1568,7 +1568,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         highest_block: Option<BlockNumber>,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader,
+        Provider: DBProvider + BlockReader + StageCheckpointReader + PruneCheckpointReader,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
         match segment {
@@ -1640,7 +1640,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         highest_static_file_block: Option<BlockNumber>,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader,
+        Provider: DBProvider + BlockReader + StageCheckpointReader + PruneCheckpointReader,
     {
         debug!(target: "reth::providers::static_file", "Ensuring invariants");
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
@@ -1685,16 +1685,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
         debug!(target: "reth::providers::static_file", ?stage_id, checkpoint_block_number, "Retrieved stage checkpoint");
+        let effective_available_block =
+            Self::effective_available_block(provider, segment, highest_static_file_block)?;
 
         // If the checkpoint is ahead, then we lost static file data. May be data corruption.
-        if checkpoint_block_number > highest_static_file_block {
+        if checkpoint_block_number > effective_available_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
-                unwind_target = highest_static_file_block,
+                unwind_target = effective_available_block,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block));
+            return Ok(Some(effective_available_block));
         }
 
         // If the checkpoint is ahead, or matches, then nothing to do.
@@ -1774,7 +1776,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         block_from_key: F,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader,
+        Provider: DBProvider + BlockReader + StageCheckpointReader + PruneCheckpointReader,
         T: Table,
         F: Fn(&T::Key) -> BlockNumber,
     {
@@ -1822,16 +1824,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let stage_id = segment.to_stage_id();
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
+        let effective_available_block =
+            Self::effective_available_block(provider, segment, highest_static_file_block)?;
 
-        if checkpoint_block_number > highest_static_file_block {
+        if checkpoint_block_number > effective_available_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
-                unwind_target = highest_static_file_block,
+                unwind_target = effective_available_block,
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block))
+            return Ok(Some(effective_available_block))
         }
 
         if checkpoint_block_number < highest_static_file_block {
@@ -1856,6 +1860,36 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         Ok(None)
+    }
+
+    fn effective_available_block<Provider>(
+        provider: &Provider,
+        segment: StaticFileSegment,
+        highest_static_file_block: BlockNumber,
+    ) -> ProviderResult<BlockNumber>
+    where
+        Provider: PruneCheckpointReader,
+    {
+        let Some(prune_segment) = Self::prune_segment_for_static_file(segment) else {
+            return Ok(highest_static_file_block)
+        };
+
+        let prune_checkpoint_block = provider
+            .get_prune_checkpoint(prune_segment)?
+            .and_then(|checkpoint| checkpoint.block_number)
+            .unwrap_or_default();
+
+        Ok(highest_static_file_block.max(prune_checkpoint_block))
+    }
+
+    const fn prune_segment_for_static_file(segment: StaticFileSegment) -> Option<PruneSegment> {
+        match segment {
+            StaticFileSegment::Receipts => Some(PruneSegment::Receipts),
+            StaticFileSegment::TransactionSenders => Some(PruneSegment::SenderRecovery),
+            StaticFileSegment::AccountChangeSets => Some(PruneSegment::AccountHistory),
+            StaticFileSegment::StorageChangeSets => Some(PruneSegment::StorageHistory),
+            StaticFileSegment::Headers | StaticFileSegment::Transactions => None,
+        }
     }
 
     /// Returns the earliest available block number that has not been expired and is still

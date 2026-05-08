@@ -67,10 +67,10 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
         AccountExtReader, BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory,
-        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
-        StaticFileProviderFactory, StorageReader,
+        ProviderFactory, ProviderResult, PruneCheckpointWriter, ReceiptProvider,
+        StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
-    use reth_prune_types::{PruneMode, PruneModes};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneModes, PruneSegment};
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
@@ -533,5 +533,76 @@ mod tests {
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Receipts>(&db, current + 1, None);
+    }
+
+    #[test]
+    fn test_consistency_respects_distance_prune_checkpoint() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let db = seed_data(90).unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let tip = 89;
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let db_provider = db.factory.database_provider_ro().unwrap();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::TransactionSenders).unwrap();
+
+            for block_number in 0..=tip {
+                let indices = db_provider.block_body_indices(block_number).unwrap().unwrap();
+                writer.ensure_at_block(block_number).unwrap();
+                writer
+                    .append_transaction_senders(indices.tx_num_range().map(|tx_num| {
+                        (tx_num, address!("0x1000000000000000000000000000000000000000"))
+                    }))
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        assert_eq!(
+            static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::TransactionSenders),
+            Some(tip)
+        );
+
+        while let Some(highest_block) = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::TransactionSenders)
+        {
+            static_file_provider
+                .delete_jar(StaticFileSegment::TransactionSenders, highest_block)
+                .unwrap();
+        }
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(Some(PipelineTarget::Unwind(_)))
+        ));
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        for segment in [
+            PruneSegment::SenderRecovery,
+            PruneSegment::AccountHistory,
+            PruneSegment::StorageHistory,
+        ] {
+            provider_rw
+                .save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(tip),
+                        tx_number: None,
+                        prune_mode: PruneMode::Distance(2_000_000),
+                    },
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(None)
+        ));
     }
 }
