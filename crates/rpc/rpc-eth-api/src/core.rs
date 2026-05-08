@@ -314,6 +314,10 @@ pub trait EthApi<
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
+    /// Returns the base fee for the next block, or `null` before London activation.
+    #[method(name = "baseFee")]
+    async fn base_fee(&self) -> RpcResult<Option<U256>>;
+
     /// Introduced in EIP-4844, returns the current blob base fee in wei.
     #[method(name = "blobBaseFee")]
     async fn blob_base_fee(&self) -> RpcResult<U256>;
@@ -417,6 +421,10 @@ pub trait EthApi<
         &self,
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a given block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
@@ -814,6 +822,12 @@ where
         Ok(EthFees::blob_base_fee(self).await?)
     }
 
+    /// Handler for: `eth_baseFee`
+    async fn base_fee(&self) -> RpcResult<Option<U256>> {
+        trace!(target: "rpc::eth", "Serving eth_baseFee");
+        Ok(EthFees::base_fee(self).await?)
+    }
+
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
     // caching of it in the LRU cache.
     // When new RPC call is executed, the cache gets locked, we check it for the historical fees
@@ -930,6 +944,7 @@ where
 
         Ok(Some(json))
     }
+
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
     async fn block_access_list_by_block_number(
         &self,
@@ -943,6 +958,18 @@ where
 
         Ok(Some(json))
     }
+
+    /// Handler for: `eth_getBlockAccessList`
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
+
+        let bal = self.get_block_access_list(block_id).await?;
+        let json = serde_json::to_value(&bal)
+            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
+
+        Ok(Some(json))
+    }
+
     /// Handler for: `eth_getBlockAccessListRaw`
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");

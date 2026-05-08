@@ -4,19 +4,22 @@
 use crate::{
     bench::{
         context::BenchContext,
+        generate_big_block::big_blocks_stream,
         helpers::{fetch_block_access_list, parse_duration},
         metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
+        BigBlockPayload,
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
     },
 };
 use alloy_consensus::TxEnvelope;
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::Encodable2718;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_provider::{
     ext::DebugApi,
     network::{AnyNetwork, AnyRpcBlock},
@@ -27,12 +30,18 @@ use alloy_rpc_types_engine::{
 };
 use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
-use reth_node_core::args::BenchmarkArgs;
+use reth_node_api::{EngineApiMessageVersion, ExecutionPayload};
+use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
-use std::time::{Duration, Instant};
+use std::{
+    pin::Pin,
+    time::{Duration, Instant},
+};
+use tokio::{runtime::Handle, sync::mpsc};
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
@@ -104,6 +113,10 @@ pub struct Command {
     /// Weather to enable bal by default or not.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     enable_bal: bool,
+
+    /// The target gas for the big blocks.
+    #[arg(long, value_name = "TARGET_GAS", default_value = "1G", value_parser = super::helpers::parse_gas_limit)]
+    pub big_blocks_target_gas: u64,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -187,6 +200,7 @@ impl Command {
             rlp_blocks,
             wait_for_persistence,
             no_wait_for_caches,
+            big_blocks_initial_state,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -198,14 +212,15 @@ impl Command {
         }
 
         let buffer_size = self.rpc_block_buffer_size;
-
-        let mut blocks = Box::pin(
+        let provider = block_provider.clone();
+        let bench_mode = benchmark_mode.clone();
+        let mut blocks: Pin<Box<dyn Stream<Item = eyre::Result<Payload>> + Send>> = Box::pin(
             stream::iter((next_block..)
-                .take_while(|next_block| {
-                    benchmark_mode.contains(*next_block)
+                .take_while(move |next_block| {
+                    bench_mode.contains(*next_block)
                 }))
-                .map(|next_block| {
-                    let block_provider = block_provider.clone();
+                .map(move |next_block| {
+                    let block_provider = provider.clone();
                     async move {
                         let block_res = block_provider
                             .get_block_by_number(next_block.into())
@@ -222,6 +237,15 @@ impl Command {
                                     return Err(e)
                                 }
                             };
+
+
+                        let bal = if !rlp_blocks &&
+                            (block.header.block_access_list_hash.is_some() || self.enable_bal)
+                        {
+                            Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+                        } else {
+                            None
+                        };
 
                         let rlp = if rlp_blocks {
                             let rlp = match block_provider
@@ -259,11 +283,45 @@ impl Command {
                             Ok(None) | Err(_) => head_block_hash,
                         };
 
-                        Ok((block, head_block_hash, safe_block_hash, finalized_block_hash, rlp))
+                        let forkchoice = ForkchoiceState {
+                            head_block_hash,
+                            safe_block_hash,
+                            finalized_block_hash,
+                        };
+
+                        Ok(Payload::Block(block, rlp, bal, forkchoice))
                     }
                 })
                 .buffered(buffer_size),
         );
+
+        // Big blocks: convert the stream of regular blocks into a stream of big blocks.
+        if let Some(num_big_blocks) = self.benchmark.big_blocks {
+            let block_stream = blocks.map(|res| {
+                res.map(|payload| {
+                    let Payload::Block(block, _, bal, _) = payload else {
+                        unreachable!();
+                    };
+                    Some((block, bal))
+                })
+            });
+            let mut big_blocks = Box::pin(big_blocks_stream(
+                num_big_blocks as u64,
+                self.big_blocks_target_gas,
+                block_stream,
+                big_blocks_initial_state,
+            ));
+            let (tx, rx) = mpsc::channel(buffer_size);
+            tokio::task::spawn_blocking(|| {
+                Handle::current().block_on(async move {
+                    while let Some(big_block) = big_blocks.next().await {
+                        tx.send(big_block.map(Payload::BigBlock)).await.unwrap();
+                    }
+                });
+            });
+
+            blocks = Box::pin(ReceiverStream::new(rx));
+        }
 
         let mut results = Vec::new();
         let mut blocks_processed = 0u64;
@@ -271,46 +329,30 @@ impl Command {
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
         let mut queued_fork_block = None;
-        while let Some((block, head, safe, finalized, rlp)) = {
+        while let Some(payload) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
             total_wait_time += wait_start.elapsed();
             result
         } {
-            let gas_used = block.header.gas_used;
-            let gas_limit = block.header.gas_limit;
-            let block_number = block.header.number;
-            let canonical_parent_hash = block.header.parent_hash;
-            let transaction_count = block.transactions.len() as u64;
+            let gas_used = payload.gas_used();
+            let gas_limit = payload.gas_limit();
+            let block_number = payload.block_number();
+            let canonical_parent_hash = payload.parent_hash();
+            let transaction_count = payload.transaction_count() as u64;
             let deferred_branch_start_block = reorg_state
                 .as_ref()
                 .filter(|state| state.fork_length == 0 && queued_fork_block.is_none())
-                .map(|_| block.clone());
-            let canonical_forkchoice_state = ForkchoiceState {
-                head_block_hash: head,
-                safe_block_hash: safe,
-                finalized_block_hash: finalized,
-            };
-
-            let bal = if rlp.is_none() &&
-                (block.header.block_access_list_hash.is_some() || self.enable_bal)
-            {
-                Some(fetch_block_access_list(&block_provider, block.header.number).await?)
-            } else {
-                None
-            };
-
-            let (version, params) = block_to_new_payload(
-                block,
-                rlp,
-                use_reth_namespace,
-                wait_for_persistence,
-                no_wait_for_caches,
-                bal,
-            )?;
+                .map(|_| payload.block().cloned());
 
             debug!(target: "reth-bench", ?block_number, "Sending payload");
             let start = Instant::now();
+            let canonical_forkchoice_state = payload.forkchoice_state();
+            let (version, params) = payload.into_new_payload_params(
+                use_reth_namespace,
+                wait_for_persistence,
+                no_wait_for_caches,
+            )?;
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;
             let np_latency =
@@ -359,7 +401,9 @@ impl Command {
                         block_number,
                         prepared: prepare_built_block(
                             &local_rpc_provider,
-                            block,
+                            block
+                                .as_ref()
+                                .ok_or_eyre("missing deferred fork block for reorg branch start")?,
                             canonical_parent_hash,
                             no_wait_for_caches,
                         )
@@ -637,4 +681,99 @@ fn parse_reorg_depth(value: &str) -> Result<usize, String> {
     }
 
     Ok(depth)
+}
+
+/// Payload types used during benchmarking.
+#[expect(clippy::large_enum_variant)]
+enum Payload {
+    /// A regular block payload.
+    Block(AnyRpcBlock, Option<Bytes>, Option<BlockAccessList>, ForkchoiceState),
+    /// A big block payload.
+    BigBlock(BigBlockPayload),
+}
+
+impl Payload {
+    fn into_new_payload_params(
+        self,
+        use_reth_namespace: bool,
+        wait_for_persistence: WaitForPersistence,
+        no_wait_for_caches: bool,
+    ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+        match self {
+            Self::Block(block, rlp, bal, _) => block_to_new_payload(
+                block,
+                rlp,
+                use_reth_namespace,
+                wait_for_persistence,
+                no_wait_for_caches,
+                bal,
+            ),
+            Self::BigBlock(big_block) => {
+                let wait_for_persistence =
+                    wait_for_persistence.rpc_value(big_block.execution_data.block_number());
+                Ok((
+                    None,
+                    serde_json::to_value((
+                        RethNewPayloadInput::ExecutionData(big_block.execution_data),
+                        wait_for_persistence,
+                        no_wait_for_caches.then_some(false),
+                        Some(big_block.big_block_data),
+                    ))?,
+                ))
+            }
+        }
+    }
+
+    fn gas_used(&self) -> u64 {
+        match self {
+            Self::Block(block, _, _, _) => block.header.gas_used,
+            Self::BigBlock(big_block) => big_block.execution_data.gas_used(),
+        }
+    }
+
+    fn gas_limit(&self) -> u64 {
+        match self {
+            Self::Block(block, _, _, _) => block.header.gas_limit,
+            Self::BigBlock(big_block) => big_block.execution_data.gas_limit(),
+        }
+    }
+
+    fn block_number(&self) -> u64 {
+        match self {
+            Self::Block(block, _, _, _) => block.header.number,
+            Self::BigBlock(big_block) => big_block.execution_data.block_number(),
+        }
+    }
+
+    fn parent_hash(&self) -> B256 {
+        match self {
+            Self::Block(block, _, _, _) => block.header.parent_hash,
+            Self::BigBlock(big_block) => big_block.execution_data.parent_hash(),
+        }
+    }
+
+    fn transaction_count(&self) -> usize {
+        match self {
+            Self::Block(block, _, _, _) => block.transactions.len(),
+            Self::BigBlock(big_block) => big_block.execution_data.transaction_count(),
+        }
+    }
+
+    const fn block(&self) -> Option<&AnyRpcBlock> {
+        match self {
+            Self::Block(block, _, _, _) => Some(block),
+            Self::BigBlock(_) => None,
+        }
+    }
+
+    const fn forkchoice_state(&self) -> ForkchoiceState {
+        match self {
+            Self::Block(_, _, _, forkchoice) => *forkchoice,
+            Self::BigBlock(big_block) => ForkchoiceState {
+                head_block_hash: big_block.execution_data.block_hash(),
+                safe_block_hash: big_block.execution_data.block_hash(),
+                finalized_block_hash: big_block.execution_data.block_hash(),
+            },
+        }
+    }
 }

@@ -161,6 +161,39 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
+    init_genesis_with_settings_and_validate(factory, genesis_storage_settings, true)
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`],
+/// optionally validating the DB-resident genesis hash against the chainspec hash.
+pub fn init_genesis_with_settings_and_validate<PF>(
+    factory: &PF,
+    genesis_storage_settings: StorageSettings,
+    validate_genesis_hash: bool,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockNumReader
+        + MetadataProvider
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -196,6 +229,15 @@ where
                 return Ok(hash)
             }
 
+            if !validate_genesis_hash {
+                warn!(
+                    target: "reth::storage",
+                    chainspec_hash = %hash,
+                    storage_hash = %block_hash,
+                    "Genesis hash mismatch with chainspec; trusting DB per --debug.skip-genesis-validation"
+                );
+                return Ok(block_hash)
+            }
             return Err(InitStorageError::GenesisHashMismatch {
                 chainspec_hash: hash,
                 storage_hash: block_hash,
@@ -1042,6 +1084,33 @@ mod tests {
                 storage_hash: SEPOLIA_GENESIS_HASH
             }
         ))
+    }
+
+    #[test]
+    fn skip_genesis_hash_validation_accepts_mismatched_db() {
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+        let static_file_provider = factory.static_file_provider();
+        let rocksdb_provider = factory.rocksdb_provider();
+        init_genesis(&factory).unwrap();
+
+        let result = init_genesis_with_settings_and_validate(
+            &ProviderFactory::<MockNodeTypesWithDB>::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                static_file_provider,
+                rocksdb_provider,
+                reth_tasks::Runtime::test(),
+            )
+            .unwrap(),
+            StorageSettings::base(),
+            false,
+        );
+
+        let returned = result.expect("skip_genesis_validation should suppress mismatch error");
+        assert_eq!(
+            returned, SEPOLIA_GENESIS_HASH,
+            "bypass returns the DB-resident hash, not the chainspec hash",
+        );
     }
 
     #[test]
