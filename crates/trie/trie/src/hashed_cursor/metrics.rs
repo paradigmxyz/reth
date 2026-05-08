@@ -10,8 +10,8 @@ use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
 
-/// Time one in every 100 cursor operations and scale the elapsed time to estimate total duration.
-const CURSOR_DURATION_SAMPLE_RATE: u32 = 100;
+/// Time one in every 1000 cursor operations and scale the elapsed time to estimate total duration.
+const CURSOR_DURATION_SAMPLE_RATE: u32 = 1000;
 
 /// Prometheus metrics for hashed cursor operations.
 ///
