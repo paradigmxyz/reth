@@ -46,6 +46,16 @@ pub trait BalStore: Send + Sync + 'static {
     /// durable.
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
 
+    /// Insert multiple BALs.
+    ///
+    /// The default implementation preserves the behavior of repeated [`Self::insert`] calls.
+    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        for (num_hash, bal) in entries {
+            self.insert(num_hash, bal)?;
+        }
+        Ok(())
+    }
+
     /// Flushes any pending BALs to the backing store.
     ///
     /// In-memory implementations may treat this as a no-op.
@@ -170,6 +180,12 @@ impl BalStoreHandle {
         self.inner.insert(num_hash, bal)
     }
 
+    /// Insert multiple BALs.
+    #[inline]
+    pub fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        self.inner.insert_many(entries)
+    }
+
     /// Flushes any pending BALs to the backing store.
     #[inline]
     pub fn flush(&self) -> ProviderResult<()> {
@@ -261,6 +277,10 @@ pub struct NoopBalStore;
 
 impl BalStore for NoopBalStore {
     fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    fn insert_many(&self, _entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
         Ok(())
     }
 
