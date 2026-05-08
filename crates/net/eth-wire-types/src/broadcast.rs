@@ -330,6 +330,24 @@ impl NewPooledTransactionHashes {
         }
     }
 
+        /// Returns an immutable reference to the inner type if this is an eth68 announcement.
+    pub const fn as_eth72(&self) -> Option<&NewPooledTransactionHashes72> {
+        match self {
+            Self::Eth66(_) => None,
+            Self::Eth68(_) => None,
+            Self::Eth72(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this is an eth68 announcement.
+    pub const fn as_eth72_mut(&mut self) -> Option<&mut NewPooledTransactionHashes72> {
+        match self {
+            Self::Eth66(_) => None,
+            Self::Eth68(_) => None,
+            Self::Eth72(msg) => Some(msg),
+        }
+    }
+
     /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
@@ -395,6 +413,12 @@ impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
 impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     fn from(hashes: NewPooledTransactionHashes68) -> Self {
         Self::Eth68(hashes)
+    }
+}
+
+impl From<NewPooledTransactionHashes72> for NewPooledTransactionHashes {
+    fn from(hashes: NewPooledTransactionHashes72) -> Self {
+        Self::Eth72(hashes)
     }
 }
 
@@ -826,9 +850,10 @@ impl DedupPayload for NewPooledTransactionHashes72 {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types, mut cell_mask } = self;
+        let Self { hashes, mut sizes, mut types, .. } = self;
 
-        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+        let mut deduped_data =
+            HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
@@ -836,7 +861,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
             }
         }
 
-        PartiallyValidData::from_raw_data_eth68(deduped_data)
+        PartiallyValidData::from_raw_data_eth72(deduped_data)
     }
 }
 
@@ -963,6 +988,11 @@ impl<V> PartiallyValidData<V> {
         Self { data, version }
     }
 
+      /// Wraps raw data with version [`EthVersion::Eth72`].
+    pub const fn from_raw_data_eth72(data: HashMap<TxHash, V>) -> Self {
+        Self::from_raw_data(data, Some(EthVersion::Eth72))
+    }
+
     /// Wraps raw data with version [`EthVersion::Eth68`].
     pub const fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
@@ -971,6 +1001,12 @@ impl<V> PartiallyValidData<V> {
     /// Wraps raw data with version [`EthVersion::Eth66`].
     pub const fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
+    }
+
+/// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
+    /// announcement.
+    pub fn empty_eth72() -> Self {
+        Self::from_raw_data_eth72(HashMap::default())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
@@ -1004,7 +1040,7 @@ pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: HashMap<TxHash, Eth68TxMetadata>,
+    data: HashMap<TxHash, Eth72TxMetadata>,
     version: EthVersion,
 }
 
@@ -1022,7 +1058,7 @@ impl ValidAnnouncementData {
     /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
     /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
     /// version set to `None`.
-    pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
+    pub fn from_partially_valid_data(data: PartiallyValidData<Eth72TxMetadata>) -> Self {
         let PartiallyValidData { data, version } = data;
 
         let version = version.expect("should have eth version for conversion");
@@ -1031,7 +1067,7 @@ impl ValidAnnouncementData {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> HashMap<TxHash, Eth68TxMetadata> {
+    pub fn into_data(self) -> HashMap<TxHash, Eth72TxMetadata> {
         self.data
     }
 }
@@ -1088,8 +1124,8 @@ impl RequestTxHashes {
     }
 }
 
-impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
-    fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
+impl FromIterator<(TxHash, Eth72TxMetadata)> for RequestTxHashes {
+    fn from_iter<I: IntoIterator<Item = (TxHash, Eth72TxMetadata)>>(iter: I) -> Self {
         Self::new(iter.into_iter().map(|(hash, _)| hash).collect())
     }
 }
