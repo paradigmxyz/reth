@@ -19,7 +19,7 @@ use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
-    stages::{EraImportSource, ExecutionStage},
+    stages::{EraImportSource, ExecutionStage, ParallelMerkleExecutionStage},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
@@ -121,6 +121,11 @@ where
                 prune_config.segments,
                 era_import_source,
             )
+            .set(ParallelMerkleExecutionStage::new(
+                provider_factory.clone(),
+                stage_config.merkle.rebuild_threshold,
+                stage_config.merkle.incremental_threshold,
+            ))
             .set(ExecutionStage::new(
                 evm_config,
                 consensus,

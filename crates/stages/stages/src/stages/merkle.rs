@@ -8,15 +8,20 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    ChangeSetReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
+    providers::OverlayStateProviderFactory, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode,
+};
+use reth_trie_db::{load_prefix_sets_with_provider, ChangesetCache, DatabaseStateRoot};
+use reth_trie_parallel::root::ParallelStateRoot;
 
 use std::fmt::Debug;
 
@@ -53,6 +58,8 @@ pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
 /// new state root for this many blocks, in batches, repeating until we reach the desired block
 /// number.
 pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
+/// Minimum number of modified storage tries in a chunk before using parallel state root.
+const PARALLEL_MERKLE_STORAGE_TRIE_THRESHOLD: usize = 1_024;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -155,6 +162,163 @@ impl MerkleStage {
             checkpoint.to_compact(&mut buf);
         }
         Ok(provider.save_stage_checkpoint_progress(StageId::MerkleExecute, buf)?)
+    }
+}
+
+/// Executes the incremental merkle stage using the existing parallel state-root calculator.
+///
+/// This is intentionally limited to the incremental path. Rebuild/unwind still use the original
+/// implementation until the parallel path has stronger validation coverage.
+#[derive(Debug, Clone)]
+pub struct ParallelMerkleExecutionStage<Factory> {
+    overlay_factory: OverlayStateProviderFactory<Factory>,
+    rebuild_threshold: u64,
+    incremental_threshold: u64,
+    parallel_storage_tries_threshold: usize,
+}
+
+impl<Factory> ParallelMerkleExecutionStage<Factory> {
+    /// Create a new stage.
+    pub fn new(factory: Factory, rebuild_threshold: u64, incremental_threshold: u64) -> Self {
+        Self {
+            overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
+            rebuild_threshold,
+            incremental_threshold,
+            parallel_storage_tries_threshold: PARALLEL_MERKLE_STORAGE_TRIE_THRESHOLD,
+        }
+    }
+
+    const fn fallback_stage(&self) -> MerkleStage {
+        MerkleStage::new_execution(self.rebuild_threshold, self.incremental_threshold)
+    }
+
+    fn incremental_root<Provider>(
+        &self,
+        provider: &Provider,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> Result<(B256, TrieUpdates), StageError>
+    where
+        Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + StorageSettingsCache,
+        Factory: DatabaseProviderFactory + Clone + Send + Sync + 'static,
+        Factory::Provider: StageCheckpointReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::BlockNumReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache,
+    {
+        let prefix_sets = load_prefix_sets_with_provider(provider, range.clone())
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+        let storage_trie_count = prefix_sets.storage_prefix_sets.len();
+        let use_parallel = storage_trie_count >= self.parallel_storage_tries_threshold;
+
+        debug!(
+            target: "sync::stages::merkle::exec",
+            ?range,
+            storage_trie_count,
+            parallel_threshold = self.parallel_storage_tries_threshold,
+            use_parallel,
+            "Loaded prefix sets for incremental merkle chunk"
+        );
+
+        if use_parallel {
+            return ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
+                .incremental_root_with_updates()
+                .map_err(|e| StageError::Fatal(Box::new(e)))
+        }
+
+        reth_trie_db::with_adapter!(provider, |A| {
+            DbStateRoot::<_, A>::from_tx(provider.tx_ref())
+                .with_prefix_sets(prefix_sets)
+                .root_with_updates()
+        })
+        .map_err(|e| StageError::Fatal(Box::new(e)))
+    }
+}
+
+impl<Provider, Factory> Stage<Provider> for ParallelMerkleExecutionStage<Factory>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + TrieWriter
+        + StatsReader
+        + HeaderProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + StageCheckpointReader
+        + StageCheckpointWriter,
+    Factory: DatabaseProviderFactory + Clone + Send + Sync + 'static,
+    Factory::Provider: StageCheckpointReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache,
+    OverlayStateProviderFactory<Factory>: DatabaseProviderROFactory,
+    <OverlayStateProviderFactory<Factory> as DatabaseProviderROFactory>::Provider:
+        TrieCursorFactory + HashedCursorFactory,
+{
+    fn id(&self) -> StageId {
+        StageId::MerkleExecute
+    }
+
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        let range = input.next_block_range();
+        let (from_block, to_block) = range.clone().into_inner();
+
+        if range.is_empty() || to_block - from_block > self.rebuild_threshold || from_block == 1 {
+            return self.fallback_stage().execute(provider, input)
+        }
+
+        let current_block_number = input.checkpoint().block_number;
+        let target_block = provider
+            .header_by_number(to_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
+
+        let chunk_to = std::cmp::min(from_block + self.incremental_threshold, to_block);
+        let chunk_range = from_block..=chunk_to;
+        debug!(
+            target: "sync::stages::merkle::exec",
+            current = ?current_block_number,
+            target = ?to_block,
+            incremental_threshold = self.incremental_threshold,
+            chunk_range = ?chunk_range,
+            "Processing chunk"
+        );
+
+        let (root, updates) =
+            self.incremental_root(provider, chunk_range.clone()).map_err(|e| {
+                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, ?chunk_range, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                e
+            })?;
+        provider.write_trie_updates(updates)?;
+
+        if chunk_to < to_block {
+            return Ok(ExecOutput { checkpoint: StageCheckpoint::new(chunk_to), done: false })
+        }
+
+        let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
+            provider.count_entries::<tables::HashedStorages>()?)
+            as u64;
+        let entities_checkpoint =
+            EntitiesCheckpoint { processed: total_hashed_entries, total: total_hashed_entries };
+
+        validate_state_root(root, SealedHeader::seal_slow(target_block), to_block)?;
+
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(to_block)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+            done: true,
+        })
+    }
+
+    fn unwind(
+        &mut self,
+        _provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
@@ -459,7 +623,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::{keccak256, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives_traits::{SealedBlock, StorageEntry};
