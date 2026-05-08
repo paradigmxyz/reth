@@ -122,6 +122,8 @@ use tui::{run_selector, SelectorOutput};
 
 const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
 const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
+const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
+const SNAPSHOT_API_PATH: &str = "/api/snapshots";
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -185,7 +187,7 @@ impl DownloadDefaults {
     pub fn default_download_defaults() -> Self {
         Self {
             available_snapshots: vec![
-                Cow::Borrowed("https://snapshots.reth.rs (default)"),
+                Cow::Borrowed(RETH_SNAPSHOTS_SOURCE),
                 Cow::Borrowed("https://publicnode.com/snapshots (full nodes & testnets)"),
             ],
             default_base_url: Cow::Borrowed(RETH_SNAPSHOTS_BASE_URL),
@@ -214,7 +216,7 @@ impl DownloadDefaults {
             "Specify a snapshot URL or let the command propose a default one.\n\n\
              Browse available snapshots at {}\n\
              or use --list-snapshots to see them from the CLI.\n\nAvailable snapshot sources:\n",
-            self.snapshot_api_url.trim_end_matches("/api/snapshots"),
+            self.snapshot_source_url(),
         );
 
         for source in &self.available_snapshots {
@@ -237,7 +239,11 @@ impl DownloadDefaults {
     }
 
     fn mainnet_only_discovery(&self) -> bool {
-        self.snapshot_api_url == RETH_SNAPSHOTS_API_URL
+        self.snapshot_api_url.trim_end_matches('/') == RETH_SNAPSHOTS_API_URL
+    }
+
+    fn snapshot_source_url(&self) -> &str {
+        snapshot_source_url_from_api(&self.snapshot_api_url)
     }
 
     /// Add a snapshot source to the list
@@ -265,8 +271,35 @@ impl DownloadDefaults {
     }
 
     /// Set the snapshot discovery API URL.
+    ///
+    /// Generated help uses the API root as the default snapshot source unless a custom
+    /// chain-aware base URL or source list was already provided.
     pub fn with_snapshot_api_url(mut self, url: impl Into<Cow<'static, str>>) -> Self {
         self.snapshot_api_url = url.into();
+
+        let source_url = self.snapshot_source_url().to_string();
+        if self.default_chain_aware_base_url.is_none() {
+            self.default_chain_aware_base_url = Some(Cow::Owned(source_url.clone()));
+        }
+        for source in &mut self.available_snapshots {
+            if source.as_ref() == RETH_SNAPSHOTS_SOURCE {
+                *source = Cow::Owned(format!("{source_url} (default)"));
+            }
+        }
+
+        self
+    }
+
+    /// Set one default snapshot source URL for discovery and generated CLI references.
+    ///
+    /// The provided URL is the public snapshot root, such as `https://snapshots.example.com`.
+    /// The discovery API is derived as `{url}/api/snapshots`.
+    pub fn with_snapshot_source_url(mut self, url: impl Into<Cow<'static, str>>) -> Self {
+        let source_url = normalize_snapshot_source_url(url.into());
+        self.available_snapshots = vec![Cow::Owned(format!("{} (default)", source_url.as_ref()))];
+        self.default_base_url = source_url.clone();
+        self.default_chain_aware_base_url = Some(source_url.clone());
+        self.snapshot_api_url = Cow::Owned(format!("{}{SNAPSHOT_API_PATH}", source_url.as_ref()));
         self
     }
 
@@ -274,6 +307,17 @@ impl DownloadDefaults {
     pub fn with_long_help(mut self, help: impl Into<String>) -> Self {
         self.long_help = Some(help.into());
         self
+    }
+}
+
+fn snapshot_source_url_from_api(api_url: &str) -> &str {
+    api_url.trim_end_matches('/').trim_end_matches(SNAPSHOT_API_PATH)
+}
+
+fn normalize_snapshot_source_url(url: Cow<'static, str>) -> Cow<'static, str> {
+    match url {
+        Cow::Borrowed(url) => Cow::Borrowed(snapshot_source_url_from_api(url)),
+        Cow::Owned(url) => Cow::Owned(snapshot_source_url_from_api(&url).to_string()),
     }
 }
 
@@ -760,7 +804,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                          \t--manifest-path <PATH>\n\
                          \t-u <SNAPSHOT-URL>\n\n\
                          Use --list to inspect snapshots exposed by {}.",
-                        defaults.snapshot_api_url.trim_end_matches("/api/snapshots"),
+                        defaults.snapshot_source_url(),
                     );
                 }
 
@@ -873,6 +917,14 @@ fn current_binary_name() -> String {
         .and_then(|name| name.into_string().ok())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "reth".to_string())
+}
+
+fn download_command() -> String {
+    download_command_for_binary(&current_binary_name())
+}
+
+fn download_command_for_binary(binary_name: &str) -> String {
+    format!("{binary_name} download")
 }
 
 fn startup_chain_arg<C>(chain_spec: &C::ChainSpec) -> Option<String>
@@ -995,12 +1047,54 @@ mod tests {
 
     #[test]
     fn test_custom_snapshot_api_keeps_selected_chain_help() {
-        let help = DownloadDefaults::default()
-            .with_snapshot_api_url("https://snapshots.tempoxyz.dev/api/snapshots")
-            .long_help();
+        let defaults = DownloadDefaults::default()
+            .with_snapshot_api_url("https://snapshots.tempoxyz.dev/api/snapshots");
+        let help = defaults.long_help();
 
+        assert_eq!(
+            defaults.default_chain_aware_base_url.as_deref(),
+            Some("https://snapshots.tempoxyz.dev")
+        );
+        assert!(help.contains("Browse available snapshots at https://snapshots.tempoxyz.dev"));
+        assert!(help.contains("- https://snapshots.tempoxyz.dev (default)"));
         assert!(help.contains("selected chain"));
         assert!(!help.contains("Ethereum mainnet"));
+        assert!(!help.contains("snapshots.reth.rs"));
+    }
+
+    #[test]
+    fn test_snapshot_source_url_sets_generated_references() {
+        let defaults =
+            DownloadDefaults::default().with_snapshot_source_url("https://snapshots.tempoxyz.dev/");
+        let help = defaults.long_help();
+
+        assert_eq!(defaults.snapshot_api_url, "https://snapshots.tempoxyz.dev/api/snapshots");
+        assert_eq!(defaults.default_base_url, "https://snapshots.tempoxyz.dev");
+        assert_eq!(
+            defaults.default_chain_aware_base_url.as_deref(),
+            Some("https://snapshots.tempoxyz.dev")
+        );
+        assert_eq!(
+            defaults.available_snapshots.iter().map(|source| source.as_ref()).collect::<Vec<_>>(),
+            vec!["https://snapshots.tempoxyz.dev (default)"]
+        );
+        assert!(!defaults.mainnet_only_discovery());
+        assert!(help.contains("Browse available snapshots at https://snapshots.tempoxyz.dev"));
+        assert!(help.contains("from https://snapshots.tempoxyz.dev."));
+    }
+
+    #[test]
+    fn test_snapshot_api_url_trailing_slash_sets_source_url() {
+        let defaults = DownloadDefaults::default()
+            .with_snapshot_api_url("https://snapshots.tempoxyz.dev/api/snapshots/");
+        let help = defaults.long_help();
+
+        assert_eq!(
+            defaults.default_chain_aware_base_url.as_deref(),
+            Some("https://snapshots.tempoxyz.dev")
+        );
+        assert!(help.contains("Browse available snapshots at https://snapshots.tempoxyz.dev"));
+        assert!(help.contains("- https://snapshots.tempoxyz.dev (default)"));
     }
 
     #[test]
@@ -1185,5 +1279,10 @@ mod tests {
             startup_node_command_for_binary::<EthereumChainSpecParser>("tempo", HOLESKY.as_ref());
 
         assert_eq!(command, "tempo node --chain holesky");
+    }
+
+    #[test]
+    fn download_command_uses_binary_name() {
+        assert_eq!(download_command_for_binary("tempo"), "tempo download");
     }
 }
