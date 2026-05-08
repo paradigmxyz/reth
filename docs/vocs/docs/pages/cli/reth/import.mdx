@@ -97,8 +97,8 @@ Database:
 
           Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
 
-      --db.max-balstore-blocks <MAX_BALSTORE_BLOCKS>
-          Block distance within which block access lists are kept in memory
+      --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
+          Number of recent blocks to keep in the in-memory BAL store cache
 
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>

@@ -206,9 +206,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(config.prune.segments.clone())
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance);
 
-        if let Some(max_balstore_blocks) = self.db.max_balstore_blocks {
+        if let Some(balstore_cache_size) = self.db.balstore_cache_size {
             factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::new(
-                BalConfig::with_in_memory_retention_distance(max_balstore_blocks),
+                BalConfig::with_in_memory_retention_distance(balstore_cache_size),
             )));
         }
 

@@ -517,9 +517,9 @@ where
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_changeset_cache(changeset_cache);
 
-        if let Some(max_balstore_blocks) = self.node_config().db.max_balstore_blocks {
+        if let Some(balstore_cache_size) = self.node_config().db.balstore_cache_size {
             factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::new(
-                BalConfig::with_in_memory_retention_distance(max_balstore_blocks),
+                BalConfig::with_in_memory_retention_distance(balstore_cache_size),
             )));
         }
 
