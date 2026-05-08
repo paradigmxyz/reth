@@ -1281,6 +1281,16 @@ jobs:
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
 
+          GITHUB_USER=$(curl -fsSL \
+            -H "Authorization: Bearer ${DEREK_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/user)
+          GIT_USER_NAME=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["login"])' <<< "${GITHUB_USER}")
+          GIT_USER_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' <<< "${GITHUB_USER}")
+          git -C "${TMP_DIR}" config user.name "${GIT_USER_NAME}"
+          git -C "${TMP_DIR}" config user.email "${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
           git -C "${TMP_DIR}" add "${CHART_DIR}"
@@ -1290,8 +1300,7 @@ jobs:
             rm -rf "${TMP_DIR}"
             exit 0
           fi
-          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
+          git -C "${TMP_DIR}" commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
 
           for attempt in 1 2 3 4 5; do
             if git -C "${TMP_DIR}" push origin HEAD:main; then

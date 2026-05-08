@@ -672,11 +672,20 @@ jobs:
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
 
+          GITHUB_USER=$(curl -fsSL \
+            -H "Authorization: Bearer ${DEREK_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/user)
+          GIT_USER_NAME=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["login"])' <<< "${GITHUB_USER}")
+          GIT_USER_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' <<< "${GITHUB_USER}")
+          git -C "${TMP_DIR}" config user.name "${GIT_USER_NAME}"
+          git -C "${TMP_DIR}" config user.email "${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
           git -C "${TMP_DIR}" add "${CHART_DIR}"
-          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "nightly bench charts for run ${RUN_ID}"
+          git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
           git -C "${TMP_DIR}" push origin HEAD:main
           echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           rm -rf "${TMP_DIR}"
@@ -1013,11 +1022,20 @@ jobs:
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
 
+          GITHUB_USER=$(curl -fsSL \
+            -H "Authorization: Bearer ${DEREK_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/user)
+          GIT_USER_NAME=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["login"])' <<< "${GITHUB_USER}")
+          GIT_USER_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' <<< "${GITHUB_USER}")
+          git -C "${TMP_DIR}" config user.name "${GIT_USER_NAME}"
+          git -C "${TMP_DIR}" config user.email "${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+
           mkdir -p "${TMP_DIR}/state"
           echo "${FEATURE_REF}" > "${TMP_DIR}/state/${MODE}-last-feature-ref"
           git -C "${TMP_DIR}" add state/
           git -C "${TMP_DIR}" diff --cached --quiet && echo "No state change" && exit 0
-          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "bench: update ${MODE} state to ${FEATURE_REF}"
+          git -C "${TMP_DIR}" commit -m "bench: update ${MODE} state to ${FEATURE_REF}"
           git -C "${TMP_DIR}" push origin HEAD:state
           rm -rf "${TMP_DIR}"
