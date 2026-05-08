@@ -595,12 +595,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
 
+        let mut total_tx_count = 0usize;
         let tx_nums: Vec<TxNumber> = {
             let mut nums = Vec::with_capacity(blocks.len());
             let mut current = first_tx_num;
             for block in &blocks {
+                let block_tx_count = block.recovered_block().body().transaction_count();
                 nums.push(current);
-                current += block.recovered_block().body().transaction_count() as u64;
+                total_tx_count += block_tx_count;
+                current += block_tx_count as u64;
             }
             nums
         };
@@ -656,8 +659,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
-                let total_tx_count: usize =
-                    blocks.iter().map(|b| b.recovered_block().body().transaction_count()).sum();
                 let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
                 for (i, block) in blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
