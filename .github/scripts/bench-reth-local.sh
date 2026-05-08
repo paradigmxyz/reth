@@ -312,7 +312,11 @@ if [ "$TUNE" = "true" ]; then
   done
 
   # Stop noisy background services
-  sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+  sudo systemctl stop \
+    irqbalance cron atd unattended-upgrades snapd \
+    prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+    prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+    2>/dev/null || true
 
   TUNING_APPLIED=true
 
