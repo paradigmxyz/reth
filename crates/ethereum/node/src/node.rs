@@ -449,10 +449,7 @@ where
     }
 }
 
-impl<N> DebugNode<N> for EthereumNode
-where
-    N: FullNodeComponents<Types = Self>,
-{
+impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> ExecutionData {

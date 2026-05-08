@@ -4,13 +4,20 @@ use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
-use reth_revm::state::bal::Bal as RevmBal;
+use reth_revm::{
+    bytecode::Bytecode,
+    primitives::{StorageKey, StorageValue},
+    state::bal::{
+        AccountBal as RevmAccountBal, AccountInfoBal as RevmAccountInfoBal, Bal as RevmBal,
+        BalWrites as RevmBalWrites, StorageBal as RevmStorageBal,
+    },
+};
 use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
@@ -64,24 +71,6 @@ type ReceiptsLruCache<R, L> =
 type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
 
 type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
-
-/// Cached revm BAL.
-#[derive(Clone, Debug)]
-pub(crate) struct CachedRevmBal(Arc<RevmBal>);
-
-impl CachedRevmBal {
-    /// Creates a cached revm BAL from an owned BAL.
-    #[inline]
-    fn new(bal: RevmBal) -> Self {
-        Self(Arc::new(bal))
-    }
-}
-
-impl InMemorySize for CachedRevmBal {
-    fn size(&self) -> usize {
-        core::mem::size_of::<Self>() + core::mem::size_of::<RevmBal>()
-    }
-}
 
 /// Provides async access to cached eth data
 ///
@@ -944,6 +933,63 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     }
 }
 
+/// Cached revm BAL.
+#[derive(Clone, Debug)]
+pub(crate) struct CachedRevmBal(Arc<RevmBal>);
+
+impl CachedRevmBal {
+    /// Creates a cached revm BAL from an owned BAL.
+    #[inline]
+    fn new(bal: RevmBal) -> Self {
+        Self(Arc::new(bal))
+    }
+}
+
+impl InMemorySize for CachedRevmBal {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>() + revm_bal_size(&self.0)
+    }
+}
+
+fn revm_bal_size(bal: &RevmBal) -> usize {
+    core::mem::size_of::<RevmBal>() +
+        bal.accounts.capacity() * core::mem::size_of::<(Address, RevmAccountBal)>() +
+        bal.accounts.values().map(revm_account_bal_heap_size).sum::<usize>()
+}
+
+fn revm_account_bal_heap_size(account: &RevmAccountBal) -> usize {
+    revm_account_info_bal_heap_size(&account.account_info) +
+        revm_storage_bal_heap_size(&account.storage)
+}
+
+fn revm_account_info_bal_heap_size(account_info: &RevmAccountInfoBal) -> usize {
+    revm_bal_writes_heap_size(&account_info.nonce, |_| 0) +
+        revm_bal_writes_heap_size(&account_info.balance, |_| 0) +
+        revm_bal_writes_heap_size(&account_info.code, revm_code_write_heap_size)
+}
+
+fn revm_storage_bal_heap_size(storage: &RevmStorageBal) -> usize {
+    storage.storage.len() * core::mem::size_of::<(StorageKey, RevmBalWrites<StorageValue>)>() +
+        storage
+            .storage
+            .values()
+            .map(|writes| revm_bal_writes_heap_size(writes, |_| 0))
+            .sum::<usize>()
+}
+
+fn revm_bal_writes_heap_size<T, F>(writes: &RevmBalWrites<T>, mut item_heap_size: F) -> usize
+where
+    T: PartialEq + Clone,
+    F: FnMut(&T) -> usize,
+{
+    writes.writes.capacity() * core::mem::size_of::<(u64, T)>() +
+        writes.writes.iter().map(|(_, item)| item_heap_size(item)).sum::<usize>()
+}
+
+fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
+    bytecode.bytes_ref().len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1065,6 +1111,28 @@ mod tests {
         let bal = response_rx.try_recv().expect("queued BAL response").expect("BAL result");
 
         assert!(bal.is_some());
+    }
+
+    #[test]
+    fn cached_revm_bal_size_accounts_for_nested_allocations() {
+        let mut account = RevmAccountBal::default();
+        account.account_info.nonce.writes.push((1, 1));
+        account.account_info.balance.writes.push((2, StorageValue::from(1u64)));
+        account.account_info.code.writes.push((
+            3,
+            (B256::repeat_byte(0xaa), Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))),
+        ));
+        account.storage.storage.insert(
+            StorageKey::from(1u64),
+            RevmBalWrites::new(vec![(4, StorageValue::from(2u64))]),
+        );
+
+        let mut bal = RevmBal::default();
+        bal.accounts.insert(Address::ZERO, account);
+
+        let previous_estimate =
+            core::mem::size_of::<CachedRevmBal>() + core::mem::size_of::<RevmBal>();
+        assert!(CachedRevmBal::new(bal).size() > previous_estimate);
     }
 
     #[tokio::test]
