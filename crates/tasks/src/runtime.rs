@@ -23,6 +23,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    thread,
     time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
@@ -593,6 +594,50 @@ impl Runtime {
         self.spawn_critical_as(name, fut, TaskKind::Blocking)
     }
 
+    /// This spawns a critical task onto a dedicated named OS thread.
+    /// The given future resolves as soon as the [`Shutdown`] signal is received.
+    ///
+    /// If this task panics, the [`TaskManager`] is notified.
+    pub fn spawn_critical_os_thread<F>(
+        &self,
+        thread_name: &'static str,
+        task_name: &'static str,
+        fut: F,
+    ) -> thread::JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.0.metrics.inc_critical_tasks();
+        let handle = self.0.handle.clone();
+        let panicked_tasks_tx = self.0.task_events_tx.clone();
+        let on_shutdown = self.0.on_shutdown.clone();
+
+        let task = std::panic::AssertUnwindSafe(fut)
+            .catch_unwind()
+            .map_err(move |error| {
+                let task_error = PanickedTaskError::new(task_name, error);
+                error!("{task_error}");
+                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
+            })
+            .in_current_span();
+
+        let finished_critical_tasks_total_metrics =
+            self.0.metrics.finished_critical_tasks_total.clone();
+        let task = async move {
+            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_total_metrics);
+            let task = pin!(task);
+            let _ = select(on_shutdown, task).await;
+        };
+
+        thread::Builder::new()
+            .name(thread_name.to_string())
+            .spawn(move || {
+                let _guard = handle.enter();
+                handle.block_on(task);
+            })
+            .unwrap_or_else(|e| panic!("failed to spawn critical OS thread {thread_name:?}: {e}"))
+    }
+
     /// This spawns a critical task onto the runtime.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
@@ -918,6 +963,43 @@ mod tests {
             Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         let runtime = RuntimeBuilder::new(config).build().unwrap();
         let _ = runtime.handle();
+    }
+
+    #[test]
+    fn critical_os_thread_uses_requested_name() {
+        let runtime = Runtime::test();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let handle = runtime.spawn_critical_os_thread(
+            "critical-os-test",
+            "critical os thread test",
+            async move {
+                let name = thread::current().name().unwrap().to_string();
+                tx.send(name).unwrap();
+            },
+        );
+
+        let name = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(name, "critical-os-test");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn critical_os_thread_panic_is_reported() {
+        let runtime = Runtime::test();
+        let manager_handle = runtime.take_task_manager_handle().unwrap();
+
+        let handle = runtime.spawn_critical_os_thread(
+            "critical-os-panic",
+            "critical os thread panic test",
+            async { panic!("critical os thread panic") },
+        );
+
+        let err =
+            runtime.handle().block_on(async move { manager_handle.await.unwrap().unwrap_err() });
+        assert_eq!(err.task_name, "critical os thread panic test");
+        assert_eq!(err.error, Some("critical os thread panic".to_string()));
+        handle.join().unwrap();
     }
 
     #[cfg(feature = "rayon")]

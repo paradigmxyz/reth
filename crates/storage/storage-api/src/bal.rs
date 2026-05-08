@@ -41,6 +41,9 @@ mod subscriptions {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
+    ///
+    /// Implementations may buffer inserts. Call [`Self::flush`] when pending BALs need to be made
+    /// durable.
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
 
     /// Insert multiple BALs.
@@ -50,6 +53,13 @@ pub trait BalStore: Send + Sync + 'static {
         for (num_hash, bal) in entries {
             self.insert(num_hash, bal)?;
         }
+        Ok(())
+    }
+
+    /// Flushes any pending BALs to the backing store.
+    ///
+    /// In-memory implementations may treat this as a no-op.
+    fn flush(&self) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -174,6 +184,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
         self.inner.insert_many(entries)
+    }
+
+    /// Flushes any pending BALs to the backing store.
+    #[inline]
+    pub fn flush(&self) -> ProviderResult<()> {
+        self.inner.flush()
     }
 
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
@@ -324,6 +340,13 @@ mod tests {
         assert!(store.get_by_hash(B256::random()).unwrap().is_none());
         assert!(by_range.is_empty());
         assert_eq!(store.prune(10).unwrap(), 0);
+    }
+
+    #[test]
+    fn noop_store_flush_is_noop() {
+        let store = BalStoreHandle::default();
+
+        store.flush().unwrap();
     }
 
     #[test]
