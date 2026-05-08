@@ -9,6 +9,7 @@ use crate::{
     BlockClient,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::Bal;
 use alloy_primitives::{Sealable, B256};
 use core::marker::PhantomData;
 use futures::FutureExt;
@@ -34,43 +35,57 @@ use tracing::debug;
 pub type FullBlockRangeWithOptionalAccessListsResponse<B> =
     (Vec<SealedBlock<B>>, Option<BlockAccessLists>);
 
-/// A full block with optional raw block access-list data.
+/// A sealed block with associated data.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockWithOptionalAccessLists<B: Block> {
+pub struct SealedBlockWith<B: Block, T = Option<Bal>> {
     block: SealedBlock<B>,
-    access_lists: Option<BlockAccessLists>,
+    data: T,
 }
 
-impl<B: Block> BlockWithOptionalAccessLists<B> {
-    /// Creates a full block response with optional block access-list data.
-    pub const fn new(block: SealedBlock<B>, access_lists: Option<BlockAccessLists>) -> Self {
-        Self { block, access_lists }
+impl<B: Block, T> SealedBlockWith<B, T> {
+    /// Creates a sealed block with associated data.
+    pub const fn new(block: SealedBlock<B>, data: T) -> Self {
+        Self { block, data }
     }
 
+    /// Returns the sealed block.
+    pub const fn block(&self) -> &SealedBlock<B> {
+        &self.block
+    }
+
+    /// Returns the associated data.
+    pub const fn data(&self) -> &T {
+        &self.data
+    }
+
+    /// Consumes the wrapper and returns its parts.
+    pub fn into_parts(self) -> (SealedBlock<B>, T) {
+        (self.block, self.data)
+    }
+}
+
+impl<B: Block> SealedBlockWith<B> {
+    /// Creates a sealed block without associated BAL data.
+    pub const fn without_data(block: SealedBlock<B>) -> Self {
+        Self::new(block, None)
+    }
+}
+
+impl<B: Block> SealedBlockWith<B, Option<BlockAccessLists>> {
     /// Creates a full block response without block access-list data.
     pub const fn without_access_lists(block: SealedBlock<B>) -> Self {
         Self::new(block, None)
     }
 
-    /// Returns the downloaded block.
-    pub const fn block(&self) -> &SealedBlock<B> {
-        &self.block
-    }
-
     /// Returns the optional raw block access-list data.
     pub const fn access_lists(&self) -> Option<&BlockAccessLists> {
-        self.access_lists.as_ref()
-    }
-
-    /// Consumes the wrapper and returns its parts.
-    pub fn into_parts(self) -> (SealedBlock<B>, Option<BlockAccessLists>) {
-        (self.block, self.access_lists)
+        self.data.as_ref()
     }
 }
 
-impl<B: Block> From<SealedBlock<B>> for BlockWithOptionalAccessLists<B> {
+impl<B: Block> From<SealedBlock<B>> for SealedBlockWith<B> {
     fn from(block: SealedBlock<B>) -> Self {
-        Self::without_access_lists(block)
+        Self::without_data(block)
     }
 }
 
@@ -421,14 +436,10 @@ where
 
     fn take_block_and_access_lists(
         &mut self,
-    ) -> Option<BlockWithOptionalAccessLists<Client::Block>> {
+    ) -> Option<SealedBlockWith<Client::Block, Option<BlockAccessLists>>> {
+        let BalRequestState::Ready(access_lists) = &mut self.bal_request_state else { return None };
         let block = self.block_result.take()?;
-        let access_lists = match &mut self.bal_request_state {
-            BalRequestState::Ready(access_lists) => access_lists.take(),
-            // BAL lookup is best-effort, so a ready block is returned without waiting.
-            BalRequestState::Pending(_) => None,
-        };
-        Some(BlockWithOptionalAccessLists::new(block, access_lists))
+        Some(SealedBlockWith::new(block, access_lists.take()))
     }
 }
 
@@ -436,7 +447,7 @@ impl<Client> Future for FetchFullBlockWithAccessListsFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
 {
-    type Output = BlockWithOptionalAccessLists<Client::Block>;
+    type Output = SealedBlockWith<Client::Block, Option<BlockAccessLists>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -1176,6 +1187,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn download_single_full_block_with_access_lists_waits_for_pending_access_lists() {
+        let client = FullBlockWithAccessListsClient::default();
+        client.set_access_list_pending_polls(1);
+
+        let header: SealedHeader = SealedHeader::default();
+        let body = BlockBody::default();
+        let access_list = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        client.insert(header.clone(), body.clone(), access_list.clone());
+
+        let request_count = Arc::clone(&client.access_list_requests);
+        let client = FullBlockClient::test_client(client);
+
+        let received =
+            timeout(Duration::from_secs(1), client.get_full_block_with_access_lists(header.hash()))
+                .await
+                .expect("access list request should complete");
+
+        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(received.access_lists(), Some(&BlockAccessLists(vec![access_list])));
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn download_single_full_block_with_access_lists_returns_none_after_empty_response() {
         let client = FullBlockWithAccessListsClient::default();
         client.empty_first_response.store(true, Ordering::SeqCst);
@@ -1256,6 +1290,7 @@ mod tests {
         access_lists: Arc<Mutex<HashMap<B256, Bytes>>>,
         access_list_requests: Arc<AtomicUsize>,
         access_list_soft_limit: Arc<AtomicUsize>,
+        access_list_pending_polls: Arc<AtomicUsize>,
         extra_access_list_entries: Arc<AtomicUsize>,
         unsupported_access_lists: Arc<AtomicBool>,
         last_access_list_requirement: Arc<Mutex<Option<BalRequirement>>>,
@@ -1270,6 +1305,7 @@ mod tests {
                 access_lists: Arc::new(Mutex::new(HashMap::default())),
                 access_list_requests: Arc::new(AtomicUsize::new(0)),
                 access_list_soft_limit: Arc::new(AtomicUsize::new(usize::MAX)),
+                access_list_pending_polls: Arc::new(AtomicUsize::new(0)),
                 extra_access_list_entries: Arc::new(AtomicUsize::new(0)),
                 unsupported_access_lists: Arc::new(AtomicBool::new(false)),
                 last_access_list_requirement: Arc::new(Mutex::new(None)),
@@ -1287,6 +1323,10 @@ mod tests {
 
         fn set_access_list_soft_limit(&self, limit: usize) {
             self.access_list_soft_limit.store(limit, Ordering::SeqCst);
+        }
+
+        fn set_access_list_pending_polls(&self, polls: usize) {
+            self.access_list_pending_polls.store(polls, Ordering::SeqCst);
         }
 
         fn set_extra_access_list_entries(&self, count: usize) {
@@ -1357,8 +1397,33 @@ mod tests {
         }
     }
 
+    struct MaybePendingAccessLists {
+        response: Option<PeerRequestResult<BlockAccessLists>>,
+        pending_polls: usize,
+    }
+
+    impl MaybePendingAccessLists {
+        const fn new(response: PeerRequestResult<BlockAccessLists>, pending_polls: usize) -> Self {
+            Self { response: Some(response), pending_polls }
+        }
+    }
+
+    impl std::future::Future for MaybePendingAccessLists {
+        type Output = PeerRequestResult<BlockAccessLists>;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.pending_polls > 0 {
+                self.pending_polls -= 1;
+                cx.waker().wake_by_ref();
+                return Poll::Pending
+            }
+
+            Poll::Ready(self.response.take().expect("future polled after completion"))
+        }
+    }
+
     impl BlockAccessListsClient for FullBlockWithAccessListsClient {
-        type Output = futures::future::Ready<PeerRequestResult<BlockAccessLists>>;
+        type Output = MaybePendingAccessLists;
 
         fn get_block_access_lists_with_priority_and_requirement(
             &self,
@@ -1368,16 +1433,20 @@ mod tests {
         ) -> Self::Output {
             self.access_list_requests.fetch_add(1, Ordering::SeqCst);
             *self.last_access_list_requirement.lock() = Some(requirement);
+            let pending_polls = self.access_list_pending_polls.swap(0, Ordering::SeqCst);
 
             if self.unsupported_access_lists.load(Ordering::SeqCst) {
-                return futures::future::ready(Err(RequestError::UnsupportedCapability))
+                return MaybePendingAccessLists::new(
+                    Err(RequestError::UnsupportedCapability),
+                    pending_polls,
+                )
             }
 
             if self.empty_first_response.swap(false, Ordering::SeqCst) {
-                return futures::future::ready(Ok(WithPeerId::new(
-                    PeerId::random(),
-                    BlockAccessLists(Vec::new()),
-                )))
+                return MaybePendingAccessLists::new(
+                    Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(Vec::new()))),
+                    pending_polls,
+                )
             }
 
             let mut access_lists: Vec<_> = hashes
@@ -1395,10 +1464,10 @@ mod tests {
                 access_lists.push(Bytes::from_static(&[EMPTY_LIST_CODE]));
             }
 
-            futures::future::ready(Ok(WithPeerId::new(
-                PeerId::random(),
-                BlockAccessLists(access_lists),
-            )))
+            MaybePendingAccessLists::new(
+                Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(access_lists))),
+                pending_polls,
+            )
         }
     }
 
