@@ -1114,11 +1114,11 @@ where
             // This can happen when `calculate_key_range` finds no keys for a child's range,
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
             // function would select the same child again.
-            if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref.len() > self.branch_path.len()
-            {
-                let lower_nibble =
-                    uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len());
+            let lower_starts_with_branch =
+                uncalculated_lower_bound_ref.starts_with(&self.branch_path);
+            let branch_path_len = self.branch_path.len();
+            if lower_starts_with_branch && uncalculated_lower_bound_ref.len() > branch_path_len {
+                let lower_nibble = uncalculated_lower_bound_ref.get_unchecked(branch_path_len);
                 // Clear all nibbles strictly below `lower_nibble` since they've been processed.
                 let already_processed_mask = TrieMask::new((1u16 << lower_nibble) - 1);
                 next_child_nibbles &= !already_processed_mask;
@@ -1130,8 +1130,7 @@ where
                     ?next_child_nibbles,
                     "Unset already processed key nibbles from next_child_nibbles",
                 );
-            } else if !uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref > &self.branch_path
+            } else if !lower_starts_with_branch && uncalculated_lower_bound_ref > &self.branch_path
             {
                 // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
                 // lower is 0x7). All remaining children have been processed.
