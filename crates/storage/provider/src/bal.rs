@@ -132,6 +132,10 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
+    fn flush(&self) -> ProviderResult<()> {
+        Ok(())
+    }
+
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
     }
@@ -209,6 +213,13 @@ mod tests {
         let store = InMemoryBalStore::default();
 
         assert!(store.get_by_range(1, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn flush_is_noop() {
+        let store = InMemoryBalStore::default();
+
+        store.flush().unwrap();
     }
 
     #[test]
