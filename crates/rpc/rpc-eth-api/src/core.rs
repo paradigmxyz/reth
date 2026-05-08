@@ -418,6 +418,10 @@ pub trait EthApi<
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<Value>>;
 
+    /// Returns the EIP-7928 block access list for a given block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
@@ -930,6 +934,7 @@ where
 
         Ok(Some(json))
     }
+
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
     async fn block_access_list_by_block_number(
         &self,
@@ -943,6 +948,18 @@ where
 
         Ok(Some(json))
     }
+
+    /// Handler for: `eth_getBlockAccessList`
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
+
+        let bal = self.get_block_access_list(block_id).await?;
+        let json = serde_json::to_value(&bal)
+            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
+
+        Ok(Some(json))
+    }
+
     /// Handler for: `eth_getBlockAccessListRaw`
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
