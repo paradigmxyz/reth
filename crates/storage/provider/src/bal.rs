@@ -51,6 +51,9 @@ pub struct BalConfig {
 }
 
 impl BalConfig {
+    /// Default block distance for BALs kept in memory.
+    pub const DEFAULT_IN_MEMORY_RETENTION_DISTANCE: u64 = BAL_RETENTION_PERIOD_SLOTS;
+
     /// Returns a config with no in-memory BAL retention limit.
     pub const fn unbounded() -> Self {
         Self { in_memory_retention: None }
@@ -69,7 +72,7 @@ impl BalConfig {
 
 impl Default for BalConfig {
     fn default() -> Self {
-        Self::with_in_memory_retention_distance(BAL_RETENTION_PERIOD_SLOTS)
+        Self::with_in_memory_retention_distance(Self::DEFAULT_IN_MEMORY_RETENTION_DISTANCE)
     }
 }
 

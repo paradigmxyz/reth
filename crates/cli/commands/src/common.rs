@@ -196,7 +196,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let mut factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
+        let balstore_cache_size =
+            self.db.balstore_cache_size.unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
+        ));
+        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
             static_file_provider,
@@ -204,13 +209,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             runtime,
         )?
         .with_prune_modes(config.prune.segments.clone())
-        .with_minimum_pruning_distance(config.prune.minimum_pruning_distance);
-
-        if let Some(balstore_cache_size) = self.db.balstore_cache_size {
-            factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::new(
-                BalConfig::with_in_memory_retention_distance(balstore_cache_size),
-            )));
-        }
+        .with_minimum_pruning_distance(config.prune.minimum_pruning_distance)
+        .with_bal_store(bal_store);
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&
