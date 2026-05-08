@@ -671,16 +671,7 @@ jobs:
             git init "${TMP_DIR}"
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
-
-          GITHUB_USER=$(curl -fsSL \
-            -H "Authorization: Bearer ${DEREK_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/user)
-          GIT_USER_NAME=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["login"])' <<< "${GITHUB_USER}")
-          GIT_USER_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' <<< "${GITHUB_USER}")
-          git -C "${TMP_DIR}" config user.name "${GIT_USER_NAME}"
-          git -C "${TMP_DIR}" config user.email "${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
 
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
@@ -1021,16 +1012,7 @@ jobs:
             git init "${TMP_DIR}"
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
-
-          GITHUB_USER=$(curl -fsSL \
-            -H "Authorization: Bearer ${DEREK_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/user)
-          GIT_USER_NAME=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["login"])' <<< "${GITHUB_USER}")
-          GIT_USER_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' <<< "${GITHUB_USER}")
-          git -C "${TMP_DIR}" config user.name "${GIT_USER_NAME}"
-          git -C "${TMP_DIR}" config user.email "${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
 
           mkdir -p "${TMP_DIR}/state"
           echo "${FEATURE_REF}" > "${TMP_DIR}/state/${MODE}-last-feature-ref"
