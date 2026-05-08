@@ -1,7 +1,6 @@
 //! E2E tests for the testing RPC namespace.
 
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
 use jsonrpsee_core::client::ClientT;
 use reth_db::test_utils::create_test_rw_db;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
@@ -11,7 +10,7 @@ use reth_node_core::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use std::str::FromStr;
@@ -35,8 +34,8 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
     let db = create_test_rw_db();
 
     let (tx, rx): (
-        oneshot::Sender<eyre::Result<ExecutionPayloadEnvelopeV4>>,
-        oneshot::Receiver<eyre::Result<ExecutionPayloadEnvelopeV4>>,
+        oneshot::Sender<eyre::Result<TestingBuildBlockResponseV1>>,
+        oneshot::Receiver<eyre::Result<TestingBuildBlockResponseV1>>,
     ) = oneshot::channel();
 
     let builder = NodeBuilder::new(config)
@@ -67,7 +66,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
             };
 
             tokio::spawn(async move {
-                let res: eyre::Result<ExecutionPayloadEnvelopeV4> =
+                let res: eyre::Result<TestingBuildBlockResponseV1> =
                     client.request("testing_buildBlockV1", [request]).await.map_err(Into::into);
                 let _ = tx.send(res);
             });

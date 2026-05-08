@@ -14,6 +14,7 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+        payload_to_new_payload,
     },
 };
 use alloy_consensus::TxEnvelope;
@@ -26,7 +27,7 @@ use alloy_provider::{
     Provider, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes,
+    ExecutionData, ExecutionPayload as RpcExecutionPayload, ForkchoiceState, PayloadAttributes,
 };
 use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
@@ -35,8 +36,9 @@ use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::{EngineApiMessageVersion, ExecutionPayload};
 use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
-use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
+use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use std::{
+    path::Path,
     pin::Pin,
     time::{Duration, Instant},
 };
@@ -126,6 +128,7 @@ pub struct Command {
 struct PreparedBuiltBlock {
     block_hash: B256,
     params: serde_json::Value,
+    artifact: BigBlockPayload,
 }
 
 #[derive(Debug)]
@@ -189,6 +192,7 @@ impl Command {
         if let Some(depth) = self.reorg {
             info!(target: "reth-bench", depth, "Using testing_buildBlockV1 reorg mode");
         }
+        let output_dir = self.benchmark.output.clone();
 
         let BenchContext {
             benchmark_mode,
@@ -214,6 +218,7 @@ impl Command {
         let buffer_size = self.rpc_block_buffer_size;
         let provider = block_provider.clone();
         let bench_mode = benchmark_mode.clone();
+        let artifact_output_dir = output_dir.clone();
         let mut blocks: Pin<Box<dyn Stream<Item = eyre::Result<Payload>> + Send>> = Box::pin(
             stream::iter((next_block..)
                 .take_while(move |next_block| {
@@ -221,6 +226,7 @@ impl Command {
                 }))
                 .map(move |next_block| {
                     let block_provider = provider.clone();
+                    let artifact_output_dir = artifact_output_dir.clone();
                     async move {
                         let block_res = block_provider
                             .get_block_by_number(next_block.into())
@@ -239,10 +245,41 @@ impl Command {
                             };
 
 
-                        let bal = if !rlp_blocks &&
-                            (block.header.block_access_list_hash.is_some() || self.enable_bal)
-                        {
-                            Some(fetch_block_access_list(&block_provider, block.header.number).await?)
+                        let fetched_bal = if !rlp_blocks {
+                            match fetch_block_access_list(&block_provider, block.header.number).await {
+                                Ok(bal) => {
+                                    write_bal_artifact(
+                                        artifact_output_dir.as_deref(),
+                                        "real",
+                                        block.header.number,
+                                        block.header.hash,
+                                        Some(&bal),
+                                    )?;
+                                    Some(bal)
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        target: "reth-bench",
+                                        block_number = block.header.number,
+                                        block_hash = %block.header.hash,
+                                        %err,
+                                        "Failed to fetch real block BAL artifact"
+                                    );
+                                    write_bal_artifact(
+                                        artifact_output_dir.as_deref(),
+                                        "real",
+                                        block.header.number,
+                                        block.header.hash,
+                                        None,
+                                    )?;
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                        let bal = if block.header.block_access_list_hash.is_some() || self.enable_bal {
+                            fetched_bal
                         } else {
                             None
                         };
@@ -329,6 +366,7 @@ impl Command {
         let mut total_wait_time = Duration::ZERO;
         let mut reorg_state = self.reorg.map(ReorgState::new);
         let mut queued_fork_block = None;
+        let mut payload_artifact_sequence = 0u64;
         while let Some(payload) = {
             let wait_start = Instant::now();
             let result = blocks.try_next().await?;
@@ -348,6 +386,13 @@ impl Command {
             debug!(target: "reth-bench", ?block_number, "Sending payload");
             let start = Instant::now();
             let canonical_forkchoice_state = payload.forkchoice_state();
+            write_payload_artifact(
+                output_dir.as_deref(),
+                payload_artifact_sequence,
+                "canonical",
+                &payload.to_artifact_payload()?,
+            )?;
+            payload_artifact_sequence += 1;
             let (version, params) = payload.into_new_payload_params(
                 use_reth_namespace,
                 wait_for_persistence,
@@ -406,6 +451,7 @@ impl Command {
                                 .ok_or_eyre("missing deferred fork block for reorg branch start")?,
                             canonical_parent_hash,
                             no_wait_for_caches,
+                            output_dir.as_deref(),
                         )
                         .await?,
                     });
@@ -422,6 +468,13 @@ impl Command {
                 );
                 let prepared = queued.prepared;
 
+                write_payload_artifact(
+                    output_dir.as_deref(),
+                    payload_artifact_sequence,
+                    "fork",
+                    &prepared.artifact,
+                )?;
+                payload_artifact_sequence += 1;
                 call_new_payload_with_reth(&auth_provider, None, prepared.params).await?;
 
                 reorg_state.push_fork_head(canonical_parent_hash, prepared.block_hash);
@@ -450,6 +503,7 @@ impl Command {
                         next_fork_block_number,
                         Some(prepared.block_hash),
                         no_wait_for_caches,
+                        output_dir.as_deref(),
                     )
                     .await?;
                 } else {
@@ -536,12 +590,13 @@ async fn prepare_built_block(
     block: &AnyRpcBlock,
     parent_block_hash: B256,
     no_wait_for_caches: bool,
+    output_dir: Option<&Path>,
 ) -> eyre::Result<PreparedBuiltBlock> {
     const MAX_BUILD_ATTEMPTS: usize = 10;
     const BUILD_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     let request = build_block_request(block, parent_block_hash)?;
-    let built_payload: ExecutionPayloadEnvelopeV5 = {
+    let built_response: TestingBuildBlockResponseV1 = {
         let mut attempts_remaining = MAX_BUILD_ATTEMPTS;
 
         loop {
@@ -571,20 +626,34 @@ async fn prepare_built_block(
         }
     };
 
+    let built_payload = built_response.execution_payload_envelope;
     let payload = &built_payload.execution_payload.payload_inner.payload_inner;
     let block_hash = payload.block_hash;
+    write_bal_artifact(
+        output_dir,
+        "fork",
+        payload.block_number,
+        block_hash,
+        built_response.block_access_list.as_ref(),
+    )?;
     let (payload, sidecar) = built_payload
         .into_payload_and_sidecar(block.header.parent_beacon_block_root.unwrap_or_default());
+    let execution_data = ExecutionData { payload, sidecar };
+    let artifact = BigBlockPayload {
+        execution_data: execution_data.clone(),
+        big_block_data: Default::default(),
+        block_access_list: built_response.block_access_list,
+    };
     // Fork payloads are built immediately before the next `testing_buildBlockV1` call. Leaving
     // reth's default persistence wait enabled here gives the regular RPC side a consistent base
     // state for the next synthetic fork block build.
     let params = serde_json::to_value((
-        RethNewPayloadInput::ExecutionData(ExecutionData { payload, sidecar }),
+        RethNewPayloadInput::ExecutionData(execution_data),
         None::<bool>,
         no_wait_for_caches.then_some(false),
     ))?;
 
-    Ok(PreparedBuiltBlock { block_hash, params })
+    Ok(PreparedBuiltBlock { block_hash, params, artifact })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -595,6 +664,7 @@ async fn queue_fork_block(
     block_number: u64,
     parent_block_hash: Option<B256>,
     no_wait_for_caches: bool,
+    output_dir: Option<&Path>,
 ) -> eyre::Result<Option<QueuedForkBlock>> {
     if !benchmark_mode.contains(block_number) {
         return Ok(None)
@@ -615,6 +685,7 @@ async fn queue_fork_block(
             &future_block,
             parent_block_hash,
             no_wait_for_caches,
+            output_dir,
         )
         .await?,
     }))
@@ -624,6 +695,55 @@ fn is_retryable_build_block_error(err: &alloy_transport::TransportError) -> bool
     let message = err.to_string();
     message.contains("block not found: hash") ||
         message.contains("block hash not found for block number")
+}
+
+fn write_bal_artifact(
+    output_dir: Option<&Path>,
+    kind: &str,
+    block_number: u64,
+    block_hash: B256,
+    block_access_list: Option<&BlockAccessList>,
+) -> eyre::Result<()> {
+    let Some(output_dir) = output_dir else { return Ok(()) };
+
+    let bal_dir = output_dir.join("block-access-lists");
+    std::fs::create_dir_all(&bal_dir)?;
+    let path = bal_dir.join(format!("bal-{kind}-{block_number}-{block_hash}.json"));
+    let value = serde_json::json!({
+        "kind": kind,
+        "blockNumber": block_number,
+        "blockHash": block_hash,
+        "blockAccessList": block_access_list,
+    });
+    let file = std::fs::File::create(&path)?;
+    serde_json::to_writer_pretty(file, &value)?;
+    debug!(target: "reth-bench", %kind, block_number, %block_hash, path = %path.display(), "Wrote BAL artifact");
+    Ok(())
+}
+
+fn write_payload_artifact(
+    output_dir: Option<&Path>,
+    sequence: u64,
+    kind: &str,
+    payload: &BigBlockPayload,
+) -> eyre::Result<()> {
+    let Some(output_dir) = output_dir else { return Ok(()) };
+
+    let payload_dir = output_dir.join("payloads");
+    std::fs::create_dir_all(&payload_dir)?;
+    let path = payload_dir.join(format!("payload_block_{sequence:06}.json"));
+    let file = std::fs::File::create(&path)?;
+    serde_json::to_writer_pretty(file, payload)?;
+    debug!(
+        target: "reth-bench",
+        %kind,
+        sequence,
+        block_number = payload.execution_data.block_number(),
+        block_hash = %payload.execution_data.block_hash(),
+        path = %path.display(),
+        "Wrote payload artifact"
+    );
+    Ok(())
 }
 
 fn build_block_request(
@@ -693,6 +813,35 @@ enum Payload {
 }
 
 impl Payload {
+    fn to_artifact_payload(&self) -> eyre::Result<BigBlockPayload> {
+        match self {
+            Self::Block(block, _, bal, _) => {
+                let block = block
+                    .clone()
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                        tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+                    })?
+                    .into_consensus();
+                let encoded_bal = alloy_rlp::encode(bal.clone().unwrap_or_default());
+                let (payload, sidecar) =
+                    RpcExecutionPayload::from_block_slow_with_bal(&block, encoded_bal.into());
+                let (_, _, execution_data) = payload_to_new_payload(payload, sidecar, None)?;
+                Ok(BigBlockPayload {
+                    execution_data,
+                    big_block_data: Default::default(),
+                    block_access_list: bal.clone(),
+                })
+            }
+            Self::BigBlock(big_block) => Ok(BigBlockPayload {
+                execution_data: big_block.execution_data.clone(),
+                big_block_data: big_block.big_block_data.clone(),
+                block_access_list: big_block.block_access_list.clone(),
+            }),
+        }
+    }
+
     fn into_new_payload_params(
         self,
         use_reth_namespace: bool,
