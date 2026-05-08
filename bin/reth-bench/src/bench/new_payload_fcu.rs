@@ -642,12 +642,7 @@ async fn prepare_built_block(
     )?;
     let (payload, sidecar) = built_payload
         .into_payload_and_sidecar(block.header.parent_beacon_block_root.unwrap_or_default());
-    let mut execution_data = ExecutionData { payload, sidecar };
-    if let Some(block_access_list) = &built_response.block_access_list &&
-        let Some(payload) = execution_data.payload.as_v4_mut()
-    {
-        payload.block_access_list = alloy_rlp::encode(block_access_list).into();
-    }
+    let execution_data = ExecutionData { payload, sidecar };
     let artifact = BigBlockPayload {
         execution_data: execution_data.clone(),
         big_block_data: Default::default(),
