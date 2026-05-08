@@ -83,6 +83,11 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
+        // Retain a copy of the storage prefix sets so the worker-miss fallback below can build a
+        // `StorageRoot` with the account's actual modified slots, not an empty `PrefixSet`. With
+        // an empty set the fallback would silently return the on-disk root and discard the
+        // chunk's storage updates.
+        let storage_prefix_sets = self.prefix_sets.storage_prefix_sets.clone();
         let storage_root_targets = StorageRootTargets::new(
             self.prefix_sets
                 .account_prefix_set
@@ -161,11 +166,15 @@ where
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
+                            let fallback_prefix_set = storage_prefix_sets
+                                .get(&hashed_address)
+                                .cloned()
+                                .unwrap_or_default();
                             StorageRoot::new_hashed(
                                 &provider,
                                 &provider,
                                 hashed_address,
-                                Default::default(),
+                                fallback_prefix_set,
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )
