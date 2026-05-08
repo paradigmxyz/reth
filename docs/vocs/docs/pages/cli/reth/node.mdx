@@ -531,9 +531,6 @@ RPC State Cache:
 
           [default: 30000]
 
-      --rpc-cache.max-balstore-blocks <MAX_BALSTORE_BLOCKS>
-          Block distance within which block access lists are kept in memory
-
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price
@@ -848,6 +845,9 @@ Database:
           `RocksDB` block cache size (e.g., 512MB, 4GB).
 
           Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
+
+      --db.max-balstore-blocks <MAX_BALSTORE_BLOCKS>
+          Block distance within which block access lists are kept in memory
 
 Dev testnet:
       --dev

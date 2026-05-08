@@ -67,6 +67,9 @@ pub struct DatabaseArgs {
     /// performance for history lookups.
     #[arg(long = "db.rocksdb-block-cache-size", value_parser = parse_byte_size)]
     pub rocksdb_block_cache_size: Option<usize>,
+    /// Block distance within which block access lists are kept in memory.
+    #[arg(long = "db.max-balstore-blocks")]
+    pub max_balstore_blocks: Option<u64>,
 }
 
 impl DatabaseArgs {
@@ -441,5 +444,16 @@ mod tests {
         let result =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_max_balstore_blocks() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.max-balstore-blocks",
+            "1234",
+        ])
+        .unwrap();
+        assert_eq!(cmd.args.max_balstore_blocks, Some(1234));
     }
 }

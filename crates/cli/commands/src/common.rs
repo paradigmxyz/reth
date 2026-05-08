@@ -27,7 +27,8 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory, StorageSettings,
+    BalConfig, BalStoreHandle, InMemoryBalStore, ProviderFactory, StaticFileProviderFactory,
+    StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -195,7 +196,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
+        let mut factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
             static_file_provider,
@@ -204,6 +205,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         )?
         .with_prune_modes(config.prune.segments.clone())
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance);
+
+        if let Some(max_balstore_blocks) = self.db.max_balstore_blocks {
+            factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::new(
+                BalConfig::with_in_memory_retention_distance(max_balstore_blocks),
+            )));
+        }
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&

@@ -69,9 +69,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory, StorageSettingsCache,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, InMemoryBalStore, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -506,7 +506,7 @@ where
         };
 
         let prune_config = self.prune_config();
-        let factory = ProviderFactory::new(
+        let mut factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
@@ -516,6 +516,12 @@ where
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_changeset_cache(changeset_cache);
+
+        if let Some(max_balstore_blocks) = self.node_config().db.max_balstore_blocks {
+            factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::new(
+                BalConfig::with_in_memory_retention_distance(max_balstore_blocks),
+            )));
+        }
 
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are

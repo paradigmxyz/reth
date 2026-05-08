@@ -117,12 +117,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         })
     }
 
-    /// Returns this provider with the given BAL store.
-    pub fn with_balstore(mut self, bal_store: BalStoreHandle) -> Self {
-        self.bal_store = bal_store;
-        self
-    }
-
     /// Gets a clone of `canonical_in_memory_state`.
     pub fn canonical_in_memory_state(&self) -> CanonicalInMemoryState<N::Primitives> {
         self.canonical_in_memory_state.clone()

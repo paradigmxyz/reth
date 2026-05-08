@@ -32,7 +32,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BalConfig, BalStoreHandle, BlockNumReader, InMemoryBalStore, StorageSettingsCache,
+    BlockNumReader, StorageSettingsCache,
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -90,12 +90,6 @@ impl EngineNodeLauncher {
 
         // Create changeset cache that will be shared across the engine
         let changeset_cache = ChangesetCache::new();
-        let bal_store = config
-            .rpc
-            .rpc_state_cache
-            .max_balstore_blocks
-            .map(BalConfig::with_in_memory_retention_distance)
-            .map(|config| BalStoreHandle::new(InMemoryBalStore::new(config)));
 
         // setup the launch context
         let ctx = ctx
@@ -127,11 +121,7 @@ impl EngineNodeLauncher {
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                let provider = BlockchainProvider::new(provider_factory)?;
-                Ok(match bal_store {
-                    Some(bal_store) => provider.with_balstore(bal_store),
-                    None => provider,
-                })
+                Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
