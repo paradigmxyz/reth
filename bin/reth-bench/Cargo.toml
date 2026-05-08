@@ -65,6 +65,7 @@ url.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+tokio-stream.workspace = true
 
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
