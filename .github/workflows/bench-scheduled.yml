@@ -614,6 +614,8 @@ jobs:
         run: |
           if [ "$BENCH_MODE" = "release" ]; then
             WORKFLOW_NAME="workflows-release-regression-${{ github.run_id }}"
+          elif [ "$BENCH_MODE" = "hourly" ]; then
+            WORKFLOW_NAME="workflows-hourly-regression-${{ github.run_id }}"
           else
             WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
           fi
@@ -676,7 +678,7 @@ jobs:
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
           git -C "${TMP_DIR}" add "${CHART_DIR}"
           git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "nightly bench charts for run ${RUN_ID}"
+            commit -m "${BENCH_MODE} bench charts for run ${RUN_ID}"
           git -C "${TMP_DIR}" push origin HEAD:main
           echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           rm -rf "${TMP_DIR}"
@@ -705,7 +707,7 @@ jobs:
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
 
             const mode = process.env.BENCH_MODE || 'nightly';
-            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
+            const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             let md = `# ${emoji} ${modeLabel}: ${label}\n\n`;
             md += `**Baseline:** ${baselineLink}\n`;
             md += `**Feature:** ${featureLink} ([diff](${diffUrl}))\n`;
@@ -734,7 +736,7 @@ jobs:
             const chartSha = '${{ steps.push-charts.outputs.sha }}';
             if (chartSha) {
               const runId = '${{ github.run_id }}';
-              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/nightly/${runId}`;
+              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/${mode}/${runId}`;
               const charts = [
                 { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
                 { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
