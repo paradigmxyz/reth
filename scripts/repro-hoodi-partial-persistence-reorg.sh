@@ -7,8 +7,8 @@ usage() {
 Usage: repro-hoodi-partial-persistence-reorg.sh [options]
 
 Restores a hoodi datadir snapshot, starts reth with partial persistence, then
-runs reth-bench new-payload-fcu with --reorg until a state-root mismatch is
-observed, the benchmark exits, or an optional timeout is reached.
+replays pre-generated reorg payload artifacts until a state-root mismatch is
+observed, replay exits, or an optional timeout is reached.
 
 Unlike repro-hoodi-partial-persistence-unwind.sh, this script does not crash the
 node and does not run restart, unwind, or Merkle-stage follow-up steps.
@@ -20,16 +20,14 @@ Options:
                               (default: /mnt/data/hoodi)
   --jwt-secret PATH           JWT secret path
                               (default: <datadir>/jwt.hex)
-  --rpc-url URL               Remote hoodi RPC used by reth-bench
-                              (default: https://rpc.hoodi.ethpandaops.io)
+  --payload-dir PATH          Directory containing payload_block_*.json files
+                              (default: /mnt/data/hoodi-bal-payload-artifacts-10k-reorg5/payloads)
+  --payload-count N           Number of payload artifacts to replay
+                              (default: 20000)
   --expected-head N           Expected local head after restore
                               (default: 2613962)
   --start-block N             First block expected to be replayed
                               (default: 2613963)
-  --to-block N                Last block to replay before declaring no mismatch
-                              (default: unset, run continuously from restored head)
-  --reorg-depth N             reth-bench --reorg depth
-                              (default: 8)
   --artifacts-dir PATH        Directory for logs and summary output
                               (default: /tmp/reth-hoodi-reorg-<timestamp>)
   --start-timeout SECONDS     Seconds to wait for node RPC startup
@@ -67,13 +65,25 @@ hex_to_dec() {
     printf '%d\n' "$((16#${1#0x}))"
 }
 
+pid_has_exited() {
+    local pid="$1"
+    local stat
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    stat=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+    [[ "$stat" == *Z* ]]
+}
+
 wait_for_pid_exit() {
     local pid="$1"
     local timeout="$2"
     local elapsed=0
 
     while (( elapsed < timeout )); do
-        if ! kill -0 "$pid" 2>/dev/null; then
+        if pid_has_exited "$pid"; then
             return 0
         fi
         sleep 1
@@ -81,6 +91,20 @@ wait_for_pid_exit() {
     done
 
     return 1
+}
+
+record_node_exit() {
+    if [[ -z "${NODE_PID:-}" ]]; then
+        return 0
+    fi
+
+    if wait "$NODE_PID"; then
+        NODE_EXIT_CODE=0
+    else
+        NODE_EXIT_CODE=$?
+    fi
+    log "reth node exited with code ${NODE_EXIT_CODE}"
+    NODE_PID=""
 }
 
 stop_pid() {
@@ -125,14 +149,14 @@ write_summary() {
         printf 'snapshot=%s\n' "$SNAPSHOT"
         printf 'datadir=%s\n' "$DATADIR"
         printf 'jwt_secret=%s\n' "$JWT_SECRET"
-        printf 'remote_rpc_url=%s\n' "$REMOTE_RPC_URL"
+        printf 'payload_dir=%s\n' "$PAYLOAD_DIR"
+        printf 'payload_count=%s\n' "$PAYLOAD_COUNT"
         printf 'expected_head=%s\n' "$EXPECTED_HEAD"
         printf 'start_block=%s\n' "$START_BLOCK"
-        printf 'to_block=%s\n' "${TO_BLOCK:-unset}"
-        printf 'reorg_depth=%s\n' "$REORG_DEPTH"
         printf 'head_before=%s\n' "${HEAD_BEFORE:-unknown}"
         printf 'head_after=%s\n' "${HEAD_AFTER:-unknown}"
         printf 'bench_exit_code=%s\n' "${BENCH_EXIT_CODE:-unknown}"
+        printf 'node_exit_code=%s\n' "${NODE_EXIT_CODE:-unknown}"
         printf 'mismatch_source=%s\n' "${MISMATCH_SOURCE:-not_found}"
         printf 'mismatch_line=%s\n' "${MISMATCH_LINE:-not_found}"
         printf 'artifacts_dir=%s\n' "$ARTIFACTS_DIR"
@@ -142,14 +166,33 @@ write_summary() {
 }
 
 cleanup() {
+    if [[ -n "${BENCH_PID:-}" ]] && pid_has_exited "$BENCH_PID"; then
+        if wait "$BENCH_PID"; then
+            BENCH_EXIT_CODE=0
+        else
+            BENCH_EXIT_CODE=$?
+        fi
+        BENCH_PID=""
+    fi
+
     stop_pid "${BENCH_PID:-}" "reth-bench"
     if [[ -n "${BENCH_PID:-}" ]]; then
-        wait "${BENCH_PID}" 2>/dev/null || true
+        if wait "${BENCH_PID}" 2>/dev/null; then
+            BENCH_EXIT_CODE=0
+        else
+            BENCH_EXIT_CODE=$?
+        fi
+        BENCH_PID=""
+    fi
+
+    if [[ -n "${NODE_PID:-}" ]] && pid_has_exited "$NODE_PID"; then
+        record_node_exit
     fi
 
     stop_pid "${NODE_PID:-}" "reth node"
     if [[ -n "${NODE_PID:-}" ]]; then
         wait "${NODE_PID}" 2>/dev/null || true
+        NODE_PID=""
     fi
 
     write_summary
@@ -158,11 +201,10 @@ cleanup() {
 SNAPSHOT="/mnt/data/hoodi.tar.zst"
 DATADIR="/mnt/data/hoodi"
 JWT_SECRET=""
-REMOTE_RPC_URL="https://rpc.hoodi.ethpandaops.io"
+PAYLOAD_DIR="/mnt/data/hoodi-bal-payload-artifacts-10k-reorg5/payloads"
+PAYLOAD_COUNT=20000
 EXPECTED_HEAD=2613962
 START_BLOCK=2613963
-TO_BLOCK=""
-REORG_DEPTH=8
 START_TIMEOUT=180
 MISMATCH_TIMEOUT=0
 RETH_BIN="/repos/reth/target/profiling/reth"
@@ -174,6 +216,7 @@ HEAD_AFTER=""
 NODE_PID=""
 BENCH_PID=""
 BENCH_EXIT_CODE=""
+NODE_EXIT_CODE=""
 MISMATCH_SOURCE=""
 MISMATCH_LINE=""
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
@@ -193,8 +236,12 @@ while (($# > 0)); do
             JWT_SECRET="$2"
             shift 2
             ;;
-        --rpc-url)
-            REMOTE_RPC_URL="$2"
+        --payload-dir)
+            PAYLOAD_DIR="$2"
+            shift 2
+            ;;
+        --payload-count)
+            PAYLOAD_COUNT="$2"
             shift 2
             ;;
         --expected-head)
@@ -203,14 +250,6 @@ while (($# > 0)); do
             ;;
         --start-block)
             START_BLOCK="$2"
-            shift 2
-            ;;
-        --to-block)
-            TO_BLOCK="$2"
-            shift 2
-            ;;
-        --reorg-depth)
-            REORG_DEPTH="$2"
             shift 2
             ;;
         --artifacts-dir)
@@ -264,13 +303,13 @@ if [[ ! -f "$SNAPSHOT" ]]; then
     exit 2
 fi
 
-if (( REORG_DEPTH <= 0 )); then
-    log "--reorg-depth must be greater than 0"
+if [[ ! -d "$PAYLOAD_DIR" ]]; then
+    log "Missing payload directory: $PAYLOAD_DIR"
     exit 2
 fi
 
-if [[ -n "$TO_BLOCK" ]] && (( TO_BLOCK < START_BLOCK )); then
-    log "--to-block ${TO_BLOCK} must be greater than or equal to --start-block ${START_BLOCK}"
+if (( PAYLOAD_COUNT <= 0 )); then
+    log "--payload-count must be greater than 0"
     exit 2
 fi
 
@@ -288,7 +327,7 @@ capture_command reth "$RETH_BIN" node \
     --engine.persistence-threshold 10 \
     --engine.deferred-trie-blocks 3 \
     --engine.accept-execution-requests-hash \
-    --log.stdout.filter 'info,providers::state::overlay=debug,chain_state::lazy_overlay=debug,engine::tree::payload_validator=debug,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug,reth-bench=debug' \
+    --log.stdout.filter debug \
     --color never
 
 restore_snapshot() {
@@ -349,20 +388,22 @@ restore_snapshot() {
 }
 
 start_node() {
-    "$RETH_BIN" node \
-        --datadir "$DATADIR" \
-        --chain "$CHAIN" \
-        --http --http.addr 127.0.0.1 --http.port 8545 --http.api eth,net,web3,reth,testing \
-        --ws --ws.addr 127.0.0.1 --ws.port 8546 --ws.api eth,net,web3,reth \
-        --authrpc.addr 127.0.0.1 --authrpc.port 8551 --authrpc.jwtsecret "$JWT_SECRET" \
-        --disable-discovery \
-        --engine.persistence-threshold 10 \
-        --engine.deferred-trie-blocks 3 \
-        --engine.accept-execution-requests-hash \
-        --log.stdout.filter 'info,providers::state::overlay=debug,providers::historical_sp=debug,chain_state::lazy_overlay=debug,chain_state::memory_overlay=debug,engine::tree=debug,engine::tree::payload_validator=debug,payload_builder=debug,providers::db=debug,reth::providers::static_file=debug,reth::storage=debug,consensus::engine=debug,reth-bench=debug' \
-        --color never \
-        >"$NODE_LOG" 2>&1 &
-    echo $!
+    (
+        ulimit -c 0
+        "$RETH_BIN" node \
+            --datadir "$DATADIR" \
+            --chain "$CHAIN" \
+            --http --http.addr 127.0.0.1 --http.port 8545 --http.api eth,net,web3,reth,testing \
+            --ws --ws.addr 127.0.0.1 --ws.port 8546 --ws.api eth,net,web3,reth \
+            --authrpc.addr 127.0.0.1 --authrpc.port 8551 --authrpc.jwtsecret "$JWT_SECRET" \
+            --disable-discovery \
+            --engine.persistence-threshold 10 \
+            --engine.deferred-trie-blocks 3 \
+            --engine.accept-execution-requests-hash \
+            --log.stdout.filter debug \
+            --color never
+    ) >"$NODE_LOG" 2>&1 &
+    NODE_PID=$!
 }
 
 wait_for_rpc_start() {
@@ -422,6 +463,13 @@ monitor_for_mismatch() {
     while true; do
         if find_mismatch node "$NODE_LOG" || find_mismatch bench "$BENCH_LOG"; then
             log "Observed state-root mismatch in ${MISMATCH_SOURCE} log"
+            if [[ -n "$NODE_PID" ]]; then
+                if wait_for_pid_exit "$NODE_PID" 5; then
+                    record_node_exit
+                else
+                    log "reth node is still running 5s after mismatch"
+                fi
+            fi
             return 0
         fi
 
@@ -430,7 +478,7 @@ monitor_for_mismatch() {
             HEAD_AFTER=$(hex_to_dec "$block_hex")
         fi
 
-        if [[ -n "$BENCH_PID" ]] && ! kill -0 "$BENCH_PID" 2>/dev/null; then
+        if [[ -n "$BENCH_PID" ]] && pid_has_exited "$BENCH_PID"; then
             if wait "$BENCH_PID"; then
                 BENCH_EXIT_CODE=0
                 RESULT="bench_completed_no_mismatch"
@@ -446,12 +494,14 @@ monitor_for_mismatch() {
             return 0
         fi
 
-        if [[ -n "$NODE_PID" ]] && ! kill -0 "$NODE_PID" 2>/dev/null; then
+        if [[ -n "$NODE_PID" ]] && pid_has_exited "$NODE_PID"; then
             if find_mismatch node "$NODE_LOG" || find_mismatch bench "$BENCH_LOG"; then
                 log "Observed state-root mismatch after node exit"
+                record_node_exit
                 return 0
             fi
             RESULT="node_exited_no_mismatch"
+            record_node_exit
             return 0
         fi
 
@@ -470,7 +520,7 @@ monitor_for_mismatch() {
 restore_snapshot
 
 log "Starting reth for reorg replay run"
-NODE_PID=$(start_node)
+start_node
 
 HEAD_HEX=$(wait_for_rpc_start "$NODE_PID" "$START_TIMEOUT") || exit 2
 HEAD_BEFORE=$(hex_to_dec "$HEAD_HEX")
@@ -488,27 +538,19 @@ if (( HEAD_BEFORE + 1 != START_BLOCK )); then
 fi
 
 BENCH_ARGS=(
-    "$BENCH_BIN" -vvv new-payload-fcu
-    --rpc-url "$REMOTE_RPC_URL"
-    --from "$HEAD_BEFORE"
+    "$BENCH_BIN" -vvv replay-payloads
+    --reth-new-payload
+    --wait-for-persistence always
     --jwt-secret "$JWT_SECRET"
     --engine-rpc-url http://127.0.0.1:8551
-    --local-rpc-url http://127.0.0.1:8545
-    --ws-rpc-url ws://127.0.0.1:8546
-    --reorg "$REORG_DEPTH"
+    --payload-dir "$PAYLOAD_DIR"
+    --count "$PAYLOAD_COUNT"
+    --output "$ARTIFACTS_DIR/reth-bench"
 )
-
-if [[ -n "$TO_BLOCK" ]]; then
-    BENCH_ARGS+=(--to "$TO_BLOCK")
-fi
 
 capture_command reth_bench "${BENCH_ARGS[@]}"
 
-if [[ -n "$TO_BLOCK" ]]; then
-    log "Running reth-bench with --reorg ${REORG_DEPTH} from block ${START_BLOCK} through ${TO_BLOCK}"
-else
-    log "Running reth-bench with --reorg ${REORG_DEPTH} continuously from block ${START_BLOCK}"
-fi
+log "Running reth-bench replay-payloads for ${PAYLOAD_COUNT} payloads from ${PAYLOAD_DIR}"
 
 "${BENCH_ARGS[@]}" >"$BENCH_LOG" 2>&1 &
 BENCH_PID=$!
