@@ -29,6 +29,7 @@ use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use std::{
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -228,7 +229,7 @@ impl Command {
             );
         }
 
-        let mut parent_hash = initial_parent_hash;
+        let mut replayed_hashes = HashMap::from([(initial_parent_hash, initial_parent_hash)]);
 
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
@@ -236,6 +237,7 @@ impl Command {
         for (i, payload) in payloads.iter().enumerate() {
             let execution_data = &payload.execution_data;
             let mut block_hash = payload.block_hash;
+            let original_block_hash = block_hash;
             let v1 = execution_data.payload.as_v1();
 
             let gas_used = v1.gas_used;
@@ -274,11 +276,16 @@ impl Command {
                     .unwrap_or(WaitForPersistence::Never)
                     .rpc_value(block_number);
 
-                // Inject sidecar BAL into the inline V4 payload field when --bal is set.
-                // If the payload is not already V4 we upgrade it (V3→V4) so the BAL
-                // can be carried inline. This changes the block hash, so we recompute
-                // it and patch parent_hash to maintain the chain.
                 let mut execution_data = execution_data.clone();
+                let original_parent_hash = execution_data.payload.as_v1().parent_hash;
+                let mut payload_modified = false;
+                if let Some(remapped_parent_hash) = replayed_hashes.get(&original_parent_hash) {
+                    if *remapped_parent_hash != original_parent_hash {
+                        execution_data.payload.as_v1_mut().parent_hash = *remapped_parent_hash;
+                        payload_modified = true;
+                    }
+                }
+
                 if self.bal &&
                     let Some(bal) = &payload.block_access_list
                 {
@@ -292,12 +299,10 @@ impl Command {
                         execution_data.payload.as_v4_mut().unwrap().block_access_list = encoded_bal;
                     }
 
-                    // Patch parent_hash so this block chains off the (possibly
-                    // rehashed) previous block.
-                    execution_data.payload.as_v1_mut().parent_hash = parent_hash;
+                    payload_modified = true;
+                }
 
-                    // Recompute block hash after payload modification and update
-                    // the hash stored in the payload itself.
+                if payload_modified {
                     block_hash = compute_payload_block_hash(&execution_data)?;
                     execution_data.payload.as_v1_mut().block_hash = block_hash;
                 }
@@ -349,8 +354,8 @@ impl Command {
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: block_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
+                safe_block_hash: initial_parent_hash,
+                finalized_block_hash: initial_parent_hash,
             };
 
             let fcu_start = Instant::now();
@@ -390,7 +395,7 @@ impl Command {
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
 
-            parent_hash = block_hash;
+            replayed_hashes.insert(original_block_hash, block_hash);
         }
 
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
