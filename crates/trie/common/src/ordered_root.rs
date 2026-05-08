@@ -192,10 +192,26 @@ impl OrderedTrieRootEncodedBuilder {
         debug_assert!(index < self.len, "index {index} out of bounds for length {}", self.len);
         debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
 
+        let next_index = adjust_index_for_rlp(self.next_insert_i, self.len);
+        if index == next_index {
+            self.add_leaf(index, bytes);
+            self.received += 1;
+            self.next_insert_i += 1;
+            self.flush();
+            return;
+        }
+
         self.pending[index] = Some(bytes.to_vec());
         self.received += 1;
 
         self.flush();
+    }
+
+    /// Adds a pre-encoded item to the underlying hash builder.
+    #[inline]
+    fn add_leaf(&mut self, index: usize, value: &[u8]) {
+        let index_buffer = alloy_rlp::encode_fixed_size(&index);
+        self.hb.add_leaf(Nibbles::unpack(&index_buffer), value);
     }
 
     /// Attempts to flush pending items to the hash builder.
@@ -207,8 +223,7 @@ impl OrderedTrieRootEncodedBuilder {
                 break;
             };
 
-            let index_buffer = alloy_rlp::encode_fixed_size(&exec_index_needed);
-            self.hb.add_leaf(Nibbles::unpack(&index_buffer), &value);
+            self.add_leaf(exec_index_needed, &value);
 
             self.next_insert_i += 1;
         }
