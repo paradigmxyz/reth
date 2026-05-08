@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{keccak256, Sealed, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -29,10 +29,10 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SealedBal,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -353,6 +353,7 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
+        + BalProvider
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
@@ -2882,9 +2883,14 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
+        let sealed_bal = payload
+            .block_access_list()
+            .map(|bal| Sealed::new_unchecked(bal.clone(), keccak256(bal.as_ref())));
+
         self.insert_block_or_payload(
             payload.block_with_parent(),
             payload,
+            sealed_bal,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
         )
@@ -2897,6 +2903,7 @@ where
         self.insert_block_or_payload(
             block.block_with_parent(),
             block,
+            None,
             |validator, block, ctx| validator.validate_block(block, ctx),
             |_, block| Ok(block),
         )
@@ -2923,6 +2930,7 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
+        sealed_bal: Option<SealedBal>,
         execute: impl FnOnce(
             &mut V,
             Input,
@@ -2999,6 +3007,19 @@ where
         let start = Instant::now();
 
         let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
+
+        if let Err(err) = sealed_bal
+            .map(|sealed_bal| {
+                self.provider.bal_store().insert(executed.recovered_block().num_hash(), sealed_bal)
+            })
+            .transpose()
+        {
+            return Err(InsertBlockError::new(
+                executed.recovered_block().clone().into_sealed_block(),
+                err.into(),
+            )
+            .into())
+        }
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
