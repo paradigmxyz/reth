@@ -132,6 +132,27 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
+    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        if entries.is_empty() {
+            return Ok(())
+        }
+
+        let mut inner = self.inner.write();
+        inner.entries.reserve(entries.len());
+        for (num_hash, bal) in &entries {
+            inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
+        }
+        if let Some(highest_block_number) = inner.highest_block_number {
+            inner.prune(self.config.in_memory_retention, highest_block_number);
+        }
+        drop(inner);
+
+        for (num_hash, bal) in entries {
+            self.notifications.notify(BalNotification::new(num_hash, bal));
+        }
+        Ok(())
+    }
+
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
     }
@@ -202,6 +223,27 @@ mod tests {
         store.insert(NumHash::new(1, hash), sealed_bal(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
+    }
+
+    #[test]
+    fn insert_many_and_lookup_by_hash() {
+        let store = InMemoryBalStore::default();
+        let hash0 = B256::random();
+        let hash1 = B256::random();
+        let bal0 = sealed_bal(Bytes::from_static(b"bal0"));
+        let bal1 = sealed_bal(Bytes::from_static(b"bal1"));
+
+        store
+            .insert_many(vec![
+                (NumHash::new(1, hash0), bal0.clone()),
+                (NumHash::new(2, hash1), bal1),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[hash0, hash1]).unwrap(),
+            vec![Some(bal0.clone_inner()), Some(Bytes::from_static(b"bal1"))]
+        );
     }
 
     #[test]
@@ -355,6 +397,32 @@ mod tests {
         assert_eq!(
             stream.next().await.unwrap(),
             BalNotification::new(NumHash::new(block_number, hash), sealed_bal)
+        );
+    }
+
+    #[tokio::test]
+    async fn insert_many_notifies_subscribers() {
+        let store = InMemoryBalStore::default();
+        let mut stream = store.bal_stream();
+        let hash0 = B256::random();
+        let hash1 = B256::random();
+        let bal0 = sealed_bal(Bytes::from_static(b"bal0"));
+        let bal1 = sealed_bal(Bytes::from_static(b"bal1"));
+
+        store
+            .insert_many(vec![
+                (NumHash::new(1, hash0), bal0.clone()),
+                (NumHash::new(2, hash1), bal1.clone()),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            stream.next().await.unwrap(),
+            BalNotification::new(NumHash::new(1, hash0), bal0)
+        );
+        assert_eq!(
+            stream.next().await.unwrap(),
+            BalNotification::new(NumHash::new(2, hash1), bal1)
         );
     }
 

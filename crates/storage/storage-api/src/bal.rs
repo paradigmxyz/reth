@@ -43,6 +43,16 @@ pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
 
+    /// Insert multiple BALs.
+    ///
+    /// The default implementation preserves the behavior of repeated [`Self::insert`] calls.
+    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        for (num_hash, bal) in entries {
+            self.insert(num_hash, bal)?;
+        }
+        Ok(())
+    }
+
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
     ///
     /// Returns the number of BALs pruned.
@@ -160,6 +170,12 @@ impl BalStoreHandle {
         self.inner.insert(num_hash, bal)
     }
 
+    /// Insert multiple BALs.
+    #[inline]
+    pub fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        self.inner.insert_many(entries)
+    }
+
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
     #[inline]
     pub fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
@@ -245,6 +261,10 @@ pub struct NoopBalStore;
 
 impl BalStore for NoopBalStore {
     fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    fn insert_many(&self, _entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
         Ok(())
     }
 
