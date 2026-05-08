@@ -40,7 +40,7 @@ use std::sync::{
     Arc,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Level, Span};
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
@@ -144,6 +144,10 @@ where
 
             let mut tx_count = 0usize;
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
+            let trace_prewarm_tx = tracing::enabled!(
+                target: "engine::tree::payload_processor::prewarm",
+                Level::TRACE
+            );
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
@@ -164,15 +168,17 @@ where
                     }
 
                     tx_count += 1;
-                    let parent_span = Span::current();
+                    let parent_span = trace_prewarm_tx.then(Span::current);
                     s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
+                        let _enter = parent_span.as_ref().map(|parent_span| {
+                            trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered()
+                        });
                         Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
                     });
                 }
