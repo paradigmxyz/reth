@@ -314,6 +314,10 @@ pub trait EthApi<
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
+    /// Returns the base fee for the next block, or `null` before London activation.
+    #[method(name = "baseFee")]
+    async fn base_fee(&self) -> RpcResult<Option<U256>>;
+
     /// Introduced in EIP-4844, returns the current blob base fee in wei.
     #[method(name = "blobBaseFee")]
     async fn blob_base_fee(&self) -> RpcResult<U256>;
@@ -812,6 +816,12 @@ where
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
         Ok(EthFees::blob_base_fee(self).await?)
+    }
+
+    /// Handler for: `eth_baseFee`
+    async fn base_fee(&self) -> RpcResult<Option<U256>> {
+        trace!(target: "rpc::eth", "Serving eth_baseFee");
+        Ok(EthFees::base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
