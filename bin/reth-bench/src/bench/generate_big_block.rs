@@ -470,7 +470,9 @@ pub(crate) fn big_blocks_stream(
                 env_switches: blocks,
                 prior_block_hashes: accumulated_block_hashes.clone(),
                 block_number: next_synthetic_block_number.unwrap_or(first_block) + big_block_idx,
-                merged_block_access_list,
+                merged_block_access_list: merged_block_access_list
+                    .as_ref()
+                    .map(|list| alloy_rlp::encode(list).into()),
             };
 
             // Accumulate real block hashes from this big block's env_switches for
@@ -493,7 +495,7 @@ pub(crate) fn big_blocks_stream(
                 total_gas_used = %big_block.gas_used(),
                 env_switches = %big_block.env_switches.len(),
                 prior_block_hashes = %big_block.prior_block_hashes.len(),
-                bal_accounts = %big_block.merged_block_access_list.as_ref().map_or(0, Vec::len),
+                bal_accounts = %merged_block_access_list.as_ref().map_or(0, Vec::len),
                 "Generated big block"
             );
 

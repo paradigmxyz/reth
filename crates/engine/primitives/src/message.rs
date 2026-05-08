@@ -1,7 +1,7 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
-use alloy_eips::{eip4895::Withdrawal, eip7928::BlockAccessList};
+use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     ExecutionData, ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError,
@@ -184,7 +184,7 @@ pub struct BigBlockData<ExecutionData> {
     pub block_number: u64,
     /// Merged block access list for this big block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub merged_block_access_list: Option<BlockAccessList>,
+    pub merged_block_access_list: Option<Bytes>,
 }
 
 impl ExecutionPayload for BigBlockData<ExecutionData> {
@@ -205,7 +205,7 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        self.env_switches[0].block_access_list()
+        self.merged_block_access_list.as_ref()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {

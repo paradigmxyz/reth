@@ -246,21 +246,12 @@ where
         let block_number = block_env.number.saturating_to::<u64>();
         let mut cfg_env = segment.evm_env.cfg_env.clone();
         cfg_env.disable_base_fee = true;
-        let segment_ctx = EthBlockExecutionCtx {
-            parent_hash: segment.ctx.parent_hash,
-            parent_beacon_block_root: segment.ctx.parent_beacon_block_root,
-            ommers: segment.ctx.ommers,
-            withdrawals: segment.ctx.withdrawals.clone(),
-            extra_data: segment.ctx.extra_data.clone(),
-            tx_count_hint: segment.ctx.tx_count_hint,
-            slot_number: segment.ctx.slot_number,
-        };
 
-        let inner = self.inner_mut();
+        let inner = self.inner.as_mut().expect("inner executor must exist");
         let evm_ctx = inner.evm.ctx_mut();
         evm_ctx.block = block_env;
         evm_ctx.cfg = cfg_env;
-        inner.ctx = segment_ctx;
+        inner.ctx = segment.ctx.clone();
 
         self.reseed_block_hashes_for(block_number);
 
@@ -337,30 +328,12 @@ where
         // that finish() applies the correct withdrawals and post-execution
         // system calls for that segment.
         let prev_segment = &plan.segments[prev_seg_idx];
-        let prev_ctx = EthBlockExecutionCtx {
-            parent_hash: prev_segment.ctx.parent_hash,
-            parent_beacon_block_root: prev_segment.ctx.parent_beacon_block_root,
-            ommers: prev_segment.ctx.ommers,
-            withdrawals: prev_segment.ctx.withdrawals.clone(),
-            extra_data: prev_segment.ctx.extra_data.clone(),
-            tx_count_hint: prev_segment.ctx.tx_count_hint,
-            slot_number: prev_segment.ctx.slot_number,
-        };
 
         // Clone the next segment's data before we consume inner.
         let new_segment = &plan.segments[seg_idx];
         let new_block_env = new_segment.evm_env.block_env.clone();
         let mut new_cfg_env = new_segment.evm_env.cfg_env.clone();
         new_cfg_env.disable_base_fee = true;
-        let new_ctx = EthBlockExecutionCtx {
-            parent_hash: new_segment.ctx.parent_hash,
-            parent_beacon_block_root: new_segment.ctx.parent_beacon_block_root,
-            ommers: new_segment.ctx.ommers,
-            withdrawals: new_segment.ctx.withdrawals.clone(),
-            extra_data: new_segment.ctx.extra_data.clone(),
-            tx_count_hint: new_segment.ctx.tx_count_hint,
-            slot_number: new_segment.ctx.slot_number,
-        };
 
         plan.next_segment += 1;
 
@@ -369,7 +342,7 @@ where
         // increments via EthBlockExecutor::finish() at the current bal_index
         // (= K, the boundary's "post-N slot").
         let mut inner = self.inner.take().expect("inner executor must exist");
-        inner.ctx = prev_ctx;
+        inner.ctx = prev_segment.ctx.clone();
         let spec = inner.spec.clone();
         let receipt_builder = inner.receipt_builder;
         let (mut evm, result) = inner.finish()?;
@@ -411,7 +384,8 @@ where
         // Build a new inner executor for the next segment. gas_used starts
         // at 0 so the per-transaction gas check uses this segment's real
         // gas_limit correctly.
-        let mut new_inner = EthBlockExecutor::new(evm, new_ctx, spec, receipt_builder);
+        let mut new_inner =
+            EthBlockExecutor::new(evm, new_segment.ctx.clone(), spec, receipt_builder);
 
         // Carry forward receipts from prior segments.
         new_inner.receipts = result.receipts;
