@@ -5,6 +5,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
+use reth_primitives_traits::Account;
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -12,11 +13,15 @@ use reth_trie::{
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::TriePrefixSets,
     trie_cursor::TrieCursorFactory,
-    updates::TrieUpdates,
+    updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::HashMap, sync::mpsc};
+use std::{
+    collections::BTreeMap,
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tracing::*;
 
@@ -62,14 +67,14 @@ where
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
-        self.calculate(false).map(|(root, _)| root)
+        self.calculate(false).map(|(root, _, _)| root)
     }
 
     /// Calculate incremental state root with updates in parallel.
     pub fn incremental_root_with_updates(
         self,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        self.calculate(true)
+        self.calculate(true).map(|(root, _, updates)| (root, updates))
     }
 
     /// Computes the state root by calculating storage roots in parallel for modified accounts,
@@ -77,139 +82,183 @@ where
     fn calculate(
         self,
         retain_updates: bool,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+    ) -> Result<(B256, usize, TrieUpdates), ParallelStateRootError> {
+        let Self {
+            factory,
+            prefix_sets,
+            #[cfg(feature = "metrics")]
+            metrics,
+        } = self;
+
         let mut tracker = ParallelTrieTracker::default();
-        // Retain a copy of the storage prefix sets so the worker-miss fallback below can build a
-        // `StorageRoot` with the account's actual modified slots, not an empty `PrefixSet`. With
-        // an empty set the fallback would silently return the on-disk root and discard the
-        // chunk's storage updates.
-        let storage_prefix_sets = self.prefix_sets.storage_prefix_sets.clone();
+        let total_start = Instant::now();
+        let mut state_root_ctx = ParallelStateRootContext::new();
+        let storage_prefix_sets = prefix_sets.storage_prefix_sets.clone();
         let storage_root_targets = StorageRootTargets::new(
-            self.prefix_sets
-                .account_prefix_set
-                .iter()
-                .map(|nibbles| B256::from_slice(&nibbles.pack())),
-            self.prefix_sets.storage_prefix_sets,
+            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
+            prefix_sets.storage_prefix_sets,
         );
+        let total_storage_root_targets = storage_root_targets.len();
 
-        // Pre-calculate storage roots in parallel for accounts which were changed.
-        tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
-        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
-        let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
+        tracker.set_precomputed_storage_roots(total_storage_root_targets as u64);
+        debug!(
+            target: "trie::parallel_state_root",
+            len = total_storage_root_targets,
+            "pre-calculating storage roots"
+        );
+        let mut storage_roots = BTreeMap::new();
+        let mut spawn_duration = Duration::ZERO;
 
+        // Eagerly dispatch every modified-storage target onto the global rayon pool. Rayon's
+        // work-stealing scheduler caps actual parallelism at ~CPU-cores, so queueing all targets
+        // up front is bounded in practice and matches the parallelism style of `sender_recovery`
+        // and `hashing_storage`.
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let factory = self.factory.clone();
+            let factory = factory.clone();
             #[cfg(feature = "metrics")]
-            let metrics = self.metrics.storage_trie.clone();
+            let metrics = metrics.storage_trie.clone();
 
             let (tx, rx) = mpsc::sync_channel(1);
-
-            // Dispatch storage-root computation onto the global rayon pool so a bounded set of
-            // worker threads (≈ CPU cores) consumes targets via work-stealing, matching the
-            // stage-level parallelism pattern used by `sender_recovery` and `hashing_storage`.
+            let spawn_start = Instant::now();
             rayon::spawn(move || {
+                let task_start = Instant::now();
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
+                    let storage_root = StorageRoot::new_hashed(
                         &provider,
                         &provider,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
-                    )
-                    .calculate(retain_updates)?)
+                    );
+                    Ok(if retain_updates {
+                        storage_root.root_with_updates()?
+                    } else {
+                        (storage_root.root()?, 0, Default::default())
+                    })
                 })();
-                let _ = tx.send(result);
+                let _ = tx.send(StorageRootTaskOutput { result, duration: task_start.elapsed() });
             });
+            spawn_duration += spawn_start.elapsed();
             storage_roots.insert(hashed_address, rx);
         }
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
-        let mut trie_updates = TrieUpdates::default();
-
-        let provider = self.factory.database_provider_ro()?;
+        let provider = factory.database_provider_ro()?;
 
         let walker = TrieWalker::<_>::state_trie(
             provider.account_trie_cursor().map_err(ProviderError::Database)?,
-            self.prefix_sets.account_prefix_set,
+            prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::state_trie(
             walker,
             provider.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
-
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
-        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+
+        let account_walk_start = Instant::now();
+        let mut recv_wait_duration = Duration::ZERO;
+        let mut received_task_duration = Duration::ZERO;
+        let mut max_task_duration = Duration::ZERO;
+        let mut precomputed_storage_roots = 0usize;
+        let mut fallback_storage_roots = 0usize;
+
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let storage_root_result = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}"
-                                )),
-                            ))
-                        })??,
-                        // Since we do not store all intermediate nodes in the database, there might
-                        // be a possibility of re-adding a non-modified leaf to the hash builder.
-                        None => {
-                            tracker.inc_missed_leaves();
-                            let fallback_prefix_set = storage_prefix_sets
-                                .get(&hashed_address)
-                                .cloned()
-                                .unwrap_or_default();
-                            StorageRoot::new_hashed(
-                                &provider,
-                                &provider,
-                                hashed_address,
-                                fallback_prefix_set,
-                                #[cfg(feature = "metrics")]
-                                self.metrics.storage_trie.clone(),
-                            )
-                            .calculate(retain_updates)?
+                    // Drop receivers for accounts the walker has already passed: their results
+                    // are no longer needed and holding the receivers would let the corresponding
+                    // workers' completion sit in memory until end-of-walk.
+                    while let Some((storage_hashed_address, _)) = storage_roots.first_key_value() {
+                        if *storage_hashed_address >= hashed_address {
+                            break;
                         }
-                    };
-
-                    let (storage_root, _, updates) = match storage_root_result {
-                        reth_trie::StorageRootProgress::Complete(root, _, updates) => (root, (), updates),
-                        reth_trie::StorageRootProgress::Progress(..) => {
-                            return Err(ParallelStateRootError::StorageRoot(
-                                StorageRootError::Database(DatabaseError::Other(
-                                    "StorageRoot returned Progress variant in parallel trie calculation".to_string()
-                                ))
-                            ))
-                        }
-                    };
-
-                    if retain_updates {
-                        trie_updates.insert_storage_updates(hashed_address, updates);
+                        storage_roots.pop_first();
                     }
 
-                    account_rlp.clear();
-                    let account = account.into_trie_account(storage_root);
-                    account.encode(&mut account_rlp as &mut dyn BufMut);
-                    hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+                    let (storage_root, walked, storage_updates) = if let Some(rx) =
+                        storage_roots.remove(&hashed_address)
+                    {
+                        precomputed_storage_roots += 1;
+                        recv_storage_root_task_output(
+                            hashed_address,
+                            rx,
+                            &mut recv_wait_duration,
+                            &mut received_task_duration,
+                            &mut max_task_duration,
+                        )?
+                    } else {
+                        fallback_storage_roots += 1;
+                        tracker.inc_missed_leaves();
+                        // Defense-in-depth: if no worker ran this account's storage root, fall
+                        // back to the real prefix set. Using an empty `PrefixSet` would return
+                        // the on-disk root and drop this chunk's storage updates.
+                        let fallback_prefix_set =
+                            storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
+                        StorageRoot::new_hashed(
+                            &provider,
+                            &provider,
+                            hashed_address,
+                            fallback_prefix_set,
+                            #[cfg(feature = "metrics")]
+                            metrics.storage_trie.clone(),
+                        )
+                        .root_with_updates()?
+                    };
+
+                    state_root_ctx.add_leaf(
+                        hashed_address,
+                        account,
+                        storage_root,
+                        walked,
+                        storage_updates,
+                        &mut hash_builder,
+                        retain_updates,
+                    )?;
                 }
             }
         }
+        let account_walk_duration = account_walk_start.elapsed();
 
+        let root_start = Instant::now();
         let root = hash_builder.root();
+        let root_duration = root_start.elapsed();
 
+        let finalize_start = Instant::now();
         let removed_keys = account_node_iter.walker.take_removed_keys();
-        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
+        let ParallelStateRootContext { mut trie_updates, hashed_entries_walked, .. } =
+            state_root_ctx;
+        trie_updates.finalize(hash_builder, removed_keys, prefix_sets.destroyed_accounts);
+        let finalize_duration = finalize_start.elapsed();
 
         let stats = tracker.finish();
+        let total_duration = total_start.elapsed();
 
         #[cfg(feature = "metrics")]
-        self.metrics.record_state_trie(stats);
+        metrics.record_state_trie(stats);
+
+        debug!(
+            target: "trie::parallel_state_root",
+            spawned_tasks = total_storage_root_targets,
+            precomputed_storage_roots,
+            fallback_storage_roots,
+            ?spawn_duration,
+            ?account_walk_duration,
+            ?recv_wait_duration,
+            ?received_task_duration,
+            ?max_task_duration,
+            ?root_duration,
+            ?finalize_duration,
+            ?total_duration,
+            "Calculated parallel state root timings"
+        );
 
         trace!(
             target: "trie::parallel_state_root",
@@ -222,7 +271,7 @@ where
             "Calculated state root"
         );
 
-        Ok((root, trie_updates))
+        Ok((root, hashed_entries_walked, trie_updates))
     }
 }
 
@@ -274,6 +323,78 @@ impl From<StateProofError> for ParallelStateRootError {
     }
 }
 
+struct StorageRootTaskOutput {
+    result: Result<(B256, usize, StorageTrieUpdates), ParallelStateRootError>,
+    duration: Duration,
+}
+
+/// Mutable state threaded through the account walker: reusable encoding buffer, accumulated
+/// trie updates, and running counters recorded into the final stats.
+#[derive(Debug)]
+struct ParallelStateRootContext {
+    /// Reusable buffer for encoding account data.
+    account_rlp: Vec<u8>,
+    /// Accumulates updates from account and storage root calculation.
+    trie_updates: TrieUpdates,
+    /// Tracks total hashed entries walked.
+    hashed_entries_walked: usize,
+}
+
+impl ParallelStateRootContext {
+    fn new() -> Self {
+        Self {
+            account_rlp: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            trie_updates: TrieUpdates::default(),
+            hashed_entries_walked: 0,
+        }
+    }
+
+    /// Emits a leaf node into the hash builder after the storage root for the corresponding
+    /// account has been produced (either by a worker or by the fallback path).
+    #[allow(clippy::too_many_arguments)]
+    fn add_leaf(
+        &mut self,
+        hashed_address: B256,
+        account: Account,
+        storage_root: B256,
+        storage_slots_walked: usize,
+        storage_updates: StorageTrieUpdates,
+        hash_builder: &mut HashBuilder,
+        retain_updates: bool,
+    ) -> Result<(), ParallelStateRootError> {
+        self.hashed_entries_walked += storage_slots_walked;
+        if retain_updates {
+            self.trie_updates.insert_storage_updates(hashed_address, storage_updates);
+        }
+
+        self.account_rlp.clear();
+        let trie_account = account.into_trie_account(storage_root);
+        trie_account.encode(&mut self.account_rlp as &mut dyn BufMut);
+        hash_builder.add_leaf(Nibbles::unpack(hashed_address), &self.account_rlp);
+
+        Ok(())
+    }
+}
+
+fn recv_storage_root_task_output(
+    hashed_address: B256,
+    rx: mpsc::Receiver<StorageRootTaskOutput>,
+    recv_wait_duration: &mut Duration,
+    received_task_duration: &mut Duration,
+    max_task_duration: &mut Duration,
+) -> Result<(B256, usize, StorageTrieUpdates), ParallelStateRootError> {
+    let recv_start = Instant::now();
+    let output = rx.recv().map_err(|_| {
+        ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
+            format!("channel closed for {hashed_address}"),
+        )))
+    })?;
+    *recv_wait_duration += recv_start.elapsed();
+    *received_task_duration += output.duration;
+    *max_task_duration = (*max_task_duration).max(output.duration);
+    output.result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,7 +403,7 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     #[tokio::test]
     async fn random_parallel_root() {
