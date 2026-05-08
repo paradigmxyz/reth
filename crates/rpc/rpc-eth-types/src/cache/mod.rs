@@ -92,16 +92,19 @@ impl<N: NodePrimitives> EthStateCache<N> {
     fn create<Provider>(
         provider: Provider,
         action_task_spawner: Runtime,
-        max_blocks: u32,
-        max_receipts: u32,
-        max_headers: u32,
-        max_bals: u32,
-        max_concurrent_db_operations: usize,
-        max_cached_tx_hashes: u32,
+        config: EthStateCacheConfig,
     ) -> (Self, EthStateCacheService<Provider, Runtime>)
     where
         Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + BalProvider,
     {
+        let EthStateCacheConfig {
+            max_blocks,
+            max_receipts,
+            max_headers,
+            max_bals,
+            max_concurrent_db_requests,
+            max_cached_tx_hashes,
+        } = config;
         let (to_service, rx) = unbounded_channel();
 
         let service = EthStateCacheService {
@@ -113,7 +116,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
-            rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
+            rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_requests)),
             tx_hash_index: LruMap::new(ByLength::new(max_cached_tx_hashes)),
         };
         let cache = Self { to_service };
@@ -136,24 +139,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             + Unpin
             + 'static,
     {
-        let EthStateCacheConfig {
-            max_blocks,
-            max_receipts,
-            max_headers,
-            max_bals,
-            max_concurrent_db_requests,
-            max_cached_tx_hashes,
-        } = config;
-        let (this, service) = Self::create(
-            provider,
-            executor.clone(),
-            max_blocks,
-            max_receipts,
-            max_headers,
-            max_bals,
-            max_concurrent_db_requests,
-            max_cached_tx_hashes,
-        );
+        let (this, service) = Self::create(provider, executor.clone(), config);
         executor.spawn_critical_task("eth state cache", service);
         this
     }
@@ -1013,12 +999,14 @@ mod tests {
         let (_cache, service) = EthStateCache::<EthPrimitives>::create(
             NoopProvider::default(),
             Runtime::test(),
-            4,
-            4,
-            4,
-            4,
-            1,
-            16,
+            EthStateCacheConfig {
+                max_blocks: 4,
+                max_receipts: 4,
+                max_headers: 4,
+                max_bals: 4,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 16,
+            },
         );
         service
     }
@@ -1215,6 +1203,10 @@ mod tests {
             Ok(())
         }
 
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Ok(0)
+        }
+
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
             Ok(block_hashes.iter().map(|_| None).collect())
         }
@@ -1226,6 +1218,10 @@ mod tests {
 
         fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
             Ok(Vec::new())
+        }
+
+        fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {
+            reth_storage_api::NoopBalStore.bal_stream()
         }
     }
 
