@@ -33,10 +33,7 @@ use crate::{
     root::ParallelStateRootError,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256, U256,
-};
+use alloy_primitives::{map::B256Map, B256, U256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
@@ -1067,13 +1064,18 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    // Collect sorted account targets so storage targets can be checked without hashing every
+    // storage address into a temporary set. Large blocks can dispatch hundreds of storage proofs
+    // from this hot path.
+    let mut account_target_addresses: Vec<_> =
+        account_targets.iter().map(|target| target.key()).collect();
+    account_target_addresses.sort_unstable();
+    account_target_addresses.dedup();
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
+        if account_target_addresses.binary_search(hashed_address).is_ok() &&
             let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
