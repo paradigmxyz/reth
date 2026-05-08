@@ -120,6 +120,20 @@ impl StateRootHandle {
         }
     }
 
+    /// Returns a state hook that streams state updates to the background state root task
+    /// without sending [`StateRootMessage::FinishedStateUpdates`] when the hook is dropped.
+    ///
+    /// Use this for non-terminal executions when the same state root pipeline will be
+    /// reused for subsequent executions (e.g. flashblocks). Use [`Self::state_hook`] for
+    /// the final execution so the task finalizes on hook drop.
+    pub fn state_hook_persistent(&self) -> impl alloy_evm::block::OnStateHook {
+        let sender = self.updates_tx.clone();
+
+        move |source: StateChangeSource, state: &EvmState| {
+            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state.clone()));
+        }
+    }
+
     /// Awaits the state root computation result.
     ///
     /// # Panics
