@@ -17,7 +17,7 @@
 #   BENCH_SNAPSHOT_MANIFEST_URL - exact manifest URL to sync from (normal blocks)
 #   BENCH_BIG_BLOCKS_SNAPSHOT_ROOT - weekly snapshot root URL
 #   BENCH_BIG_BLOCKS_SNAPSHOT_PREFIX - weekly snapshot name prefix
-#   BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS - snapshot age in weeks (default: 4)
+#   BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS - snapshot age in weeks (default: 2)
 #   BENCH_SNAPSHOT_NAME         - expected snapshot label for log/error output
 set -euo pipefail
 
@@ -41,7 +41,7 @@ DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 LOCAL_MANIFEST="$DATADIR/manifest.json"
 
 resolve_big_blocks_manifest() {
-  local age_weeks="${BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS:-4}"
+  local age_weeks="${BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS:-2}"
   local root="${BENCH_BIG_BLOCKS_SNAPSHOT_ROOT:-http://10.10.0.50:9000/reth-snapshots}"
   local prefix="${BENCH_BIG_BLOCKS_SNAPSHOT_PREFIX:-reth-1-minimal-stable-weekly}"
 
