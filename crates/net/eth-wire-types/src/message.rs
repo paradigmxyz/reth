@@ -130,7 +130,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 Transactions::decode_with_memory_budget(buf, tx_memory_budget)?,
             ),
             EthMessageID::NewPooledTransactionHashes => {
-                if version >= EthVersion::Eth68 {
+                if version >= EthVersion::Eth72 {
+                    EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72::decode(
+                        buf,
+                    )?)
+                } else if version >= EthVersion::Eth68 {
                     EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68::decode(
                         buf,
                     )?)

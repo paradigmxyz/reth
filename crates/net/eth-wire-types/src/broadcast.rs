@@ -330,7 +330,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-        /// Returns an immutable reference to the inner type if this is an eth68 announcement.
+    /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth72(&self) -> Option<&NewPooledTransactionHashes72> {
         match self {
             Self::Eth66(_) => None,
@@ -852,8 +852,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self { hashes, mut sizes, mut types, .. } = self;
 
-        let mut deduped_data =
-            HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
@@ -988,7 +987,7 @@ impl<V> PartiallyValidData<V> {
         Self { data, version }
     }
 
-      /// Wraps raw data with version [`EthVersion::Eth72`].
+    /// Wraps raw data with version [`EthVersion::Eth72`].
     pub const fn from_raw_data_eth72(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth72))
     }
@@ -1003,7 +1002,7 @@ impl<V> PartiallyValidData<V> {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
     }
 
-/// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
+    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
     /// announcement.
     pub fn empty_eth72() -> Self {
         Self::from_raw_data_eth72(HashMap::default())
@@ -1040,7 +1039,7 @@ pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: HashMap<TxHash, Eth72TxMetadata>,
+    data: HashMap<TxHash, Eth68TxMetadata>,
     version: EthVersion,
 }
 
@@ -1058,7 +1057,7 @@ impl ValidAnnouncementData {
     /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
     /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
     /// version set to `None`.
-    pub fn from_partially_valid_data(data: PartiallyValidData<Eth72TxMetadata>) -> Self {
+    pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
         let PartiallyValidData { data, version } = data;
 
         let version = version.expect("should have eth version for conversion");
@@ -1067,7 +1066,7 @@ impl ValidAnnouncementData {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> HashMap<TxHash, Eth72TxMetadata> {
+    pub fn into_data(self) -> HashMap<TxHash, Eth68TxMetadata> {
         self.data
     }
 }

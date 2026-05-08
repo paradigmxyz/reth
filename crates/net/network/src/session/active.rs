@@ -1026,6 +1026,15 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 existing.types.extend(inc.types);
                 None
             }
+            (
+                EthMessage::NewPooledTransactionHashes72(existing),
+                NewPooledTransactionHashes::Eth72(inc),
+            ) => {
+                existing.hashes.extend(inc.hashes);
+                existing.sizes.extend(inc.sizes);
+                existing.types.extend(inc.types);
+                None
+            }
             (_, incoming) => Some(incoming),
         }
     }

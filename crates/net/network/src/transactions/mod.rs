@@ -43,8 +43,8 @@ use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
     HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
-    RequestTxHashes, Transactions, ValidAnnouncementData,
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
+    PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::{TransactionSigned, TxType};
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
@@ -1916,6 +1916,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
 enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
+    Eth72(NewPooledTransactionHashes72),
 }
 
 // === impl PooledTransactionsHashesBuilder ===
@@ -1930,6 +1931,11 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.ty());
             }
+            Self::Eth72(msg) => {
+                msg.hashes.push(*pooled_tx.hash());
+                msg.sizes.push(pooled_tx.encoded_length());
+                msg.types.push(pooled_tx.transaction.ty());
+            }
         }
     }
 
@@ -1938,6 +1944,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
+            Self::Eth72(hashes) => hashes.is_empty(),
         }
     }
 
@@ -1946,6 +1953,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.len(),
             Self::Eth68(hashes) => hashes.len(),
+            Self::Eth72(hashes) => hashes.len(),
         }
     }
 
@@ -1967,6 +1975,11 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.ty());
             }
+            Self::Eth72(msg) => {
+                msg.hashes.push(*tx.tx_hash());
+                msg.sizes.push(tx.size);
+                msg.types.push(tx.transaction.ty());
+            }
         }
     }
 
@@ -1974,11 +1987,10 @@ impl PooledTransactionsHashesBuilder {
     fn new(version: EthVersion) -> Self {
         match version {
             EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
-            EthVersion::Eth68 |
-            EthVersion::Eth69 |
-            EthVersion::Eth70 |
-            EthVersion::Eth71 |
-            EthVersion::Eth72 => Self::Eth68(Default::default()),
+            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
+                Self::Eth68(Default::default())
+            }
+            EthVersion::Eth72 => Self::Eth72(Default::default()),
         }
     }
 
@@ -1989,6 +2001,10 @@ impl PooledTransactionsHashesBuilder {
                 msg.into()
             }
             Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth72(mut msg) => {
                 msg.shrink_to_fit();
                 msg.into()
             }
