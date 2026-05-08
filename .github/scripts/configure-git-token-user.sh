@@ -13,8 +13,8 @@ GITHUB_USER=$(curl -fsSL \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
   https://api.github.com/user)
-GIT_USER_NAME=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["login"])' <<< "${GITHUB_USER}")
-GIT_USER_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' <<< "${GITHUB_USER}")
+GIT_USER_NAME=$(jq -r '.login' <<< "${GITHUB_USER}")
+GIT_USER_ID=$(jq -r '.id' <<< "${GITHUB_USER}")
 
 git -C "${REPO_DIR}" config user.name "${GIT_USER_NAME}"
 git -C "${REPO_DIR}" config user.email "${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
