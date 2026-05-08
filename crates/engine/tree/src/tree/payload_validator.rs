@@ -39,11 +39,12 @@
 //! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
 use crate::tree::{
-    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+    error::{InsertBlockError, InsertBlockErrorKind},
     instrumented_state::{InstrumentedStateProvider, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
@@ -106,18 +107,10 @@ use std::{
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
-/// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
-    Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
+pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
-
-/// Result type for block validation with optional timing stats.
-type InsertPayloadResult<N> = Result<
-    (ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>),
-    InsertPayloadError<<N as NodePrimitives>::Block>,
->;
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -876,7 +869,7 @@ where
             trie_output,
             changeset_provider,
         );
-        Ok((executed_block, timing_stats))
+        Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
