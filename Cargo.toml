@@ -549,11 +549,11 @@ miniz_oxide = { version = "0.9.0", default-features = false }
 chrono = "0.4.41"
 
 # metrics
-metrics = "0.24.0"
+metrics = "0.24.5"
 metrics-derive = "0.1.1"
-metrics-exporter-prometheus = { version = "0.18.0", default-features = false }
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 metrics-process = "2.1.0"
-metrics-util = { default-features = false, version = "0.20.0" }
+metrics-util = { default-features = false, version = "0.20.3" }
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -651,7 +651,7 @@ ahash = "0.8"
 anyhow = "1.0"
 bindgen = { version = "0.72", default-features = false }
 block-padding = "0.3"
-cc = "1.2.15"
+cc = "1.2.61"
 cipher = "0.4.3"
 comfy-table = "7.0"
 concat-kdf = "0.1.0"
@@ -670,7 +670,7 @@ hickory-resolver = "0.26.1"
 hmac = "0.12.1"
 human_bytes = "0.4.1"
 indexmap = "2"
-interprocess = "2.2.0"
+interprocess = "2.4.2"
 lz4_flex = { version = "0.12", default-features = false }
 memmap2 = "0.9.4"
 num-traits = "0.2.15"
@@ -692,7 +692,7 @@ tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"
-typenum = "1.15.0"
+typenum = "1.20.0"
 vergen = "9.1.0"
 visibility = "0.1.1"
 walkdir = "2.3.3"
