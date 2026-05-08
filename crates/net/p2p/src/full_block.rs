@@ -396,6 +396,11 @@ where
         self.block_result.as_ref().map(|block| block.number()).or_else(|| self.block.block_number())
     }
 
+    /// Polls the optional BAL request once and records its final best-effort result.
+    ///
+    /// Exactly one returned BAL entry is preserved. Empty responses, malformed responses, and
+    /// request errors resolve to `None` instead of being retried, so a BAL failure cannot block
+    /// returning the downloaded block.
     fn poll_bal_request(&mut self, cx: &mut Context<'_>) {
         let poll = match &mut self.bal_request_state {
             BalRequestState::Pending(fut) => fut.poll_unpin(cx),
@@ -434,6 +439,11 @@ where
         }
     }
 
+    /// Returns the block once the block download and optional BAL lookup have both completed.
+    ///
+    /// The BAL lookup must be ready even when it resolved to `None`, which prevents a fast block
+    /// response from racing a still-pending BAL response and incorrectly dropping available BAL
+    /// data.
     fn take_block_and_access_lists(
         &mut self,
     ) -> Option<SealedBlockWith<Client::Block, Option<BlockAccessLists>>> {
