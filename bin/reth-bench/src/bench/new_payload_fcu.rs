@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use alloy_consensus::TxEnvelope;
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{bal::Bal, BlockAccessList};
 use alloy_eips::Encodable2718;
 use alloy_primitives::{Bytes, B256};
 use alloy_provider::{
@@ -27,7 +27,8 @@ use alloy_provider::{
     Provider, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload as RpcExecutionPayload, ForkchoiceState, PayloadAttributes,
+    ExecutionData, ExecutionPayload as RpcExecutionPayload, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, PayloadAttributes,
 };
 use clap::Parser;
 use eyre::{bail, ensure, Context, OptionExt};
@@ -642,7 +643,10 @@ async fn prepare_built_block(
     )?;
     let (payload, sidecar) = built_payload
         .into_payload_and_sidecar(block.header.parent_beacon_block_root.unwrap_or_default());
-    let execution_data = ExecutionData { payload, sidecar };
+    let mut execution_data = ExecutionData { payload, sidecar };
+    if let Some(block_access_list) = &built_response.block_access_list {
+        execution_data.payload = payload_with_bal(execution_data.payload, block_access_list);
+    }
     let artifact = BigBlockPayload {
         execution_data: execution_data.clone(),
         big_block_data: Default::default(),
@@ -748,6 +752,45 @@ fn write_payload_artifact(
         "Wrote payload artifact"
     );
     Ok(())
+}
+
+fn payload_with_bal(
+    payload: RpcExecutionPayload,
+    block_access_list: &BlockAccessList,
+) -> RpcExecutionPayload {
+    let encoded_bal = alloy_rlp::encode(Bal::from(block_access_list.clone())).into();
+    match payload {
+        RpcExecutionPayload::V4(mut payload) => {
+            payload.block_access_list = encoded_bal;
+            RpcExecutionPayload::V4(payload)
+        }
+        RpcExecutionPayload::V3(payload) => RpcExecutionPayload::V4(ExecutionPayloadV4 {
+            payload_inner: payload,
+            block_access_list: encoded_bal,
+            slot_number: 0,
+        }),
+        RpcExecutionPayload::V2(payload) => RpcExecutionPayload::V4(ExecutionPayloadV4 {
+            payload_inner: ExecutionPayloadV3 {
+                payload_inner: payload,
+                blob_gas_used: 0,
+                excess_blob_gas: 0,
+            },
+            block_access_list: encoded_bal,
+            slot_number: 0,
+        }),
+        RpcExecutionPayload::V1(payload) => RpcExecutionPayload::V4(ExecutionPayloadV4 {
+            payload_inner: ExecutionPayloadV3 {
+                payload_inner: ExecutionPayloadV2 {
+                    payload_inner: payload,
+                    withdrawals: Vec::new(),
+                },
+                blob_gas_used: 0,
+                excess_blob_gas: 0,
+            },
+            block_access_list: encoded_bal,
+            slot_number: 0,
+        }),
+    }
 }
 
 fn build_block_request(
