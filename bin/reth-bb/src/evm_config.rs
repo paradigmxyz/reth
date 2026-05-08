@@ -234,16 +234,23 @@ where
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         let payload_hash = payload.block_hash();
-        let first_exec_data = {
+        let bb_data = {
             let pending = self.pending.lock().unwrap();
-            pending
-                .get(&payload_hash)
-                .and_then(|bb_data| bb_data.env_switches.first().map(|(_, data)| data.clone()))
+            pending.get(&payload_hash).cloned()
         };
 
-        if let Some(first_exec_data) = first_exec_data {
+        if let Some(bb_data) = bb_data {
+            match self.build_plan(&bb_data) {
+                Some(plan) => self.executor_factory.stage_plan(plan),
+                None => self.executor_factory.clear_staged_plan(),
+            }
+
+            let Some((_, first_exec_data)) = bb_data.env_switches.first() else {
+                return self.inner.evm_env_for_payload(payload)
+            };
+
             // Compute the env from the first segment before the executor is created.
-            let mut env = self.inner.evm_env_for_payload(&first_exec_data)?;
+            let mut env = self.inner.evm_env_for_payload(first_exec_data)?;
 
             // Disable basefee validation: transactions from different
             // original blocks may have gas prices below the big block's
@@ -252,6 +259,7 @@ where
 
             Ok(env)
         } else {
+            self.executor_factory.clear_staged_plan();
             self.inner.evm_env_for_payload(payload)
         }
     }
