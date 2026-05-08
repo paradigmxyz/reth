@@ -394,15 +394,14 @@ where
     /// Exactly one returned BAL entry is preserved. Empty responses, malformed responses, and
     /// request errors resolve to `None` instead of being retried, so a BAL failure cannot block
     /// returning the downloaded block.
-    fn poll_bal_request(&mut self, cx: &mut Context<'_>) {
-        let poll = match &mut self.bal_request_state {
-            BalRequestState::Pending(fut) => fut.poll_unpin(cx),
-            BalRequestState::Ready(_) => return,
+    fn poll_bal_request(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let res = match &mut self.bal_request_state {
+            BalRequestState::Pending(fut) => ready!(fut.poll_unpin(cx)),
+            BalRequestState::Ready(_) => return Poll::Ready(()),
         };
 
-        match poll {
-            Poll::Pending => {}
-            Poll::Ready(Ok(bal)) => {
+        match res {
+            Ok(bal) => {
                 let (peer, access_lists) = bal.split();
                 match access_lists.0.len() {
                     0 => self.bal_request_state = BalRequestState::Ready(None),
@@ -420,7 +419,7 @@ where
                     }
                 }
             }
-            Poll::Ready(Err(err)) => {
+            Err(err) => {
                 debug!(
                     target: "downloaders",
                     %err,
@@ -430,6 +429,8 @@ where
                 self.bal_request_state = BalRequestState::Ready(None);
             }
         }
+
+        Poll::Ready(())
     }
 
     /// Returns the block once the block download and optional BAL lookup have both completed.
@@ -461,7 +462,7 @@ where
             this.block_result = Some(block);
         }
 
-        this.poll_bal_request(cx);
+        ready!(this.poll_bal_request(cx));
 
         if let Some(res) = this.take_block_and_access_lists() {
             return Poll::Ready(res)
