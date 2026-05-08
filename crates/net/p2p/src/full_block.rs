@@ -174,9 +174,9 @@ where
     pub fn get_full_block_with_access_lists(
         &self,
         hash: B256,
-    ) -> FetchFullBlockWithAccessListsFuture<Client> {
+    ) -> FetchFullBlockWithBalFuture<Client> {
         let client = self.client.clone();
-        FetchFullBlockWithAccessListsFuture {
+        FetchFullBlockWithBalFuture {
             block: FetchFullBlockFuture::new(client.clone(), self.consensus.clone(), hash),
             block_result: None,
             bal_request_state: BalRequestState::Pending(
@@ -368,7 +368,7 @@ where
 /// This composes the existing full block downloader with a block access list request so the
 /// header/body logic stays centralized. Missing access lists do not block returning the full block.
 #[must_use = "futures do nothing unless polled"]
-pub struct FetchFullBlockWithAccessListsFuture<Client>
+pub struct FetchFullBlockWithBalFuture<Client>
 where
     Client: BlockClient + BlockAccessListsClient,
 {
@@ -377,7 +377,7 @@ where
     bal_request_state: BalRequestState<<Client as BlockAccessListsClient>::Output>,
 }
 
-impl<Client> FetchFullBlockWithAccessListsFuture<Client>
+impl<Client> FetchFullBlockWithBalFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
 {
@@ -387,7 +387,7 @@ where
     }
 }
 
-impl<Client> FetchFullBlockWithAccessListsFuture<Client>
+impl<Client> FetchFullBlockWithBalFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
 {
@@ -453,7 +453,7 @@ where
     }
 }
 
-impl<Client> Future for FetchFullBlockWithAccessListsFuture<Client>
+impl<Client> Future for FetchFullBlockWithBalFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
 {
@@ -478,12 +478,12 @@ where
     }
 }
 
-impl<Client> Debug for FetchFullBlockWithAccessListsFuture<Client>
+impl<Client> Debug for FetchFullBlockWithBalFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FetchFullBlockWithAccessListsFuture")
+        f.debug_struct("FetchFullBlockWithBalFuture")
             .field("hash", &self.block.hash())
             .field("block_ready", &self.block_result.is_some())
             .field("bal_request_ready", &self.bal_request_state.is_ready())
