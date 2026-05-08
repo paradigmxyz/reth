@@ -200,6 +200,7 @@ impl Command {
             rlp_blocks,
             wait_for_persistence,
             no_wait_for_caches,
+            big_blocks_initial_state,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -308,6 +309,7 @@ impl Command {
                 num_big_blocks as u64,
                 self.big_blocks_target_gas,
                 block_stream,
+                big_blocks_initial_state,
             ));
             let (tx, rx) = mpsc::channel(buffer_size);
             tokio::task::spawn_blocking(|| {

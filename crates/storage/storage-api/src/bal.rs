@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
+use revm_database::state::bal::Bal as RevmBal;
 
 /// Raw BAL RLP bytes sealed by the BAL hash.
 pub type SealedBal = Sealed<Bytes>;
@@ -41,7 +42,27 @@ mod subscriptions {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BalStore: Send + Sync + 'static {
     /// Insert the BAL for the given block.
+    ///
+    /// Implementations may buffer inserts. Call [`Self::flush`] when pending BALs need to be made
+    /// durable.
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
+
+    /// Insert multiple BALs.
+    ///
+    /// The default implementation preserves the behavior of repeated [`Self::insert`] calls.
+    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        for (num_hash, bal) in entries {
+            self.insert(num_hash, bal)?;
+        }
+        Ok(())
+    }
+
+    /// Flushes any pending BALs to the backing store.
+    ///
+    /// In-memory implementations may treat this as a no-op.
+    fn flush(&self) -> ProviderResult<()> {
+        Ok(())
+    }
 
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
     ///
@@ -64,6 +85,17 @@ pub trait BalStore: Send + Sync + 'static {
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
+    }
+
+    /// Fetches the BAL for the given block hash in revm representation.
+    fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+        self.get_decoded_by_hash(block_hash)?
+            .map(|decoded| {
+                let (bal, _) = decoded.split();
+                RevmBal::try_from(Vec::from(bal))
+                    .map_err(reth_storage_errors::provider::ProviderError::other)
+            })
+            .transpose()
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -160,6 +192,18 @@ impl BalStoreHandle {
         self.inner.insert(num_hash, bal)
     }
 
+    /// Insert multiple BALs.
+    #[inline]
+    pub fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        self.inner.insert_many(entries)
+    }
+
+    /// Flushes any pending BALs to the backing store.
+    #[inline]
+    pub fn flush(&self) -> ProviderResult<()> {
+        self.inner.flush()
+    }
+
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
     #[inline]
     pub fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
@@ -182,6 +226,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
         self.inner.get_decoded_by_hash(block_hash)
+    }
+
+    /// Fetches the BAL for the given block hash in revm representation.
+    #[inline]
+    pub fn revm_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<RevmBal>> {
+        self.inner.revm_bal_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -248,6 +298,10 @@ impl BalStore for NoopBalStore {
         Ok(())
     }
 
+    fn insert_many(&self, _entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        Ok(())
+    }
+
     fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
         Ok(0)
     }
@@ -304,6 +358,13 @@ mod tests {
         assert!(store.get_by_hash(B256::random()).unwrap().is_none());
         assert!(by_range.is_empty());
         assert_eq!(store.prune(10).unwrap(), 0);
+    }
+
+    #[test]
+    fn noop_store_flush_is_noop() {
+        let store = BalStoreHandle::default();
+
+        store.flush().unwrap();
     }
 
     #[test]
