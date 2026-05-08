@@ -445,16 +445,12 @@ pub(crate) fn big_blocks_stream(
             for (block_idx, (block_data, block_access_list)) in
                 blocks.iter().zip(block_access_lists).enumerate()
             {
-                // Segment index in the merged big block. The base block is
-                // segment 0; subsequent blocks are segments 1, 2, ...
-                let segment_idx = (block_idx + 1) as u64;
-
                 if let Some(block_access_list) = block_access_list {
                     merge_block_access_list(
                         merged_block_access_list.get_or_insert_with(Default::default),
                         block_access_list,
                         cumulative_tx_count as u64,
-                        segment_idx,
+                        block_idx,
                     );
                 }
 
