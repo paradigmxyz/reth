@@ -301,6 +301,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     pub fn is_supported_by_eth_version(&self, version: EthVersion) -> bool {
         match self {
             Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
+            Self::GetCells { .. } => version >= EthVersion::Eth72,
             _ => true,
         }
     }
@@ -401,5 +402,15 @@ mod tests {
 
         assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
         assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
+    }
+
+    #[test]
+    fn test_get_cells_version_support() {
+        let (tx, _rx) = oneshot::channel();
+        let req: PeerRequest<EthNetworkPrimitives> =
+            PeerRequest::GetCells { request: GetCells::default(), response: tx };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth71));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth72));
     }
 }
