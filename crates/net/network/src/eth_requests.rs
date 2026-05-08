@@ -653,4 +653,3 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         response: oneshot::Sender<RequestResult<Cells>>,
     },
 }
-
