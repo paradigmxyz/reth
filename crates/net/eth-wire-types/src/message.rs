@@ -344,7 +344,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockBodies(RequestPair<BlockBodies<N::BlockBody>>),
     /// Represents a `GetPooledTransactions` request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
-       /// Represents a `GetPooledTransactions72` request-response pair.
+    /// Represents a `GetPooledTransactions72` request-response pair.
     GetPooledTransactions72(RequestPair<GetPooledTransactions>),
     /// Represents a `PooledTransactions` request-response pair.
     #[cfg_attr(
@@ -352,7 +352,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
-     /// Represents a `PooledTransactions` request-response pair for eth 72.
+    /// Represents a `PooledTransactions` request-response pair for eth 72.
     #[cfg_attr(
         feature = "serde",
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
@@ -425,9 +425,12 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
-            Self::GetPooledTransactions(_)|Self::GetPooledTransactions72(_) => EthMessageID::GetPooledTransactions,
-            Self::PooledTransactions(_)|
-            Self::PooledTransactions72(_) => EthMessageID::PooledTransactions,
+            Self::GetPooledTransactions(_) | Self::GetPooledTransactions72(_) => {
+                EthMessageID::GetPooledTransactions
+            }
+            Self::PooledTransactions(_) | Self::PooledTransactions72(_) => {
+                EthMessageID::PooledTransactions
+            }
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
@@ -461,7 +464,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         matches!(
             self,
             Self::PooledTransactions(_) |
-            Self::PooledTransactions72(_) |
+                Self::PooledTransactions72(_) |
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
                 Self::Receipts70(_) |

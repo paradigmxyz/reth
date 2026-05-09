@@ -148,7 +148,7 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a pooled transactions request.
         response: oneshot::Receiver<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     },
-     /// Represents a response to a request for pooled transactions for eth 72.
+    /// Represents a response to a request for pooled transactions for eth 72.
     PooledTransactions72 {
         /// The receiver channel for the response to a pooled transactions request.
         response: oneshot::Receiver<RequestResult<PooledTransactions<N::PooledTransaction>>>,
@@ -215,8 +215,8 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 poll_request!(response, PooledTransactions, cx)
             }
             Self::PooledTransactions72 { response } => {
-                    poll_request!(response, PooledTransactions72, cx)
-                }
+                poll_request!(response, PooledTransactions72, cx)
+            }
             Self::NodeData { response } => {
                 poll_request!(response, NodeData, cx)
             }
