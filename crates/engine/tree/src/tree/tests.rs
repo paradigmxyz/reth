@@ -36,7 +36,7 @@ use std::{
         mpsc::{Receiver, Sender},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
 
@@ -695,6 +695,47 @@ async fn test_holesky_payload() {
 
     let resp = rx.await.unwrap().unwrap();
     assert!(resp.is_syncing());
+}
+
+fn holesky_execution_data() -> ExecutionData {
+    let s = include_str!("../../test-data/holesky/1.rlp");
+    let data = Bytes::from_str(s).unwrap();
+    let block: Block = Block::decode(&mut data.as_ref()).unwrap();
+    let sealed = block.seal_slow();
+    let hash = sealed.hash();
+    let block = sealed.into_block();
+    let payload = ExecutionPayloadV1::from_block_unchecked(hash, &block);
+
+    ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() }
+}
+
+#[tokio::test]
+async fn test_reth_new_payload_returns_error_when_persistence_channel_closes() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+
+    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+    drop(persist_tx);
+
+    let (tx, rx) = oneshot::channel();
+    let _ = test_harness
+        .tree
+        .on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::RethNewPayload {
+                payload: holesky_execution_data(),
+                wait_for_persistence: true,
+                wait_for_caches: true,
+                tx,
+                enqueued_at: Instant::now(),
+            }
+            .into(),
+        ))
+        .unwrap();
+
+    let err = rx.await.unwrap().unwrap_err();
+    assert!(err.to_string().contains("persistence state channel closed"));
 }
 
 #[test]

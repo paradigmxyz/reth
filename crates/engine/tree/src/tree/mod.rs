@@ -1682,6 +1682,7 @@ where
                                 );
 
                                 let backpressure_wait = enqueued_at.elapsed();
+                                let num_hash = payload.num_hash();
 
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
@@ -1692,26 +1693,68 @@ where
                                             "wait-persist",
                                             move || {
                                                 let start = Instant::now();
-                                                let result = rx
-                                                    .recv()
-                                                    .expect("persistence state channel closed");
-                                                let _ = persistence_tx.send((
-                                                    result,
-                                                    start_time,
-                                                    start.elapsed(),
-                                                ));
+                                                let result = rx.recv().map(|result| {
+                                                    (result, start_time, start.elapsed())
+                                                });
+                                                let _ = persistence_tx.send(result);
                                             },
                                         );
-                                        let (result, start_time, wait_duration) = persistence_rx
-                                            .recv()
-                                            .expect("persistence result channel closed");
-                                        let _ = self.on_persistence_complete(result, start_time);
-                                        wait_duration
+                                        match persistence_rx.recv() {
+                                            Ok(Ok((result, start_time, wait_duration))) => {
+                                                let _ = self
+                                                    .on_persistence_complete(result, start_time);
+                                                Ok(wait_duration)
+                                            }
+                                            Ok(Err(_)) => Err(BeaconOnNewPayloadError::internal(
+                                                std::io::Error::other(
+                                                    "persistence state channel closed",
+                                                ),
+                                            )),
+                                            Err(_) => Err(BeaconOnNewPayloadError::internal(
+                                                std::io::Error::other(
+                                                    "persistence result channel closed",
+                                                ),
+                                            )),
+                                        }
                                     } else {
-                                        Duration::ZERO
+                                        Ok(Duration::ZERO)
                                     }
                                 } else {
-                                    Duration::ZERO
+                                    Ok(Duration::ZERO)
+                                };
+
+                                let explicit_persistence_wait = match explicit_persistence_wait {
+                                    Ok(wait) => wait,
+                                    Err(err) => {
+                                        error!(
+                                            target: "engine::tree",
+                                            payload = ?num_hash,
+                                            ?err,
+                                            "Failed to wait for in-flight persistence"
+                                        );
+                                        self.metrics
+                                            .engine
+                                            .new_payload
+                                            .new_payload_messages
+                                            .increment(1);
+                                        self.metrics
+                                            .engine
+                                            .new_payload
+                                            .new_payload_error
+                                            .increment(1);
+                                        if let Err(send_err) = tx.send(Err(err)) {
+                                            warn!(
+                                                target: "engine::tree",
+                                                payload = ?num_hash,
+                                                "Failed to deliver reth_newPayload error response, receiver dropped (request cancelled): {send_err:?}"
+                                            );
+                                            self.metrics
+                                                .engine
+                                                .failed_new_payload_response_deliveries
+                                                .increment(1);
+                                        }
+                                        return Ok(ops::ControlFlow::Continue(()))
+                                    }
                                 };
 
                                 let cache_wait = wait_for_caches
@@ -1719,7 +1762,6 @@ where
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
-                                let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
                                 let latency = start.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
