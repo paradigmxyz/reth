@@ -2,9 +2,9 @@
 
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::BlobTransactionSidecarVariant,
+    eip7594::{BlobTransactionSidecarVariant, Cell},
 };
-use alloy_primitives::{B128, B256};
+use alloy_primitives::{TxHash, B128, B256};
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -119,6 +119,13 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         versioned_hashes: &[B256],
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
+
+    /// Retrieve the cells for a specific transaction hash and cell mask.
+    fn get_cells(
+        &self,
+        tx_hash: TxHash,
+        indices_bitarray: B128,
+    ) -> Result<Option<Vec<Cell>>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
