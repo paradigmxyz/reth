@@ -551,8 +551,9 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockHeaders(headers) => headers.length(),
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(bodies) => bodies.length(),
-            Self::GetPooledTransactions(request) => request.length(),
-            Self::GetPooledTransactions72(request) => request.length(),
+            Self::GetPooledTransactions(request) | Self::GetPooledTransactions72(request) => {
+                request.length()
+            }
             Self::PooledTransactions(transactions) | Self::PooledTransactions72(transactions) => {
                 transactions.length()
             }
