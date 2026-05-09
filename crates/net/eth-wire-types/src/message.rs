@@ -344,12 +344,20 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockBodies(RequestPair<BlockBodies<N::BlockBody>>),
     /// Represents a `GetPooledTransactions` request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
+       /// Represents a `GetPooledTransactions72` request-response pair.
+    GetPooledTransactions72(RequestPair<GetPooledTransactions>),
     /// Represents a `PooledTransactions` request-response pair.
     #[cfg_attr(
         feature = "serde",
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
+     /// Represents a `PooledTransactions` request-response pair for eth 72.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    PooledTransactions72(RequestPair<PooledTransactions<N::PooledTransaction>>),
     /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
     /// Represents a `NodeData` request-response pair.
@@ -417,8 +425,9 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
-            Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
-            Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
+            Self::GetPooledTransactions(_)|Self::GetPooledTransactions72(_) => EthMessageID::GetPooledTransactions,
+            Self::PooledTransactions(_)|
+            Self::PooledTransactions72(_) => EthMessageID::PooledTransactions,
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
@@ -452,6 +461,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         matches!(
             self,
             Self::PooledTransactions(_) |
+            Self::PooledTransactions72(_) |
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
                 Self::Receipts70(_) |
@@ -506,7 +516,9 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(bodies) => bodies.encode(out),
             Self::GetPooledTransactions(request) => request.encode(out),
+            Self::GetPooledTransactions72(request) => request.encode(out),
             Self::PooledTransactions(transactions) => transactions.encode(out),
+            Self::PooledTransactions72(transactions) => transactions.encode(out),
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
@@ -535,7 +547,9 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(bodies) => bodies.length(),
             Self::GetPooledTransactions(request) => request.length(),
+            Self::GetPooledTransactions72(request) => request.length(),
             Self::PooledTransactions(transactions) => transactions.length(),
+            Self::PooledTransactions72(transactions) => transactions.length(),
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
