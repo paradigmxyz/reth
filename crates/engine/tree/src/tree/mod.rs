@@ -1,6 +1,7 @@
 use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
+    download::DownloadedBlock,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
@@ -664,7 +665,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<SealedBlock<N::Block>>,
+        mut blocks: Vec<DownloadedBlock<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -2464,8 +2465,8 @@ where
         let now = Instant::now();
         let block_count = blocks.len();
         for child in blocks {
-            let child_num_hash = child.num_hash();
-            match self.insert_block(child) {
+            let child_num_hash = child.block().num_hash();
+            match self.insert_downloaded_block(child) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_any_sync_target(child_num_hash.hash) &&
@@ -2818,14 +2819,15 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.block().hash(), block_num = %block.block().number()))]
     fn on_downloaded_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: DownloadedBlock<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
-        let block_num_hash = block.num_hash();
+        let block_num_hash = block.block().num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
-        if self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?.is_some() {
+        if self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.block())?.is_some()
+        {
             return Ok(None)
         }
 
@@ -2834,7 +2836,7 @@ where
         }
 
         // try to append the block
-        match self.insert_block(block) {
+        match self.insert_downloaded_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 return self.on_valid_downloaded_block(block_num_hash);
             }
@@ -2879,18 +2881,22 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
+            |this, payload| {
+                Ok(DownloadedBlock::without_bal(
+                    this.payload_validator.convert_payload_to_block(payload)?,
+                ))
+            },
         )
     }
 
-    fn insert_block(
+    fn insert_downloaded_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: DownloadedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
-            block.block_with_parent(),
+            block.block().block_with_parent(),
             block,
-            |validator, block, ctx| validator.validate_block(block, ctx),
+            |validator, block, ctx| validator.validate_block(block.into_block(), ctx),
             |_, block| Ok(block),
         )
     }
@@ -2917,7 +2923,7 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<DownloadedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -2938,7 +2944,7 @@ where
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block, err.into()).into());
+                    return Err(InsertBlockError::new(block.into_block(), err.into()).into());
                 }
                 Ok(Some(_)) => {
                     convert_to_block(self, input)?;
@@ -2952,7 +2958,7 @@ where
         match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
+                return Err(InsertBlockError::new(block.into_block(), err.into()).into());
             }
             Ok(None) => {
                 let block = convert_to_block(self, input)?;
@@ -2962,9 +2968,9 @@ where
                 let missing_ancestor = self
                     .state
                     .buffer
-                    .lowest_ancestor(&block.parent_hash())
+                    .lowest_ancestor(&block.block().parent_hash())
                     .map(|block| block.parent_num_hash())
-                    .unwrap_or_else(|| block.parent_num_hash());
+                    .unwrap_or_else(|| block.block().parent_num_hash());
 
                 self.state.buffer.insert_block(block);
 

@@ -3,7 +3,7 @@
 use crate::{
     backfill::BackfillAction,
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
-    download::{BlockDownloader, DownloadAction, DownloadOutcome},
+    download::{BlockDownloader, DownloadAction, DownloadOutcome, DownloadedBlock},
 };
 use alloy_primitives::{map::B256Set, B256};
 use crossbeam_channel::Sender;
@@ -11,7 +11,7 @@ use futures::{Stream, StreamExt};
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::{BuiltPayloadExecutedBlock, PayloadTypes};
-use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
+use reth_primitives_traits::{Block, NodePrimitives};
 use std::{
     fmt::Display,
     task::{ready, Context, Poll},
@@ -305,7 +305,7 @@ pub enum FromEngine<Req, B: Block> {
     /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
-    DownloadedBlocks(Vec<SealedBlock<B>>),
+    DownloadedBlocks(Vec<DownloadedBlock<B>>),
 }
 
 impl<Req: Display, B: Block> Display for FromEngine<Req, B> {
