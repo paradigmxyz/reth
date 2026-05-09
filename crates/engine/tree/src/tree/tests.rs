@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    download::DownloadedBlock,
     persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
@@ -39,6 +40,12 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
+
+fn downloaded_blocks<B: reth_primitives_traits::Block>(
+    blocks: Vec<reth_primitives_traits::SealedBlock<B>>,
+) -> Vec<DownloadedBlock<B>> {
+    blocks.into_iter().map(DownloadedBlock::without_bal).collect()
+}
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -513,7 +520,7 @@ fn test_tree_persist_block_batch() {
         blocks.push(test_block_builder.generate_random_block(idx as u64, B256::random()));
     }
 
-    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(blocks)).unwrap();
+    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(downloaded_blocks(blocks))).unwrap();
 
     // process the message
     let msg = match test_harness.tree.wait_for_event() {
@@ -655,7 +662,10 @@ fn test_disconnected_block() {
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-    let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
+    let outcome = test_harness
+        .tree
+        .insert_downloaded_block(DownloadedBlock::without_bal(sealed.clone()))
+        .unwrap();
     assert_eq!(
         outcome,
         InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -1098,10 +1108,10 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let _ = test_harness
         .tree
-        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+        .on_engine_message(FromEngine::DownloadedBlocks(downloaded_blocks(vec![main_chain
             .last()
             .unwrap()
-            .clone_sealed_block()]))
+            .clone_sealed_block()])))
         .unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();

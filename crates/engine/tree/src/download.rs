@@ -2,6 +2,7 @@
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{map::B256Set, B256};
 use futures::FutureExt;
 use reth_consensus::Consensus;
@@ -44,7 +45,7 @@ pub enum DownloadAction {
 #[derive(Debug)]
 pub enum DownloadOutcome<B: Block> {
     /// Downloaded blocks.
-    Blocks(Vec<SealedBlock<B>>),
+    Blocks(Vec<DownloadedBlock<B>>),
     /// New download started.
     NewDownloadStarted {
         /// How many blocks are pending in this download.
@@ -52,6 +53,61 @@ pub enum DownloadOutcome<B: Block> {
         /// The hash of the highest block of this download.
         target: B256,
     },
+}
+
+/// A value with an optional decoded block access list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithDecodedBal<T> {
+    value: T,
+    decoded_bal: Option<Arc<DecodedBal>>,
+}
+
+impl<T> WithDecodedBal<T> {
+    /// Creates a value with optional decoded BAL data.
+    pub fn new(value: T, decoded_bal: Option<Arc<DecodedBal>>) -> Self {
+        Self { value, decoded_bal }
+    }
+
+    /// Creates a value without BAL data.
+    pub fn without_bal(value: T) -> Self {
+        Self::new(value, None)
+    }
+
+    /// Returns the wrapped value.
+    pub const fn value(&self) -> &T {
+        &self.value
+    }
+
+    /// Returns the optional decoded BAL.
+    pub fn decoded_bal(&self) -> Option<Arc<DecodedBal>> {
+        self.decoded_bal.clone()
+    }
+
+    /// Returns the wrapped value.
+    pub fn into_value(self) -> T {
+        self.value
+    }
+}
+
+/// A block downloaded from the network with an optional decoded block access list.
+pub type DownloadedBlock<B> = WithDecodedBal<SealedBlock<B>>;
+
+impl<B: Block> DownloadedBlock<B> {
+    /// Returns the downloaded block.
+    pub const fn block(&self) -> &SealedBlock<B> {
+        self.value()
+    }
+
+    /// Returns the inner block.
+    pub fn into_block(self) -> SealedBlock<B> {
+        self.into_value()
+    }
+}
+
+impl<B: Block> From<SealedBlock<B>> for DownloadedBlock<B> {
+    fn from(block: SealedBlock<B>) -> Self {
+        Self::without_bal(block)
+    }
 }
 
 /// Basic [`BlockDownloader`].
@@ -68,7 +124,7 @@ where
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
-    set_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock<B>>>,
+    set_buffered_blocks: BinaryHeap<Reverse<OrderedDownloadedBlock<B>>>,
     /// Engine download metrics.
     metrics: BlockDownloaderMetrics,
     /// Pending events to be emitted.
@@ -214,7 +270,7 @@ where
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
             if let Poll::Ready(block) = request.poll_unpin(cx) {
                 trace!(target: "engine::download", block=?block.num_hash(), "Received single full block, buffering");
-                self.set_buffered_blocks.push(Reverse(block.into()));
+                self.set_buffered_blocks.push(Reverse(DownloadedBlock::without_bal(block).into()));
             } else {
                 // still pending
                 self.inflight_full_block_requests.push(request);
@@ -226,8 +282,13 @@ where
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
             if let Poll::Ready(blocks) = request.poll_unpin(cx) {
                 trace!(target: "engine::download", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
-                self.set_buffered_blocks
-                    .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
+                self.set_buffered_blocks.extend(
+                    blocks
+                        .into_iter()
+                        .map(DownloadedBlock::without_bal)
+                        .map(OrderedDownloadedBlock)
+                        .map(Reverse),
+                );
             } else {
                 // still pending
                 self.inflight_block_range_requests.push(request);
@@ -243,45 +304,49 @@ where
         // drain all unique element of the block buffer if there are any
         let mut downloaded_blocks = Vec::with_capacity(self.set_buffered_blocks.len());
         while let Some(block) = self.set_buffered_blocks.pop() {
+            let mut block = block.0 .0;
             // peek ahead and pop duplicates
             while let Some(peek) = self.set_buffered_blocks.peek_mut() {
-                if peek.0 .0.hash() == block.0 .0.hash() {
-                    PeekMut::pop(peek);
+                if peek.0 .0.block().hash() == block.block().hash() {
+                    let duplicate = PeekMut::pop(peek).0 .0;
+                    if block.decoded_bal().is_none() && duplicate.decoded_bal().is_some() {
+                        block = duplicate;
+                    }
                 } else {
                     break
                 }
             }
-            downloaded_blocks.push(block.0.into());
+            downloaded_blocks.push(block);
         }
         Poll::Ready(DownloadOutcome::Blocks(downloaded_blocks))
     }
 }
 
-/// A wrapper type around [`SealedBlock`] that implements the [Ord]
+/// A wrapper type around [`DownloadedBlock`] that implements the [Ord]
 /// trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlock<B: Block>(SealedBlock<B>);
+struct OrderedDownloadedBlock<B: Block>(DownloadedBlock<B>);
 
-impl<B: Block> PartialOrd for OrderedSealedBlock<B> {
+impl<B: Block> PartialOrd for OrderedDownloadedBlock<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<B: Block> Ord for OrderedSealedBlock<B> {
+impl<B: Block> Ord for OrderedDownloadedBlock<B> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.number().cmp(&other.0.number())
+        self.0.block().number().cmp(&other.0.block().number())
     }
 }
 
-impl<B: Block> From<SealedBlock<B>> for OrderedSealedBlock<B> {
-    fn from(block: SealedBlock<B>) -> Self {
+impl<B: Block> From<DownloadedBlock<B>> for OrderedDownloadedBlock<B> {
+    fn from(block: DownloadedBlock<B>) -> Self {
         Self(block)
     }
 }
 
-impl<B: Block> From<OrderedSealedBlock<B>> for SealedBlock<B> {
-    fn from(value: OrderedSealedBlock<B>) -> Self {
+impl<B: Block> From<OrderedDownloadedBlock<B>> for DownloadedBlock<B> {
+    fn from(value: OrderedDownloadedBlock<B>) -> Self {
         value.0
     }
 }
@@ -383,7 +448,7 @@ mod tests {
 
             // ensure they are in ascending order
             for num in 1..=TOTAL_BLOCKS {
-                assert_eq!(blocks[num-1].number(), num as u64);
+                assert_eq!(blocks[num - 1].block().number(), num as u64);
             }
         });
     }
@@ -421,7 +486,7 @@ mod tests {
 
             // ensure they are in ascending order
             for num in 1..=TOTAL_BLOCKS {
-                assert_eq!(blocks[num-1].number(), num as u64);
+                assert_eq!(blocks[num - 1].block().number(), num as u64);
             }
         });
     }
