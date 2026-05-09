@@ -9179,6 +9179,7 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rlp",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "aquamarine",

@@ -20,7 +20,11 @@ use reth_network_api::{
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
     PeersInfo,
 };
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
+use reth_network_p2p::{
+    error::PeerRequestResult,
+    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
+    BalRequirement, BlockAccessLists, BlockAccessListsClient,
+};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_tokio_util::{EventSender, EventStream};
@@ -477,6 +481,15 @@ impl<N: NetworkPrimitives> BlockDownloaderProvider for NetworkHandle<N> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
         rx.await
+    }
+
+    async fn fetch_block_access_lists(
+        &self,
+        hashes: Vec<B256>,
+        requirement: BalRequirement,
+    ) -> PeerRequestResult<BlockAccessLists> {
+        let fetch_client = self.fetch_client().await?;
+        fetch_client.get_block_access_lists_with_requirement(hashes, requirement).await
     }
 }
 

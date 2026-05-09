@@ -16,12 +16,19 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
     ConsensusEngineHandle,
 };
+use alloy_consensus::BlockHeader;
+use alloy_eips::NumHash;
+use alloy_primitives::{keccak256, BlockHash, BlockNumber, Bytes, Sealed};
+use alloy_rlp::EMPTY_LIST_CODE;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
+use futures::StreamExt;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_network_api::BlockDownloaderProvider;
+use reth_network_p2p::{BalRequirement, BlockAccessLists};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -32,6 +39,8 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{BalProvider, SealedBal};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -45,7 +54,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, info, warn};
 use std::{
     fmt::{self, Debug},
     future::Future,
@@ -1103,9 +1112,12 @@ where
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
+        let eth_config = config.rpc.eth_config();
+        let cache_config = eth_config.cache;
+
         let cache = EthStateCache::spawn_with(
             node.provider().clone(),
-            config.rpc.eth_config().cache,
+            cache_config,
             node.task_executor().clone(),
         );
 
@@ -1115,7 +1127,20 @@ where
             cache_new_blocks_task(c, new_canonical_blocks).await;
         });
 
-        let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
+        if cache_config.prewarm_bals {
+            let new_canonical_blocks = node.provider().canonical_state_stream();
+            let provider = node.provider().clone();
+            let network = node.network().clone();
+            let c = cache.clone();
+            node.task_executor().spawn_critical_task(
+                "prewarm canonical block BALs task",
+                async move {
+                    prewarm_new_block_bals_task(provider, network, c, new_canonical_blocks).await;
+                },
+            );
+        }
+
+        let eth_config = eth_config.max_batch_size(config.txpool.max_batch_size());
         let ctx = EthApiCtx {
             components: &node,
             config: eth_config,
@@ -1254,6 +1279,103 @@ where
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
         self.launch_add_ons_with(ctx, |_| Ok(())).await
     }
+}
+
+async fn prewarm_new_block_bals_task<Provider, Network, N, St>(
+    provider: Provider,
+    network: Network,
+    eth_state_cache: EthStateCache<N>,
+    mut events: St,
+) where
+    Provider: BalProvider,
+    Network: BlockDownloaderProvider,
+    N: NodePrimitives,
+    St: futures::Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
+{
+    while let Some(event) = events.next().await {
+        let committed = event.committed();
+        for block in committed.blocks_iter() {
+            let block_hash = block.hash();
+            let block_number = block.number();
+            match network.fetch_block_access_lists(vec![block_hash], BalRequirement::Optional).await
+            {
+                Ok(access_lists) => {
+                    prewarm_block_bal(
+                        &provider,
+                        &eth_state_cache,
+                        block_number,
+                        block_hash,
+                        access_lists.into_data(),
+                    )
+                    .await;
+                }
+                Err(err) => {
+                    debug!(
+                        target: "reth::cli",
+                        %err,
+                        ?block_hash,
+                        block_number,
+                        "Failed to fetch BAL for canonical block",
+                    );
+                }
+            }
+        }
+    }
+}
+
+async fn prewarm_block_bal<N, Provider>(
+    provider: &Provider,
+    eth_state_cache: &EthStateCache<N>,
+    block_number: BlockNumber,
+    block_hash: BlockHash,
+    access_lists: BlockAccessLists,
+) where
+    N: NodePrimitives,
+    Provider: BalProvider,
+{
+    let mut access_lists = access_lists.0;
+    if access_lists.len() != 1 {
+        debug!(
+            target: "reth::cli",
+            ?block_hash,
+            block_number,
+            received = access_lists.len(),
+            "Skipping BAL prewarm due to unexpected response length",
+        );
+        return
+    }
+
+    let bal = access_lists.pop().expect("checked length");
+    if bal.as_ref() == [EMPTY_LIST_CODE] {
+        debug!(
+            target: "reth::cli",
+            ?block_hash,
+            block_number,
+            "Skipping BAL prewarm for unavailable BAL response",
+        );
+        return
+    }
+
+    if let Err(err) =
+        provider.bal_store().insert(NumHash::new(block_number, block_hash), sealed_bal(bal))
+    {
+        warn!(target: "reth::cli", %err, ?block_hash, block_number, "Failed to store fetched BAL");
+        return
+    }
+
+    if let Err(err) = eth_state_cache.prewarm_bal(block_hash).await {
+        debug!(
+            target: "reth::cli",
+            %err,
+            ?block_hash,
+            block_number,
+            "Failed to prewarm fetched BAL",
+        );
+    }
+}
+
+fn sealed_bal(bal: Bytes) -> SealedBal {
+    Sealed::new_unchecked(bal.clone(), keccak256(&bal))
 }
 
 /// Helper trait implemented for add-ons producing [`RpcHandle`]. Used by common node launcher

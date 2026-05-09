@@ -102,6 +102,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             max_receipts,
             max_headers,
             max_bals,
+            prewarm_bals: _,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         } = config;
@@ -285,6 +286,12 @@ impl<N: NodePrimitives> EthStateCache<N> {
         rx.await
             .map_err(|_| CacheServiceUnavailable)?
             .map(|maybe_bal| maybe_bal.map(|cached| cached.0))
+    }
+
+    /// Best-effort prewarms the revm BAL for the block hash.
+    pub async fn prewarm_bal(&self, block_hash: B256) -> ProviderResult<()> {
+        let _ = self.get_bal(block_hash).await?;
+        Ok(())
     }
 }
 /// Thrown when the cache service task dropped.
@@ -1011,6 +1018,7 @@ mod tests {
                 max_receipts: 4,
                 max_headers: 4,
                 max_bals: 4,
+                prewarm_bals: false,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 16,
             },
@@ -1148,6 +1156,7 @@ mod tests {
                 max_receipts: 0,
                 max_headers: 0,
                 max_bals: 4,
+                prewarm_bals: false,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
             },
@@ -1156,6 +1165,31 @@ mod tests {
         let block_hash = B256::repeat_byte(0x66);
 
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn prewarm_bal_populates_cache() {
+        let fetches = Arc::new(AtomicUsize::default());
+        let provider = TestBalProvider::new(fetches.clone());
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig {
+                max_blocks: 0,
+                max_receipts: 0,
+                max_headers: 0,
+                max_bals: 4,
+                prewarm_bals: false,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 0,
+            },
+            Runtime::test(),
+        );
+        let block_hash = B256::repeat_byte(0x67);
+
+        cache.prewarm_bal(block_hash).await.unwrap();
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
         assert_eq!(fetches.load(Ordering::SeqCst), 1);
@@ -1172,6 +1206,7 @@ mod tests {
                 max_receipts: 0,
                 max_headers: 0,
                 max_bals: 4,
+                prewarm_bals: false,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
             },
