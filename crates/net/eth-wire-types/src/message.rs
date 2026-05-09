@@ -518,10 +518,12 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockHeaders(headers) => headers.encode(out),
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(bodies) => bodies.encode(out),
-            Self::GetPooledTransactions(request) => request.encode(out),
-            Self::GetPooledTransactions72(request) => request.encode(out),
-            Self::PooledTransactions(transactions) => transactions.encode(out),
-            Self::PooledTransactions72(transactions) => transactions.encode(out),
+            Self::GetPooledTransactions(request) | Self::GetPooledTransactions72(request) => {
+                request.encode(out)
+            }
+            Self::PooledTransactions(transactions) | Self::PooledTransactions72(transactions) => {
+                transactions.encode(out)
+            }
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
@@ -551,8 +553,9 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.length(),
             Self::GetPooledTransactions(request) => request.length(),
             Self::GetPooledTransactions72(request) => request.length(),
-            Self::PooledTransactions(transactions) => transactions.length(),
-            Self::PooledTransactions72(transactions) => transactions.length(),
+            Self::PooledTransactions(transactions) | Self::PooledTransactions72(transactions) => {
+                transactions.length()
+            }
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
