@@ -1083,32 +1083,32 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
         let changed_accounts = self.account_changesets_range(from..)?;
 
+        // Unwind account hashes.
+        self.unwind_account_hashing(changed_accounts.iter())?;
+
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
         let changed_storages = self.storage_changesets_range(from..)?;
 
+        // Unwind storage hashes.
+        self.unwind_storage_hashing(changed_storages.iter().copied())?;
+
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
-        let Some(trie_persisted_range) = self.durable_trie_range_from(from)? else { return Ok(()) };
-
-        // Only hashed state and trie tables up to the durable trie frontier are materialized.
-        self.unwind_account_hashing(
-            changed_accounts
-                .iter()
-                .filter(|(block_number, _)| trie_persisted_range.contains(block_number)),
-        )?;
-
-        self.unwind_storage_hashing(
-            changed_storages
-                .iter()
-                .copied()
-                .filter(|(index, _)| trie_persisted_range.contains(&index.block_number())),
-        )?;
-
         // Unwind accounts/storages trie tables using the revert.
-        let trie_revert = self.changeset_cache.get_or_compute_range(self, trie_persisted_range)?;
+        // Get the database tip block number
+        let db_tip_block = self
+            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+            .as_ref()
+            .map(|chk| chk.block_number)
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: from,
+                available: 0..=0,
+            })?;
+
+        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         Ok(())
@@ -3012,51 +3012,41 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         };
 
         if self.cached_storage_settings().use_hashed_state() {
-            if let Some(trie_persisted_range) = self.durable_trie_range_from(block + 1)? {
-                let mut hashed_accounts_cursor =
-                    self.tx.cursor_write::<tables::HashedAccounts>()?;
-                let mut hashed_storage_cursor =
-                    self.tx.cursor_dup_write::<tables::HashedStorages>()?;
+            let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
+            let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
-                let (state, _) = self.populate_bundle_state_hashed(
-                    account_changeset
-                        .into_iter()
-                        .filter(|(block_number, _)| trie_persisted_range.contains(block_number))
-                        .collect::<Vec<_>>(),
-                    storage_changeset
-                        .into_iter()
-                        .filter(|(index, _)| trie_persisted_range.contains(&index.block_number()))
-                        .collect::<Vec<_>>(),
-                    &mut hashed_accounts_cursor,
-                    &mut hashed_storage_cursor,
-                )?;
+            let (state, _) = self.populate_bundle_state_hashed(
+                account_changeset,
+                storage_changeset,
+                &mut hashed_accounts_cursor,
+                &mut hashed_storage_cursor,
+            )?;
 
-                for (address, (old_account, new_account, storage)) in &state {
-                    if old_account != new_account {
-                        let hashed_address = keccak256(address);
-                        let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
-                        if let Some(account) = old_account {
-                            hashed_accounts_cursor.upsert(hashed_address, account)?;
-                        } else if existing_entry.is_some() {
-                            hashed_accounts_cursor.delete_current()?;
-                        }
+            for (address, (old_account, new_account, storage)) in &state {
+                if old_account != new_account {
+                    let hashed_address = keccak256(address);
+                    let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
+                    if let Some(account) = old_account {
+                        hashed_accounts_cursor.upsert(hashed_address, account)?;
+                    } else if existing_entry.is_some() {
+                        hashed_accounts_cursor.delete_current()?;
+                    }
+                }
+
+                for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                    let hashed_address = keccak256(address);
+                    let hashed_storage_key = keccak256(storage_key);
+                    let storage_entry =
+                        StorageEntry { key: hashed_storage_key, value: *old_storage_value };
+                    if hashed_storage_cursor
+                        .seek_by_key_subkey(hashed_address, hashed_storage_key)?
+                        .is_some_and(|s| s.key == hashed_storage_key)
+                    {
+                        hashed_storage_cursor.delete_current()?
                     }
 
-                    for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                        let hashed_address = keccak256(address);
-                        let hashed_storage_key = keccak256(storage_key);
-                        let storage_entry =
-                            StorageEntry { key: hashed_storage_key, value: *old_storage_value };
-                        if hashed_storage_cursor
-                            .seek_by_key_subkey(hashed_address, hashed_storage_key)?
-                            .is_some_and(|s| s.key == hashed_storage_key)
-                        {
-                            hashed_storage_cursor.delete_current()?
-                        }
-
-                        if !old_storage_value.is_zero() {
-                            hashed_storage_cursor.upsert(hashed_address, &storage_entry)?;
-                        }
+                    if !old_storage_value.is_zero() {
+                        hashed_storage_cursor.upsert(hashed_address, &storage_entry)?;
                     }
                 }
             }
@@ -3744,21 +3734,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .and_then(|finish| finish.partial_state_trie)
                 .unwrap_or(checkpoint.block_number)
         }))
-    }
-
-    fn durable_trie_range_from(
-        &self,
-        from: BlockNumber,
-    ) -> ProviderResult<Option<RangeInclusive<BlockNumber>>> {
-        let Some(trie_persisted_tip) = self.trie_persisted_tip_block_number()? else {
-            return Ok(None)
-        };
-
-        if from > trie_persisted_tip {
-            return Ok(None)
-        }
-
-        Ok(Some(from..=trie_persisted_tip))
     }
 
     fn update_finish_checkpoint_after_remove(&self, block: BlockNumber) -> ProviderResult<()> {
@@ -5150,116 +5125,6 @@ mod tests {
             static_files.get_highest_static_file_block(StaticFileSegment::Receipts),
             Some(4)
         );
-    }
-
-    #[test]
-    fn test_remove_blocks_above_keeps_masked_hashed_state_and_trie_unmaterialized() {
-        fn empty_execution_output() -> BlockExecutionOutput<Receipt> {
-            BlockExecutionOutput {
-                result: BlockExecutionResult {
-                    receipts: vec![],
-                    requests: Default::default(),
-                    gas_used: 0,
-                    blob_gas_used: 0,
-                },
-                state: Default::default(),
-            }
-        }
-
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v1());
-
-        let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
-            SealedHeader::new(
-                Header { number: 0, difficulty: U256::from(1), ..Default::default() },
-                B256::ZERO,
-            ),
-            Default::default(),
-        );
-        let genesis_executed = ExecutedBlock::new(
-            Arc::new(genesis.try_recover().unwrap()),
-            Arc::new(empty_execution_output()),
-            ComputedTrieData::default(),
-        );
-
-        let mut test_block_builder = TestBlockBuilder::eth().with_state();
-        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
-        let overlapping_trie_data = blocks[1].trie_data();
-        let overlapping_hashed_account = overlapping_trie_data.hashed_state.accounts[0].0;
-        let (&overlapping_hashed_storage, overlapping_storage) =
-            overlapping_trie_data.hashed_state.storages.iter().next().unwrap();
-        let overlapping_hashed_slot = overlapping_storage.storage_slots[0].0;
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(
-                &full_save_plan(std::slice::from_ref(&genesis_executed).to_vec()),
-                SaveBlocksMode::Full,
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(
-                &partial_save_plan(
-                    blocks,
-                    vec![
-                        SaveBlocksPlanStep::new(0..1, Some(1..3), true),
-                        SaveBlocksPlanStep::new(1..3, None, true),
-                    ],
-                ),
-                SaveBlocksMode::Full,
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider = factory.provider().unwrap();
-        assert_eq!(provider.tx_ref().entries::<tables::AccountsTrie>().unwrap(), 0);
-        assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap(), 0);
-        assert!(provider
-            .tx_ref()
-            .cursor_read::<tables::HashedAccounts>()
-            .unwrap()
-            .seek_exact(overlapping_hashed_account)
-            .unwrap()
-            .is_none());
-        assert!(provider
-            .tx_ref()
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .seek_by_key_subkey(overlapping_hashed_storage, overlapping_hashed_slot)
-            .unwrap()
-            .is_none());
-        drop(provider);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.remove_block_and_execution_above(2).unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider = factory.provider().unwrap();
-        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(finish_checkpoint.block_number, 2);
-        assert_eq!(
-            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
-            Some(1)
-        );
-        assert_eq!(provider.tx_ref().entries::<tables::AccountsTrie>().unwrap(), 0);
-        assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap(), 0);
-        assert!(provider
-            .tx_ref()
-            .cursor_read::<tables::HashedAccounts>()
-            .unwrap()
-            .seek_exact(overlapping_hashed_account)
-            .unwrap()
-            .is_none());
-        assert!(provider
-            .tx_ref()
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .seek_by_key_subkey(overlapping_hashed_storage, overlapping_hashed_slot)
-            .unwrap()
-            .is_none());
     }
 
     #[test]

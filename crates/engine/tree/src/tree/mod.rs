@@ -1354,10 +1354,52 @@ where
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+            let Some(trie_state_blocks) = self.remove_blocks_trie_state_catchup_blocks(new_tip_num)
+            else {
+                warn!(
+                    target: "engine::tree",
+                    ?new_tip_num,
+                    last_state_trie_persisted_block = ?self.persistence_state.last_state_trie_persisted_block.number,
+                    "Cannot remove blocks: missing in-memory block needed for trie catchup"
+                );
+                return
+            };
             let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            let _ = self.persistence.remove_blocks_above(new_tip_num, trie_state_blocks, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
+    }
+
+    /// Returns canonical in-memory blocks whose state/trie data must be materialized before an
+    /// on-disk removal can unwind from the persisted block-data tip down to `new_tip_num`.
+    fn remove_blocks_trie_state_catchup_blocks(
+        &self,
+        new_tip_num: u64,
+    ) -> Option<Vec<ExecutedBlock<N>>> {
+        let last_state_trie_persisted_block_number =
+            self.persistence_state.last_state_trie_persisted_block.number;
+        if new_tip_num <= last_state_trie_persisted_block_number {
+            return Some(Vec::new())
+        }
+
+        let mut blocks =
+            Vec::with_capacity((new_tip_num - last_state_trie_persisted_block_number) as usize);
+        for block_number in last_state_trie_persisted_block_number + 1..=new_tip_num {
+            let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_number)
+            else {
+                debug!(
+                    target: "engine::tree",
+                    block_number,
+                    ?new_tip_num,
+                    ?last_state_trie_persisted_block_number,
+                    "missing in-memory block needed for remove-blocks trie catchup"
+                );
+                return None
+            };
+            blocks.push(block_state.block());
+        }
+
+        Some(blocks)
     }
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
