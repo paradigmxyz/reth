@@ -682,6 +682,7 @@ impl NewPooledTransactionHashes72 {
 impl Encodable for NewPooledTransactionHashes72 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         #[derive(RlpEncodable)]
+        #[rlp(trailing)]
         struct EncodableNewPooledTransactionHashes72<'a> {
             types: &'a [u8],
             sizes: &'a Vec<usize>,
@@ -700,6 +701,7 @@ impl Encodable for NewPooledTransactionHashes72 {
     }
     fn length(&self) -> usize {
         #[derive(RlpEncodable)]
+        #[rlp(trailing)]
         struct EncodableNewPooledTransactionHashes72<'a> {
             types: &'a [u8],
             sizes: &'a Vec<usize>,
@@ -721,6 +723,7 @@ impl Encodable for NewPooledTransactionHashes72 {
 impl Decodable for NewPooledTransactionHashes72 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         #[derive(RlpDecodable)]
+        #[rlp(trailing)]
         struct EncodableNewPooledTransactionHashes72 {
             types: Bytes,
             sizes: Vec<usize>,
