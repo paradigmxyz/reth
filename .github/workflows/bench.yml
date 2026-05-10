@@ -393,7 +393,6 @@ jobs:
             }
 
             const fallbackReasons = [];
-            if (bigBlocks === 'true') fallbackReasons.push('big-blocks');
             if (bal !== 'false') fallbackReasons.push('BAL');
             const driver = fallbackReasons.length ? 'reth-bench' : 'txgen';
             const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
@@ -496,7 +495,7 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = '${{ steps.args.outputs.driver }}' || (bigBlocks ? 'reth-bench' : 'txgen');
+            const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
@@ -543,7 +542,7 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = '${{ steps.args.outputs.driver }}' || (bigBlocks ? 'reth-bench' : 'txgen');
+            const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
@@ -702,7 +701,7 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = process.env.BENCH_DRIVER || (bigBlocks ? 'reth-bench' : 'txgen');
+            const driver = process.env.BENCH_DRIVER || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = process.env.BENCH_DRIVER_REASON || '';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
