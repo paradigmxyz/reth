@@ -61,6 +61,7 @@ pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
@@ -74,6 +75,7 @@ pub use reth_execution_cache::{
     CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
     PayloadExecutionCache, SavedCache,
 };
+pub use types::{ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
@@ -3030,12 +3032,7 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(
-            &mut V,
-            Input,
-            TreeCtx<'_, N>,
-        )
-            -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
+        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -3105,7 +3102,8 @@ where
 
         let start = Instant::now();
 
-        let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).

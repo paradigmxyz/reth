@@ -308,7 +308,7 @@ impl Default for DefaultEngineValues {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
-            bal_parallel_execution_disabled: true,
+            bal_parallel_execution_disabled: false,
             bal_parallel_state_root_disabled: false,
         }
     }
@@ -535,13 +535,12 @@ pub struct EngineArgs {
     )]
     pub suppress_persistence_during_build: bool,
 
-    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled,
-    /// falling back to transaction-based prewarming even when a BAL is available.
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution.
     #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
     pub bal_parallel_execution_disabled: bool,
 
-    /// Disable BAL-driven parallel state root computation. When set, the BAL hashed post state
-    /// is not sent to the multiproof task for early parallel state root computation.
+    /// Disable BAL-driven parallel state root computation. This is only valid together with
+    /// `--engine.disable-bal-parallel-execution`.
     #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
     pub bal_parallel_state_root_disabled: bool,
 
@@ -669,6 +668,10 @@ impl EngineArgs {
             self.deferred_trie_blocks,
             self.memory_block_buffer_target,
             self.persistence_threshold,
+        );
+        ensure!(
+            self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
+            "--engine.disable-bal-parallel-state-root requires --engine.disable-bal-parallel-execution because BAL parallel execution depends on BAL prewarm state-root updates"
         );
         Ok(())
     }
@@ -908,6 +911,19 @@ mod tests {
         assert!(err.contains("engine.deferred-trie-blocks"));
         assert!(err.contains("engine.memory-block-buffer-target"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_rejects_bal_parallel_execution_without_bal_parallel_state_root() {
+        let args = EngineArgs {
+            bal_parallel_execution_disabled: false,
+            bal_parallel_state_root_disabled: true,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.disable-bal-parallel-state-root"));
+        assert!(err.contains("engine.disable-bal-parallel-execution"));
     }
 
     #[test]
