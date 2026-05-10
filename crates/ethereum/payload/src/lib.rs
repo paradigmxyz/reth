@@ -131,7 +131,7 @@ where
             self.pool.clone(),
             self.builder_config.clone(),
             args,
-            |attributes| self.pool.best_transactions_with_attributes(attributes),
+            |_| -> BestTransactionsIter<Pool> { Box::new(std::iter::empty()) },
         )?
         .into_payload()
         .ok_or_else(|| PayloadBuilderError::MissingPayload)
