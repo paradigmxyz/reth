@@ -291,10 +291,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::BlockBodies(resp) => {
                 to_message!(resp, BlockBodies, id)
             }
-            Self::PooledTransactions(resp) => {
-                to_message!(resp, PooledTransactions, id)
-            }
-            Self::PooledTransactions72(resp) => {
+            Self::PooledTransactions(resp) | Self::PooledTransactions72(resp) => {
                 to_message!(resp, PooledTransactions, id)
             }
             Self::NodeData(resp) => {
@@ -335,8 +332,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
         match self {
             Self::BlockHeaders(res) => res.as_ref().err(),
             Self::BlockBodies(res) => res.as_ref().err(),
-            Self::PooledTransactions(res) => res.as_ref().err(),
-            Self::PooledTransactions72(res) => res.as_ref().err(),
+            Self::PooledTransactions(res) | Self::PooledTransactions72(res) => res.as_ref().err(),
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
