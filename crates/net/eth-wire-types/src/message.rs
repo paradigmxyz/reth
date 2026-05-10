@@ -344,8 +344,6 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockBodies(RequestPair<BlockBodies<N::BlockBody>>),
     /// Represents a `GetPooledTransactions` request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
-    /// Represents a `GetPooledTransactions72` request-response pair.
-    GetPooledTransactions72(RequestPair<GetPooledTransactions>),
     /// Represents a `PooledTransactions` request-response pair.
     #[cfg_attr(
         feature = "serde",
@@ -425,9 +423,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
-            Self::GetPooledTransactions(_) | Self::GetPooledTransactions72(_) => {
-                EthMessageID::GetPooledTransactions
-            }
+            Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
             Self::PooledTransactions(_) | Self::PooledTransactions72(_) => {
                 EthMessageID::PooledTransactions
             }
@@ -518,9 +514,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockHeaders(headers) => headers.encode(out),
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(bodies) => bodies.encode(out),
-            Self::GetPooledTransactions(request) | Self::GetPooledTransactions72(request) => {
-                request.encode(out)
-            }
+            Self::GetPooledTransactions(request) => request.encode(out),
             Self::PooledTransactions(transactions) | Self::PooledTransactions72(transactions) => {
                 transactions.encode(out)
             }
@@ -551,9 +545,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockHeaders(headers) => headers.length(),
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(bodies) => bodies.length(),
-            Self::GetPooledTransactions(request) | Self::GetPooledTransactions72(request) => {
-                request.length()
-            }
+            Self::GetPooledTransactions(request) => request.length(),
             Self::PooledTransactions(transactions) | Self::PooledTransactions72(transactions) => {
                 transactions.length()
             }

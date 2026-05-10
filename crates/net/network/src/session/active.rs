@@ -309,13 +309,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::GetPooledTransactions(req) => {
                 on_request!(req, PooledTransactions, GetPooledTransactions)
             }
-            EthMessage::GetPooledTransactions72(req) => {
-                if self.conn.version() >= EthVersion::Eth72 {
-                    on_request!(req, PooledTransactions72, GetPooledTransactions)
-                } else {
-                    on_request!(req, PooledTransactions, GetPooledTransactions)
-                }
-            }
             EthMessage::PooledTransactions(resp) => {
                 on_response!(resp, GetPooledTransactions)
             }
