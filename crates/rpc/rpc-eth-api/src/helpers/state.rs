@@ -23,7 +23,6 @@ use reth_storage_api::{
 };
 use reth_transaction_pool::TransactionPool;
 use std::collections::HashMap;
-use tracing::debug;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -280,14 +279,10 @@ pub trait LoadState:
             if at.is_pending() &&
                 let Ok(Some(state)) = self.local_pending_state().await
             {
-                debug!(target: "rpc::eth::state", ?at, "Using local pending state provider");
                 return Ok(state)
             }
 
-            debug!(target: "rpc::eth::state", ?at, "Loading state provider by block id");
-            let state = self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?;
-            debug!(target: "rpc::eth::state", ?at, "Loaded state provider by block id");
-            Ok(state)
+            self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
         }
     }
 

@@ -18,9 +18,7 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives_traits::{
-    Account, BlockBody, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
-};
+use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -34,7 +32,7 @@ use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
@@ -117,26 +115,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         &'a self,
         block_hash: BlockHash,
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        debug!(target: "providers::blockchain", %block_hash, "Resolving borrowed historical state provider by block hash");
+        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
 
         self.get_in_memory_or_storage_by_block(
             block_hash.into(),
-            |_| {
-                debug!(target: "providers::blockchain", %block_hash, "Borrowed historical state provider falling back to database");
-                self.storage_provider.history_by_block_hash(block_hash)
-            },
+            |_| self.storage_provider.history_by_block_hash(block_hash),
             |block_state| {
-                let anchor = block_state.anchor();
-                debug!(
-                    target: "providers::blockchain",
-                    %block_hash,
-                    block_number = block_state.number(),
-                    block_hash = %block_state.hash(),
-                    anchor_number = anchor.number,
-                    anchor_hash = %anchor.hash,
-                    in_memory_blocks = ?block_state_summaries(block_state),
-                    "Borrowed historical state provider using in-memory overlay"
-                );
                 let state_provider = self.block_state_provider_ref(block_state)?;
                 Ok(Box::new(state_provider))
             },
@@ -261,19 +245,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
-        let anchor = state.anchor();
-        let anchor_hash = anchor.hash;
+        let anchor_hash = state.anchor().hash;
         let latest_historical = self.history_by_block_hash_ref(anchor_hash)?;
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
-        debug!(
-            target: "providers::blockchain",
-            block_number = state.number(),
-            block_hash = %state.hash(),
-            anchor_number = anchor.number,
-            anchor_hash = %anchor.hash,
-            in_memory_blocks = ?block_state_summaries(state),
-            "Creating borrowed memory overlay state provider from block state"
-        );
         Ok(MemoryOverlayStateProviderRef::new(latest_historical, in_memory))
     }
 
@@ -474,53 +448,20 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         self.ensure_canonical_block(block_number)?;
-        debug!(
-            target: "providers::blockchain",
-            %block_hash,
-            block_number,
-            "Resolving owned state provider at block hash"
-        );
 
         let Self { storage_provider, head_block, .. } = self;
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
-            let anchor = block_state.anchor();
-            let anchor_hash = anchor.hash;
+            let anchor_hash = block_state.anchor().hash;
             let block_number = storage_provider
                 .block_number(anchor_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-            debug!(
-                target: "providers::blockchain",
-                requested_block_hash = %block_hash,
-                requested_block_number = block_state.number(),
-                anchor_number = anchor.number,
-                anchor_hash = %anchor.hash,
-                historical_block_number = block_number,
-                in_memory_blocks = ?block_state_summaries(block_state),
-                "Owned state provider using in-memory overlay"
-            );
             let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
-        debug!(
-            target: "providers::blockchain",
-            %block_hash,
-            block_number,
-            "Owned state provider falling back to database historical provider"
-        );
         storage_provider.try_into_history_at_block(block_number)
     }
-}
-
-fn block_state_summaries<N: NodePrimitives>(state: &BlockState<N>) -> Vec<String> {
-    state
-        .chain()
-        .map(|block_state| {
-            let block = block_state.block_ref().recovered_block();
-            format!("#{} hash={} parent={}", block.number(), block.hash(), block.parent_hash())
-        })
-        .collect()
 }
 
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {

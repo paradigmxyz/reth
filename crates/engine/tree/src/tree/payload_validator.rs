@@ -2057,19 +2057,9 @@ where
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
-        let lazy_anchor = lazy_overlay.as_ref().and_then(LazyOverlay::anchor_hash);
-        let lazy_blocks = lazy_overlay.as_ref().map(LazyOverlay::block_summaries);
-        let span = debug_span!(
-            target: "engine::tree::payload_validator",
-            "payload_builder_sparse_trie_overlay",
-            %parent_hash,
-            %parent_state_root,
-            %anchor_hash,
-            ?lazy_anchor,
-            ?lazy_blocks,
-        );
-        let _guard = span.enter();
         if tracing::enabled!(target: "engine::tree::payload_validator", tracing::Level::DEBUG) {
+            let lazy_anchor = lazy_overlay.as_ref().and_then(LazyOverlay::anchor_hash);
+            let lazy_blocks = lazy_overlay.as_ref().map(LazyOverlay::block_summaries);
             match self.provider.database_provider_ro() {
                 Ok(provider) => match provider.get_stage_checkpoint(StageId::Finish) {
                     Ok(Some(checkpoint)) => {
@@ -2086,6 +2076,11 @@ where
                             provider.convert_number(finish_tip_number.into()).ok().flatten();
                         debug!(
                             target: "engine::tree::payload_validator",
+                            %parent_hash,
+                            %parent_state_root,
+                            %anchor_hash,
+                            ?lazy_anchor,
+                            ?lazy_blocks,
                             partial_state_trie_number,
                             ?partial_state_trie_hash,
                             finish_tip_number,
@@ -2096,12 +2091,22 @@ where
                     Ok(None) => {
                         debug!(
                             target: "engine::tree::payload_validator",
+                            %parent_hash,
+                            %parent_state_root,
+                            %anchor_hash,
+                            ?lazy_anchor,
+                            ?lazy_blocks,
                             "Preparing payload builder sparse trie overlay without finish checkpoint"
                         );
                     }
                     Err(err) => {
                         debug!(
                             target: "engine::tree::payload_validator",
+                            %parent_hash,
+                            %parent_state_root,
+                            %anchor_hash,
+                            ?lazy_anchor,
+                            ?lazy_blocks,
                             %err,
                             "Preparing payload builder sparse trie overlay without database frontiers"
                         );
@@ -2110,6 +2115,11 @@ where
                 Err(err) => {
                     debug!(
                         target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        %parent_state_root,
+                        %anchor_hash,
+                        ?lazy_anchor,
+                        ?lazy_blocks,
                         %err,
                         "Preparing payload builder sparse trie overlay without database frontiers"
                     );

@@ -39,7 +39,7 @@ Both `new-payload-fcu` and `new-payload-only` support `--rpc-block-fetch-retries
 to control how many times block fetches are retried after an RPC failure. The default is `10`.
 Use `--rpc-block-fetch-retries forever` to keep retrying indefinitely.
 
-When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold. This can be customized with `--persistence-threshold <N>`.
+When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold (2). This can be customized with `--persistence-threshold <N>`.
 
 By default, the WebSocket URL for persistence subscriptions is derived from `--engine-rpc-url` (converting to ws:// on port 8546). Use `--ws-rpc-url` to override this.
 

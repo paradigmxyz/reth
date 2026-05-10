@@ -158,12 +158,14 @@ impl<N: NodePrimitives> LazyOverlay<N> {
         let Some(last_index) =
             blocks.iter().position(|block| block.recovered_block().parent_hash() == anchor_hash)
         else {
-            debug!(
-                target: "chain_state::lazy_overlay",
-                %anchor_hash,
-                available_blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
-                "Lazy overlay requested missing anchor"
-            );
+            if tracing::enabled!(target: "chain_state::lazy_overlay", tracing::Level::DEBUG) {
+                debug!(
+                    target: "chain_state::lazy_overlay",
+                    %anchor_hash,
+                    available_blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
+                    "Lazy overlay requested missing anchor"
+                );
+            }
             panic!(
                 "LazyOverlay does not contain a block whose parent hash matches requested anchor {anchor_hash}"
             );
@@ -187,14 +189,17 @@ impl<N: NodePrimitives> LazyOverlay<N> {
             let data = tip.trie_data();
             if let Some(anchored) = &data.anchored_trie_input {
                 if anchored.anchor_hash == anchor_hash {
-                    debug!(
-                        target: "chain_state::lazy_overlay",
-                        %anchor_hash,
-                        tip = ?block_summary(tip),
-                        trie_updates = anchored.trie_input.nodes.total_len(),
-                        hashed_state = anchored.trie_input.state.total_len(),
-                        "Reusing tip block's cached overlay (fast path)"
-                    );
+                    if tracing::enabled!(target: "chain_state::lazy_overlay", tracing::Level::DEBUG)
+                    {
+                        debug!(
+                            target: "chain_state::lazy_overlay",
+                            %anchor_hash,
+                            tip = ?block_summary(tip),
+                            trie_updates = anchored.trie_input.nodes.total_len(),
+                            hashed_state = anchored.trie_input.state.total_len(),
+                            "Reusing tip block's cached overlay (fast path)"
+                        );
+                    }
                     return Arc::clone(&anchored.trie_input);
                 }
                 debug!(
@@ -207,13 +212,15 @@ impl<N: NodePrimitives> LazyOverlay<N> {
         }
 
         // Slow path: Merge the prefix of blocks from the tip back to the requested anchor.
-        debug!(
-            target: "chain_state::lazy_overlay",
-            %anchor_hash,
-            num_blocks = blocks.len(),
-            blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
-            "Merging blocks (slow path)"
-        );
+        if tracing::enabled!(target: "chain_state::lazy_overlay", tracing::Level::DEBUG) {
+            debug!(
+                target: "chain_state::lazy_overlay",
+                %anchor_hash,
+                num_blocks = blocks.len(),
+                blocks = ?blocks.iter().map(block_summary).collect::<Vec<_>>(),
+                "Merging blocks (slow path)"
+            );
+        }
         Arc::new(Self::merge_blocks(blocks))
     }
 

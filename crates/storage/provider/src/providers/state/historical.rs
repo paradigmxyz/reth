@@ -13,7 +13,6 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
-use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
     StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
@@ -35,7 +34,6 @@ use reth_trie_db::{
 };
 
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
-use tracing::debug;
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -310,78 +308,11 @@ where
             .block_hash(target_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
-        match self.provider.get_stage_checkpoint(StageId::Finish) {
-            Ok(Some(checkpoint)) => {
-                let finish_tip_number = checkpoint.block_number;
-                let partial_state_trie_number = checkpoint
-                    .finish_stage_checkpoint()
-                    .and_then(|finish| finish.partial_state_trie)
-                    .unwrap_or(finish_tip_number);
-                let finish_tip_hash = self.provider.block_hash(finish_tip_number)?;
-                let partial_state_trie_hash =
-                    self.provider.block_hash(partial_state_trie_number)?;
-                debug!(
-                    target: "providers::historical_sp",
-                    historical_block_number = self.block_number,
-                    target_block,
-                    %anchor_hash,
-                    finish_tip_number,
-                    ?finish_tip_hash,
-                    partial_state_trie_number,
-                    ?partial_state_trie_hash,
-                    "Historical state provider overlay frontiers"
-                );
-            }
-            Ok(None) => {
-                debug!(
-                    target: "providers::historical_sp",
-                    historical_block_number = self.block_number,
-                    target_block,
-                    %anchor_hash,
-                    "Historical state provider overlay without finish checkpoint"
-                );
-            }
-            Err(err) => {
-                debug!(
-                    target: "providers::historical_sp",
-                    historical_block_number = self.block_number,
-                    target_block,
-                    %anchor_hash,
-                    %err,
-                    "Historical state provider overlay could not load finish checkpoint"
-                );
-            }
-        }
-
         let TrieInputSorted { nodes, state, prefix_sets } = input;
-        let input_trie_updates = nodes.total_len();
-        let input_hashed_state = state.total_len();
-        debug!(
-            target: "providers::historical_sp",
-            historical_block_number = self.block_number,
-            target_block,
-            %anchor_hash,
-            input_trie_updates,
-            input_hashed_state,
-            prefix_account_updates = prefix_sets.account_prefix_set.len(),
-            prefix_storage_tries = prefix_sets.storage_prefix_sets.len(),
-            prefix_destroyed_accounts = prefix_sets.destroyed_accounts.len(),
-            "Building historical state provider overlay"
-        );
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let Overlay { trie_updates, hashed_post_state } =
             overlay_builder.build_overlay(self.provider)?;
-
-        debug!(
-            target: "providers::historical_sp",
-            historical_block_number = self.block_number,
-            target_block,
-            %anchor_hash,
-            output_trie_updates = trie_updates.total_len(),
-            output_hashed_state = hashed_post_state.total_len(),
-            "Built historical state provider overlay"
-        );
 
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
