@@ -130,6 +130,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// If the tx contains blobs `[blob0, blob1]` and the requested indices are
     /// `[2, 5, 9]`, the returned vector is:
     ///
+    /// ```text
     /// [
     ///   blob0_cell2,
     ///   blob0_cell5,
@@ -138,6 +139,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     ///   blob1_cell5,
     ///   blob1_cell9,
     /// ]
+    /// ```
     fn get_cells(
         &self,
         tx_hash: TxHash,
