@@ -677,67 +677,65 @@ impl NewPooledTransactionHashes72 {
         self.extend(txs);
         self
     }
+
+    fn payload_length(&self) -> usize {
+        self.types.as_slice().length() +
+            self.sizes.length() +
+            self.hashes.length() +
+            self.cell_mask.as_ref().map_or(1, Encodable::length)
+    }
 }
 
 impl Encodable for NewPooledTransactionHashes72 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        #[derive(RlpEncodable)]
-        #[rlp(trailing)]
-        struct EncodableNewPooledTransactionHashes72<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<B256>,
-            cell_mask: Option<&'a B128>,
+        Header { list: true, payload_length: self.payload_length() }.encode(out);
+        self.types.as_slice().encode(out);
+        self.sizes.encode(out);
+        self.hashes.encode(out);
+        if let Some(cell_mask) = &self.cell_mask {
+            cell_mask.encode(out);
+        } else {
+            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
         }
-
-        let encodable = EncodableNewPooledTransactionHashes72 {
-            types: &self.types[..],
-            sizes: &self.sizes,
-            hashes: &self.hashes,
-            cell_mask: self.cell_mask.as_ref(),
-        };
-
-        encodable.encode(out);
     }
+
     fn length(&self) -> usize {
-        #[derive(RlpEncodable)]
-        #[rlp(trailing)]
-        struct EncodableNewPooledTransactionHashes72<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<B256>,
-            cell_mask: Option<&'a B128>,
-        }
-
-        let encodable = EncodableNewPooledTransactionHashes72 {
-            types: &self.types[..],
-            sizes: &self.sizes,
-            hashes: &self.hashes,
-            cell_mask: self.cell_mask.as_ref(),
-        };
-
-        encodable.length()
+        Header { list: true, payload_length: self.payload_length() }.length_with_payload()
     }
 }
 
 impl Decodable for NewPooledTransactionHashes72 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        #[derive(RlpDecodable)]
-        #[rlp(trailing)]
-        struct EncodableNewPooledTransactionHashes72 {
-            types: Bytes,
-            sizes: Vec<usize>,
-            hashes: Vec<B256>,
-            cell_mask: Option<B128>,
+        let Header { list, payload_length } = Header::decode(buf)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
+        if buf.len() < payload_length {
+            return Err(alloy_rlp::Error::InputTooShort)
         }
 
-        let encodable = EncodableNewPooledTransactionHashes72::decode(buf)?;
-        let msg = Self {
-            types: encodable.types.into(),
-            sizes: encodable.sizes,
-            hashes: encodable.hashes,
-            cell_mask: encodable.cell_mask,
+        let (mut payload, rest) = buf.split_at(payload_length);
+        let types = Bytes::decode(&mut payload)?;
+        let sizes = Vec::<usize>::decode(&mut payload)?;
+        let hashes = Vec::<B256>::decode(&mut payload)?;
+        let Some(first_byte) = payload.first().copied() else {
+            return Err(alloy_rlp::Error::InputTooShort)
         };
+        let cell_mask = if first_byte == alloy_rlp::EMPTY_STRING_CODE {
+            payload = &payload[1..];
+            None
+        } else {
+            Some(B128::decode(&mut payload)?)
+        };
+
+        if !payload.is_empty() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: payload_length,
+                got: payload_length - payload.len(),
+            })
+        }
+
+        let msg = Self { types: types.into(), sizes, hashes, cell_mask };
 
         if msg.hashes.len() != msg.types.len() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
@@ -751,6 +749,8 @@ impl Decodable for NewPooledTransactionHashes72 {
                 got: msg.sizes.len(),
             })
         }
+
+        *buf = rest;
 
         Ok(msg)
     }
@@ -1247,6 +1247,43 @@ mod tests {
         for vector in vectors {
             test_encoding_vector(vector);
         }
+    }
+
+    #[test]
+    fn eth_72_tx_hash_roundtrip() {
+        let vectors = vec![
+            (
+                NewPooledTransactionHashes72 {
+                    types: vec![],
+                    sizes: vec![],
+                    hashes: vec![],
+                    cell_mask: None,
+                },
+                &hex!("c480c0c080")[..],
+            ),
+            (
+                NewPooledTransactionHashes72 {
+                    types: vec![],
+                    sizes: vec![],
+                    hashes: vec![],
+                    cell_mask: Some(B128::repeat_byte(0x11)),
+                },
+                &hex!("d480c0c09011111111111111111111111111111111")[..],
+            ),
+        ];
+
+        for vector in vectors {
+            test_encoding_vector(vector);
+        }
+    }
+
+    #[test]
+    fn eth_72_rejects_missing_cell_mask() {
+        let encoded_eth68_payload = hex!("c380c0c0");
+
+        let result = NewPooledTransactionHashes72::decode(&mut encoded_eth68_payload.as_ref());
+
+        assert!(matches!(result, Err(alloy_rlp::Error::InputTooShort)));
     }
 
     #[test]
