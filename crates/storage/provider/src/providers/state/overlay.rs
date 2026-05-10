@@ -164,14 +164,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     ) -> Self {
         if let Some(state) = hashed_state_overlay {
-            if tracing::enabled!(target: "providers::state::overlay", tracing::Level::DEBUG) {
-                debug!(
-                    target: "providers::state::overlay",
-                    anchor_hash = ?self.anchor_hash,
-                    hashed_state_updates = state.total_len(),
-                    "Configuring immediate hashed-state overlay"
-                );
-            }
             self.overlay_source = Some(OverlaySource::Immediate {
                 trie: Arc::new(TrieUpdatesSorted::default()),
                 state,
@@ -191,15 +183,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// If no overlay exists, creates a new immediate overlay with the given state.
     /// If a lazy overlay exists, it is resolved first then extended.
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
-        if tracing::enabled!(target: "providers::state::overlay", tracing::Level::DEBUG) {
-            debug!(
-                target: "providers::state::overlay",
-                anchor_hash = ?self.anchor_hash,
-                existing_source = overlay_source_kind(self.overlay_source.as_ref()),
-                added_hashed_state_updates = other.total_len(),
-                "Extending hashed-state overlay"
-            );
-        }
         match &mut self.overlay_source {
             Some(OverlaySource::Immediate { state, .. }) => {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
@@ -243,20 +226,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 (Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default()))
             }
         };
-
-        if tracing::enabled!(target: "providers::state::overlay", tracing::Level::DEBUG) {
-            debug!(
-                target: "providers::state::overlay",
-                requested_anchor_hash = ?anchor_hash,
-                builder_anchor_hash = ?self.anchor_hash,
-                source = overlay_source_kind(self.overlay_source.as_ref()),
-                source_anchor = ?self.overlay_source.as_ref().and_then(overlay_source_anchor),
-                source_blocks = ?self.overlay_source.as_ref().and_then(overlay_source_num_blocks),
-                resolved_trie_updates = result.0.total_len(),
-                resolved_hashed_state = result.1.total_len(),
-                "Resolved overlay source"
-            );
-        }
 
         Ok(result)
     }
@@ -760,16 +729,6 @@ where
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
-        if tracing::enabled!(target: "providers::state::overlay", tracing::Level::DEBUG) {
-            debug!(
-                target: "providers::state::overlay",
-                anchor_hash = ?self.overlay_builder.anchor_hash,
-                trie_updates = trie_updates.total_len(),
-                hashed_state = hashed_post_state.total_len(),
-                is_v2,
-                "Created overlay state provider"
-            );
-        }
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }

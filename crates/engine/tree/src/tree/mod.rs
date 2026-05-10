@@ -1413,16 +1413,6 @@ where
         }
 
         let last_block = plan.last_block().expect("checked non-empty persisting blocks");
-
-        if tracing::enabled!(target: "engine::tree", tracing::Level::DEBUG) {
-            debug!(
-                target: "engine::tree",
-                count = plan.blocks.len(),
-                steps = ?plan.steps,
-                blocks = ?plan.blocks.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
-                "Persisting blocks"
-            );
-        }
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(plan, tx);
 
