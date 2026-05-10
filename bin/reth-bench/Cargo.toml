@@ -80,7 +80,7 @@ csv.workspace = true
 [dev-dependencies]
 
 [features]
-default = ["jemalloc"]
+default = []#["jemalloc"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",
