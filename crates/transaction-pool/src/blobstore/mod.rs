@@ -120,7 +120,24 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
-    /// Retrieve the cells for a specific transaction hash and cell mask.
+    /// Returns all requested cells for all blobs belonging to the transaction.
+    ///
+    /// The `indices_bitarray` is applied independently to every blob in the tx.
+    ///
+    /// Returned cells are flattened in blob order, then cell-index order.
+    ///
+    /// Example:
+    /// If the tx contains blobs `[blob0, blob1]` and the requested indices are
+    /// `[2, 5, 9]`, the returned vector is:
+    ///
+    /// [
+    ///   blob0_cell2,
+    ///   blob0_cell5,
+    ///   blob0_cell9,
+    ///   blob1_cell2,
+    ///   blob1_cell5,
+    ///   blob1_cell9,
+    /// ]
     fn get_cells(
         &self,
         tx_hash: TxHash,
