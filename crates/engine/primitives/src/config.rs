@@ -8,7 +8,7 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
 /// Maximum number of consecutive canonical blocks whose non-trie outputs may be persisted ahead
 /// of trie persistence.
-pub const DEFAULT_DEFERRED_TRIE_BLOCKS: u64 = 0;
+pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 0;
 
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
@@ -248,12 +248,12 @@ impl Default for TreeConfig {
         );
         assert_state_masking_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
-            DEFAULT_DEFERRED_TRIE_BLOCKS,
+            DEFAULT_NUM_STATE_MASKING_BLOCKS,
             DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
         );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
-            num_state_masking_blocks: DEFAULT_DEFERRED_TRIE_BLOCKS,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             persistence_backpressure_threshold,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
@@ -843,8 +843,8 @@ impl TreeConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_persistence_backpressure_threshold, TreeConfig, DEFAULT_DEFERRED_TRIE_BLOCKS,
-        DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
+        default_persistence_backpressure_threshold, TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+        DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_THRESHOLD,
     };
 
     #[test]
@@ -852,7 +852,7 @@ mod tests {
         let config = TreeConfig::default();
 
         assert_eq!(config.persistence_threshold(), DEFAULT_PERSISTENCE_THRESHOLD);
-        assert_eq!(config.num_state_masking_blocks(), DEFAULT_DEFERRED_TRIE_BLOCKS);
+        assert_eq!(config.num_state_masking_blocks(), DEFAULT_NUM_STATE_MASKING_BLOCKS);
         assert_eq!(config.memory_block_buffer_target(), DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
         assert_eq!(
             config.persistence_backpressure_threshold(),
