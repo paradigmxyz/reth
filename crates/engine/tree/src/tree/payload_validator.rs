@@ -393,7 +393,7 @@ where
         // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
         // RLP decoding + header hashing.
-        let is_payload = matches!(&input, BlockOrPayload::Payload(_));
+        let is_payload = input.is_payload();
         let convert_to_block = match &input {
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
@@ -2285,6 +2285,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
         }
+    }
+
+    /// Returns true if this is a payload.
+    pub const fn is_payload(&self) -> bool {
+        matches!(self, Self::Payload(_))
+    }
+
+    /// Returns true if this is a block.
+    pub const fn is_block(&self) -> bool {
+        matches!(self, Self::Block(_))
     }
 
     /// Returns the decoded block access list, if present and successfully decoded.
