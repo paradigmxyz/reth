@@ -183,27 +183,73 @@ where
 
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
+                    let account_targets = targets.account_targets.len();
+                    let storage_targets =
+                        targets.storage_targets.values().map(Vec::len).sum::<usize>();
+                    let storage_jobs = targets.storage_targets.len();
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        account_targets,
+                        storage_targets,
+                        storage_jobs,
+                        "Hashing task forwarded prefetch proof targets"
+                    );
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
                 StateRootMessage::StateUpdate(_, state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
+                    let state_len = state.len();
+                    let hash_start = Instant::now();
                     let hashed = evm_state_to_hashed_post_state(state);
+                    let hash_elapsed = hash_start.elapsed();
+                    let hashed_stats = HashedStateStats::new(&hashed);
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        state_len,
+                        accounts = hashed_stats.accounts,
+                        storage_addresses = hashed_stats.storage_addresses,
+                        storage_slots = hashed_stats.storage_slots,
+                        hash_elapsed_us = hash_elapsed.as_micros(),
+                        "Hashing task converted state update"
+                    );
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        "Hashing task forwarded finished state updates"
+                    );
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
                 StateRootMessage::BlockAccessList(_) => {
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        "Hashing task ignored block access list message"
+                    );
                     idle_start = Instant::now();
                     continue;
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
+                    let hashed_stats = HashedStateStats::new(&state);
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        accounts = hashed_stats.accounts,
+                        storage_addresses = hashed_stats.storage_addresses,
+                        storage_slots = hashed_stats.storage_slots,
+                        "Hashing task forwarded pre-hashed state update"
+                    );
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
+            let send_start = Instant::now();
             if hashed_state_tx.send(msg).is_err() {
                 break;
             }
+            debug!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                send_elapsed_us = send_start.elapsed().as_micros(),
+                "Hashing task sent sparse trie message"
+            );
 
             idle_start = Instant::now();
         }
@@ -291,8 +337,25 @@ where
                         .sparse_trie_channel_wait_duration_histogram
                         .record(wake.duration_since(t));
 
+                    let message_stats = SparseTrieTaskMessageStats::new(&update);
+                    let on_message_start = Instant::now();
                     self.on_message(update);
                     self.pending_updates += 1;
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        message_kind = message_stats.kind,
+                        accounts = message_stats.accounts,
+                        storage_addresses = message_stats.storage_addresses,
+                        storage_slots = message_stats.storage_slots,
+                        prefetch_account_targets = message_stats.prefetch_account_targets,
+                        prefetch_storage_targets = message_stats.prefetch_storage_targets,
+                        prefetch_storage_jobs = message_stats.prefetch_storage_jobs,
+                        channel_wait_us = wake.duration_since(idle_start).as_micros(),
+                        on_message_elapsed_us = on_message_start.elapsed().as_micros(),
+                        pending_updates = self.pending_updates,
+                        finished_state_updates = self.finished_state_updates,
+                        "Sparse trie task processed input message"
+                    );
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
@@ -349,9 +412,22 @@ where
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
                 t = Instant::now();
+                let process_start = Instant::now();
                 self.process_new_updates()?;
+                let process_elapsed = process_start.elapsed();
+                let promote_start = Instant::now();
                 self.promote_pending_account_updates()?;
-                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                let promote_elapsed = promote_start.elapsed();
+                let process_phase_elapsed = t.elapsed();
+                self.metrics
+                    .sparse_trie_process_updates_duration_histogram
+                    .record(process_phase_elapsed);
+                self.log_sparse_trie_phase(
+                    "Processed idle sparse trie update phase",
+                    process_elapsed,
+                    Some(promote_elapsed),
+                    process_phase_elapsed,
+                );
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -365,14 +441,31 @@ where
                 // If there's still no pending updates spend some time pre-computing the account
                 // trie upper hashes
                 if self.proof_result_rx.is_empty() {
+                    let calculate_start = Instant::now();
                     self.trie.calculate_subtries();
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        calculate_subtries_elapsed_us = calculate_start.elapsed().as_micros(),
+                        "Calculated account subtries"
+                    );
                 }
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
                 t = Instant::now();
+                let process_start = Instant::now();
                 self.process_new_updates()?;
-                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                let process_elapsed = process_start.elapsed();
+                let process_phase_elapsed = t.elapsed();
+                self.metrics
+                    .sparse_trie_process_updates_duration_histogram
+                    .record(process_phase_elapsed);
+                self.log_sparse_trie_phase(
+                    "Processed sparse trie update phase",
+                    process_elapsed,
+                    None,
+                    process_phase_elapsed,
+                );
                 self.dispatch_pending_targets();
             } else if self.pending_targets.len() > self.chunk_size {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
@@ -411,8 +504,21 @@ where
         let debug_recorders = self.trie.take_debug_recorders();
 
         let end = Instant::now();
-        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
-        self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
+        let final_update_elapsed = end.duration_since(start);
+        let total_elapsed = end.duration_since(now);
+        self.metrics.sparse_trie_final_update_duration_histogram.record(final_update_elapsed);
+        self.metrics.sparse_trie_total_duration_histogram.record(total_elapsed);
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            final_update_elapsed_us = final_update_elapsed.as_micros(),
+            total_elapsed_us = total_elapsed.as_micros(),
+            sparse_trie_idle_time_us = total_idle_time.as_micros(),
+            account_cache_hits = self.account_cache_hits,
+            account_cache_misses = self.account_cache_misses,
+            storage_cache_hits = self.storage_cache_hits,
+            storage_cache_misses = self.storage_cache_misses,
+            "Computed sparse trie state root"
+        );
 
         self.metrics.sparse_trie_account_cache_hits.record(self.account_cache_hits as f64);
         self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
@@ -429,6 +535,25 @@ where
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
+    }
+
+    fn log_sparse_trie_phase(
+        &self,
+        phase: &'static str,
+        process_elapsed: Duration,
+        promote_elapsed: Option<Duration>,
+        total_elapsed: Duration,
+    ) {
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            phase,
+            pending = ?SparseTriePendingStats::new(self),
+            process_new_updates_elapsed_us = process_elapsed.as_micros(),
+            promote_pending_account_updates_elapsed_us =
+                promote_elapsed.map_or(0, |elapsed| elapsed.as_micros()),
+            total_elapsed_us = total_elapsed.as_micros(),
+            "Sparse trie phase completed"
+        );
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
@@ -538,11 +663,16 @@ where
         }
 
         let _span = debug_span!("process_new_updates").entered();
+        let pending_updates = self.pending_updates;
+        let stats_before = SparseTriePendingStats::new(self);
         self.pending_updates = 0;
 
         // Firstly apply all new storage and account updates to the tries.
+        let leaf_start = Instant::now();
         self.process_leaf_updates(true)?;
+        let leaf_elapsed = leaf_start.elapsed();
 
+        let storage_merge_start = Instant::now();
         for (address, mut new) in self.new_storage_updates.drain() {
             match self.storage_updates.entry(address) {
                 Entry::Vacant(entry) => {
@@ -565,7 +695,9 @@ where
                 }
             }
         }
+        let storage_merge_elapsed = storage_merge_start.elapsed();
 
+        let account_merge_start = Instant::now();
         for (address, new) in self.new_account_updates.drain() {
             match self.account_updates.entry(address) {
                 Entry::Occupied(mut entry) => {
@@ -578,6 +710,18 @@ where
                 }
             }
         }
+        let account_merge_elapsed = account_merge_start.elapsed();
+        let stats_after = SparseTriePendingStats::new(self);
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            pending_updates,
+            before = ?stats_before,
+            after = ?stats_after,
+            leaf_update_elapsed_us = leaf_elapsed.as_micros(),
+            storage_merge_elapsed_us = storage_merge_elapsed.as_micros(),
+            account_merge_elapsed_us = account_merge_elapsed.as_micros(),
+            "Processed new sparse trie updates"
+        );
 
         Ok(())
     }
@@ -682,11 +826,13 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
+        let start = Instant::now();
         let addresses_to_compute_roots: Vec<_> = self
             .storage_updates
             .iter()
             .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
             .collect();
+        let drained_storage_tries = addresses_to_compute_roots.len();
 
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
@@ -704,9 +850,17 @@ where
         }
 
         if tries_to_compute_roots.is_empty() {
+            debug!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                drained_storage_tries,
+                storage_roots_computed = 0usize,
+                elapsed_us = start.elapsed().as_micros(),
+                "Computed drained storage roots"
+            );
             return;
         }
 
+        let storage_roots_computed = tries_to_compute_roots.len();
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
@@ -733,6 +887,13 @@ where
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
             unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
         });
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            drained_storage_tries,
+            storage_roots_computed,
+            elapsed_us = start.elapsed().as_micros(),
+            "Computed drained storage roots"
+        );
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
@@ -744,15 +905,37 @@ where
         skip_all
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
+        let start = Instant::now();
+        let stats_before = SparseTriePendingStats::new(self);
+        let leaf_start = Instant::now();
         self.process_leaf_updates(false)?;
+        let leaf_elapsed = leaf_start.elapsed();
 
         if self.pending_account_updates.is_empty() {
+            debug!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                before = ?stats_before,
+                after = ?SparseTriePendingStats::new(self),
+                leaf_update_elapsed_us = leaf_elapsed.as_micros(),
+                storage_root_elapsed_us = 0u128,
+                account_leaf_update_elapsed_us = 0u128,
+                promotion_iterations = 0usize,
+                promoted_accounts = 0usize,
+                total_elapsed_us = start.elapsed().as_micros(),
+                "Promoted pending account updates"
+            );
             return Ok(());
         }
 
+        let storage_root_start = Instant::now();
         self.compute_drained_storage_roots();
+        let storage_root_elapsed = storage_root_start.elapsed();
 
+        let mut promotion_iterations = 0usize;
+        let mut promoted_accounts = 0usize;
+        let mut account_leaf_update_elapsed = Duration::ZERO;
         loop {
+            promotion_iterations += 1;
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
@@ -803,15 +986,35 @@ where
             });
             span.record("promoted", num_promoted);
             drop(span);
+            promoted_accounts += num_promoted;
 
             // Only exit when no new updates are processed.
             //
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
-            if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
+            if num_promoted == 0 {
                 break
             }
+
+            let account_leaf_start = Instant::now();
+            if !self.process_account_leaf_updates(false)? {
+                account_leaf_update_elapsed += account_leaf_start.elapsed();
+                break
+            }
+            account_leaf_update_elapsed += account_leaf_start.elapsed();
         }
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            before = ?stats_before,
+            after = ?SparseTriePendingStats::new(self),
+            leaf_update_elapsed_us = leaf_elapsed.as_micros(),
+            storage_root_elapsed_us = storage_root_elapsed.as_micros(),
+            account_leaf_update_elapsed_us = account_leaf_update_elapsed.as_micros(),
+            promotion_iterations,
+            promoted_accounts,
+            total_elapsed_us = start.elapsed().as_micros(),
+            "Promoted pending account updates"
+        );
 
         Ok(())
     }
@@ -833,8 +1036,10 @@ where
                 current_storage_worker_count,
                 current_account_worker_count,
             );
+        let ensure_capacity_start = Instant::now();
         self.proof_worker_handle
             .ensure_worker_capacity(desired_storage_worker_count, desired_account_worker_count);
+        let ensure_capacity_elapsed = ensure_capacity_start.elapsed();
         let active_storage_worker_count = self.proof_worker_handle.total_storage_workers();
         let active_account_worker_count = self.proof_worker_handle.total_account_workers();
         let has_multiple_idle_account_workers =
@@ -882,7 +1087,12 @@ where
             desired_account_workers = desired_account_worker_count,
             active_storage_workers = active_storage_worker_count,
             active_account_workers = active_account_worker_count,
+            spawned_storage_workers =
+                active_storage_worker_count.saturating_sub(current_storage_worker_count),
+            spawned_account_workers =
+                active_account_worker_count.saturating_sub(current_account_worker_count),
             chunks_dispatched,
+            ensure_capacity_elapsed_us = ensure_capacity_elapsed.as_micros(),
             dispatch_elapsed_us = dispatch_start.elapsed().as_micros(),
             "Dispatched pending proof targets"
         );
@@ -948,6 +1158,105 @@ struct PendingTargetCounts {
 impl PendingTargetCounts {
     const fn total(self) -> usize {
         self.account + self.storage
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct HashedStateStats {
+    accounts: usize,
+    storage_addresses: usize,
+    storage_slots: usize,
+}
+
+impl HashedStateStats {
+    fn new(state: &HashedPostState) -> Self {
+        Self {
+            accounts: state.accounts.len(),
+            storage_addresses: state.storages.len(),
+            storage_slots: state.storages.values().map(|storage| storage.storage.len()).sum(),
+        }
+    }
+}
+
+struct SparseTrieTaskMessageStats {
+    kind: &'static str,
+    accounts: usize,
+    storage_addresses: usize,
+    storage_slots: usize,
+    prefetch_account_targets: usize,
+    prefetch_storage_targets: usize,
+    prefetch_storage_jobs: usize,
+}
+
+impl SparseTrieTaskMessageStats {
+    fn new(message: &SparseTrieTaskMessage) -> Self {
+        match message {
+            SparseTrieTaskMessage::PrefetchProofs(targets) => Self {
+                kind: "prefetch_proofs",
+                accounts: 0,
+                storage_addresses: 0,
+                storage_slots: 0,
+                prefetch_account_targets: targets.account_targets.len(),
+                prefetch_storage_targets: targets.storage_targets.values().map(Vec::len).sum(),
+                prefetch_storage_jobs: targets.storage_targets.len(),
+            },
+            SparseTrieTaskMessage::HashedState(state) => {
+                let HashedStateStats { accounts, storage_addresses, storage_slots } =
+                    HashedStateStats::new(state);
+                Self {
+                    kind: "hashed_state",
+                    accounts,
+                    storage_addresses,
+                    storage_slots,
+                    prefetch_account_targets: 0,
+                    prefetch_storage_targets: 0,
+                    prefetch_storage_jobs: 0,
+                }
+            }
+            SparseTrieTaskMessage::FinishedStateUpdates => Self {
+                kind: "finished_state_updates",
+                accounts: 0,
+                storage_addresses: 0,
+                storage_slots: 0,
+                prefetch_account_targets: 0,
+                prefetch_storage_targets: 0,
+                prefetch_storage_jobs: 0,
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+struct SparseTriePendingStats {
+    pending_updates: usize,
+    new_account_updates: usize,
+    account_updates: usize,
+    pending_account_updates: usize,
+    new_storage_tries: usize,
+    new_storage_updates: usize,
+    storage_tries: usize,
+    storage_updates: usize,
+    pending_targets: usize,
+}
+
+impl SparseTriePendingStats {
+    fn new<A, S>(task: &SparseTrieCacheTask<A, S>) -> Self {
+        Self {
+            pending_updates: task.pending_updates,
+            new_account_updates: task.new_account_updates.len(),
+            account_updates: task.account_updates.len(),
+            pending_account_updates: task.pending_account_updates.len(),
+            new_storage_tries: task.new_storage_updates.len(),
+            new_storage_updates: task
+                .new_storage_updates
+                .values()
+                .map(|updates| updates.len())
+                .sum(),
+            storage_tries: task.storage_updates.len(),
+            storage_updates: task.storage_updates.values().map(|updates| updates.len()).sum(),
+            pending_targets: task.pending_targets.len(),
+        }
     }
 }
 
