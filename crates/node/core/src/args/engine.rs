@@ -41,7 +41,9 @@ pub struct DefaultEngineValues {
     always_process_payload_attributes_on_canonical_head: bool,
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
+    storage_worker_max_count: Option<usize>,
     account_worker_count: Option<usize>,
+    account_worker_max_count: Option<usize>,
     prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
     sparse_trie_max_hot_slots: usize,
@@ -178,9 +180,21 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the default storage worker burst cap
+    pub const fn with_storage_worker_max_count(mut self, v: Option<usize>) -> Self {
+        self.storage_worker_max_count = v;
+        self
+    }
+
     /// Set the default account worker count
     pub const fn with_account_worker_count(mut self, v: Option<usize>) -> Self {
         self.account_worker_count = v;
+        self
+    }
+
+    /// Set the default account worker burst cap
+    pub const fn with_account_worker_max_count(mut self, v: Option<usize>) -> Self {
+        self.account_worker_max_count = v;
         self
     }
 
@@ -278,7 +292,9 @@ impl Default for DefaultEngineValues {
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
+            storage_worker_max_count: None,
             account_worker_count: None,
+            account_worker_max_count: None,
             prewarming_threads: None,
             cache_metrics_disabled: false,
             sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
@@ -411,15 +427,25 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value_t = DefaultEngineValues::get_global().allow_unwind_canonical_header)]
     pub allow_unwind_canonical_header: bool,
 
-    /// Configure the number of storage proof workers in the Tokio blocking pool.
+    /// Configure the base number of storage proof workers.
     /// If not specified, defaults to 2x available parallelism.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
-    /// Configure the number of account proof workers in the Tokio blocking pool.
+    /// Configure the maximum number of storage proof workers for proof-heavy blocks.
+    /// If not specified, defaults to the larger of storage-worker-count and the runtime burst cap.
+    #[arg(long = "engine.max-storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_max_count.map(|v| v.to_string().into())))]
+    pub storage_worker_max_count: Option<usize>,
+
+    /// Configure the base number of account proof workers.
     /// If not specified, defaults to the same count as storage workers.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
+
+    /// Configure the maximum number of account proof workers for proof-heavy blocks.
+    /// If not specified, defaults to the larger of account-worker-count and the runtime burst cap.
+    #[arg(long = "engine.max-account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_max_count.map(|v| v.to_string().into())))]
+    pub account_worker_max_count: Option<usize>,
 
     /// Configure the number of prewarming threads.
     /// If not specified, defaults to available parallelism.
@@ -561,7 +587,9 @@ impl Default for EngineArgs {
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
             storage_worker_count,
+            storage_worker_max_count,
             account_worker_count,
+            account_worker_max_count,
             prewarming_threads,
             cache_metrics_disabled,
             sparse_trie_max_hot_slots,
@@ -598,7 +626,9 @@ impl Default for EngineArgs {
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
             storage_worker_count,
+            storage_worker_max_count,
             account_worker_count,
+            account_worker_max_count,
             prewarming_threads,
             cache_metrics_disabled,
             sparse_trie_max_hot_slots,
@@ -724,7 +754,9 @@ mod tests {
             always_process_payload_attributes_on_canonical_head: true,
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
+            storage_worker_max_count: Some(64),
             account_worker_count: Some(8),
+            account_worker_max_count: Some(32),
             prewarming_threads: Some(4),
             cache_metrics_disabled: true,
             sparse_trie_max_hot_slots: 100,
@@ -770,8 +802,12 @@ mod tests {
             "--engine.allow-unwind-canonical-header",
             "--engine.storage-worker-count",
             "16",
+            "--engine.max-storage-worker-count",
+            "64",
             "--engine.account-worker-count",
             "8",
+            "--engine.max-account-worker-count",
+            "32",
             "--engine.prewarming-threads",
             "4",
             "--engine.disable-cache-metrics",

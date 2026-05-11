@@ -37,6 +37,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Number of queued multiproof chunks that should be available per burst worker.
+const PROOF_TARGET_CHUNKS_PER_BURST_WORKER: usize = 4;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
     /// Sender for proof results.
@@ -799,7 +802,12 @@ where
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
-        let (targets, chunking_length) = self.pending_targets.take();
+        let (targets, target_counts) = self.pending_targets.take();
+        let chunking_length = target_counts.total();
+        let (storage_worker_count, account_worker_count) =
+            self.desired_worker_capacity(target_counts);
+        self.proof_worker_handle.ensure_worker_capacity(storage_worker_count, account_worker_count);
+
         dispatch_with_chunking(
             targets,
             chunking_length,
@@ -824,6 +832,26 @@ where
             },
         );
     }
+
+    fn desired_worker_capacity(&self, target_counts: PendingTargetCounts) -> (usize, usize) {
+        let current_storage_workers = self.proof_worker_handle.total_storage_workers();
+        let current_account_workers = self.proof_worker_handle.total_account_workers();
+
+        if target_counts.total() <= self.max_targets_for_chunking {
+            return (current_storage_workers, current_account_workers);
+        }
+
+        let chunk_size = self.chunk_size.max(1);
+        let target_chunks = target_counts.total().div_ceil(chunk_size);
+        let storage_chunks = target_counts.storage.div_ceil(chunk_size);
+
+        let desired_account_workers = current_account_workers
+            .max(target_chunks.div_ceil(PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
+        let desired_storage_workers = current_storage_workers
+            .max(storage_chunks.div_ceil(PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
+
+        (desired_storage_workers, desired_account_workers)
+    }
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
@@ -846,35 +874,54 @@ fn encode_account_leaf_value(
 struct PendingTargets {
     /// The proof targets.
     targets: MultiProofTargetsV2,
-    /// Number of account + storage proof targets currently queued.
-    len: usize,
+    /// Number of account proof targets currently queued.
+    account_len: usize,
+    /// Number of storage proof targets currently queued.
+    storage_len: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PendingTargetCounts {
+    /// Number of account proof targets currently queued.
+    account: usize,
+    /// Number of storage proof targets currently queued.
+    storage: usize,
+}
+
+impl PendingTargetCounts {
+    const fn total(self) -> usize {
+        self.account + self.storage
+    }
 }
 
 impl PendingTargets {
     /// Returns the number of pending targets.
     const fn len(&self) -> usize {
-        self.len
+        self.account_len + self.storage_len
     }
 
     /// Returns `true` if there are no pending targets.
     const fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len() == 0
     }
 
     /// Takes the pending targets, replacing with empty defaults.
-    fn take(&mut self) -> (MultiProofTargetsV2, usize) {
-        (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
+    fn take(&mut self) -> (MultiProofTargetsV2, PendingTargetCounts) {
+        let counts = PendingTargetCounts { account: self.account_len, storage: self.storage_len };
+        self.account_len = 0;
+        self.storage_len = 0;
+        (std::mem::take(&mut self.targets), counts)
     }
 
     /// Adds a target to the account targets.
     fn push_account_target(&mut self, target: ProofV2Target) {
         self.targets.account_targets.push(target);
-        self.len += 1;
+        self.account_len += 1;
     }
 
     /// Extends storage targets for the given address.
     fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
-        self.len += targets.len();
+        self.storage_len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
 }

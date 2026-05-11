@@ -44,6 +44,9 @@ pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
+/// Default upper bound for proof workers that can be activated for proof-heavy blocks.
+pub const DEFAULT_PROOF_WORKER_MAX_THREADS: usize = 128;
+
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
 pub enum TokioConfig {
@@ -106,9 +109,15 @@ pub struct RayonConfig {
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
     /// If `None`, derived from available parallelism.
     pub proof_storage_worker_threads: Option<usize>,
+    /// Maximum number of proof storage workers that can be activated for proof-heavy blocks.
+    /// If `None`, uses [`DEFAULT_PROOF_WORKER_MAX_THREADS`].
+    pub proof_storage_worker_max_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
     /// If `None`, derived from available parallelism.
     pub proof_account_worker_threads: Option<usize>,
+    /// Maximum number of proof account workers that can be activated for proof-heavy blocks.
+    /// If `None`, uses [`DEFAULT_PROOF_WORKER_MAX_THREADS`].
+    pub proof_account_worker_max_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
     pub prewarming_threads: Option<usize>,
@@ -127,7 +136,9 @@ impl Default for RayonConfig {
             storage_threads: None,
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
             proof_storage_worker_threads: None,
+            proof_storage_worker_max_threads: None,
             proof_account_worker_threads: None,
+            proof_account_worker_max_threads: None,
             prewarming_threads: None,
             bal_streaming_threads: None,
         }
@@ -169,12 +180,30 @@ impl RayonConfig {
         self
     }
 
+    /// Set the maximum number of proof storage workers.
+    pub const fn with_proof_storage_worker_max_threads(
+        mut self,
+        proof_storage_worker_max_threads: usize,
+    ) -> Self {
+        self.proof_storage_worker_max_threads = Some(proof_storage_worker_max_threads);
+        self
+    }
+
     /// Set the number of threads for the proof account worker pool.
     pub const fn with_proof_account_worker_threads(
         mut self,
         proof_account_worker_threads: usize,
     ) -> Self {
         self.proof_account_worker_threads = Some(proof_account_worker_threads);
+        self
+    }
+
+    /// Set the maximum number of proof account workers.
+    pub const fn with_proof_account_worker_max_threads(
+        mut self,
+        proof_account_worker_max_threads: usize,
+    ) -> Self {
+        self.proof_account_worker_max_threads = Some(proof_account_worker_max_threads);
         self
     }
 
@@ -266,9 +295,15 @@ struct RuntimeInner {
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
     proof_storage_worker_pool: WorkerPool,
+    /// Maximum storage proof workers that can be activated for proof-heavy blocks.
+    #[cfg(feature = "rayon")]
+    proof_storage_worker_max_threads: usize,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: WorkerPool,
+    /// Maximum account proof workers that can be activated for proof-heavy blocks.
+    #[cfg(feature = "rayon")]
+    proof_account_worker_max_threads: usize,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
@@ -348,10 +383,22 @@ impl Runtime {
         &self.0.proof_storage_worker_pool
     }
 
+    /// Get the maximum storage proof worker count.
+    #[cfg(feature = "rayon")]
+    pub fn proof_storage_worker_max_threads(&self) -> usize {
+        self.0.proof_storage_worker_max_threads
+    }
+
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
     pub fn proof_account_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_account_worker_pool
+    }
+
+    /// Get the maximum account proof worker count.
+    #[cfg(feature = "rayon")]
+    pub fn proof_account_worker_max_threads(&self) -> usize {
+        self.0.proof_account_worker_max_threads
     }
 
     /// Get the prewarming pool.
@@ -397,7 +444,9 @@ impl Runtime {
                 storage_threads: Some(2),
                 max_blocking_tasks: 16,
                 proof_storage_worker_threads: Some(2),
+                proof_storage_worker_max_threads: Some(2),
                 proof_account_worker_threads: Some(2),
+                proof_account_worker_max_threads: Some(2),
                 prewarming_threads: Some(2),
                 bal_streaming_threads: Some(2),
             },
@@ -820,7 +869,9 @@ impl RuntimeBuilder {
             storage_pool,
             blocking_guard,
             proof_storage_worker_pool,
+            proof_storage_worker_max_threads,
             proof_account_worker_pool,
+            proof_account_worker_max_threads,
             prewarming_pool,
             bal_streaming_pool,
         ) = {
@@ -854,11 +905,21 @@ impl RuntimeBuilder {
                 config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
             let proof_storage_worker_pool =
                 WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+            let proof_storage_worker_max_threads = config
+                .rayon
+                .proof_storage_worker_max_threads
+                .unwrap_or(DEFAULT_PROOF_WORKER_MAX_THREADS)
+                .max(proof_storage_worker_threads);
 
             let proof_account_worker_threads =
                 config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
+            let proof_account_worker_max_threads = config
+                .rayon
+                .proof_account_worker_max_threads
+                .unwrap_or(DEFAULT_PROOF_WORKER_MAX_THREADS)
+                .max(proof_account_worker_threads);
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
@@ -872,7 +933,9 @@ impl RuntimeBuilder {
                 rpc_threads,
                 storage_threads,
                 proof_storage_worker_threads,
+                proof_storage_worker_max_threads,
                 proof_account_worker_threads,
+                proof_account_worker_max_threads,
                 prewarming_threads,
                 bal_streaming_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
@@ -885,7 +948,9 @@ impl RuntimeBuilder {
                 storage_pool,
                 blocking_guard,
                 proof_storage_worker_pool,
+                proof_storage_worker_max_threads,
                 proof_account_worker_pool,
+                proof_account_worker_max_threads,
                 prewarming_pool,
                 bal_streaming_pool,
             )
@@ -917,7 +982,11 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             proof_storage_worker_pool,
             #[cfg(feature = "rayon")]
+            proof_storage_worker_max_threads,
+            #[cfg(feature = "rayon")]
             proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
+            proof_account_worker_max_threads,
             #[cfg(feature = "rayon")]
             prewarming_pool,
             #[cfg(feature = "rayon")]

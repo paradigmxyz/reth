@@ -103,7 +103,13 @@ where
                         reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
                             reserved_cpu_cores: command.engine.reserved_cpu_cores,
                             proof_storage_worker_threads: command.engine.storage_worker_count,
+                            proof_storage_worker_max_threads: command
+                                .engine
+                                .storage_worker_max_count,
                             proof_account_worker_threads: command.engine.account_worker_count,
+                            proof_account_worker_max_threads: command
+                                .engine
+                                .account_worker_max_count,
                             prewarming_threads: command.engine.prewarming_threads,
                             ..Default::default()
                         })
