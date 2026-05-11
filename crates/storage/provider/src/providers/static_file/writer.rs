@@ -1371,6 +1371,34 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Starts a block account changeset that will be appended one entry at a time.
+    ///
+    /// Callers must append entries sorted by address and keep the writer open until the block is
+    /// complete so the changeset offset sidecar is finalized with the correct row count.
+    pub fn begin_account_changeset(&mut self, block_number: u64) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+
+        self.increment_block(block_number)?;
+        self.ensure_no_queued_prune()
+    }
+
+    /// Appends one account changeset entry to the current block.
+    ///
+    /// [`Self::begin_account_changeset`] must be called first.
+    pub fn append_account_changeset_entry(
+        &mut self,
+        change: AccountBeforeTx,
+    ) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+        if self.current_changeset_offset.is_none() {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "account changeset stream must be started before appending entries",
+            )))
+        }
+
+        self.append_change(&change)
+    }
+
     /// Appends a block storage changeset to the static file.
     ///
     /// It **CALLS** `increment_block()`.
@@ -1404,6 +1432,35 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         Ok(())
+    }
+
+    /// Starts a block storage changeset that will be appended one entry at a time.
+    ///
+    /// Callers must append entries sorted by address and storage key and keep the writer open until
+    /// the block is complete so the changeset offset sidecar is finalized with the correct row
+    /// count.
+    pub fn begin_storage_changeset(&mut self, block_number: u64) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+
+        self.increment_block(block_number)?;
+        self.ensure_no_queued_prune()
+    }
+
+    /// Appends one storage changeset entry to the current block.
+    ///
+    /// [`Self::begin_storage_changeset`] must be called first.
+    pub fn append_storage_changeset_entry(
+        &mut self,
+        change: StorageBeforeTx,
+    ) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+        if self.current_changeset_offset.is_none() {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "storage changeset stream must be started before appending entries",
+            )))
+        }
+
+        self.append_change(&change)
     }
 
     /// Adds an instruction to prune `to_delete` transactions during commit.
