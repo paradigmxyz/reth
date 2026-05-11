@@ -1081,7 +1081,7 @@ async fn test_get_canonical_blocks_to_persist() {
 }
 
 #[test]
-fn test_get_save_blocks_plan_with_deferred_trie_blocks() {
+fn test_get_save_blocks_plan_with_state_masking_blocks() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
