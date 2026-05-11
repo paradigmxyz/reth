@@ -135,6 +135,8 @@ jobs:
       node-bin: ${{ steps.args.outputs.node-bin }}
       driver-reason: ${{ steps.args.outputs.driver-reason }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
+      pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
+      pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
@@ -356,17 +358,17 @@ jobs:
             // Resolve display names for baseline/feature
             let baselineName = baseline || 'main';
             let featureName = feature;
-            if (!featureName) {
-              if (pr) {
-                const { data: prData } = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: parseInt(pr),
-                });
-                featureName = prData.head.ref;
-              } else {
-                featureName = '${{ github.ref_name }}';
-              }
+            if (pr) {
+              const { data: prData } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parseInt(pr),
+              });
+              core.setOutput('pr-head-sha', prData.head.sha);
+              core.setOutput('pr-head-ref', prData.head.ref);
+              if (!featureName) featureName = prData.head.ref;
+            } else {
+              if (!featureName) featureName = '${{ github.ref_name }}';
             }
 
             const fallbackReasons = [];
@@ -587,6 +589,8 @@ jobs:
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ${{ needs.reth-bench-ack.outputs.pr }}
+      BENCH_PR_HEAD_SHA: ${{ needs.reth-bench-ack.outputs.pr-head-sha }}
+      BENCH_PR_HEAD_REF: ${{ needs.reth-bench-ack.outputs.pr-head-ref }}
       BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
@@ -623,16 +627,13 @@ jobs:
               core.setOutput('ref', '${{ github.ref }}');
               return;
             }
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: parseInt(process.env.BENCH_PR),
-            });
-            // Always use head SHA — the merge ref (refs/pull/N/merge) may not
-            // exist if the PR has conflicts, was force-pushed, or was
-            // merged/closed between this step and checkout.
-            core.info(`PR #${process.env.BENCH_PR} (${pr.state}), using head SHA ${pr.head.sha}`);
-            core.setOutput('ref', pr.head.sha);
+            const sha = process.env.BENCH_PR_HEAD_SHA;
+            if (!sha) {
+              core.setFailed('BENCH_PR_HEAD_SHA is not set — ack job must pin the PR head SHA');
+              return;
+            }
+            core.info(`PR #${process.env.BENCH_PR}, using pinned head SHA ${sha}`);
+            core.setOutput('ref', sha);
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -768,13 +769,10 @@ jobs:
         with:
           script: |
             if (process.env.BENCH_PR) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: parseInt(process.env.BENCH_PR),
-              });
-              core.setOutput('head-ref', pr.head.ref);
-              core.setOutput('head-sha', pr.head.sha);
+              const ref = process.env.BENCH_PR_HEAD_REF || '${{ github.ref_name }}';
+              const sha = process.env.BENCH_PR_HEAD_SHA || '${{ github.sha }}';
+              core.setOutput('head-ref', ref);
+              core.setOutput('head-sha', sha);
             } else {
               core.setOutput('head-ref', '${{ github.ref_name }}');
               core.setOutput('head-sha', '${{ github.sha }}');
