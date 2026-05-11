@@ -639,7 +639,7 @@ pub struct NewPooledTransactionHashes72 {
     /// Transaction hashes for new transactions that have appeared on the network.
     pub hashes: Vec<B256>,
     /// Cell mask for new transactions that have appeared on the network.
-    pub cell_mask: B128,
+    pub cell_mask: Option<B128>,
 }
 
 #[cfg(feature = "arbitrary")]
@@ -662,7 +662,7 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
                 // Map the usize values to the range 0..131072(0x20000)
                 let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
                 let hashes_vec = vec(any::<B256>(), len..=len);
-                let cell_mask = any::<B128>();
+                let cell_mask = any::<Option<B128>>();
 
                 (types_vec, sizes_vec, hashes_vec, cell_mask)
             })
@@ -714,64 +714,65 @@ impl NewPooledTransactionHashes72 {
         self.extend(txs);
         self
     }
+
+    fn payload_length(&self) -> usize {
+        self.types.as_slice().length() +
+            self.sizes.length() +
+            self.hashes.length() +
+            self.cell_mask.as_ref().map_or(1, Encodable::length)
+    }
 }
 
 impl Encodable for NewPooledTransactionHashes72 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        #[derive(RlpEncodable)]
-        struct EncodableNewPooledTransactionHashes72<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<B256>,
-            cell_mask: &'a B128,
+        Header { list: true, payload_length: self.payload_length() }.encode(out);
+        self.types.as_slice().encode(out);
+        self.sizes.encode(out);
+        self.hashes.encode(out);
+        if let Some(cell_mask) = &self.cell_mask {
+            cell_mask.encode(out);
+        } else {
+            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
         }
-
-        let encodable = EncodableNewPooledTransactionHashes72 {
-            types: &self.types[..],
-            sizes: &self.sizes,
-            hashes: &self.hashes,
-            cell_mask: &self.cell_mask,
-        };
-
-        encodable.encode(out);
     }
+
     fn length(&self) -> usize {
-        #[derive(RlpEncodable)]
-        struct EncodableNewPooledTransactionHashes72<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<B256>,
-            cell_mask: &'a B128,
-        }
-
-        let encodable = EncodableNewPooledTransactionHashes72 {
-            types: &self.types[..],
-            sizes: &self.sizes,
-            hashes: &self.hashes,
-            cell_mask: &self.cell_mask,
-        };
-
-        encodable.length()
+        Header { list: true, payload_length: self.payload_length() }.length_with_payload()
     }
 }
 
 impl Decodable for NewPooledTransactionHashes72 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        #[derive(RlpDecodable)]
-        struct EncodableNewPooledTransactionHashes72 {
-            types: Bytes,
-            sizes: Vec<usize>,
-            hashes: Vec<B256>,
-            cell_mask: B128,
+        let Header { list, payload_length } = Header::decode(buf)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
+        if buf.len() < payload_length {
+            return Err(alloy_rlp::Error::InputTooShort)
         }
 
-        let encodable = EncodableNewPooledTransactionHashes72::decode(buf)?;
-        let msg = Self {
-            types: encodable.types.into(),
-            sizes: encodable.sizes,
-            hashes: encodable.hashes,
-            cell_mask: encodable.cell_mask,
+        let (mut payload, rest) = buf.split_at(payload_length);
+        let types = Bytes::decode(&mut payload)?;
+        let sizes = Vec::<usize>::decode(&mut payload)?;
+        let hashes = Vec::<B256>::decode(&mut payload)?;
+        let Some(first_byte) = payload.first().copied() else {
+            return Err(alloy_rlp::Error::InputTooShort)
         };
+        let cell_mask = if first_byte == alloy_rlp::EMPTY_STRING_CODE {
+            payload = &payload[1..];
+            None
+        } else {
+            Some(B128::decode(&mut payload)?)
+        };
+
+        if !payload.is_empty() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: payload_length,
+                got: payload_length - payload.len(),
+            })
+        }
+
+        let msg = Self { types: types.into(), sizes, hashes, cell_mask };
 
         if msg.hashes.len() != msg.types.len() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
@@ -785,6 +786,8 @@ impl Decodable for NewPooledTransactionHashes72 {
                 got: msg.sizes.len(),
             })
         }
+
+        *buf = rest;
 
         Ok(msg)
     }
@@ -1116,8 +1119,8 @@ impl RequestTxHashes {
     }
 }
 
-impl FromIterator<(TxHash, Eth72TxMetadata)> for RequestTxHashes {
-    fn from_iter<I: IntoIterator<Item = (TxHash, Eth72TxMetadata)>>(iter: I) -> Self {
+impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
+    fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
         Self::new(iter.into_iter().map(|(hash, _)| hash).collect())
     }
 }
@@ -1328,6 +1331,43 @@ mod tests {
         for vector in vectors {
             test_encoding_vector(vector);
         }
+    }
+
+    #[test]
+    fn eth_72_tx_hash_roundtrip() {
+        let vectors = vec![
+            (
+                NewPooledTransactionHashes72 {
+                    types: vec![],
+                    sizes: vec![],
+                    hashes: vec![],
+                    cell_mask: None,
+                },
+                &hex!("c480c0c080")[..],
+            ),
+            (
+                NewPooledTransactionHashes72 {
+                    types: vec![],
+                    sizes: vec![],
+                    hashes: vec![],
+                    cell_mask: Some(B128::repeat_byte(0x11)),
+                },
+                &hex!("d480c0c09011111111111111111111111111111111")[..],
+            ),
+        ];
+
+        for vector in vectors {
+            test_encoding_vector(vector);
+        }
+    }
+
+    #[test]
+    fn eth_72_rejects_missing_cell_mask() {
+        let encoded_eth68_payload = hex!("c380c0c0");
+
+        let result = NewPooledTransactionHashes72::decode(&mut encoded_eth68_payload.as_ref());
+
+        assert!(matches!(result, Err(alloy_rlp::Error::InputTooShort)));
     }
 
     #[test]
