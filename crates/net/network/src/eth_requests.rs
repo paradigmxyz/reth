@@ -9,6 +9,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
+use reth_transaction_pool::blobstore::NoopBlobStore;
 use reth_eth_wire::{
     BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
@@ -82,7 +83,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
-            blob_store: Arc::new(reth_transaction_pool::blobstore::NoopBlobStore),
+            blob_store: Arc::new(NoopBlobStore::default()),
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),

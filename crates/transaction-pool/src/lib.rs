@@ -470,7 +470,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Transaction = T::Transaction;
 
@@ -827,7 +827,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Block = V::Block;
 
