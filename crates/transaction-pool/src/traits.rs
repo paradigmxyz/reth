@@ -736,7 +736,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
     /// Returns the blob store used by the pool.
-    fn blob_store(&self) -> &dyn BlobStore;
+    fn blob_store(&self) -> Arc<dyn BlobStore>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.

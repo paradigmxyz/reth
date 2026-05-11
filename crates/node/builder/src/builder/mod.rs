@@ -920,7 +920,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 propagation_policy,
                 announcement_policy,
             )
-            .request_handler_with_pool(self.provider().clone(), pool)
+            .request_handler_with_blob_store(self.provider().clone(), pool.blob_store())
             .split_with_handle();
 
         self.executor.spawn_critical_blocking_task("p2p txpool", txpool);

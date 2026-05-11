@@ -416,7 +416,7 @@ where
         + Clone
         + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
         + 'static,
-    S: BlobStore,
+    S: BlobStore + Clone,
     Evm: ConfigureEvm + 'static,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
@@ -817,8 +817,8 @@ where
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
 
-    fn blob_store(&self) -> &dyn BlobStore {
-        self.pool.blob_store()
+    fn blob_store(&self) -> Arc<dyn BlobStore> {
+        Arc::new(Clone::clone(self.pool.blob_store()))
     }
 }
 

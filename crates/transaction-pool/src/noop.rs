@@ -25,8 +25,6 @@ use reth_primitives_traits::Recovered;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
-static NOOP_BLOB_STORE: NoopBlobStore = NoopBlobStore;
-
 /// A [`TransactionPool`] implementation that does nothing.
 ///
 /// All transactions are rejected and no events are emitted.
@@ -391,8 +389,8 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         Ok(vec![None; versioned_hashes.len()])
     }
 
-    fn blob_store(&self) -> &dyn BlobStore {
-        &NOOP_BLOB_STORE
+    fn blob_store(&self) -> Arc<dyn BlobStore> {
+        Arc::new(NoopBlobStore)
     }
 }
 
