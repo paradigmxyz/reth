@@ -32,9 +32,9 @@ on:
           - "feature"
           - "baseline"
       warmup:
-        description: "Number of warmup blocks"
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
         required: false
-        default: "200"
+        default: ""
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
@@ -190,12 +190,13 @@ jobs:
               if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
               return null;
             };
+            const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
               blocks = '${{ github.event.inputs.blocks }}' || '500';
-              warmup = '${{ github.event.inputs.warmup }}' || '200';
-              if (warmup !== '200') explicitWarmup = true;
+              warmup = '${{ github.event.inputs.warmup }}' || '';
+              explicitWarmup = warmup !== '';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
@@ -240,7 +241,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -345,9 +346,16 @@ jobs:
               var featureNodeArgs = defaults['feature-args'];
             }
 
-            // Default warmup to 20 for big-blocks mode unless explicitly set
-            if (bigBlocks === 'true' && !explicitWarmup) {
-              warmup = '20';
+            if (!/^\d+$/.test(blocks)) {
+              core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
+              return;
+            }
+            if (explicitWarmup && !/^\d+$/.test(warmup)) {
+              core.setFailed(`Invalid warmup value: ${warmup} (must be a positive integer)`);
+              return;
+            }
+            if (!explicitWarmup) {
+              warmup = defaultWarmup(blocks);
             }
 
             if (!validBalModes.has(bal)) {
