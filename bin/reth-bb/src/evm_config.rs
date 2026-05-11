@@ -53,7 +53,7 @@ pub(crate) struct BigBlockSegment<'a> {
 
 /// EVM configuration for big-block execution.
 ///
-/// Wraps [`EthEvmConfig`]. When a big-block payload is received, the plan is 
+/// Wraps [`EthEvmConfig`]. When a big-block payload is received, the plan is
 /// staged on the [`BbBlockExecutorFactory`]
 /// and consumed when the executor is created. Block hashes for inter-segment
 /// BLOCKHASH resolution are reseeded into `State::block_hashes` at each

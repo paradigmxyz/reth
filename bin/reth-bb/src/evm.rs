@@ -447,7 +447,7 @@ where
         let gas_used = self.inner_mut().commit_transaction(output);
         self.plan.tx_counter += 1;
 
-        if self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx {
+        if self.plan.next_segment < self.plan.segments.len() && self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx {
             self.apply_segment_boundary().expect("must succeed");
         }
 
