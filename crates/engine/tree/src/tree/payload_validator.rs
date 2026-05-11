@@ -774,12 +774,12 @@ where
             }
             StateRootStrategy::Synchronous => {}
             StateRootStrategy::Custom(custom) => {
-                let (state_root, trie_updates) = custom(CustomStateRootInput {
+                let (state_root, trie_updates) = ensure_ok_post_block!(custom(CustomStateRootInput {
                     block: &block,
                     parent_block: &parent_block,
                     output: &output,
                     hashed_state: &hashed_state,
-                })?;
+                }), block);
                 maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
             }
         }
