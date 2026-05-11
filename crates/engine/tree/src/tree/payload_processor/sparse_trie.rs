@@ -38,8 +38,11 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
-/// Number of queued multiproof chunks that should be available per burst worker.
-const PROOF_TARGET_CHUNKS_PER_BURST_WORKER: usize = 4;
+/// Account proofs can block on database/page-cache latency, so large account-only batches benefit
+/// from keeping as many proof requests in flight as the configured worker cap allows.
+const ACCOUNT_PROOF_TARGET_CHUNKS_PER_BURST_WORKER: usize = 1;
+/// Storage proof jobs are spawned by account proof workers, so keep a smaller storage burst.
+const STORAGE_PROOF_TARGET_CHUNKS_PER_BURST_WORKER: usize = 4;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
@@ -1116,9 +1119,9 @@ where
         let storage_chunks = target_counts.storage.div_ceil(chunk_size);
 
         let desired_account_workers = current_account_workers
-            .max(target_chunks.div_ceil(PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
+            .max(target_chunks.div_ceil(ACCOUNT_PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
         let desired_storage_workers = current_storage_workers
-            .max(storage_chunks.div_ceil(PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
+            .max(storage_chunks.div_ceil(STORAGE_PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
 
         (desired_storage_workers, desired_account_workers)
     }

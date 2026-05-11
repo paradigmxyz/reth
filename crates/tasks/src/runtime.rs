@@ -45,7 +45,7 @@ pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
 /// Default upper bound for proof workers that can be activated for proof-heavy blocks.
-pub const DEFAULT_PROOF_WORKER_MAX_THREADS: usize = 128;
+pub const DEFAULT_PROOF_WORKER_MAX_THREADS: usize = 256;
 
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
