@@ -25,6 +25,7 @@ pub mod valid_payload;
 use bench::BenchmarkCommand;
 use clap::Parser;
 use reth_cli_runner::CliRunner;
+use url as _;
 
 fn main() -> eyre::Result<()> {
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.

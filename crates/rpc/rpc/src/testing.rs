@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
-use reth_errors::RethError;
+use reth_errors::{ProviderResult, RethError};
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
@@ -35,15 +35,22 @@ use reth_primitives_traits::{
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
-use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_rpc_eth_types::{cache::db::StateProviderTraitObjWrapper, EthApiError};
+use reth_storage_api::{BlockReader, HeaderProvider, StateProviderBox};
 use revm::context::Block;
 use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
 use tracing::debug;
 
+/// Hook used by `testing_buildBlockV1` to wrap the base state provider before block assembly.
+///
+/// This lets custom node integrations use the same execution state reads while replacing the
+/// state-root provider used when sealing the synthetic block.
+pub type TestingStateProviderFactory =
+    Arc<dyn Fn(StateProviderBox) -> ProviderResult<StateProviderBox> + Send + Sync>;
+
 /// Testing API handler.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TestingApi<Eth, Evm> {
     eth_api: Eth,
     evm_config: Evm,
@@ -51,12 +58,36 @@ pub struct TestingApi<Eth, Evm> {
     skip_invalid_transactions: bool,
     /// If set, override the parent block's gas limit in `testing_buildBlockV1`.
     gas_limit_override: Option<u64>,
+    /// Optional state-provider wrapper used for custom state roots.
+    state_provider_factory: Option<TestingStateProviderFactory>,
+}
+
+impl<Eth, Evm> std::fmt::Debug for TestingApi<Eth, Evm>
+where
+    Eth: std::fmt::Debug,
+    Evm: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestingApi")
+            .field("eth_api", &self.eth_api)
+            .field("evm_config", &self.evm_config)
+            .field("skip_invalid_transactions", &self.skip_invalid_transactions)
+            .field("gas_limit_override", &self.gas_limit_override)
+            .field("state_provider_factory", &self.state_provider_factory.is_some())
+            .finish()
+    }
 }
 
 impl<Eth, Evm> TestingApi<Eth, Evm> {
     /// Create a new testing API handler.
     pub const fn new(eth_api: Eth, evm_config: Evm) -> Self {
-        Self { eth_api, evm_config, skip_invalid_transactions: false, gas_limit_override: None }
+        Self {
+            eth_api,
+            evm_config,
+            skip_invalid_transactions: false,
+            gas_limit_override: None,
+            state_provider_factory: None,
+        }
     }
 
     /// Enable skipping invalid transactions instead of failing.
@@ -71,6 +102,12 @@ impl<Eth, Evm> TestingApi<Eth, Evm> {
     /// parent block.
     pub const fn with_gas_limit_override(mut self, gas_limit: u64) -> Self {
         self.gas_limit_override = Some(gas_limit);
+        self
+    }
+
+    /// Wrap the state provider used by `testing_buildBlockV1`.
+    pub fn with_state_provider_factory(mut self, factory: TestingStateProviderFactory) -> Self {
+        self.state_provider_factory = Some(factory);
         self
     }
 }
@@ -90,12 +127,20 @@ where
         let evm_config = self.evm_config.clone();
         let skip_invalid_transactions = self.skip_invalid_transactions;
         let gas_limit_override = self.gas_limit_override;
+        let state_provider_factory = self.state_provider_factory.clone();
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state = state.database.0;
+                let StateProviderTraitObjWrapper(state_provider) = state.database.0;
+                let state_provider = if let Some(state_provider_factory) = state_provider_factory {
+                    state_provider_factory(state_provider)
+                        .map_err(EthApiError::from)
+                        .map_err(Eth::Error::from_eth_err)?
+                } else {
+                    state_provider
+                };
                 let mut db = State::builder()
                     .with_bundle_update()
-                    .with_database(StateProviderDatabase::new(&state))
+                    .with_database(StateProviderDatabase::new(&state_provider))
                     .build();
                 let parent = eth_api
                     .provider()
@@ -206,7 +251,9 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder
+                    .finish(state_provider.as_ref(), None)
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let sealed_block = Arc::new(outcome.block.into_sealed_block());

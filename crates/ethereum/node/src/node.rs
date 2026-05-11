@@ -37,7 +37,7 @@ use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
-    TestingApi, ValidationApi,
+    TestingApi, TestingStateProviderFactory, ValidationApi,
 };
 use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -56,7 +56,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm::context::TxEnv;
-use std::{marker::PhantomData, sync::Arc, time::SystemTime};
+use std::{fmt, marker::PhantomData, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -158,7 +158,6 @@ where
 }
 
 /// Add-ons w.r.t. l1 ethereum.
-#[derive(Debug)]
 pub struct EthereumAddOns<
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
@@ -169,6 +168,22 @@ pub struct EthereumAddOns<
     AuthHttpMiddleware = Identity,
 > {
     inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>,
+    testing_state_provider_factory: Option<TestingStateProviderFactory>,
+}
+
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> fmt::Debug
+    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
+where
+    N: FullNodeComponents,
+    EthB: EthApiBuilder<N>,
+    RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EthereumAddOns")
+            .field("inner", &self.inner)
+            .field("testing_state_provider_factory", &self.testing_state_provider_factory.is_some())
+            .finish()
+    }
 }
 
 impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
@@ -181,7 +196,7 @@ where
     pub const fn new(
         inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>,
     ) -> Self {
-        Self { inner }
+        Self { inner, testing_state_provider_factory: None }
     }
 }
 
@@ -223,8 +238,11 @@ where
     where
         T: Send,
     {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.with_engine_api(engine_api_builder))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.with_engine_api(engine_api_builder),
+            testing_state_provider_factory,
+        }
     }
 
     /// Replace the consensus engine validator builder.
@@ -235,8 +253,11 @@ where
     where
         T: Send,
     {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.with_engine_validator(engine_validator_builder))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.with_engine_validator(engine_validator_builder),
+            testing_state_provider_factory,
+        }
     }
 
     /// Replace the payload validator builder.
@@ -244,8 +265,11 @@ where
         self,
         payload_validator_builder: T,
     ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware, AuthHttpMiddleware> {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.with_payload_validator(payload_validator_builder))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.with_payload_validator(payload_validator_builder),
+            testing_state_provider_factory,
+        }
     }
 
     /// Sets rpc middleware
@@ -256,8 +280,11 @@ where
     where
         T: Send,
     {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.with_rpc_middleware(rpc_middleware))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.with_rpc_middleware(rpc_middleware),
+            testing_state_provider_factory,
+        }
     }
 
     /// Configures the HTTP transport middleware for the auth / Engine API server.
@@ -268,8 +295,11 @@ where
     where
         T: Send,
     {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.with_auth_http_middleware(auth_http_middleware))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.with_auth_http_middleware(auth_http_middleware),
+            testing_state_provider_factory,
+        }
     }
 
     /// Stacks an additional HTTP transport middleware layer for the auth / Engine API server.
@@ -277,8 +307,11 @@ where
         self,
         layer: T,
     ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Stack<AuthHttpMiddleware, T>> {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.layer_auth_http_middleware(layer))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.layer_auth_http_middleware(layer),
+            testing_state_provider_factory,
+        }
     }
 
     /// Conditionally stacks an HTTP transport middleware layer for the auth / Engine API server.
@@ -295,16 +328,28 @@ where
         RpcMiddleware,
         Stack<AuthHttpMiddleware, Either<T, Identity>>,
     > {
-        let Self { inner } = self;
-        EthereumAddOns::new(inner.option_layer_auth_http_middleware(layer))
+        let Self { inner, testing_state_provider_factory } = self;
+        EthereumAddOns {
+            inner: inner.option_layer_auth_http_middleware(layer),
+            testing_state_provider_factory,
+        }
     }
 
     /// Sets the tokio runtime for the RPC servers.
     ///
     /// Caution: This runtime must not be created from within asynchronous context.
     pub fn with_tokio_runtime(self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
-        let Self { inner } = self;
-        Self { inner: inner.with_tokio_runtime(tokio_runtime) }
+        let Self { inner, testing_state_provider_factory } = self;
+        Self { inner: inner.with_tokio_runtime(tokio_runtime), testing_state_provider_factory }
+    }
+
+    /// Wraps the state provider used by `testing_buildBlockV1`.
+    ///
+    /// This is intended for custom state-root integrations that need the testing namespace to
+    /// build synthetic blocks with the same root calculation as engine validation.
+    pub fn with_testing_state_provider(mut self, factory: TestingStateProviderFactory) -> Self {
+        self.testing_state_provider_factory = Some(factory);
+        self
     }
 }
 
@@ -348,6 +393,7 @@ where
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
+        let testing_state_provider_factory = self.testing_state_provider_factory.clone();
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -371,6 +417,9 @@ where
                 }
                 if let Some(gas_limit) = testing_gas_limit_override {
                     testing_api = testing_api.with_gas_limit_override(gas_limit);
+                }
+                if let Some(factory) = testing_state_provider_factory.clone() {
+                    testing_api = testing_api.with_state_provider_factory(factory);
                 }
                 container
                     .modules

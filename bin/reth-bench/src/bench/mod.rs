@@ -6,6 +6,7 @@ use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
 
 mod context;
+mod copy_chain;
 mod generate_big_block;
 pub(crate) mod helpers;
 pub use generate_big_block::{
@@ -37,6 +38,9 @@ pub enum Subcommands {
 
     /// Benchmark which only calls subsequent `newPayload` calls.
     NewPayloadOnly(new_payload_only::Command),
+
+    /// Build a target-native copy of source blocks and benchmark processing it.
+    CopyChain(copy_chain::Command),
 
     /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
     /// block.
@@ -84,6 +88,7 @@ impl BenchmarkCommand {
         match self.command {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
+            Subcommands::CopyChain(command) => command.execute(ctx).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
             Subcommands::GenerateBigBlock(command) => command.execute(ctx).await,
             Subcommands::SendInvalidPayload(command) => (*command).execute(ctx).await,

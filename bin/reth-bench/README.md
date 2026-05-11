@@ -43,6 +43,34 @@ When using `--wait-for-persistence`, the benchmark waits after every `(threshold
 
 By default, the WebSocket URL for persistence subscriptions is derived from `--engine-rpc-url` (converting to ws:// on port 8546). Use `--ws-rpc-url` to override this.
 
+### Copying a chain for MPT vs QMDb comparisons
+
+`reth-bench copy-chain` builds a target-native copy of source blocks with
+`testing_buildBlockV1`, submits each built payload through `reth_newPayload`, and advances
+forkchoice with `reth_forkchoiceUpdated`. This is intended for apples-to-apples block-processing
+comparisons where the source transaction workload is the same but the target node may seal headers
+with a different state-root implementation.
+
+The target node must already be canonical at `--from - 1` and must expose the `testing` RPC module
+on its regular RPC port:
+
+```bash
+reth-bench copy-chain \
+  --rpc-url <source_rpc_url> \
+  --from <first_block> \
+  --to <last_block> \
+  --jwt-secret <jwt_file_path> \
+  --local-rpc-url http://localhost:8545 \
+  --engine-rpc-url http://localhost:8551 \
+  --output ./copy-bench
+```
+
+Run the same command against an MPT node and a QMDb node that start from the same parent block.
+The output directory includes `copy_chain.csv`, `combined_latency.csv`, and `total_gas.csv`.
+Blob transactions are rejected by default because the testing builder takes raw signed
+transactions; use `--skip-blob-transactions` only when intentionally excluding blobs from the
+workload.
+
 Below is an overview of how to run a benchmark:
 
 ### Setup

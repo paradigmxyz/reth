@@ -52,7 +52,7 @@ pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use reth_rpc_convert::RpcTypes;
 pub use rpc::RPCApi;
-pub use testing::TestingApi;
+pub use testing::{TestingApi, TestingStateProviderFactory};
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use validation::{ValidationApi, ValidationApiConfig};

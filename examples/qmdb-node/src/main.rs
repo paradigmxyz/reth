@@ -23,6 +23,7 @@ use reth_ethereum::{
         AccountReader, BlockNumReader, CanonStateSubscriptions, ChangeSetReader, HeaderProvider,
         ProviderError, StateReader, StorageChangeSetReader, StorageReader,
     },
+    storage::StateProviderBox,
     trie::{updates::TrieUpdates, HashedPostState},
     EthPrimitives, TransactionSigned,
 };
@@ -35,6 +36,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives};
 use reth_qmdb::{
     genesis_hashed_state, QmdbBlock, QmdbConfig, QmdbStage, QmdbState, QmdbStateProviderFactory,
+    QmdbStateRootProvider,
 };
 use reth_stages::{StageId, StageSetBuilder};
 use reth_trie_db::ChangesetCache;
@@ -292,6 +294,7 @@ where
 
 fn main() {
     let qmdb = QmdbStateLoader::default();
+    let testing_qmdb = qmdb.clone();
 
     Cli::parse_args()
         .run(async move |builder, _| {
@@ -300,12 +303,22 @@ fn main() {
                 .with_components(
                     EthereumNode::components().payload(QmdbPayloadBuilder::new(qmdb.clone())),
                 )
-                .with_add_ons(EthereumAddOns::default().with_engine_validator(
-                    QmdbEngineValidatorBuilder::new(
-                        EthereumEngineValidatorBuilder::default(),
-                        qmdb,
-                    ),
-                ))
+                .with_add_ons(
+                    EthereumAddOns::default()
+                        .with_testing_state_provider(Arc::new(move |provider| {
+                            let qmdb = testing_qmdb.state.get().cloned().ok_or_else(|| {
+                                ProviderError::other(std::io::Error::other(
+                                    "QMDb state is not initialized",
+                                ))
+                            })?;
+                            Ok(Box::new(QmdbStateRootProvider::new(provider, qmdb))
+                                as StateProviderBox)
+                        }))
+                        .with_engine_validator(QmdbEngineValidatorBuilder::new(
+                            EthereumEngineValidatorBuilder::default(),
+                            qmdb,
+                        )),
+                )
                 .launch()
                 .await?;
 
@@ -318,7 +331,10 @@ fn main() {
 mod tests {
     use super::*;
     use alloy_primitives::{Address, B256};
-    use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+    use alloy_rpc_types_engine::{
+        CancunPayloadFields, ExecutionData, ExecutionPayload as RpcExecutionPayload,
+        ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, TestingBuildBlockRequestV1,
+    };
     use reth_chainspec::{ChainSpecBuilder, EthereumHardforks, MAINNET};
     use reth_e2e_test_utils::node::NodeTestContext;
     use reth_node_api::TreeConfig;
@@ -371,18 +387,28 @@ mod tests {
 
         let tree_config =
             TreeConfig::default().with_persistence_threshold(0).with_memory_block_buffer_target(0);
+        let testing_qmdb = qmdb.clone();
         let NodeHandle { node, node_exit_future: _node_exit_future } = NodeBuilder::new(config)
             .testing_node(runtime.clone())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
             .with_components(
                 EthereumNode::components().payload(QmdbPayloadBuilder::new(qmdb.clone())),
             )
-            .with_add_ons(EthereumAddOns::default().with_engine_validator(
-                QmdbEngineValidatorBuilder::new(
-                    EthereumEngineValidatorBuilder::default(),
-                    qmdb.clone(),
-                ),
-            ))
+            .with_add_ons(
+                EthereumAddOns::default()
+                    .with_testing_state_provider(Arc::new(move |provider| {
+                        let qmdb = testing_qmdb.state.get().cloned().ok_or_else(|| {
+                            ProviderError::other(std::io::Error::other(
+                                "QMDb state is not initialized",
+                            ))
+                        })?;
+                        Ok(Box::new(QmdbStateRootProvider::new(provider, qmdb)) as StateProviderBox)
+                    }))
+                    .with_engine_validator(QmdbEngineValidatorBuilder::new(
+                        EthereumEngineValidatorBuilder::default(),
+                        qmdb.clone(),
+                    )),
+            )
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
                     builder.task_executor().clone(),
@@ -397,7 +423,32 @@ mod tests {
         let genesis = node.block_hash(0);
         node.update_forkchoice(genesis, genesis).await?;
 
-        for _ in 0..blocks.saturating_sub(1) {
+        let built = node
+            .testing_build_block_v1(TestingBuildBlockRequestV1 {
+                parent_block_hash: genesis,
+                payload_attributes: test_payload_attributes(1),
+                transactions: vec![],
+                extra_data: None,
+            })
+            .await?;
+        let testing_block_hash = built.execution_payload.payload_inner.payload_inner.block_hash;
+        let versioned_hashes = built.blobs_bundle.versioned_hashes();
+        let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
+            parent_beacon_block_root: B256::ZERO,
+            versioned_hashes,
+        });
+        node.inner
+            .add_ons_handle
+            .beacon_engine_handle
+            .new_payload(ExecutionData {
+                payload: RpcExecutionPayload::V3(built.execution_payload),
+                sidecar,
+            })
+            .await?;
+        update_forkchoice(&node, genesis, testing_block_hash).await?;
+        wait_for_head(&node, 1, testing_block_hash).await?;
+
+        for _ in 1..blocks.saturating_sub(1) {
             node.advance_block().await?;
         }
 
