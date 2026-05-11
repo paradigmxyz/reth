@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
+use revm_database::state::bal::Bal as RevmBal;
 
 /// Raw BAL RLP bytes sealed by the BAL hash.
 pub type SealedBal = Sealed<Bytes>;
@@ -84,6 +85,21 @@ pub trait BalStore: Send + Sync + 'static {
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
+    }
+
+    /// Fetches the BAL for the given block hash in revm representation.
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
+        self.get_decoded_by_hash(block_hash)?
+            .map(|decoded| {
+                decoded.try_map(|bal| {
+                    RevmBal::try_from(Vec::from(bal))
+                        .map_err(reth_storage_errors::provider::ProviderError::other)
+                })
+            })
+            .transpose()
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -214,6 +230,15 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
         self.inner.get_decoded_by_hash(block_hash)
+    }
+
+    /// Fetches the BAL for the given block hash in revm representation.
+    #[inline]
+    pub fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
+        self.inner.revm_bal_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -367,6 +392,11 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+
+        let revm_bal = store.revm_bal_by_hash(hash).unwrap().unwrap();
+
+        assert_eq!(revm_bal.as_raw(), &raw_bal);
+        assert!(revm_bal.as_bal().accounts.is_empty());
     }
 
     #[test]
