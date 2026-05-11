@@ -334,6 +334,11 @@ where
         inner.ctx = prev_segment.ctx.clone();
         let spec = inner.spec.clone();
         let receipt_builder = inner.receipt_builder;
+
+        if let Some(bumper) = self.bal_index_bumper {
+            bumper(inner.evm_mut().db_mut());
+        }
+
         let (mut evm, result) = inner.finish()?;
 
         // Renumbering: bump bal_index so the new segment's
@@ -396,13 +401,6 @@ where
         // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788)
         // at bal_index K+1.
         self.inner_mut().apply_pre_execution_changes()?;
-
-        // Renumbering: bump bal_index so the upcoming `inner.commit_transaction`
-        // for tx 0 of this segment lands at K+2 (visible to its worker via
-        // strict less-than reads of K+2, which include both K and K+1).
-        if let Some(bumper) = self.bal_index_bumper {
-            bumper(self.inner_mut().evm_mut().db_mut());
-        }
 
         trace!(target: "engine::bb::evm", "Started segment {seg_idx}");
 
