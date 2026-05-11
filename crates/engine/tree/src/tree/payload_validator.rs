@@ -49,10 +49,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{
-    bal::{Bal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
-};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -63,9 +60,7 @@ use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptR
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
-use reth_consensus::{
-    validate_block_access_list_gas, ConsensusError, FullConsensus, ReceiptRootBloom,
-};
+use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -944,16 +939,17 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        if let Some(bal_opt) = input.block_access_list() {
-            let bal = bal_opt.map_err(BlockExecutionError::other)?;
-            validate_block_access_list_gas(Some(&bal), input.gas_limit())
+        if let Some(decoded_bal) = &env.decoded_bal {
+            decoded_bal
+                .as_bal()
+                .validate_gas_limit(input.gas_limit())
                 .map_err(|e| {
                     debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
-                    InsertBlockErrorKind::Consensus(e)
+                    InsertBlockErrorKind::Consensus(ConsensusError::from(e))
                 })?
         }
 
-        let has_bal = input.block_access_list().is_some();
+        let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -2288,16 +2284,6 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
-        }
-    }
-
-    /// Returns the block access list embedded in a payload, if present.
-    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        match self {
-            Self::Payload(payload) => payload.block_access_list().map(|block_access_list| {
-                alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
-            }),
-            Self::Block(_) => None,
         }
     }
 
