@@ -712,7 +712,8 @@ where
                 "Seeking hashed cursor to meet lower bound",
             );
 
-            let lower_key = B256::right_padding_from(&lower_bound.pack());
+            let mut lower_key = B256::ZERO;
+            lower_bound.pack_to(lower_key.as_mut_slice());
             *hashed_cursor_current =
                 self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
         }
