@@ -14,7 +14,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
     PraguePayloadFields,
 };
-use reth_engine_primitives::BigBlockData;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
@@ -315,7 +314,8 @@ impl From<EthBuiltPayload> for ExecutionData {
     }
 }
 
-impl From<EthBuiltPayload> for BigBlockData<ExecutionData> {
+#[cfg(feature = "std")]
+impl From<EthBuiltPayload> for reth_engine_primitives::BigBlockData<ExecutionData> {
     fn from(_value: EthBuiltPayload) -> Self {
         unreachable!("payload building is not supported for big blocks");
     }
