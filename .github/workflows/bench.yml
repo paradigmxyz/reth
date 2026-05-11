@@ -1280,6 +1280,7 @@ jobs:
             git init "${TMP_DIR}"
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
+          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
 
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
@@ -1290,8 +1291,7 @@ jobs:
             rm -rf "${TMP_DIR}"
             exit 0
           fi
-          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
+          git -C "${TMP_DIR}" commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
 
           for attempt in 1 2 3 4 5; do
             if git -C "${TMP_DIR}" push origin HEAD:main; then

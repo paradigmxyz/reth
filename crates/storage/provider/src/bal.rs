@@ -51,9 +51,17 @@ pub struct BalConfig {
 }
 
 impl BalConfig {
+    /// Default block distance for BALs kept in memory.
+    pub const DEFAULT_IN_MEMORY_RETENTION_DISTANCE: u64 = BAL_RETENTION_PERIOD_SLOTS;
+
     /// Returns a config with no in-memory BAL retention limit.
     pub const fn unbounded() -> Self {
         Self { in_memory_retention: None }
+    }
+
+    /// Returns a config that keeps BALs within the given block distance in memory.
+    pub const fn with_in_memory_retention_distance(blocks: u64) -> Self {
+        Self::with_in_memory_retention(PruneMode::Distance(blocks))
     }
 
     /// Returns a config with the given in-memory BAL retention policy.
@@ -64,7 +72,7 @@ impl BalConfig {
 
 impl Default for BalConfig {
     fn default() -> Self {
-        Self::with_in_memory_retention(PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS))
+        Self::with_in_memory_retention_distance(Self::DEFAULT_IN_MEMORY_RETENTION_DISTANCE)
     }
 }
 
@@ -378,6 +386,26 @@ mod tests {
             vec![Some(old_bal), Some(tip_bal)]
         );
         assert_eq!(store.prune(BAL_RETENTION_PERIOD_SLOTS + 2).unwrap(), 0);
+    }
+
+    #[test]
+    fn in_memory_retention_distance_prunes_old_bals() {
+        let store = InMemoryBalStore::new(BalConfig::with_in_memory_retention_distance(2));
+        let old_hash = B256::random();
+        let retained_hash = B256::random();
+        let tip_hash = B256::random();
+        let old_bal = Bytes::from_static(b"old");
+        let retained_bal = Bytes::from_static(b"retained");
+        let tip_bal = Bytes::from_static(b"tip");
+
+        store.insert(NumHash::new(1, old_hash), sealed_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(2, retained_hash), sealed_bal(retained_bal.clone())).unwrap();
+        store.insert(NumHash::new(4, tip_hash), sealed_bal(tip_bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[old_hash, retained_hash, tip_hash]).unwrap(),
+            vec![None, Some(retained_bal), Some(tip_bal)]
+        );
     }
 
     #[test]
