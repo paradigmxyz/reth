@@ -10,7 +10,8 @@
 # Optional env: BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
-#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ
+#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_SAMPLY_SHUTDOWN_TIMEOUT
 set -euxo pipefail
 
 LABEL="$1"
@@ -21,6 +22,7 @@ mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+SAMPLY_SHUTDOWN_TIMEOUT="${BENCH_SAMPLY_SHUTDOWN_TIMEOUT:-300}"
 
 # Unsupported txgen-path behavior is made explicit here. Keep these checks near
 # the top so new txgen support can be added one feature at a time.
@@ -54,14 +56,17 @@ cleanup() {
   if sudo systemctl is-active "$RETH_SCOPE" >/dev/null 2>&1; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
       sudo pkill -INT -x reth 2>/dev/null || true
-      for i in $(seq 1 120); do
+      for i in $(seq 1 "$SAMPLY_SHUTDOWN_TIMEOUT"); do
         sudo pgrep -x samply > /dev/null 2>&1 || break
         if [ $((i % 10)) -eq 0 ]; then
           echo "Waiting for samply to finish writing profile... (${i}s)"
         fi
         sleep 1
       done
-      sudo pkill -x samply 2>/dev/null || true
+      if sudo pgrep -x samply > /dev/null 2>&1; then
+        echo "Samply still running after ${SAMPLY_SHUTDOWN_TIMEOUT}s, sending SIGTERM..."
+        sudo pkill -x samply 2>/dev/null || true
+      fi
     fi
     sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
     sleep 1

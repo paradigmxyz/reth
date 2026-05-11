@@ -11,6 +11,7 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_SAMPLY_SHUTDOWN_TIMEOUT (seconds to wait for samply to flush, default 300)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 #               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
@@ -28,6 +29,7 @@ mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+SAMPLY_SHUTDOWN_TIMEOUT="${BENCH_SAMPLY_SHUTDOWN_TIMEOUT:-300}"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
@@ -56,7 +58,7 @@ cleanup() {
       # capture reth's exit and save the profile.
       sudo pkill -INT -x reth 2>/dev/null || true
       # Wait for samply to finish writing the profile and exit
-      for i in $(seq 1 120); do
+      for i in $(seq 1 "$SAMPLY_SHUTDOWN_TIMEOUT"); do
         sudo pgrep -x samply > /dev/null 2>&1 || break
         if [ $((i % 10)) -eq 0 ]; then
           echo "Waiting for samply to finish writing profile... (${i}s)"
@@ -64,7 +66,7 @@ cleanup() {
         sleep 1
       done
       if sudo pgrep -x samply > /dev/null 2>&1; then
-        echo "Samply still running after 120s, sending SIGTERM..."
+        echo "Samply still running after ${SAMPLY_SHUTDOWN_TIMEOUT}s, sending SIGTERM..."
         sudo pkill -x samply 2>/dev/null || true
       fi
     fi
