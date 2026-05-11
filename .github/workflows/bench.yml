@@ -976,6 +976,11 @@ jobs:
           done
           # Stop noisy background services
           sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+          # Keep host background work on the housekeeping core. The reth process
+          # is placed in reth-bench.slice and constrained by the run scripts.
+          sudo systemctl set-property --runtime system.slice AllowedCPUs=0
+          sudo systemctl set-property --runtime user.slice AllowedCPUs=0
+          sudo systemctl set-property --runtime machine.slice AllowedCPUs=0
           # Log environment for reproducibility
           echo "=== Benchmark environment ==="
           uname -r
@@ -1508,6 +1513,9 @@ jobs:
       - name: Restore system settings
         if: always()
         run: |
+          sudo systemctl set-property --runtime system.slice AllowedCPUs= 2>/dev/null || true
+          sudo systemctl set-property --runtime user.slice AllowedCPUs= 2>/dev/null || true
+          sudo systemctl set-property --runtime machine.slice AllowedCPUs= 2>/dev/null || true
           # Restore frequency scaling to full range
           for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
             cat "$(dirname "$f")/cpuinfo_min_freq" | sudo tee "$f" > /dev/null 2>&1 || true
