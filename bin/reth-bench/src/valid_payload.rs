@@ -356,9 +356,9 @@ struct RethPayloadStatus {
     #[serde(default)]
     persistence_wait_us: u64,
     #[serde(default)]
-    execution_cache_wait_us: u64,
+    execution_cache_wait_us: Option<u64>,
     #[serde(default)]
-    sparse_trie_wait_us: u64,
+    sparse_trie_wait_us: Option<u64>,
 }
 
 /// Server-side timing breakdown from `reth_newPayload` endpoint.
@@ -369,9 +369,9 @@ pub(crate) struct NewPayloadTimingBreakdown {
     /// Time spent waiting on persistence (backpressure + explicit wait).
     pub(crate) persistence_wait: Duration,
     /// Time spent waiting for execution cache lock.
-    pub(crate) execution_cache_wait: Duration,
+    pub(crate) execution_cache_wait: Option<Duration>,
     /// Time spent waiting for sparse trie lock.
-    pub(crate) sparse_trie_wait: Duration,
+    pub(crate) sparse_trie_wait: Option<Duration>,
 }
 
 /// Calls either `engine_newPayload*` or `reth_newPayload` depending on whether
@@ -416,8 +416,8 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
     Ok(Some(NewPayloadTimingBreakdown {
         latency: Duration::from_micros(resp.latency_us),
         persistence_wait: Duration::from_micros(resp.persistence_wait_us),
-        execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
-        sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
+        execution_cache_wait: resp.execution_cache_wait_us.map(Duration::from_micros),
+        sparse_trie_wait: resp.sparse_trie_wait_us.map(Duration::from_micros),
     }))
 }
 
@@ -490,5 +490,26 @@ pub(crate) async fn call_forkchoice_updated_with_reth<
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn preserves_absent_optional_cache_wait_fields() {
+        let resp: RethPayloadStatus = serde_json::from_value(serde_json::json!({
+            "status": "VALID",
+            "latestValidHash": B256::ZERO,
+            "validationError": null,
+            "latency_us": 7,
+            "persistence_wait_us": 3
+        }))
+        .unwrap();
+
+        assert_eq!(resp.execution_cache_wait_us, None);
+        assert_eq!(resp.sparse_trie_wait_us, None);
     }
 }

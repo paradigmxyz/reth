@@ -75,3 +75,31 @@ pub trait RethEngineApi<ExecutionData> {
         forkchoice_state: ForkchoiceState,
     ) -> RpcResult<ForkchoiceUpdated>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn serializes_absent_and_zero_cache_waits_differently() {
+        let status = serde_json::from_value(serde_json::json!({
+            "status": "VALID",
+            "latestValidHash": B256::ZERO,
+            "validationError": null
+        }))
+        .unwrap();
+        let payload_status = RethPayloadStatus {
+            status,
+            latency_us: 1,
+            persistence_wait_us: 0,
+            execution_cache_wait_us: None,
+            sparse_trie_wait_us: Some(0),
+        };
+
+        let value = serde_json::to_value(payload_status).unwrap();
+        let object = value.as_object().unwrap();
+        assert!(!object.contains_key("execution_cache_wait_us"));
+        assert_eq!(object.get("sparse_trie_wait_us").unwrap().as_u64(), Some(0));
+    }
+}
