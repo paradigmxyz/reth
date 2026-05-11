@@ -48,7 +48,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
     evm_config: &'a Evm,
     make_db: &'a MakeDb,
-    received_bal: Arc<DecodedBal>,
+    input_bal: Arc<DecodedBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
@@ -71,7 +71,7 @@ where
             scope,
             evm_config,
             make_db,
-            received_bal,
+            input_bal,
             evm_env,
             ctx,
             transaction_count,
@@ -87,7 +87,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
-    received_bal: Arc<DecodedBal>,
+    input_bal: Arc<DecodedBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
@@ -103,8 +103,8 @@ where
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
-    let bal = received_bal.as_bal();
-    let received_bal_revm: Arc<RevmBal> = Arc::new(
+    let bal = input_bal.as_bal();
+    let input_bal_revm: Arc<RevmBal> = Arc::new(
         RevmBal::try_from(Vec::<_>::from(bal.clone()))
             .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
     );
@@ -129,7 +129,7 @@ where
                 result_tx.clone(),
                 evm_config,
                 make_db,
-                Arc::clone(&received_bal_revm),
+                Arc::clone(&input_bal_revm),
                 evm_env.clone(),
                 ctx.clone(),
             );
@@ -144,6 +144,10 @@ where
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
+        // `DecodedBal::hash` is lazy-cached. Compute the hash after workers are spawned and before
+        // waiting on ordered results, so the callsite can read the header commitment hash once
+        // execution finishes without adding serial work after the BAL equality check.
+        let _ = input_bal.hash();
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
@@ -170,7 +174,7 @@ where
         (block_result, senders)
     };
 
-    validate_bal(&mut canonical_state, bal)?;
+    validate_bal(&mut canonical_state, input_bal.as_ref())?;
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -202,29 +206,34 @@ where
     Ok(())
 }
 
-fn validate_bal<DB>(
+/// Validates that execution rebuilt the same BAL that was provided with the payload.
+///
+/// This consumes the BAL built by `canonical_state` and compares it against the decoded input
+/// BAL before post-execution validation relies on `DecodedBal::hash()` as the header commitment.
+pub(crate) fn validate_bal<DB>(
     canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
+    input_bal: &DecodedBal,
 ) -> Result<(), BalExecutionError>
 where
     DB: Database,
 {
     let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if composed_alloy == received_bal.as_ref() {
+    let input_bal_entries = input_bal.as_bal();
+    if composed_alloy == input_bal_entries.as_slice() {
         return Ok(());
     }
     let rebuilt = compute_block_access_list_hash(&composed_alloy);
-    let header_bal_hash = compute_block_access_list_hash(received_bal);
+    let expected_bal_hash = input_bal.hash();
 
     if tracing::enabled!(
         target: "engine::tree::payload_processor::bal",
         tracing::Level::DEBUG
     ) {
-        let div = received_bal.diff(&composed_alloy);
+        let div = input_bal_entries.diff(&composed_alloy);
         tracing::debug!(
             target: "engine::tree::payload_processor::bal",
             %rebuilt,
-            expected = %header_bal_hash,
+            expected = %expected_bal_hash,
             %div,
             "first BAL divergence",
         );
@@ -232,7 +241,7 @@ where
 
     Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
         rebuilt,
-        expected: header_bal_hash,
+        expected: expected_bal_hash,
     }))
 }
 
@@ -423,10 +432,10 @@ mod tests {
         //      pass (A, B, D, F).
         let evm_config = EthEvmConfig::mainnet();
 
-        let received_bal = reference_bal_for_empty_block(&evm_config);
-        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&received_bal);
+        let input_bal = reference_bal_for_empty_block(&evm_config);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&input_bal);
         // Sanity: reference BAL is non-empty (system calls populated it).
-        assert!(!received_bal.is_empty(), "empty BAL means system calls didn't record state");
+        assert!(!input_bal.is_empty(), "empty BAL means system calls didn't record state");
 
         let block = empty_amsterdam_block(bal_hash);
 
@@ -434,7 +443,7 @@ mod tests {
             &Runtime::test(),
             evm_config,
             db_factory(system_contracts_db()),
-            to_arc_decoded(received_bal),
+            to_arc_decoded(input_bal),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
         );
@@ -465,7 +474,7 @@ mod tests {
         runtime: &Runtime,
         evm_config: EthEvmConfig,
         make_db: MakeDb,
-        received_bal: Arc<DecodedBal>,
+        input_bal: Arc<DecodedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
     ) -> Result<BlockExecutionOutput<EthereumReceipt>, BalExecutionError>
@@ -482,7 +491,7 @@ mod tests {
             runtime,
             &evm_config,
             &make_db,
-            received_bal,
+            input_bal,
             evm_env,
             execution_ctx,
             transaction_count,
