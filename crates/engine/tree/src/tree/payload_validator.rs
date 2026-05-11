@@ -195,6 +195,8 @@ where
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
+    /// Custom state root computation function.
+    custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -250,7 +252,14 @@ where
             validator,
             changeset_cache,
             runtime,
+            custom_state_root: None,
         }
+    }
+
+    /// Sets a custom state root computation handler.
+    pub fn with_custom_state_root(mut self, custom_state_root: CustomStateRoot<N>) -> Self {
+        self.custom_state_root = Some(custom_state_root);
+        self
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -538,7 +547,7 @@ where
             txs,
             provider_builder.clone(),
             overlay_factory.clone(),
-            strategy,
+            &strategy,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -764,6 +773,23 @@ where
                 }
             }
             StateRootStrategy::Synchronous => {}
+            StateRootStrategy::Custom(custom) => {
+                let result = custom(CustomStateRootInput {
+                    block: &block,
+                    parent_block: &parent_block,
+                    output: &output,
+                    hashed_state: &hashed_state,
+                });
+                match result {
+                    Ok((state_root, trie_updates)) => {
+                        maybe_state_root =
+                            Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
+                    }
+                    Err(error) => {
+                        debug!(target: "engine::tree::payload_validator", %error, "Custom state root computation failed");
+                    }
+                }
+            }
         }
 
         // Determine the state root.
@@ -1601,7 +1627,7 @@ where
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        strategy: StateRootStrategy,
+        strategy: &StateRootStrategy<N>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1631,7 +1657,9 @@ where
 
                 Ok(handle)
             }
-            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
+            StateRootStrategy::Parallel |
+            StateRootStrategy::Synchronous |
+            StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -1682,8 +1710,10 @@ where
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
-    const fn plan_state_root_computation(&self) -> StateRootStrategy {
-        if self.config.state_root_fallback() {
+    fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
+        if let Some(custom_state_root) = &self.custom_state_root {
+            StateRootStrategy::Custom(custom_state_root.clone())
+        } else if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
@@ -2024,14 +2054,16 @@ where
 }
 
 /// Strategy describing how to compute the state root.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StateRootStrategy {
+#[derive(derive_more::Debug, Clone)]
+enum StateRootStrategy<N: NodePrimitives> {
     /// Use the state root task (background sparse trie computation).
     StateRootTask,
     /// Run the parallel state root computation on the calling thread.
     Parallel,
     /// Fall back to synchronous computation via the state provider.
     Synchronous,
+    /// Custom state root computation strategy.
+    Custom(#[debug(skip)] CustomStateRoot<N>),
 }
 
 /// Type that validates the payloads processed by the engine.
@@ -2341,3 +2373,24 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 }
+
+/// Input for [`CustomStateRoot`].
+#[derive(Debug, Clone)]
+pub struct CustomStateRootInput<'a, N: NodePrimitives> {
+    /// The block being validated.
+    pub block: &'a SealedBlock<N::Block>,
+    /// The parent block.
+    pub parent_block: &'a SealedHeader<N::BlockHeader>,
+    /// The execution output.
+    pub output: &'a BlockExecutionOutput<N::Receipt>,
+    /// The hashed state.
+    pub hashed_state: &'a LazyHashedPostState,
+}
+
+/// A custom state root computation handler.
+pub type CustomStateRoot<N> = Arc<
+    dyn Fn(CustomStateRootInput<'_, N>) -> ProviderResult<(B256, TrieUpdates)>
+        + Send
+        + Sync
+        + 'static,
+>;
