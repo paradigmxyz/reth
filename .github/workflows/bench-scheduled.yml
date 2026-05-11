@@ -272,8 +272,12 @@ jobs:
       BENCH_ABBA: "true"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
+      BENCH_DRIVER: txgen
+      BENCH_NODE_BIN: reth
+      BENCH_DRIVER_REASON: ""
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
       BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
@@ -404,14 +408,26 @@ jobs:
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
+          TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
+          DEREK_PAT: ${{ secrets.DEREK_PAT }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
 
-          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "$BASELINE_REF" &
+          if [ "$BENCH_DRIVER" = "txgen" ]; then
+            .github/scripts/bench-txgen-install.sh
+            BUILD_SCRIPT=.github/scripts/bench-txgen-build.sh
+          else
+            BUILD_SCRIPT=.github/scripts/bench-reth-build.sh
+          fi
+
+          "$BUILD_SCRIPT" baseline "${BASELINE_DIR}" "$BASELINE_REF" &
           PID_BASELINE=$!
-          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "$FEATURE_REF" &
+          "$BUILD_SCRIPT" feature "${FEATURE_DIR}" "$FEATURE_REF" &
           PID_FEATURE=$!
 
           FAIL=0
@@ -425,7 +441,7 @@ jobs:
       - name: Sync snapshot
         id: snapshot-check
         run: |
-          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/reth" \
+          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
             .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
@@ -501,7 +517,11 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
+          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
+          if [ "$BENCH_DRIVER" = "txgen" ]; then
+            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
+          fi
+          taskset -c 0 "$RUN_SCRIPT" baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
 
       - name: "Run benchmark: feature (1/2)"
         id: run-feature-1
@@ -509,7 +529,11 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
+          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
+          if [ "$BENCH_DRIVER" = "txgen" ]; then
+            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
+          fi
+          taskset -c 0 "$RUN_SCRIPT" feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
 
       - name: "Run benchmark: feature (2/2)"
         id: run-feature-2
@@ -517,7 +541,11 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
+          if [ "$BENCH_DRIVER" = "txgen" ]; then
+            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
+          fi
+          taskset -c 0 "$RUN_SCRIPT" feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
 
       - name: "Run benchmark: baseline (2/2)"
         id: run-baseline-2
@@ -527,7 +555,11 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
+          if [ "$BENCH_DRIVER" = "txgen" ]; then
+            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
+          fi
+          taskset -c 0 "$RUN_SCRIPT" baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
 
       - name: Stop metrics proxy & generate Grafana URL
         id: metrics
@@ -601,6 +633,12 @@ jobs:
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          if [ -n "${BENCH_DRIVER:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --driver $BENCH_DRIVER"
+          fi
+          if [ -n "${BENCH_DRIVER_REASON:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --driver-reason $BENCH_DRIVER_REASON"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
