@@ -631,7 +631,7 @@ jobs:
       BENCH_DRIVER_REASON: ${{ needs.reth-bench-ack.outputs.driver-reason }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
+      TXGEN_REV: 15c7070e645cc66c7f88b492ac73fe683c73fdd4
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
     steps:
