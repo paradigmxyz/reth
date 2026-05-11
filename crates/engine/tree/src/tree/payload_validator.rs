@@ -774,21 +774,13 @@ where
             }
             StateRootStrategy::Synchronous => {}
             StateRootStrategy::Custom(custom) => {
-                let result = custom(CustomStateRootInput {
+                let (state_root, trie_updates) = custom(CustomStateRootInput {
                     block: &block,
                     parent_block: &parent_block,
                     output: &output,
                     hashed_state: &hashed_state,
-                });
-                match result {
-                    Ok((state_root, trie_updates)) => {
-                        maybe_state_root =
-                            Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
-                    }
-                    Err(error) => {
-                        debug!(target: "engine::tree::payload_validator", %error, "Custom state root computation failed");
-                    }
-                }
+                })?;
+                maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
             }
         }
 
