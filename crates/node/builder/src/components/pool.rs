@@ -173,7 +173,7 @@ where
         >,
     >
     where
-        BS: BlobStore,
+        BS: BlobStore + Clone,
     {
         self.build_with_ordering_and_spawn_maintenance_task(
             CoinbaseTipOrdering::default(),
