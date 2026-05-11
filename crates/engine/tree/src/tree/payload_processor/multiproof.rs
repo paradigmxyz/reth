@@ -12,6 +12,9 @@ pub use reth_trie_parallel::state_root_task::{
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
+/// Avoid splitting light proof batches into tiny chunks just because several workers are idle.
+const MIN_CHUNKS_FOR_IDLE_WORKER_CHUNKING: usize = 4;
+
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
@@ -68,11 +71,13 @@ pub(crate) fn dispatch_with_chunking<T, I>(
 ) where
     I: IntoIterator<Item = T>,
 {
+    let enough_targets_for_idle_workers =
+        chunking_len >= chunk_size.saturating_mul(MIN_CHUNKS_FOR_IDLE_WORKER_CHUNKING);
     let should_chunk = chunking_len > max_targets_for_chunking ||
-        has_multiple_idle_account_workers ||
-        has_multiple_idle_storage_workers;
+        (enough_targets_for_idle_workers &&
+            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
 
-    if should_chunk && chunking_len > chunk_size {
+    if should_chunk && chunk_size > 0 && chunking_len > chunk_size {
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);
         }
