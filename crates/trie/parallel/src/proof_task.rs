@@ -590,6 +590,7 @@ impl ProofWorkerHandle {
                 let _ = result_tx.send(ProofResultMessage {
                     result: Err(ParallelStateRootError::Provider(error.clone())),
                     elapsed: start.elapsed(),
+                    stats: ProofResultStats::default(),
                     state,
                 });
 
@@ -707,8 +708,25 @@ pub struct ProofResultMessage {
     pub result: Result<DecodedMultiProofV2, ParallelStateRootError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
+    /// Proof target and timing stats for observability.
+    pub stats: ProofResultStats,
     /// Original state update that triggered this proof
     pub state: HashedPostState,
+}
+
+/// Summary stats for a completed account multiproof job.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProofResultStats {
+    /// Number of account proof targets in the job.
+    pub account_targets: usize,
+    /// Number of storage proof targets in the job.
+    pub storage_targets: usize,
+    /// Number of storage proof jobs dispatched by the account worker.
+    pub storage_jobs: usize,
+    /// Time spent computing the account multiproof on the worker.
+    pub proof_elapsed: Duration,
+    /// Time the account worker spent waiting for storage proofs.
+    pub storage_wait_time: Duration,
 }
 
 /// Context for sending proof calculation results back to `SparseTrieCacheTask`.
@@ -1240,6 +1258,9 @@ where
         let proof_start = Instant::now();
 
         let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let account_targets = targets.account_targets.len();
+        let storage_jobs = targets.storage_targets.len();
+        let storage_targets = targets.storage_targets.values().map(Vec::len).sum();
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
@@ -1255,9 +1276,19 @@ where
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
+        let stats = ProofResultStats {
+            account_targets,
+            storage_targets,
+            storage_jobs,
+            proof_elapsed,
+            storage_wait_time: value_encoder_stats.storage_wait_time,
+        };
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx
+            .send(ProofResultMessage { result, elapsed: total_elapsed, stats, state })
+            .is_err()
+        {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
@@ -1270,6 +1301,10 @@ where
             target: "trie::proof_task",
             proof_time_us = proof_elapsed.as_micros(),
             total_elapsed_us = total_elapsed.as_micros(),
+            storage_wait_time_us = stats.storage_wait_time.as_micros(),
+            account_targets = stats.account_targets,
+            storage_targets = stats.storage_targets,
+            storage_jobs = stats.storage_jobs,
             total_processed = account_proofs_processed,
             "Account multiproof completed"
         );
