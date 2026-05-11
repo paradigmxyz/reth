@@ -569,18 +569,17 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
-            let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
-            let built_bal = Some(decoded_bal.as_bal().clone().into());
+            let built_bal = Some(
+                env.decoded_bal
+                    .as_ref()
+                    .expect("eligibility implies BAL is present")
+                    .as_bal()
+                    .clone()
+                    .into(),
+            );
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
-            match self.execute_block_bal(
-                state_provider,
-                env,
-                &input,
-                &handle,
-                decoded_bal,
-                provider_builder,
-            ) {
+            match self.execute_block_bal(state_provider, env, &input, &handle, provider_builder) {
                 Ok((output, senders, receipt_root_rx)) => {
                     (output, senders, receipt_root_rx, built_bal)
                 }
@@ -1072,7 +1071,6 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
-        decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
@@ -1096,6 +1094,9 @@ where
         let saved_cache = SavedCache::new(env.parent_hash, cache);
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
+        let decoded_bal = env.decoded_bal.ok_or_else(|| {
+            InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
+        })?;
 
         let make_db = move || {
             let provider = provider_builder
