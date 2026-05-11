@@ -8,9 +8,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadFieldV2,
+    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    PraguePayloadFields,
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::BuiltPayload;
@@ -57,6 +59,11 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
 
     /// Returns the built block(sealed)
     pub fn block(&self) -> &SealedBlock<N::Block> {
+        &self.block
+    }
+
+    /// Returns the built block with shared ownership.
+    pub const fn block_arc(&self) -> &Arc<SealedBlock<N::Block>> {
         &self.block
     }
 
@@ -189,6 +196,39 @@ impl EthBuiltPayload {
             execution_requests: requests.unwrap_or_default(),
         })
     }
+
+    /// Converts built payload into [`ExecutionData`].
+    pub fn into_execution_data(self) -> ExecutionData {
+        let Self { block, requests, block_access_list, .. } = self;
+        let block_hash = block.hash();
+        let block = Arc::unwrap_or_clone(block).into_block();
+
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
+            block_hash,
+            &block,
+            block_access_list,
+        );
+
+        let sidecar = if let Some(requests) = requests {
+            block.header.parent_beacon_block_root.map_or(sidecar, |parent_beacon_block_root| {
+                ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        parent_beacon_block_root,
+                        versioned_hashes: block
+                            .body
+                            .blob_versioned_hashes_iter()
+                            .copied()
+                            .collect(),
+                    },
+                    PraguePayloadFields::new(requests),
+                )
+            })
+        } else {
+            sidecar
+        };
+
+        ExecutionData::new(payload, sidecar)
+    }
 }
 
 impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
@@ -200,6 +240,10 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
 
     fn fees(&self) -> U256 {
         self.fees
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.block_access_list.as_ref()
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -261,6 +305,12 @@ impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV6 {
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v6()
+    }
+}
+
+impl From<EthBuiltPayload> for ExecutionData {
+    fn from(value: EthBuiltPayload) -> Self {
+        value.into_execution_data()
     }
 }
 
@@ -348,5 +398,64 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecar>> for BlobSidecars {
 impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars {
     fn from(value: alloc::vec::IntoIter<BlobTransactionSidecarEip7594>) -> Self {
         value.collect::<Vec<_>>().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+    use reth_primitives_traits::Block as _;
+
+    #[test]
+    fn into_execution_data_preserves_requests() {
+        let requests = Requests::from_requests([Bytes::from_static(&[1, 2])]);
+        let parent_beacon_block_root = B256::with_last_byte(1);
+
+        let mut block = reth_ethereum_primitives::Block::default();
+        block.header.parent_beacon_block_root = Some(parent_beacon_block_root);
+        block.header.requests_hash = Some(requests.requests_hash());
+
+        let payload = EthBuiltPayload::new(
+            Arc::new(block.seal_slow()),
+            U256::ZERO,
+            Some(requests.clone()),
+            None,
+        );
+
+        let execution_data: ExecutionData = payload.into();
+
+        assert_eq!(
+            execution_data.sidecar.parent_beacon_block_root(),
+            Some(parent_beacon_block_root)
+        );
+        assert_eq!(execution_data.sidecar.requests(), Some(&requests));
+    }
+
+    #[test]
+    fn into_execution_data_preserves_block_access_list() {
+        let block_access_list = Bytes::from_static(&[0xc0]);
+
+        let mut block = reth_ethereum_primitives::Block::default();
+        block.header.parent_beacon_block_root = Some(B256::ZERO);
+        block.header.block_access_list_hash = Some(B256::ZERO);
+
+        let payload = EthBuiltPayload::new(
+            Arc::new(block.seal_slow()),
+            U256::ZERO,
+            None,
+            Some(block_access_list.clone()),
+        );
+
+        let execution_data: ExecutionData = payload.into();
+
+        assert_eq!(execution_data.payload.block_access_list(), Some(&block_access_list));
+    }
+
+    #[test]
+    fn execution_data_has_infallible_try_from_impl() {
+        fn assert_try_from<T: TryFrom<EthBuiltPayload, Error = core::convert::Infallible>>() {}
+
+        assert_try_from::<ExecutionData>();
     }
 }

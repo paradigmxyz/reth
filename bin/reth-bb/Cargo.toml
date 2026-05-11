@@ -70,7 +70,7 @@ default = [
     "reth-cli-util/jemalloc",
     "asm-keccak",
     "keccak-cache-global",
-    "min-debug-logs",
+    "min-trace-logs",
 ]
 
 jemalloc = [
@@ -100,6 +100,11 @@ min-debug-logs = [
     "tracing/release_max_level_debug",
     "reth-ethereum-cli/min-debug-logs",
     "reth-node-core/min-debug-logs",
+]
+min-trace-logs = [
+    "tracing/release_max_level_trace",
+    "reth-ethereum-cli/min-trace-logs",
+    "reth-node-core/min-trace-logs",
 ]
 
 [[bin]]

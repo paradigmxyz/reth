@@ -30,7 +30,6 @@ use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::primitives::hardfork::SpecId;
 use std::sync::Arc;
-use tracing::debug;
 
 // ---------------------------------------------------------------------------
 // Execution plan types
@@ -55,7 +54,7 @@ pub(crate) struct BigBlockSegment {
 ///
 /// Wraps [`EthEvmConfig`] and a shared [`BigBlockMap`]. When a big-block
 /// payload is received, the plan is staged on the [`BbBlockExecutorFactory`]
-/// and cloned when executors are created. Block hashes for inter-segment
+/// and consumed when the executor is created. Block hashes for inter-segment
 /// BLOCKHASH resolution are reseeded into `State::block_hashes` at each
 /// segment boundary via a [`BlockHashSeeder`](crate::evm::BlockHashSeeder)
 /// callback injected in [`ConfigureEvm::create_executor`].
@@ -106,8 +105,34 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
     }
 }
 
+/// Reads the BAL index from a `&mut State<DB>`.
+///
+/// Used as a [`BalIndexReader`] callback so the
+/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
+/// starting segment without a trait bound on `DB`.
 fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
     state.bal_state.bal_index()
+}
+
+/// Bumps the BAL index on a `&mut State<DB>`.
+///
+/// Used as a [`BalIndexBumper`](crate::evm::BalIndexBumper) callback so the
+/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can advance
+/// `bal_index` between sub-events of a segment boundary (post-N's `finish()`
+/// and pre-N+1's `apply_pre_execution_changes()`) without a trait bound on
+/// `DB`.
+fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
+    state.bump_bal_index();
+}
+
+/// Sets the BAL index on a `&mut State<DB>`.
+///
+/// Used as a [`BalIndexSetter`](crate::evm::BalIndexSetter) callback so
+/// [`BbBlockExecutor::initialize`](crate::evm::BbBlockExecutor) can renumber
+/// a worker's incoming `bal_index = i + 1` into the boundary-padded space
+/// `i + 1 + 2*k` (where `k` is the worker's segment index).
+fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
+    state.set_bal_index(index);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,19 +169,6 @@ where
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(
-        &self,
-        block: &'a SealedBlock<reth_ethereum_primitives::Block>,
-    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
-        if let Some(plan) = self.plan_for_payload_hash(&block.hash()) {
-            self.executor_factory.stage_plan(plan);
-        } else {
-            self.executor_factory.clear_staged_plan();
-        }
-
-        self.inner.context_for_block(block)
-    }
-
     fn context_for_next_block(
         &self,
         parent: &SealedHeader,
@@ -183,13 +195,32 @@ where
             Some(read_bal_index::<DB>);
 
         // Inject concrete function pointers that know the `State<DB>` type so
-        // the generic executor can reseed block hashes and read `bal_index`.
+        // the generic executor can manipulate `bal_index` and reseed block
+        // hashes without a trait bound on `DB`.
         self.executor_factory.create_executor_with_seeder(
             evm,
             ctx,
             Some(seed_state_block_hashes::<DB>),
             bal_index_reader,
+            Some(bump_bal_index::<DB>),
+            Some(set_bal_index::<DB>),
         )
+    }
+
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<reth_ethereum_primitives::Block>,
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
+        // Refresh the staged plan based on this block's hash so subsequent
+        // `create_executor` calls - both canonical and parallel BAL workers -
+        // see the right plan. Cleared explicitly when this block isn't a
+        // big-block payload, so a stale plan from a prior big block doesn't
+        // leak into a regular block.
+        match self.plan_for_payload_hash(&block.hash()) {
+            Some(plan) => self.executor_factory.stage_plan(plan),
+            None => self.executor_factory.clear_staged_plan(),
+        }
+        self.inner.context_for_block(block)
     }
 }
 
@@ -203,16 +234,15 @@ where
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         let payload_hash = payload.block_hash();
-        let has_plan = self.pending.lock().unwrap().contains_key(&payload_hash);
+        let first_exec_data = {
+            let pending = self.pending.lock().unwrap();
+            pending
+                .get(&payload_hash)
+                .and_then(|bb_data| bb_data.env_switches.first().map(|(_, data)| data.clone()))
+        };
 
-        if has_plan {
-            // Compute the env from the first segment BEFORE removing the
-            // entry (stage_plan_for_payload removes it).
-            let first_exec_data = {
-                let pending = self.pending.lock().unwrap();
-                let bb_data = pending.get(&payload_hash).unwrap();
-                bb_data.env_switches[0].1.clone()
-            };
+        if let Some(first_exec_data) = first_exec_data {
+            // Compute the env from the first segment before the executor is created.
             let mut env = self.inner.evm_env_for_payload(&first_exec_data)?;
 
             // Disable basefee validation: transactions from different
@@ -220,12 +250,8 @@ where
             // effective basefee.
             env.cfg_env.disable_base_fee = true;
 
-            // Now stage the plan on the factory (removes the entry).
-            self.stage_plan_for_payload(&payload_hash);
-
             Ok(env)
         } else {
-            self.executor_factory.clear_staged_plan();
             self.inner.evm_env_for_payload(payload)
         }
     }
@@ -246,61 +272,49 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Plan construction and staging
+// Plan construction
 // ---------------------------------------------------------------------------
 
 impl<C> BbEvmConfig<C>
 where
     C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
 {
-    /// Takes the big-block plan for a payload hash, builds a [`BbEvmPlan`],
-    /// and stages it on the factory.
-    ///
-    /// Must be called before `evm_with_env` is invoked for this payload.
-    /// In practice, this is called from `evm_env_for_payload` in the
-    /// engine pipeline.
-    pub fn stage_plan_for_payload(&self, payload_hash: &B256) {
-        let Some(plan) = self.plan_for_payload_hash(payload_hash) else { return };
-        self.executor_factory.stage_plan(plan);
+    fn plan_for_payload_hash(&self, payload_hash: &B256) -> Option<BbEvmPlan> {
+        let pending = self.pending.lock().unwrap();
+        self.build_plan(pending.get(payload_hash)?)
     }
 
-    fn plan_for_payload_hash(&self, payload_hash: &B256) -> Option<BbEvmPlan> {
-        let bb = self.pending.lock().unwrap().remove(payload_hash)?;
+    fn build_plan(&self, bb: &BigBlockData<ExecutionData>) -> Option<BbEvmPlan> {
+        if bb.env_switches.is_empty() {
+            return None;
+        }
 
         let segments: Vec<_> = bb
             .env_switches
-            .into_iter()
+            .iter()
             .map(|(start_tx, exec_data)| {
-                let evm_env = self.inner.evm_env_for_payload(&exec_data).unwrap();
-                let ctx = self.inner.context_for_payload(&exec_data).unwrap();
-                let ctx = EthBlockExecutionCtx {
-                    tx_count_hint: ctx.tx_count_hint,
-                    parent_hash: ctx.parent_hash,
-                    parent_beacon_block_root: ctx.parent_beacon_block_root,
-                    ommers: &[],
-                    withdrawals: ctx.withdrawals.map(|w| std::borrow::Cow::Owned(w.into_owned())),
-                    extra_data: ctx.extra_data,
-                    slot_number: ctx.slot_number,
-                };
-                BigBlockSegment { start_tx, evm_env, ctx }
+                let mut evm_env = self.inner.evm_env_for_payload(exec_data).unwrap();
+                evm_env.cfg_env.disable_base_fee = true;
+                let ctx = self.inner.context_for_payload(exec_data).unwrap();
+                BigBlockSegment { start_tx: *start_tx, evm_env, ctx: clone_ctx(&ctx) }
             })
             .collect();
 
-        debug!(
-            target: "engine::bb",
-            ?payload_hash,
-            segments = segments.len(),
-            seed_hashes = bb.prior_block_hashes.len(),
-            "Staging multi-segment plan"
-        );
-
         let mut plan = BbEvmPlan::new(segments);
-
-        // Add prior block hashes to the seeding list.
-        plan.block_hashes_to_seed.extend(bb.prior_block_hashes);
-
+        plan.block_hashes_to_seed.extend(bb.prior_block_hashes.iter().copied());
         plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
-
         Some(plan)
+    }
+}
+
+fn clone_ctx<'a>(ctx: &EthBlockExecutionCtx<'_>) -> EthBlockExecutionCtx<'a> {
+    EthBlockExecutionCtx {
+        tx_count_hint: ctx.tx_count_hint,
+        parent_hash: ctx.parent_hash,
+        parent_beacon_block_root: ctx.parent_beacon_block_root,
+        ommers: &[],
+        withdrawals: ctx.withdrawals.clone().map(|w| std::borrow::Cow::Owned(w.into_owned())),
+        extra_data: ctx.extra_data.clone(),
+        slot_number: ctx.slot_number,
     }
 }

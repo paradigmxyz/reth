@@ -23,6 +23,7 @@ use reth_payload_primitives::BuiltPayload;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_tasks::Runtime;
 use std::{
+    net::{IpAddr, Ipv4Addr},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -416,6 +417,52 @@ async fn test_admin_node_info_uses_discv5_port_when_discv4_is_disabled() -> eyre
     assert_eq!(info.ports.listener, local_record.tcp_port);
     assert_eq!(info.enode, local_record.to_string());
     assert!(info.enode.contains(&format!("?discport={discv5_port}")));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_admin_node_info_discv5_enr_uses_nat_extip_when_discv4_is_disabled() -> eyre::Result<()>
+{
+    reth_tracing::init_test_tracing();
+
+    let runtime = Runtime::test();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec =
+        Arc::new(ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).build());
+
+    let mut network = NetworkArgs::default().with_unused_ports();
+    network.bootnodes = Some(Vec::new());
+    network.discovery.disable_dns_discovery = true;
+    network.discovery.disable_discv4_discovery = true;
+    let external_ip = Ipv4Addr::new(203, 0, 113, 7);
+    network = network.with_nat_resolver(NatResolver::ExternalIp(IpAddr::V4(external_ip)));
+
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_network(network)
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    assert!(node.network.discv4().is_none());
+    let discv5 = node.network.discv5().expect("discv5 should be enabled");
+    let discv5_port = discv5.local_port();
+    let info = node.add_ons_handle.admin_api().node_info().await.unwrap();
+    let admin_enr: enr::Enr<enr::secp256k1::SecretKey> =
+        info.enr.parse().map_err(|err| eyre::eyre!("failed to parse admin ENR: {err}"))?;
+
+    assert_eq!(discv5.local_enr().ip4(), Some(external_ip));
+    assert_eq!(discv5.local_enr().udp4(), Some(discv5_port));
+    assert_eq!(admin_enr.ip4(), Some(external_ip));
+    assert_eq!(admin_enr.udp4(), Some(discv5_port));
+    assert_eq!(info.ip, IpAddr::V4(external_ip));
+    assert_eq!(info.ports.discovery, discv5_port);
 
     Ok(())
 }
