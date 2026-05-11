@@ -1097,28 +1097,6 @@ impl ArenaParallelSparseTrie {
         B256::from(bytes)
     }
 
-    /// Returns the [`BranchNodeMasks`] for a branch based on the status of its children.
-    fn get_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> BranchNodeMasks {
-        let mut masks = BranchNodeMasks::default();
-
-        for (nibble, child) in branch.child_iter() {
-            let (hash_bit, tree_bit) = match child {
-                ArenaSparseNodeBranchChild::Blinded(_) => (
-                    branch.branch_masks.hash_mask.is_bit_set(nibble),
-                    branch.branch_masks.tree_mask.is_bit_set(nibble),
-                ),
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                    let child = &arena[*child_idx];
-                    (child.hash_mask_bit(), child.tree_mask_bit())
-                }
-            };
-
-            masks.set_child_bits(nibble, hash_bit, tree_bit);
-        }
-
-        masks
-    }
-
     /// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
     ///
     /// Uses the cursor's stack to walk dirty branches depth-first. For each branch,
@@ -1199,11 +1177,21 @@ impl ArenaParallelSparseTrie {
             );
 
             rlp_node_buf.clear();
-            let state_mask = arena[head_idx].branch_ref().state_mask;
-            for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
+            let b = arena[head_idx].branch_ref();
+            let short_key = b.short_key;
+            let state_mask = b.state_mask;
+            let prev_branch_masks = b.branch_masks;
+            let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
+            let mut new_branch_masks = BranchNodeMasks::default();
+            for (child_idx, nibble) in BranchChildIter::new(state_mask) {
                 match &arena[head_idx].branch_ref().children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node_buf.push(rlp_node.clone());
+                        new_branch_masks.set_child_bits(
+                            nibble,
+                            prev_branch_masks.hash_mask.is_bit_set(nibble),
+                            prev_branch_masks.tree_mask.is_bit_set(nibble),
+                        );
                     }
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                         let child_idx = *child_idx;
@@ -1238,17 +1226,15 @@ impl ArenaParallelSparseTrie {
                                 unreachable!("Unexpected child {:?}", arena[child_idx]);
                             }
                         }
+                        let child = &arena[child_idx];
+                        new_branch_masks.set_child_bits(
+                            nibble,
+                            child.hash_mask_bit(),
+                            child.tree_mask_bit(),
+                        );
                     }
                 }
             }
-
-            // Encode the branch, optionally wrapping in an extension if it has a short_key.
-            let b = arena[head_idx].branch_ref();
-            let short_key = b.short_key;
-            let state_mask = b.state_mask;
-            let prev_branch_masks = b.branch_masks;
-            let new_branch_masks = Self::get_branch_masks(arena, b);
-            let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
 
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
