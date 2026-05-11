@@ -410,7 +410,7 @@ where
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
-                self.dispatch_pending_targets();
+                let mut dispatched_proof_jobs = self.dispatch_pending_targets();
                 t = Instant::now();
                 let process_start = Instant::now();
                 self.process_new_updates()?;
@@ -436,11 +436,13 @@ where
                     break;
                 }
 
-                self.dispatch_pending_targets();
+                dispatched_proof_jobs += self.dispatch_pending_targets();
 
-                // If there's still no pending updates spend some time pre-computing the account
-                // trie upper hashes
-                if self.proof_result_rx.is_empty() {
+                // If there's still no pending work, spend some time pre-computing the account
+                // trie upper hashes. Avoid doing speculative work immediately after proof dispatch:
+                // proof results or new updates can arrive while `calculate_subtries` is running,
+                // and delaying those messages is worse than overlapping this pre-computation.
+                if dispatched_proof_jobs == 0 && self.proof_result_rx.is_empty() {
                     let calculate_start = Instant::now();
                     self.trie.calculate_subtries();
                     debug!(
@@ -1019,9 +1021,9 @@ where
         Ok(())
     }
 
-    fn dispatch_pending_targets(&mut self) {
+    fn dispatch_pending_targets(&mut self) -> usize {
         if self.pending_targets.is_empty() {
-            return;
+            return 0;
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
@@ -1096,6 +1098,7 @@ where
             dispatch_elapsed_us = dispatch_start.elapsed().as_micros(),
             "Dispatched pending proof targets"
         );
+        chunks_dispatched
     }
 
     fn desired_worker_capacity(
