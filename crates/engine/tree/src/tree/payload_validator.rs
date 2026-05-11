@@ -49,10 +49,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{
-    bal::{Bal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
-};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -63,9 +60,7 @@ use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptR
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
-use reth_consensus::{
-    validate_block_access_list_gas, ConsensusError, FullConsensus, ReceiptRootBloom,
-};
+use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -398,7 +393,7 @@ where
         // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
         // RLP decoding + header hashing.
-        let is_payload = matches!(&input, BlockOrPayload::Payload(_));
+        let is_payload = input.is_payload();
         let convert_to_block = match &input {
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
@@ -574,18 +569,17 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
-            let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
-            let built_bal = Some(decoded_bal.as_bal().clone().into());
+            let built_bal = Some(
+                env.decoded_bal
+                    .as_ref()
+                    .expect("eligibility implies BAL is present")
+                    .as_bal()
+                    .clone()
+                    .into(),
+            );
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
-            match self.execute_block_bal(
-                state_provider,
-                env,
-                &input,
-                &handle,
-                decoded_bal,
-                provider_builder,
-            ) {
+            match self.execute_block_bal(state_provider, env, &input, &handle, provider_builder) {
                 Ok((output, senders, receipt_root_rx)) => {
                     (output, senders, receipt_root_rx, built_bal)
                 }
@@ -944,16 +938,17 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        if let Some(bal_opt) = input.block_access_list() {
-            let bal = bal_opt.map_err(BlockExecutionError::other)?;
-            validate_block_access_list_gas(Some(&bal), input.gas_limit())
+        if let Some(decoded_bal) = &env.decoded_bal {
+            decoded_bal
+                .as_bal()
+                .validate_gas_limit(input.gas_limit())
                 .map_err(|e| {
                     debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
-                    InsertBlockErrorKind::Consensus(e)
+                    InsertBlockErrorKind::Consensus(ConsensusError::from(e))
                 })?
         }
 
-        let has_bal = input.block_access_list().is_some();
+        let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1076,7 +1071,6 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
-        decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
@@ -1100,6 +1094,9 @@ where
         let saved_cache = SavedCache::new(env.parent_hash, cache);
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
+        let decoded_bal = env.decoded_bal.ok_or_else(|| {
+            InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
+        })?;
 
         let make_db = move || {
             let provider = provider_builder
@@ -2291,14 +2288,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 
-    /// Returns the block access list embedded in a payload, if present.
-    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        match self {
-            Self::Payload(payload) => payload.block_access_list().map(|block_access_list| {
-                alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
-            }),
-            Self::Block(_) => None,
-        }
+    /// Returns true if this is a payload.
+    pub const fn is_payload(&self) -> bool {
+        matches!(self, Self::Payload(_))
+    }
+
+    /// Returns true if this is a block.
+    pub const fn is_block(&self) -> bool {
+        matches!(self, Self::Block(_))
     }
 
     /// Returns the decoded block access list, if present and successfully decoded.

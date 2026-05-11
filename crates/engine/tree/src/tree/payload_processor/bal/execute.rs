@@ -14,9 +14,7 @@
 //! validator still handles consensus checks, receipt-root validation, state-root work, and block
 //! insertion.
 
-use super::{
-    debug, ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, RejectReason,
-};
+use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, RejectReason};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash,
@@ -222,12 +220,12 @@ where
         target: "engine::tree::payload_processor::bal",
         tracing::Level::DEBUG
     ) {
-        let div = debug::first_bal_divergence(received_bal, &composed_alloy);
+        let div = received_bal.diff(&composed_alloy);
         tracing::debug!(
             target: "engine::tree::payload_processor::bal",
             %rebuilt,
             expected = %header_bal_hash,
-            ?div,
+            %div,
             "first BAL divergence",
         );
     }
