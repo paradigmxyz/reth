@@ -2,7 +2,7 @@
 //!
 //! This command fetches consecutive blocks from an RPC until a target gas usage is reached,
 //! takes block 0 as the "base" payload, concatenates transactions from subsequent blocks,
-//! and saves the result to disk as a [`BigBlockPayload`] JSON file containing the merged
+//! and saves the result to disk as a [`BigBlockData`] JSON file containing the merged
 //! [`ExecutionData`] and environment switches at each block boundary.
 
 use alloy_consensus::TxEnvelope;
