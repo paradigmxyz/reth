@@ -17,7 +17,7 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     error::RequestError,
     headers::client::{HeadersClient, HeadersRequest},
-    BalRequirement, BlockAccessListsClient,
+    BlockAccessListsClient,
 };
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, SealedBal};
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
@@ -649,17 +649,14 @@ async fn test_eth71_fetch_client_get_block_access_lists() {
     );
 }
 
-// Ensures fetch client BAL requests are rejected when no eth/71 peer is available.
+// Ensures default fetch client BAL requests are rejected when no eth/71 peer is available.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth70_fetch_client_rejects_optional_block_access_lists_request() {
+async fn test_eth70_fetch_client_rejects_default_block_access_lists_request() {
     reth_tracing::init_test_tracing();
     let (net, _) = spawn_bal_testnet([EthVersion::Eth70, EthVersion::Eth70]).await;
 
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
-    let err = fetch
-        .get_block_access_lists_with_requirement(vec![B256::random()], BalRequirement::Optional)
-        .await
-        .unwrap_err();
+    let err = fetch.get_block_access_lists(vec![B256::random()]).await.unwrap_err();
 
     assert_eq!(err, RequestError::UnsupportedCapability);
 }

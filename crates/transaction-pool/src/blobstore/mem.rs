@@ -1,7 +1,7 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{map::B256Map, B128, B256};
 use parking_lot::RwLock;
@@ -223,6 +223,43 @@ impl BlobStore for InMemoryBlobStore {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         self.get_by_versioned_hashes_cells_eip7594(versioned_hashes, indices_bitarray)
+    }
+
+    fn get_cells(
+        &self,
+        tx: B256,
+        indices_bitarray: B128,
+    ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
+        let Some(sidecar) = self.get(tx)? else {
+            return Ok(None);
+        };
+
+        let Some(sidecar) = sidecar.as_eip7594() else {
+            return Ok(None);
+        };
+
+        let versioned_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();
+
+        let matches =
+            self.get_by_versioned_hashes_cells_eip7594(&versioned_hashes, indices_bitarray)?;
+
+        let mut cells = Vec::new();
+
+        for matched in matches {
+            let Some(matched) = matched else {
+                return Ok(None);
+            };
+
+            for cell in matched.blob_cells {
+                let Some(cell) = cell else {
+                    return Ok(None);
+                };
+
+                cells.push(cell);
+            }
+        }
+
+        Ok(Some(cells))
     }
 
     fn data_size_hint(&self) -> Option<usize> {
