@@ -1013,4 +1013,204 @@ mod tests {
 
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
+
+    #[test]
+    fn rejects_final_hash_mismatch() {
+        // Build the BAL an empty block actually produces, then append a phantom address
+        // that execution never touches. The rebuilt BAL omits it, so the final hash check
+        // must fail.
+        use alloy_eip7928::AccountChanges;
+
+        let evm_config = EthEvmConfig::mainnet();
+
+        // Real BAL the block would produce.
+        let real_bal = reference_bal_for_empty_block(&evm_config);
+        assert!(!real_bal.is_empty(), "reference BAL must be non-empty");
+
+        // Tamper: append a phantom address not accessed during execution.
+        let phantom = alloy_primitives::Address::from([0xFF; 20]);
+        let mut tampered_entries: Vec<AccountChanges> = real_bal.clone().into();
+        tampered_entries.push(AccountChanges::new(phantom));
+        let tampered_bal: alloy_eip7928::bal::Bal = alloy_eip7928::bal::Bal::new(tampered_entries);
+
+        // Stamp the tampered BAL's hash on the block header.
+        let tampered_block_access_list: BlockAccessList = tampered_bal.clone().into();
+        let tampered_hash =
+            alloy_eip7928::compute_block_access_list_hash(&tampered_block_access_list);
+        let block = empty_amsterdam_block(tampered_hash);
+
+        let received = {
+            let raw = alloy_rlp::encode(&tampered_bal).into();
+            Arc::new(DecodedBal::new(tampered_bal, raw))
+        };
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            evm_config,
+            db_factory(system_contracts_db()),
+            received,
+            &block,
+            Vec::<Recovered<TransactionSigned>>::new(),
+        );
+
+        match result {
+            Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
+                rebuilt,
+                expected,
+            })) => {
+                assert_ne!(rebuilt, expected, "rebuilt and expected hashes must differ");
+            }
+            Err(e) => panic!("expected FinalHashMismatch, got {e:?}"),
+            Ok(_) => panic!("expected FinalHashMismatch, got Ok"),
+        }
+    }
+
+    #[test]
+    fn canonical_make_db_failure() {
+        // A make_db that always fails must surface as Provider before any workers are
+        // spawned or the BAL is processed.
+        let evm_config = EthEvmConfig::mainnet();
+        let block = empty_amsterdam_block(B256::ZERO);
+
+        let failing_make_db = || -> Result<CacheDB<EmptyDB>, BalExecutionError> {
+            Err(reth_provider::ProviderError::BestBlockNotFound.into())
+        };
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            evm_config,
+            failing_make_db,
+            to_arc_decoded(BlockAccessList::default()),
+            &block,
+            Vec::<Recovered<TransactionSigned>>::new(),
+        );
+
+        assert!(
+            matches!(result, Err(BalExecutionError::Provider(_))),
+            "expected Provider error from canonical make_db failure, got {result:?}",
+        );
+    }
+
+    #[test]
+    fn worker_tx_recovery_error_becomes_evm_error() {
+        // A tx recovery failure fed into the worker channel must surface as
+        // BalExecutionError::Evm. Uses execute_block directly since tx_stream hardcodes
+        // Infallible and cannot inject errors.
+        let evm_config = EthEvmConfig::mainnet();
+        let block = empty_amsterdam_block(B256::ZERO);
+
+        let (tx_tx, tx_rx) = crossbeam_channel::unbounded::<(
+            usize,
+            Result<Recovered<TransactionSigned>, std::io::Error>,
+        )>();
+        tx_tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
+        drop(tx_tx);
+
+        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let evm_env = evm_config.evm_env(block.header()).unwrap();
+        let execution_ctx = evm_config.context_for_block(&block).unwrap();
+
+        let result = execute_block(
+            &Runtime::test(),
+            &evm_config,
+            &db_factory(system_contracts_db()),
+            to_arc_decoded(BlockAccessList::default()),
+            evm_env,
+            execution_ctx,
+            1, // transaction_count = 1 → exactly one worker spawned
+            tx_rx,
+            receipt_tx,
+        );
+
+        assert!(
+            matches!(result, Err(BalExecutionError::Evm(_))),
+            "expected Evm error from tx recovery failure, got {result:?}",
+        );
+    }
+
+    #[test]
+    fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
+        // All-state-gas results keep block_regular_gas_used at 0, so a second tx that fits
+        // within the block limit but not the remaining cumulative budget proves that
+        // non-Amsterdam reads cumulative_tx_gas_used while Amsterdam does not.
+        use revm::context::result::{
+            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+        };
+        use revm_state::EvmState;
+
+        let block_gas_limit = 1_000_000u64;
+        let first_tx_gas = 600_000u64;
+        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
+
+        let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas);
+        let fake_result: ResultAndState<revm::context::result::HaltReason> =
+            ExecResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas,
+                    logs: vec![],
+                    output: Output::Call(Default::default()),
+                },
+                EvmState::default(),
+            );
+
+        // Non-Amsterdam: block_available_gas = 1_000_000 - 600_000 = 400_000 → reject 500_000.
+        let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false);
+        non_amsterdam.record_result(&fake_result);
+        assert!(
+            non_amsterdam.validate_tx_limit(second_tx_gas_limit).is_err(),
+            "non-Amsterdam tracker must reject tx that exceeds remaining cumulative gas",
+        );
+
+        // Amsterdam: block_available_gas = 1_000_000 - 0 = 1_000_000 → accept 500_000.
+        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true);
+        amsterdam.record_result(&fake_result);
+        assert!(
+            amsterdam.validate_tx_limit(second_tx_gas_limit).is_ok(),
+            "Amsterdam tracker must accept the same tx since block_regular_gas_used stays 0",
+        );
+    }
+
+    #[test]
+    fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
+        // A tx with gas_limit above TX_GAS_LIMIT_CAP (EIP-7825) is admitted when the
+        // capped value fits in the remaining block gas and rejected when it does not.
+        use revm::context::result::{
+            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+        };
+        use revm_state::EvmState;
+
+        let block_gas_limit = 30_000_000u64;
+        let oversized = TX_GAS_LIMIT_CAP + 1_000_000; // 17_777_216 — above the cap
+
+        // Case 1: fresh block, no prior gas consumed.
+        // tx_min_gas_limit = TX_GAS_LIMIT_CAP (16_777_216) ≤ block_available_gas (30M) → Ok.
+        let tracker = BlockGasTracker::new(block_gas_limit, false);
+        assert!(
+            tracker.validate_tx_limit(oversized).is_ok(),
+            "oversized tx must pass when capped limit fits in block gas",
+        );
+
+        // Case 2: prior tx consumed 20M, leaving 10M available.
+        // tx_min_gas_limit = TX_GAS_LIMIT_CAP (16_777_216) > block_available_gas (10M) → Err.
+        let prior_gas = 20_000_000u64;
+        let gas = ResultGas::new_with_state_gas(prior_gas, 0, 0, prior_gas);
+        let fake_result: ResultAndState<revm::context::result::HaltReason> =
+            ExecResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas,
+                    logs: vec![],
+                    output: Output::Call(Default::default()),
+                },
+                EvmState::default(),
+            );
+
+        let mut tracker = BlockGasTracker::new(block_gas_limit, false);
+        tracker.record_result(&fake_result);
+        assert!(
+            tracker.validate_tx_limit(oversized).is_err(),
+            "oversized tx must be rejected when capped limit exceeds remaining block gas",
+        );
+    }
 }
