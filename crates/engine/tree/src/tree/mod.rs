@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{keccak256, Sealed, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -29,10 +29,10 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SealedBal,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -186,6 +186,8 @@ pub struct TreeOutcome<T> {
     pub outcome: T,
     /// An optional event to tell the caller to do something.
     pub event: Option<TreeEvent>,
+    /// Valid payload BAL to store after responding to `newPayload`.
+    pub store_bal: Option<(NumHash, SealedBal)>,
     /// Whether the block was already seen, meaning no real execution happened during this
     /// `newPayload` call.
     pub already_seen: bool,
@@ -194,7 +196,7 @@ pub struct TreeOutcome<T> {
 impl<T> TreeOutcome<T> {
     /// Create new tree outcome.
     pub const fn new(outcome: T) -> Self {
-        Self { outcome, event: None, already_seen: false }
+        Self { outcome, event: None, store_bal: None, already_seen: false }
     }
 
     /// Set event on the outcome.
@@ -219,13 +221,20 @@ pub struct TryInsertPayloadResult {
     pub status: PayloadStatus,
     /// Whether the block was already seen
     pub already_seen: bool,
+    /// Valid payload BAL to store after responding to `newPayload`.
+    pub store_bal: Option<(NumHash, SealedBal)>,
 }
 
 impl TryInsertPayloadResult {
     /// Convert the result into a [`TreeOutcome`].
     #[inline]
     pub fn into_outcome(self) -> TreeOutcome<PayloadStatus> {
-        TreeOutcome::new(self.status).with_already_seen(self.already_seen)
+        TreeOutcome {
+            outcome: self.status,
+            event: None,
+            store_bal: self.store_bal,
+            already_seen: self.already_seen,
+        }
     }
 }
 
@@ -352,6 +361,7 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
+        + BalProvider
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
@@ -786,32 +796,38 @@ where
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
+        let raw_bal = payload.block_access_list().cloned();
         let mut latest_valid_hash = None;
 
         match self.insert_payload(payload) {
             Ok(status) => {
-                let (status, already_seen) = match status {
+                let (status, already_seen, store_bal) = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
                         self.try_connect_buffered_blocks(num_hash)?;
-                        (PayloadStatusEnum::Valid, false)
+                        let store_bal = raw_bal.map(|bal| {
+                            let seal = keccak256(bal.as_ref());
+                            (num_hash, Sealed::new_unchecked(bal, seal))
+                        });
+                        (PayloadStatusEnum::Valid, false, store_bal)
                     }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
-                        (PayloadStatusEnum::Valid, true)
+                        (PayloadStatusEnum::Valid, true, None)
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) => {
-                        (PayloadStatusEnum::Syncing, false)
+                        (PayloadStatusEnum::Syncing, false, None)
                     }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                         // not known to be invalid, but we don't know anything else
-                        (PayloadStatusEnum::Syncing, true)
+                        (PayloadStatusEnum::Syncing, true, None)
                     }
                 };
 
                 Ok(TryInsertPayloadResult {
                     status: PayloadStatus::new(status, latest_valid_hash),
                     already_seen,
+                    store_bal,
                 })
             }
             Err(error) => {
@@ -822,7 +838,7 @@ where
                     }
                 };
 
-                Ok(TryInsertPayloadResult { status, already_seen: false })
+                Ok(TryInsertPayloadResult { status, already_seen: false, store_bal: None })
             }
         }
     }
@@ -852,6 +868,14 @@ where
                 }
             }
             Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
+        }
+    }
+
+    fn on_maybe_store_bal(&self, store_bal: Option<(NumHash, SealedBal)>) {
+        let Some((num_hash, bal)) = store_bal else { return };
+
+        if let Err(err) = self.provider.bal_store().insert(num_hash, bal) {
+            warn!(target: "engine::tree", block=?num_hash, %err, "Failed to insert payload BAL");
         }
     }
 
@@ -1648,8 +1672,10 @@ where
                                     gas_used,
                                 );
 
-                                let maybe_event =
-                                    output.as_mut().ok().and_then(|out| out.event.take());
+                                let (maybe_event, store_bal) = output
+                                    .as_mut()
+                                    .map(|out| (out.event.take(), out.store_bal.take()))
+                                    .unwrap_or_default();
 
                                 // emit response
                                 if let Err(err) =
@@ -1663,6 +1689,8 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                self.on_maybe_store_bal(store_bal);
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
@@ -1729,8 +1757,10 @@ where
                                     gas_used,
                                 );
 
-                                let maybe_event =
-                                    output.as_mut().ok().and_then(|out| out.event.take());
+                                let (maybe_event, store_bal) = output
+                                    .as_mut()
+                                    .map(|out| (out.event.take(), out.store_bal.take()))
+                                    .unwrap_or_default();
 
                                 let timings = NewPayloadTimings {
                                     latency,
@@ -1750,6 +1780,8 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                self.on_maybe_store_bal(store_bal);
 
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
