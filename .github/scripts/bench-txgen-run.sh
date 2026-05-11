@@ -21,6 +21,10 @@ mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+RETH_SLICE_ARGS=()
+if [ -n "${RETH_SLICE:-}" ]; then
+  RETH_SLICE_ARGS+=(--slice="$RETH_SLICE")
+fi
 
 # Unsupported txgen-path behavior is made explicit here. Keep these checks near
 # the top so new txgen support can be added one feature at a time.
@@ -163,7 +167,7 @@ echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
+  sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" "${RETH_SLICE_ARGS[@]}" \
     -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
@@ -171,7 +175,7 @@ if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
+  sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" "${RETH_SLICE_ARGS[@]}" \
     -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &

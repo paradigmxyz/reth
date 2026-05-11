@@ -257,6 +257,7 @@ jobs:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
+      RETH_SLICE: reth-bench.slice
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ""
       BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
