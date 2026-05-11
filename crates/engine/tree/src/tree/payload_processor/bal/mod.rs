@@ -16,3 +16,4 @@ pub mod execute;
 
 pub use error::{BalExecutionError, RejectReason};
 pub use execute::execute_block;
+pub(crate) use execute::validate_bal;
