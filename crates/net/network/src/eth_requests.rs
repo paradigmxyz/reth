@@ -9,7 +9,6 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
-use reth_transaction_pool::blobstore::NoopBlobStore;
 use reth_eth_wire::{
     BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
@@ -20,7 +19,7 @@ use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
-use reth_transaction_pool::BlobStore;
+use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
     future::Future,
     pin::Pin,
