@@ -221,7 +221,7 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
     }
 
     fn gas_limit(&self) -> u64 {
-        self.env_switches[0].gas_limit()
+        self.env_switches.iter().map(|data| data.gas_limit()).sum()
     }
 
     fn transaction_count(&self) -> usize {

@@ -6,6 +6,7 @@
 //! cfg env) and applies pre/post execution changes for each segment.
 
 pub(crate) use reth_engine_primitives::BigBlockData;
+use reth_engine_primitives::ExecutionPayload as _;
 use reth_storage_errors::any::AnyError;
 use revm_primitives::Bytes;
 
@@ -210,6 +211,33 @@ where
             Some(set_bal_index::<DB>),
         )
     }
+
+    fn create_executor_with_state<'ctx, 'db, DB, I>(
+        &'ctx self,
+        evm: reth_evm::EvmFor<Self, &'db mut revm::database::State<DB>, I>,
+        ctx: BbEvmPlan<'ctx>,
+    ) -> alloy_evm::block::BlockExecutorFor<
+        'ctx,
+        Self::BlockExecutorFactory,
+        &'db mut revm::database::State<DB>,
+        I,
+    >
+    where
+        DB: Database,
+        I: reth_evm::InspectorFor<Self, &'db mut revm::database::State<DB>>,
+    {
+        let bal_index_reader: Option<BalIndexReader<&'db mut revm::database::State<DB>>> =
+            Some(read_bal_index::<DB>);
+
+        self.executor_factory.create_executor_with_seeder(
+            evm,
+            ctx,
+            Some(seed_state_block_hashes::<DB>),
+            bal_index_reader,
+            Some(bump_bal_index::<DB>),
+            Some(set_bal_index::<DB>),
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +261,7 @@ where
         // original blocks may have gas prices below the big block's
         // effective basefee.
         env.cfg_env.disable_base_fee = true;
+        env.block_env.gas_limit = payload.gas_limit();
 
         Ok(env)
     }

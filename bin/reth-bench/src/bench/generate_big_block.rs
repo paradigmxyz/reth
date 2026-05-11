@@ -457,6 +457,13 @@ pub(crate) fn big_blocks_stream(
                 cumulative_tx_count += block_data.transaction_count();
             }
 
+            if let Some(block_access_list) = &mut merged_block_access_list {
+                block_access_list.sort_unstable_by_key(|account| account.address);
+                for account in block_access_list {
+                    account.sort();
+                }
+            }
+
             let big_block = BigBlockData {
                 env_switches: blocks,
                 prior_block_hashes: accumulated_block_hashes.clone(),

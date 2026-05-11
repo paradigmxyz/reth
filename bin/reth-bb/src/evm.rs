@@ -226,22 +226,33 @@ where
     /// plan so segment boundaries don't fire — a BAL worker only runs one
     /// transaction in its segment.
     fn initialize(&mut self) -> Result<(), BlockExecutionError> {
-        if self.initialized {
-            return Ok(());
-        }
-        self.initialized = true;
+        let segment_idx = if let Some(bal_index) =
+            self.bal_index_reader.map(|reader| reader(self.inner().evm().db()))
+        {
+            let segment_idx = self.plan.segment_index_for_tx((bal_index - 1) as usize);
 
-        let plan = &self.plan;
+            // Renumber the worker's bal_index from the raw "tx i + 1"
+            // convention to "tx i + 1 + 2k" where k is the segment index.
+            // This reserves two `bal_indexes` per crossed segment boundary
+            // (one for post-N's `finish()`, one for pre-N+1's
+            // `apply_pre_execution_changes`) so worker reads via
+            // `BalWrites::get` see those writes via the strict less-than
+            // semantic.
+            if let Some(setter) = self.bal_index_setter {
+                let renumbered = bal_index + 2 * segment_idx as u64;
+                setter(self.inner_mut().evm_mut().db_mut(), renumbered);
+            }
 
-        let bal_index =
-            self.bal_index_reader.map(|reader| reader(self.inner().evm().db())).unwrap_or(0);
-        let segment_idx = if bal_index == 0 {
-            0
+            segment_idx
         } else {
-            let tx_index = (bal_index - 1) as usize;
-            plan.segment_index_for_tx(tx_index)
+            if self.initialized {
+                return Ok(());
+            }
+
+            self.initialized = true;
+            0
         };
-        let segment = &plan.segments[segment_idx];
+        let segment = &self.plan.segments[segment_idx];
         let block_env = segment.evm_env.block_env.clone();
         let block_number = block_env.number.saturating_to::<u64>();
         let mut cfg_env = segment.evm_env.cfg_env.clone();
@@ -254,20 +265,6 @@ where
         inner.ctx = segment.ctx.clone();
 
         self.reseed_block_hashes_for(block_number);
-
-        if bal_index > 0 {
-            // Renumber the worker's bal_index from the raw "tx i + 1"
-            // convention to "tx i + 1 + 2k" where k is the segment index.
-            // This reserves two `bal_indexes` per crossed segment boundary
-            // (one for post-N's `finish()`, one for pre-N+1's
-            // `apply_pre_execution_changes`) so worker reads via
-            // `BalWrites::get` see those writes via the strict less-than
-            // semantic.
-            if let Some(setter) = self.bal_index_setter {
-                let renumbered = bal_index + 2 * segment_idx as u64;
-                setter(self.inner_mut().evm_mut().db_mut(), renumbered);
-            }
-        }
 
         Ok(())
     }
@@ -296,20 +293,6 @@ where
         let Some(seeder) = self.block_hash_seeder else { return };
         let hashes = self.plan.hashes_for_block(block_number);
         seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
-    }
-
-    fn maybe_apply_boundary(&mut self) -> Result<(), BlockExecutionError> {
-        loop {
-            let plan = &self.plan;
-
-            if plan.next_segment >= plan.segments.len() ||
-                plan.tx_counter != plan.segments[plan.next_segment].start_tx
-            {
-                return Ok(());
-            }
-
-            self.apply_segment_boundary()?;
-        }
     }
 
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
@@ -457,27 +440,17 @@ where
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
         self.initialize()?;
-        self.maybe_apply_boundary()?;
         self.inner_mut().execute_transaction_without_commit(tx)
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
-        self.maybe_apply_boundary()
-            .expect("segment boundary application must succeed before committing transaction");
-
         let gas_used = self.inner_mut().commit_transaction(output);
+        self.plan.tx_counter += 1;
 
-        // Fix up cumulative_gas_used on the just-committed receipt so that
-        // the receipt root task (which reads receipts incrementally) sees
-        // globally-correct values across all segments.
-        let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
-        {
-            receipt.cumulative_gas_used += offset;
+        if self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx {
+            self.apply_segment_boundary().expect("must succeed");
         }
 
-        self.plan.tx_counter += 1;
         gas_used
     }
 
@@ -598,8 +571,8 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
     ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>
     where
         Spec: alloy_evm::eth::spec::EthExecutorSpec,
-        DB: StateDB + 'a,
-        I: Inspector<EthEvmContext<DB>> + 'a,
+        DB: StateDB,
+        I: Inspector<EthEvmContext<DB>>,
     {
         BbBlockExecutor::new(
             evm,

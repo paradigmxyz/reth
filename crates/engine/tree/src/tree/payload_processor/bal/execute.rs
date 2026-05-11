@@ -27,10 +27,7 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{
-    block::BlockExecutorFactory, execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor,
-    ExecutionCtxFor,
-};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
@@ -140,8 +137,7 @@ where
 
         let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
-        let mut canonical_executor =
-            evm_config.block_executor_factory().create_executor(evm, ctx.clone());
+        let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
