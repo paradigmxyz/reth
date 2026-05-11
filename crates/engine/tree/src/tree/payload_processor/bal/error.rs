@@ -33,12 +33,11 @@ impl From<RejectReason> for BalExecutionError {
 /// Reasons a block may be rejected on the BAL execution path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RejectReason {
-    /// The rebuilt BAL's hash disagrees with `header.block_access_list_hash` at end-of-block.
-    /// Catches over-declared addresses and any divergence the per-tx fragment compares missed.
+    /// The rebuilt BAL disagrees with the received BAL at end-of-block.
     FinalHashMismatch {
         /// Hash of the rebuilt BAL.
         rebuilt: B256,
-        /// Hash committed in the block header.
+        /// Hash of the received BAL.
         expected: B256,
     },
 }
