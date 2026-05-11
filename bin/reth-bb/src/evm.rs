@@ -226,8 +226,10 @@ where
     /// plan so segment boundaries don't fire — a BAL worker only runs one
     /// transaction in its segment.
     fn initialize(&mut self) -> Result<(), BlockExecutionError> {
-        let segment_idx = if let Some(bal_index) =
-            self.bal_index_reader.map(|reader| reader(self.inner().evm().db()))
+        let segment_idx = if let Some(bal_index) = self
+            .bal_index_reader
+            .map(|reader| reader(self.inner().evm().db()))
+            .filter(|bal_index| *bal_index > 0)
         {
             let segment_idx = self.plan.segment_index_for_tx((bal_index - 1) as usize);
 
@@ -447,7 +449,9 @@ where
         let gas_used = self.inner_mut().commit_transaction(output);
         self.plan.tx_counter += 1;
 
-        if self.plan.next_segment < self.plan.segments.len() && self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx {
+        if self.plan.next_segment < self.plan.segments.len() &&
+            self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
+        {
             self.apply_segment_boundary().expect("must succeed");
         }
 
