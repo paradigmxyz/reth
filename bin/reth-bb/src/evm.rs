@@ -226,6 +226,10 @@ where
     /// plan so segment boundaries don't fire — a BAL worker only runs one
     /// transaction in its segment.
     fn initialize(&mut self) -> Result<(), BlockExecutionError> {
+        if self.initialized {
+            return Ok(());
+        }
+
         let segment_idx = if let Some(bal_index) = self
             .bal_index_reader
             .map(|reader| reader(self.inner().evm().db()))
