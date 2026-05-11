@@ -1,20 +1,16 @@
 use crate::metrics::PersistenceMetrics;
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode, SaveBlocksPlan,
-    SaveBlocksPlanStep, StageCheckpointReader, StageCheckpointWriter,
+    providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    SaveBlocksPlan, SaveBlocksPlanStep, StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
-use reth_stages_api::{
-    FinishCheckpoint, MetricEvent, MetricEventsSender, StageCheckpoint, StageId,
-};
+use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
@@ -104,8 +100,8 @@ where
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, trie_state_blocks, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num, trie_state_blocks)?;
+                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
@@ -139,86 +135,12 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
-        trie_state_blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-
-        let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?;
-        if let Some(checkpoint) = finish_checkpoint.as_ref() {
-            let partial_state_trie = checkpoint
-                .finish_stage_checkpoint()
-                .and_then(|finish| finish.partial_state_trie)
-                .unwrap_or(checkpoint.block_number);
-
-            if new_tip_num > partial_state_trie {
-                let expected_start = partial_state_trie + 1;
-                let expected_len = (new_tip_num - partial_state_trie) as usize;
-                if trie_state_blocks.len() != expected_len {
-                    return Err(ProviderError::HeaderNotFound(expected_start.into()).into())
-                }
-
-                for (index, block) in trie_state_blocks.iter().enumerate() {
-                    let expected_number = expected_start + index as u64;
-                    let num_hash = block.recovered_block().num_hash();
-                    if num_hash.number != expected_number {
-                        return Err(ProviderError::HeaderNotFound(expected_number.into()).into())
-                    }
-
-                    let expected_hash = provider_rw
-                        .block_hash(expected_number)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(expected_number.into()))?;
-                    if num_hash.hash != expected_hash {
-                        return Err(ProviderError::BlockHashNotFound(expected_hash).into())
-                    }
-
-                    if index == 0 {
-                        let expected_parent =
-                            provider_rw.block_hash(partial_state_trie)?.ok_or_else(|| {
-                                ProviderError::HeaderNotFound(partial_state_trie.into())
-                            })?;
-                        if block.recovered_block().parent_num_hash().hash != expected_parent {
-                            return Err(ProviderError::BlockHashNotFound(expected_parent).into())
-                        }
-                    } else if block.recovered_block().parent_num_hash().hash !=
-                        trie_state_blocks[index - 1].recovered_block().num_hash().hash
-                    {
-                        return Err(ProviderError::HeaderNotFound(expected_number.into()).into())
-                    }
-                }
-
-                let new_tip_hash = new_tip_hash
-                    .ok_or_else(|| ProviderError::HeaderNotFound(new_tip_num.into()))?;
-                if trie_state_blocks
-                    .last()
-                    .is_none_or(|block| block.recovered_block().hash() != new_tip_hash)
-                {
-                    return Err(ProviderError::BlockHashNotFound(new_tip_hash).into())
-                }
-
-                let catchup_len = trie_state_blocks.len();
-                provider_rw.save_blocks(
-                    &SaveBlocksPlan::new(
-                        trie_state_blocks,
-                        vec![SaveBlocksPlanStep::new(
-                            0..catchup_len,
-                            Some(catchup_len..catchup_len),
-                            false,
-                        )],
-                    ),
-                    SaveBlocksMode::Full,
-                )?;
-                provider_rw.save_stage_checkpoint(
-                    StageId::Finish,
-                    StageCheckpoint::new(checkpoint.block_number).with_finish_stage_checkpoint(
-                        FinishCheckpoint { partial_state_trie: Some(new_tip_num) },
-                    ),
-                )?;
-            }
-        }
 
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         let last_state_trie_block =
@@ -333,12 +255,9 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Removes block data above the given block number from the database.
     ///
-    /// If the durable trie frontier is below the new tip, the supplied blocks are first used to
-    /// catch trie/state persistence up to the new tip before the unwind removes the old suffix.
-    ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -447,18 +366,14 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
-    /// `trie_state_blocks` must contain canonical in-memory blocks from the current trie frontier +
-    /// 1 through `block_num`, if that frontier is below `block_num`.
-    ///
     /// When the operation completes, the new tip hash is returned in the receiver end of the sender
     /// argument.
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        trie_state_blocks: Vec<ExecutedBlock<T>>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, trie_state_blocks, tx))
+        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 }
 
@@ -603,49 +518,6 @@ mod tests {
             assert_eq!(last_hash, last_block.hash);
             assert_eq!(result.last_state_trie_block, Some(last_block.number));
         }
-    }
-
-    #[test]
-    fn test_remove_blocks_above_catches_up_partial_state_trie() {
-        reth_tracing::init_test_tracing();
-
-        let provider = create_test_provider_factory();
-        let mut test_block_builder = TestBlockBuilder::eth().with_state();
-        let blocks = test_block_builder.get_executed_blocks(0..4).collect::<Vec<_>>();
-        let trie_state_blocks = vec![blocks[2].clone()];
-
-        let provider_rw = provider.database_provider_rw().unwrap();
-        provider_rw
-            .save_blocks(
-                &SaveBlocksPlan::new(
-                    blocks,
-                    vec![
-                        SaveBlocksPlanStep::new(0..2, Some(2..4), true),
-                        SaveBlocksPlanStep::new(2..4, None, true),
-                    ],
-                ),
-                SaveBlocksMode::Full,
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let handle = persistence_handle(provider.clone());
-        let (tx, rx) = crossbeam_channel::bounded(1);
-
-        handle.remove_blocks_above(2, trie_state_blocks, tx).unwrap();
-
-        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
-        let last_block = result.last_block.unwrap();
-        assert_eq!(last_block.number, 2);
-        assert_eq!(result.last_state_trie_block, Some(2));
-
-        let finish_checkpoint =
-            provider.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(finish_checkpoint.block_number, 2);
-        assert_eq!(
-            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
-            Some(2)
-        );
     }
 
     /// Verifies that committing `save_blocks` history before running the pruner
