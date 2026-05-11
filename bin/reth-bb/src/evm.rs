@@ -462,7 +462,7 @@ where
 
         self.plan.tx_counter += 1;
 
-        if self.plan.next_segment < self.plan.segments.len() &&
+        while self.plan.next_segment < self.plan.segments.len() &&
             self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
         {
             self.apply_segment_boundary().expect("must succeed");
