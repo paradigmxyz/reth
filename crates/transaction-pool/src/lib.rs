@@ -816,6 +816,10 @@ where
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
+
+    fn blob_store(&self) -> &dyn BlobStore {
+        self.pool.blob_store()
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>

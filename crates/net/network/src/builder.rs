@@ -78,6 +78,25 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         NetworkBuilder { network, request_handler, transactions }
     }
 
+    /// Creates a new [`EthRequestHandler`] with access to transaction pool blob cells and wires it
+    /// to the network.
+    pub fn request_handler_with_pool<Client, Pool>(
+        self,
+        client: Client,
+        pool: Pool,
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N, Pool>, N>
+    where
+        Client: BalProvider,
+        Pool: TransactionPool,
+    {
+        let Self { mut network, transactions, .. } = self;
+        let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
+        network.set_eth_request_handler(tx);
+        let peers = network.handle().peers_handle().clone();
+        let request_handler = EthRequestHandler::with_pool(client, pool, peers, rx);
+        NetworkBuilder { network, request_handler, transactions }
+    }
+
     /// Creates a new [`TransactionsManager`] and wires it to the network.
     pub fn transactions<Pool: TransactionPool>(
         self,

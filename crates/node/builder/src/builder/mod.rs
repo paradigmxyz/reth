@@ -914,8 +914,13 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         AnnPolicy: AnnouncementFilteringPolicy<N>,
     {
         let (handle, network, txpool, eth) = builder
-            .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
-            .request_handler(self.provider().clone())
+            .transactions_with_policies(
+                pool.clone(),
+                tx_config,
+                propagation_policy,
+                announcement_policy,
+            )
+            .request_handler_with_pool(self.provider().clone(), pool)
             .split_with_handle();
 
         self.executor.spawn_critical_blocking_task("p2p txpool", txpool);

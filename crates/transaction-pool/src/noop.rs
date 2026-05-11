@@ -4,7 +4,7 @@
 //! to be generic over it.
 
 use crate::{
-    blobstore::BlobStoreError,
+    blobstore::{BlobStore, BlobStoreError, NoopBlobStore},
     error::{InvalidPoolTransactionError, PoolError},
     pool::TransactionListenerKind,
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
@@ -24,6 +24,8 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
+
+static NOOP_BLOB_STORE: NoopBlobStore = NoopBlobStore;
 
 /// A [`TransactionPool`] implementation that does nothing.
 ///
@@ -387,6 +389,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         _indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn blob_store(&self) -> &dyn BlobStore {
+        &NOOP_BLOB_STORE
     }
 }
 

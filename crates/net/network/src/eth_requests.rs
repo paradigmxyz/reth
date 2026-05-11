@@ -19,6 +19,7 @@ use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use std::{
     future::Future,
     pin::Pin,
@@ -59,9 +60,15 @@ pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct EthRequestHandler<
+    C,
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P = NoopTransactionPool,
+> {
     /// The client type that can interact with the chain.
     client: C,
+    /// Transaction pool used for serving blob cell requests.
+    pool: P,
     /// Used for reporting peers.
     // TODO use to report spammers
     #[expect(dead_code)]
@@ -78,6 +85,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
+            pool: NoopTransactionPool::default(),
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
@@ -85,10 +93,29 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     }
 }
 
-impl<C, N> EthRequestHandler<C, N>
+impl<C, N: NetworkPrimitives, P> EthRequestHandler<C, N, P> {
+    /// Create a new instance with access to blob cells from the transaction pool.
+    pub fn with_pool(
+        client: C,
+        pool: P,
+        peers: PeersHandle,
+        incoming: Receiver<IncomingEthRequest<N>>,
+    ) -> Self {
+        Self {
+            client,
+            pool,
+            peers,
+            incoming_requests: ReceiverStream::new(incoming),
+            metrics: Default::default(),
+        }
+    }
+}
+
+impl<C, N, P> EthRequestHandler<C, N, P>
 where
     N: NetworkPrimitives,
     C: BlockReader,
+    P: TransactionPool,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
@@ -318,17 +345,37 @@ where
     fn on_cells_request(
         &self,
         _peer_id: PeerId,
-        _request: GetCells,
+        request: GetCells,
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
-        let _ = response.send(Ok(Cells::default()));
+        let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
+
+        for hash in request.hashes {
+            let Some(cells) =
+                self.pool.blob_store().get_cells(hash, request.cell_mask).unwrap_or_default()
+            else {
+                continue;
+            };
+
+            cells_response.hashes.push(hash);
+            cells_response.cells.push(cells);
+
+            if cells_response.length() > SOFT_RESPONSE_LIMIT {
+                cells_response.hashes.pop();
+                cells_response.cells.pop();
+                break
+            }
+        }
+
+        let _ = response.send(Ok(cells_response));
     }
 }
 
-impl<C, N> EthRequestHandler<C, N>
+impl<C, N, P> EthRequestHandler<C, N, P>
 where
     N: NetworkPrimitives,
     C: BalProvider,
+    P: TransactionPool,
 {
     /// Handles [`GetBlockAccessLists`] queries.
     ///
@@ -371,13 +418,14 @@ fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLi
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
-impl<C, N> Future for EthRequestHandler<C, N>
+impl<C, N, P> Future for EthRequestHandler<C, N, P>
 where
     N: NetworkPrimitives,
     C: BalProvider
         + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
+    P: TransactionPool + Unpin,
 {
     type Output = ();
 
