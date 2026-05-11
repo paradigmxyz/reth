@@ -92,7 +92,7 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// final [`BundleState`]. See also [`ExecutionCache::insert_state`].
 ///
 /// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
-/// [`CacheStats`] are controlled separately by [`Self::with_cache_stats`].
+/// [`CacheStats`] are controlled separately by [`Self::new_with_mode`].
 #[derive(Debug)]
 pub struct CachedStateProvider<S> {
     /// The state provider
@@ -120,39 +120,26 @@ impl<S> CachedStateProvider<S> {
         caches: ExecutionCache,
         metrics: Option<CachedStateMetrics>,
     ) -> Self {
-        Self::new_with_mode(state_provider, caches, CacheFillMode::LookupOnly, metrics)
+        Self::new_with_mode(state_provider, caches, CacheFillMode::LookupOnly, metrics, None)
     }
 
     /// Creates a cache-filling [`CachedStateProvider`].
     ///
     /// Doesn't accept metrics because prewarming path does not need to report hit/misses.
     pub const fn new_prewarm(state_provider: S, caches: ExecutionCache) -> Self {
-        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None)
+        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None, None)
     }
 
-    /// Creates a cache-filling [`CachedStateProvider`] that also reports hit/miss metrics.
-    pub const fn new_cache_filling(
-        state_provider: S,
-        caches: ExecutionCache,
-        metrics: Option<CachedStateMetrics>,
-    ) -> Self {
-        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, metrics)
-    }
-
-    /// Creates a [`CachedStateProvider`] with an explicit cache fill mode.
+    /// Creates a [`CachedStateProvider`] with explicit cache fill behavior and optional
+    /// block-local cache stats.
     pub const fn new_with_mode(
         state_provider: S,
         caches: ExecutionCache,
         fill_mode: CacheFillMode,
         metrics: Option<CachedStateMetrics>,
+        cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self { state_provider, caches, metrics, fill_mode, cache_stats: None }
-    }
-
-    /// Enables cache statistics tracking for detailed block logging.
-    pub fn with_cache_stats(mut self, stats: Option<Arc<CacheStats>>) -> Self {
-        self.cache_stats = stats;
-        self
+        Self { state_provider, caches, metrics, fill_mode, cache_stats }
     }
 
     fn record_account_hit(&self) {
