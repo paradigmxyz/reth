@@ -144,17 +144,30 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const user = context.payload.comment.user.login;
-            try {
-              const { status } = await github.rest.orgs.checkMembershipForUser({
-                org: 'paradigmxyz',
-                username: user,
-              });
-              if (status !== 204 && status !== 302) {
-                core.setFailed(`@${user} is not a member of paradigmxyz`);
+            const org = 'paradigmxyz';
+            const checkMembership = async (username) => {
+              try {
+                const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
+                return status === 204 || status === 302;
+              } catch {
+                return false;
               }
-            } catch (e) {
-              core.setFailed(`@${user} is not a member of paradigmxyz`);
+            };
+
+            const commenter = context.payload.comment.user.login;
+            if (!await checkMembership(commenter)) {
+              core.setFailed(`@${commenter} is not a member of ${org}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const prAuthor = pr.user.login;
+            if (!await checkMembership(prAuthor)) {
+              core.setFailed(`PR author @${prAuthor} is not a member of ${org}`);
             }
 
       - name: Parse arguments
