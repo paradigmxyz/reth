@@ -57,7 +57,7 @@ pub(crate) struct MultiProofTaskMetrics {
 }
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
-/// availability.
+/// availability, returning the number of dispatched jobs.
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
@@ -68,7 +68,8 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     has_multiple_idle_storage_workers: bool,
     chunker: impl FnOnce(T, usize) -> I,
     mut dispatch: impl FnMut(T),
-) where
+) -> usize
+where
     I: IntoIterator<Item = T>,
 {
     let enough_targets_for_idle_workers =
@@ -78,11 +79,14 @@ pub(crate) fn dispatch_with_chunking<T, I>(
             (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
 
     if should_chunk && chunk_size > 0 && chunking_len > chunk_size {
+        let mut chunks_dispatched = 0;
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);
+            chunks_dispatched += 1;
         }
-        return;
+        return chunks_dispatched;
     }
 
     dispatch(items);
+    1
 }

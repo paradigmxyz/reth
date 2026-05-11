@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::tree::{
     multiproof::{
@@ -22,7 +22,8 @@ use reth_trie::{
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultStats,
+        ProofWorkerHandle,
     },
     root::ParallelStateRootError,
 };
@@ -301,26 +302,45 @@ where
                         .record(phase_end.duration_since(t));
                     t = phase_end;
 
-                    let Ok(result) = message else {
+                    let Ok(message) = message else {
                         unreachable!("we own the sender half")
                     };
 
-                    let mut result = result.result?;
+                    let mut proof_batch_stats = ProofResultBatchStats::default();
+                    proof_batch_stats.record(&message);
+                    let mut result = message.result?;
                     while let Ok(next) = self.proof_result_rx.try_recv() {
+                        proof_batch_stats.record(&next);
                         let res = next.result?;
                         result.extend(res);
                     }
 
                     let phase_end = Instant::now();
+                    let coalesce_elapsed = phase_end.duration_since(t);
                     self.metrics
                         .sparse_trie_proof_coalesce_duration_histogram
-                        .record(phase_end.duration_since(t));
+                        .record(coalesce_elapsed);
                     t = phase_end;
 
+                    let reveal_start = Instant::now();
                     self.on_proof_result(result)?;
+                    let reveal_elapsed = reveal_start.elapsed();
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        proof_results = proof_batch_stats.proof_results,
+                        account_targets = proof_batch_stats.account_targets,
+                        storage_targets = proof_batch_stats.storage_targets,
+                        storage_jobs = proof_batch_stats.storage_jobs,
+                        storage_wait_time_us = proof_batch_stats.storage_wait_time.as_micros(),
+                        worker_proof_time_us = proof_batch_stats.proof_elapsed.as_micros(),
+                        max_worker_elapsed_us = proof_batch_stats.max_elapsed.as_micros(),
+                        coalesce_elapsed_us = coalesce_elapsed.as_micros(),
+                        reveal_elapsed_us = reveal_elapsed.as_micros(),
+                        "Processed proof result batch"
+                    );
                     self.metrics
                         .sparse_trie_reveal_multiproof_duration_histogram
-                        .record(t.elapsed());
+                        .record(reveal_elapsed);
                 },
             }
 
@@ -804,17 +824,32 @@ where
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, target_counts) = self.pending_targets.take();
         let chunking_length = target_counts.total();
-        let (storage_worker_count, account_worker_count) =
-            self.desired_worker_capacity(target_counts);
-        self.proof_worker_handle.ensure_worker_capacity(storage_worker_count, account_worker_count);
+        let storage_jobs = targets.storage_targets.len();
+        let current_storage_worker_count = self.proof_worker_handle.total_storage_workers();
+        let current_account_worker_count = self.proof_worker_handle.total_account_workers();
+        let (desired_storage_worker_count, desired_account_worker_count) = self
+            .desired_worker_capacity(
+                target_counts,
+                current_storage_worker_count,
+                current_account_worker_count,
+            );
+        self.proof_worker_handle
+            .ensure_worker_capacity(desired_storage_worker_count, desired_account_worker_count);
+        let active_storage_worker_count = self.proof_worker_handle.total_storage_workers();
+        let active_account_worker_count = self.proof_worker_handle.total_account_workers();
+        let has_multiple_idle_account_workers =
+            self.proof_worker_handle.has_multiple_idle_account_workers();
+        let has_multiple_idle_storage_workers =
+            self.proof_worker_handle.has_multiple_idle_storage_workers();
 
-        dispatch_with_chunking(
+        let dispatch_start = Instant::now();
+        let chunks_dispatched = dispatch_with_chunking(
             targets,
             chunking_length,
             self.chunk_size,
             self.max_targets_for_chunking,
-            self.proof_worker_handle.has_multiple_idle_account_workers(),
-            self.proof_worker_handle.has_multiple_idle_storage_workers(),
+            has_multiple_idle_account_workers,
+            has_multiple_idle_storage_workers,
             MultiProofTargetsV2::chunks,
             |proof_targets| {
                 if let Err(e) =
@@ -831,12 +866,34 @@ where
                 }
             },
         );
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            account_targets = target_counts.account,
+            storage_targets = target_counts.storage,
+            storage_jobs,
+            total_targets = chunking_length,
+            chunk_size = self.chunk_size,
+            max_targets_for_chunking = self.max_targets_for_chunking,
+            has_multiple_idle_account_workers,
+            has_multiple_idle_storage_workers,
+            current_storage_workers = current_storage_worker_count,
+            current_account_workers = current_account_worker_count,
+            desired_storage_workers = desired_storage_worker_count,
+            desired_account_workers = desired_account_worker_count,
+            active_storage_workers = active_storage_worker_count,
+            active_account_workers = active_account_worker_count,
+            chunks_dispatched,
+            dispatch_elapsed_us = dispatch_start.elapsed().as_micros(),
+            "Dispatched pending proof targets"
+        );
     }
 
-    fn desired_worker_capacity(&self, target_counts: PendingTargetCounts) -> (usize, usize) {
-        let current_storage_workers = self.proof_worker_handle.total_storage_workers();
-        let current_account_workers = self.proof_worker_handle.total_account_workers();
-
+    fn desired_worker_capacity(
+        &self,
+        target_counts: PendingTargetCounts,
+        current_storage_workers: usize,
+        current_account_workers: usize,
+    ) -> (usize, usize) {
         if target_counts.total() <= self.max_targets_for_chunking {
             return (current_storage_workers, current_account_workers);
         }
@@ -891,6 +948,37 @@ struct PendingTargetCounts {
 impl PendingTargetCounts {
     const fn total(self) -> usize {
         self.account + self.storage
+    }
+}
+
+#[derive(Default)]
+struct ProofResultBatchStats {
+    proof_results: usize,
+    account_targets: usize,
+    storage_targets: usize,
+    storage_jobs: usize,
+    proof_elapsed: Duration,
+    storage_wait_time: Duration,
+    max_elapsed: Duration,
+}
+
+impl ProofResultBatchStats {
+    fn record(&mut self, message: &ProofResultMessage) {
+        let ProofResultStats {
+            account_targets,
+            storage_targets,
+            storage_jobs,
+            proof_elapsed,
+            storage_wait_time,
+        } = message.stats;
+
+        self.proof_results += 1;
+        self.account_targets += account_targets;
+        self.storage_targets += storage_targets;
+        self.storage_jobs += storage_jobs;
+        self.proof_elapsed += proof_elapsed;
+        self.storage_wait_time += storage_wait_time;
+        self.max_elapsed = self.max_elapsed.max(message.elapsed);
     }
 }
 
