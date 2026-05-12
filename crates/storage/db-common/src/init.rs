@@ -67,7 +67,10 @@ const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 /// Max number of storage "units" (1 per account + 1 per storage slot) before committing
 /// the current MDBX transaction and opening a new one. This bounds dirty page accumulation
 /// and prevents OOM on large state imports.
-const STORAGE_COMMIT_THRESHOLD: usize = 500_000;
+const STORAGE_COMMIT_THRESHOLD: usize = 100_000;
+
+/// Max number of trie updates retained before init-state state root computation commits progress.
+const STATE_ROOT_COMMIT_THRESHOLD: u64 = 25_000;
 
 /// Storage initialization error type.
 #[derive(Debug, thiserror::Error, Clone)]
@@ -645,22 +648,22 @@ fn parse_state_root(reader: &mut impl BufRead) -> eyre::Result<B256> {
 
 /// Parses accounts and pushes them to a [`Collector`].
 fn parse_accounts(
-    mut reader: impl BufRead,
+    reader: impl BufRead,
     etl_config: EtlConfig,
 ) -> Result<Collector<Address, GenesisAccount>, eyre::Error> {
-    let mut line = String::new();
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir);
+    let mut parsed_accounts = 0usize;
 
-    loop {
-        let n = reader.read_line(&mut line)?;
-        if n == 0 {
-            break
-        }
-
-        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
+    let stream =
+        serde_json::Deserializer::from_reader(reader).into_iter::<GenesisAccountWithAddress>();
+    for account in stream {
+        let GenesisAccountWithAddress { genesis_account, address } = account?;
         collector.insert(address, genesis_account)?;
 
-        line.clear();
+        parsed_accounts += 1;
+        if parsed_accounts.is_multiple_of(100_000) {
+            info!(target: "reth::cli", parsed_accounts, "Parsed accounts");
+        }
     }
 
     Ok(collector)
@@ -719,6 +722,7 @@ where
                 "Committed chunk"
             );
             storage_units = 0;
+            seen_bytecodes = B256Set::default();
         }
 
         write_account_to_db(
@@ -801,11 +805,7 @@ fn write_account_to_db<TX: DbTxMut>(
         let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_cs_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
 
-        // sort storage slots by key so we can use append_dup for plain/changeset tables
-        let mut sorted_slots: Vec<_> = storage.iter().collect();
-        sorted_slots.sort_unstable_by_key(|(k, _)| *k);
-
-        for &(&key, &value) in &sorted_slots {
+        for (&key, &value) in storage {
             let value_u256 = U256::from_be_bytes(value.0);
 
             // plain storage — sorted by (address, key), use append_dup
@@ -941,8 +941,9 @@ where
         let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
         let tx = provider_rw.tx_ref();
 
-        let state_root =
-            DbStateRoot::<_, A>::from_tx(tx).with_intermediate_state(intermediate_state.take());
+        let state_root = DbStateRoot::<_, A>::from_tx(tx)
+            .with_intermediate_state(intermediate_state.take())
+            .with_threshold(STATE_ROOT_COMMIT_THRESHOLD);
 
         match state_root.root_with_progress()? {
             StateRootProgress::Progress(state, _, updates) => {
@@ -1029,6 +1030,36 @@ mod tests {
         T: Table,
     {
         Ok(tx.cursor_read::<T>()?.walk_range(..)?.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    #[test]
+    fn parse_accounts_streams_jsonl_accounts() {
+        let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x2"}
+{"address":"0x0000000000000000000000000000000000000001","balance":"0x1"}
+"#;
+
+        let mut collector =
+            parse_accounts(&input[..], EtlConfig::new(None, 128)).expect("parse succeeds");
+
+        let accounts = collector
+            .iter()
+            .unwrap()
+            .map(|entry| {
+                let (address_raw, account_raw) = entry.unwrap();
+                let (address, _) = Address::from_compact(address_raw.as_slice(), address_raw.len());
+                let (account, _) =
+                    GenesisAccount::from_compact(account_raw.as_slice(), account_raw.len());
+                (address, account.balance)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            accounts,
+            vec![
+                (Address::with_last_byte(1), U256::from(1)),
+                (Address::with_last_byte(2), U256::from(2))
+            ]
+        );
     }
 
     #[test]

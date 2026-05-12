@@ -7,7 +7,8 @@
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
-# Optional env: BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
+# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
+#               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ
@@ -16,18 +17,19 @@ set -euxo pipefail
 LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
-DATADIR="$SCHELK_MOUNT/datadir"
+DATADIR_NAME="datadir"
+BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
+if [ "$BIG_BLOCKS" = "true" ]; then
+  DATADIR_NAME="datadir-big-blocks"
+fi
+DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 
-# Unsupported txgen-path behavior is made explicit here. Keep these checks near
-# the top so new txgen support can be added one feature at a time.
-if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
-  echo "::error::txgen driver does not support big-block benchmarks yet; use the reth-bench driver"
-  exit 1
-fi
+# Unsupported txgen-path behavior is made explicit here. Keep this check near
+# the top so BAL support can be added when txgen supports it.
 if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
   echo "::error::txgen driver does not support BAL replay yet; use big-blocks with the reth-bench driver"
   exit 1
@@ -54,6 +56,7 @@ cleanup() {
   if sudo systemctl is-active "$RETH_SCOPE" >/dev/null 2>&1; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
       sudo pkill -INT -x reth 2>/dev/null || true
+      sudo pkill -INT -x reth-bb 2>/dev/null || true
       for i in $(seq 1 120); do
         sudo pgrep -x samply > /dev/null 2>&1 || break
         if [ $((i % 10)) -eq 0 ]; then
@@ -157,12 +160,13 @@ if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
 fi
 
 TOTAL_MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
-MEM_LIMIT=$(( TOTAL_MEM_KB * 95 / 100 * 1024 ))
+MEM_LIMIT=$(( TOTAL_MEM_KB * 95 * 1024 / 100 ))
 echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 1024 ))MB)"
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
+  # shellcheck disable=SC2024
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
     -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 \
@@ -171,6 +175,7 @@ if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
+  # shellcheck disable=SC2024
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
     -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
@@ -242,15 +247,33 @@ mkdir -p "$TXGEN_DIR"
 ALL_BLOCKS="$TXGEN_DIR/all-blocks.ndjson"
 WARMUP_BLOCKS="$TXGEN_DIR/warmup-blocks.ndjson"
 BENCHMARK_BLOCKS="$TXGEN_DIR/benchmark-blocks.ndjson"
+if [ "$BIG_BLOCKS" = "true" ]; then
+  ALL_BIG_BLOCKS="$TXGEN_DIR/all-big-blocks.ndjson"
+  WARMUP_BIG_BLOCKS="$TXGEN_DIR/warmup-big-blocks.ndjson"
+  MEASURED_BIG_BLOCKS="$TXGEN_DIR/measured-big-blocks.ndjson"
+  ALL_BLOCKS="$ALL_BIG_BLOCKS"
+  WARMUP_BLOCKS="$WARMUP_BIG_BLOCKS"
+  BENCHMARK_BLOCKS="$MEASURED_BIG_BLOCKS"
+fi
 
 EXTRACT_FROM=$(( HEAD_DEC + 1 ))
-EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
-echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
-"$TXGEN_ETHEREUM" extract \
-  --rpc "$BENCH_RPC_URL" \
-  --from "$EXTRACT_FROM" \
-  --to "$EXTRACT_TO" \
-  -o "$ALL_BLOCKS"
+if [ "$BIG_BLOCKS" = "true" ]; then
+  echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+  "$TXGEN_ETHEREUM" extract-big-blocks \
+    --rpc "$BENCH_RPC_URL" \
+    --from "$EXTRACT_FROM" \
+    --count "$TOTAL" \
+    --target-gas "${BENCH_BIG_BLOCKS_TARGET_GAS:-1G}" \
+    -o "$ALL_BIG_BLOCKS"
+else
+  EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
+  echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+  "$TXGEN_ETHEREUM" extract \
+    --rpc "$BENCH_RPC_URL" \
+    --from "$EXTRACT_FROM" \
+    --to "$EXTRACT_TO" \
+    -o "$ALL_BLOCKS"
+fi
 
 if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
   head -n "$WARMUP" "$ALL_BLOCKS" > "$WARMUP_BLOCKS"
@@ -280,7 +303,6 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
-# TODO(txgen): support reth-bb payload/env-switch/BAL replay so big-blocks can move here.
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
 $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --engine http://127.0.0.1:8551 \

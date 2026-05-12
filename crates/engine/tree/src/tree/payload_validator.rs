@@ -49,10 +49,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{
-    bal::{Bal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
-};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -63,9 +60,7 @@ use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptR
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
-use reth_consensus::{
-    validate_block_access_list_gas, ConsensusError, FullConsensus, ReceiptRootBloom,
-};
+use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -200,6 +195,8 @@ where
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
+    /// Custom state root computation function.
+    custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -255,7 +252,14 @@ where
             validator,
             changeset_cache,
             runtime,
+            custom_state_root: None,
         }
+    }
+
+    /// Sets a custom state root computation handler.
+    pub fn with_custom_state_root(mut self, custom_state_root: CustomStateRoot<N>) -> Self {
+        self.custom_state_root = Some(custom_state_root);
+        self
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -398,7 +402,7 @@ where
         // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
         // RLP decoding + header hashing.
-        let is_payload = matches!(&input, BlockOrPayload::Payload(_));
+        let is_payload = input.is_payload();
         let convert_to_block = match &input {
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
@@ -543,7 +547,7 @@ where
             txs,
             provider_builder.clone(),
             overlay_factory.clone(),
-            strategy,
+            &strategy,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -573,22 +577,12 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
-            let decoded_bal = env.decoded_bal.clone().expect("eligibility implies BAL is present");
-            let built_bal = Some(decoded_bal.as_bal().clone().into());
+        let decoded_bal = env.decoded_bal.clone();
+        let (output, senders, receipt_root_rx) = if bal_eligible {
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
-            match self.execute_block_bal(
-                state_provider,
-                env,
-                &input,
-                &handle,
-                decoded_bal,
-                provider_builder,
-            ) {
-                Ok((output, senders, receipt_root_rx)) => {
-                    (output, senders, receipt_root_rx, built_bal)
-                }
+            match self.execute_block_bal(state_provider, env, &input, &handle, provider_builder) {
+                Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             }
         } else {
@@ -597,6 +591,7 @@ where
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             }
         };
+        let block_access_list_hash = decoded_bal.as_ref().map(|decoded_bal| decoded_bal.hash());
         let execution_duration = execute_block_start.elapsed();
 
         // After executing the block we can stop prewarming transactions
@@ -674,7 +669,7 @@ where
                 transaction_root,
                 receipt_root_bloom,
                 hashed_state,
-                built_bal
+                block_access_list_hash
             ),
             block
         );
@@ -778,6 +773,18 @@ where
                 }
             }
             StateRootStrategy::Synchronous => {}
+            StateRootStrategy::Custom(custom) => {
+                let (state_root, trie_updates) = ensure_ok_post_block!(
+                    custom(CustomStateRootInput {
+                        block: &block,
+                        parent_block: &parent_block,
+                        output: &output,
+                        hashed_state: &hashed_state,
+                    }),
+                    block
+                );
+                maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
+            }
         }
 
         // Determine the state root.
@@ -927,12 +934,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
         InsertBlockErrorKind,
     >
     where
@@ -944,16 +946,17 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        if let Some(bal_opt) = input.block_access_list() {
-            let bal = bal_opt.map_err(BlockExecutionError::other)?;
-            validate_block_access_list_gas(Some(&bal), input.gas_limit())
+        if let Some(decoded_bal) = &env.decoded_bal {
+            decoded_bal
+                .as_bal()
+                .validate_gas_limit(input.gas_limit())
                 .map_err(|e| {
                     debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
-                    InsertBlockErrorKind::Consensus(e)
+                    InsertBlockErrorKind::Consensus(ConsensusError::from(e))
                 })?
         }
 
-        let has_bal = input.block_access_list().is_some();
+        let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1019,12 +1022,16 @@ where
             .map(|(evm, result)| (evm.into_db(), result))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
+        if let Some(decoded_bal) = &env.decoded_bal {
+            // Regular execution still handles BAL payloads when the parallel BAL path is
+            // disabled. Prove that execution rebuilt the payload-provided BAL before
+            // post-execution validation uses `decoded_bal.hash()` as the header commitment.
+            crate::tree::payload_processor::bal::validate_bal(&mut db, decoded_bal)?;
+        }
+
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
-
-        // Extract the built bal if payload has bal
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
@@ -1033,7 +1040,7 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx, built_bal))
+        Ok((output, senders, result_rx))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1076,7 +1083,6 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
-        decoded_bal: Arc<DecodedBal>,
         provider_builder: StateProviderBuilder<N, BalP>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
@@ -1100,6 +1106,9 @@ where
         let saved_cache = SavedCache::new(env.parent_hash, cache);
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
+        let input_bal = env.decoded_bal.ok_or_else(|| {
+            InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
+        })?;
 
         let make_db = move || {
             let provider = provider_builder
@@ -1118,7 +1127,7 @@ where
             &self.runtime,
             &self.evm_config,
             &make_db,
-            decoded_bal,
+            input_bal,
             env.evm_env,
             ctx,
             env.transaction_count,
@@ -1523,7 +1532,7 @@ where
         transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         hashed_state: LazyHashedPostState,
-        built_bal: Option<BlockAccessList>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1550,9 +1559,6 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
-
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
             output,
@@ -1616,7 +1622,7 @@ where
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        strategy: StateRootStrategy,
+        strategy: &StateRootStrategy<N>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1646,7 +1652,9 @@ where
 
                 Ok(handle)
             }
-            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
+            StateRootStrategy::Parallel |
+            StateRootStrategy::Synchronous |
+            StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -1697,8 +1705,10 @@ where
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
-    const fn plan_state_root_computation(&self) -> StateRootStrategy {
-        if self.config.state_root_fallback() {
+    fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
+        if let Some(custom_state_root) = &self.custom_state_root {
+            StateRootStrategy::Custom(custom_state_root.clone())
+        } else if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
@@ -2039,14 +2049,16 @@ where
 }
 
 /// Strategy describing how to compute the state root.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StateRootStrategy {
+#[derive(derive_more::Debug, Clone)]
+enum StateRootStrategy<N: NodePrimitives> {
     /// Use the state root task (background sparse trie computation).
     StateRootTask,
     /// Run the parallel state root computation on the calling thread.
     Parallel,
     /// Fall back to synchronous computation via the state provider.
     Synchronous,
+    /// Custom state root computation strategy.
+    Custom(#[debug(skip)] CustomStateRoot<N>),
 }
 
 /// Type that validates the payloads processed by the engine.
@@ -2291,14 +2303,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 
-    /// Returns the block access list embedded in a payload, if present.
-    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        match self {
-            Self::Payload(payload) => payload.block_access_list().map(|block_access_list| {
-                alloy_rlp::decode_exact::<Bal>(block_access_list.as_ref()).map(Bal::into_inner)
-            }),
-            Self::Block(_) => None,
-        }
+    /// Returns true if this is a payload.
+    pub const fn is_payload(&self) -> bool {
+        matches!(self, Self::Payload(_))
+    }
+
+    /// Returns true if this is a block.
+    pub const fn is_block(&self) -> bool {
+        matches!(self, Self::Block(_))
     }
 
     /// Returns the decoded block access list, if present and successfully decoded.
@@ -2356,3 +2368,24 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 }
+
+/// Input for [`CustomStateRoot`].
+#[derive(Debug, Clone)]
+pub struct CustomStateRootInput<'a, N: NodePrimitives> {
+    /// The block being validated.
+    pub block: &'a SealedBlock<N::Block>,
+    /// The parent block.
+    pub parent_block: &'a SealedHeader<N::BlockHeader>,
+    /// The execution output.
+    pub output: &'a BlockExecutionOutput<N::Receipt>,
+    /// The hashed state.
+    pub hashed_state: &'a LazyHashedPostState,
+}
+
+/// A custom state root computation handler.
+pub type CustomStateRoot<N> = Arc<
+    dyn Fn(CustomStateRootInput<'_, N>) -> ProviderResult<(B256, TrieUpdates)>
+        + Send
+        + Sync
+        + 'static,
+>;
