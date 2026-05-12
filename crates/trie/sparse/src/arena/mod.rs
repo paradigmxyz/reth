@@ -848,7 +848,8 @@ impl ArenaParallelSparseTrie {
         let head_path = head.path;
 
         let ArenaSparseNode::Branch(b) = &self.upper_arena[head_idx] else { return };
-        let short_key = b.short_key;
+        let mut child_base_path = head_path;
+        child_base_path.extend(&b.short_key);
         let children: SmallVec<[_; 4]> = b
             .child_iter()
             .filter_map(|(nibble, child)| match child {
@@ -858,8 +859,7 @@ impl ArenaParallelSparseTrie {
             .collect();
 
         for (nibble, child_idx) in children {
-            let mut child_path = head_path;
-            child_path.extend(&short_key);
+            let mut child_path = child_base_path;
             child_path.push_unchecked(nibble);
             self.maybe_wrap_in_subtrie(child_idx, &child_path);
         }
