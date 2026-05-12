@@ -9,14 +9,13 @@ mod context;
 mod generate_big_block;
 pub(crate) mod helpers;
 pub use generate_big_block::{
-    compute_payload_block_hash, BigBlockPayload, RawTransaction, RpcTransactionSource,
-    TransactionCollector, TransactionSource,
+    compute_payload_block_hash, RawTransaction, RpcTransactionSource, TransactionCollector,
+    TransactionSource,
 };
 pub(crate) mod metrics_scraper;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
-mod replay_payloads;
 mod send_invalid_payload;
 mod send_payload;
 
@@ -63,17 +62,6 @@ pub enum Subcommands {
     /// --count 10 --output-dir ./payloads`
     GenerateBigBlock(generate_big_block::Command),
 
-    /// Replay pre-generated payloads from a directory.
-    ///
-    /// This command reads payload files from a previous `generate-big-block` run and replays
-    /// them in sequence using `newPayload` followed by `forkchoiceUpdated`.
-    ///
-    /// Example:
-    ///
-    /// `reth-bench replay-payloads --payload-dir ./payloads --engine-rpc-url
-    /// http://localhost:8551 --jwt-secret ~/.local/share/reth/mainnet/jwt.hex`
-    ReplayPayloads(replay_payloads::Command),
-
     /// Generate and send an invalid `engine_newPayload` request for testing.
     ///
     /// Takes a valid block and modifies fields to make it invalid, allowing you to test
@@ -98,7 +86,6 @@ impl BenchmarkCommand {
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
             Subcommands::GenerateBigBlock(command) => command.execute(ctx).await,
-            Subcommands::ReplayPayloads(command) => command.execute(ctx).await,
             Subcommands::SendInvalidPayload(command) => (*command).execute(ctx).await,
         }
     }

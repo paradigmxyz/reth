@@ -47,6 +47,16 @@ on:
           - nightly
           - hourly
           - release
+      blocks:
+        description: "Number of blocks to benchmark"
+        required: false
+        default: "2000"
+        type: string
+      warmup:
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
+        required: false
+        default: ""
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -76,6 +86,8 @@ jobs:
       nightly-created: ${{ steps.refs.outputs.nightly-created }}
       long-running: ${{ steps.refs.outputs.long-running }}
       release-tag: ${{ steps.refs.outputs.release-tag }}
+      blocks: ${{ steps.bench-config.outputs.blocks }}
+      warmup: ${{ steps.bench-config.outputs.warmup }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -103,6 +115,30 @@ jobs:
           fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "Detected mode: $MODE"
+
+      - name: Resolve benchmark config
+        id: bench-config
+        env:
+          INPUT_BLOCKS: ${{ inputs.blocks || '2000' }}
+          INPUT_WARMUP: ${{ inputs.warmup || '' }}
+        run: |
+          if ! [[ "$INPUT_BLOCKS" =~ ^[0-9]+$ ]]; then
+            echo "::error::blocks must be a non-negative integer"
+            exit 1
+          fi
+          if [ -n "$INPUT_WARMUP" ] && ! [[ "$INPUT_WARMUP" =~ ^[0-9]+$ ]]; then
+            echo "::error::warmup must be a non-negative integer"
+            exit 1
+          fi
+
+          if [ -z "$INPUT_WARMUP" ]; then
+            INPUT_WARMUP=$(( INPUT_BLOCKS / 4 ))
+          fi
+
+          {
+            echo "blocks=$INPUT_BLOCKS"
+            echo "warmup=$INPUT_WARMUP"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve refs
         id: refs
@@ -261,8 +297,8 @@ jobs:
       BENCH_PR: ""
       BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
       BENCH_ACTOR: "${{ needs.resolve-refs.outputs.mode }}-regression"
-      BENCH_BLOCKS: "2000"
-      BENCH_WARMUP_BLOCKS: "500"
+      BENCH_BLOCKS: ${{ needs.resolve-refs.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.resolve-refs.outputs.warmup }}
       BENCH_SAMPLY: "false"
       BENCH_CORES: "0"
       BENCH_BIG_BLOCKS: "false"
