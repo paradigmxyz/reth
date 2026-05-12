@@ -66,6 +66,16 @@ impl<'a> StaticFileCursor<'a> {
         }
     }
 
+    /// Gets one column value from the current row and advances the cursor.
+    pub fn next_one<M: ColumnSelectorOne>(&mut self) -> ColumnResult<M::FIRST> {
+        let row = self.next_row_with_cols(M::MASK).map_err(ProviderError::other)?;
+
+        match row {
+            Some(row) => Ok(Some(M::FIRST::decompress(row[0])?)),
+            None => Ok(None),
+        }
+    }
+
     /// Gets two column values from a row.
     pub fn get_two<M: ColumnSelectorTwo>(
         &mut self,

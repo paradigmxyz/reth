@@ -2425,8 +2425,14 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
-            for i in offset.changeset_range() {
-                if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
+            for (idx, i) in offset.changeset_range().enumerate() {
+                let change = if idx == 0 {
+                    cursor.get_one::<StorageChangesetMask>(i.into())?
+                } else {
+                    cursor.next_one::<StorageChangesetMask>()?
+                };
+
+                if let Some(change) = change {
                     let block_address = BlockNumberAddress((block_number, change.address));
                     let entry = StorageEntry { key: change.key, value: change.value };
                     changeset.push((block_address, entry));
