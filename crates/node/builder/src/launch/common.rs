@@ -532,7 +532,7 @@ where
         let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
 
         // Take the minimum block number to ensure all storage layers are consistent.
-        let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
+        let mut unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
 
         if let Some(unwind_block) = unwind_target {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
@@ -548,10 +548,28 @@ where
                 "A {} inconsistency was found that would trigger an unwind to block 0",
                 inconsistency_source
             );
+            info!(target: "reth::cli", unwind_block, %inconsistency_source, "Storage inconsistency detected");
+        }
 
+        // Check that all pipeline stage checkpoints are consistent with each other.
+        // A partial `stage unwind`, snapshot import, or crash recovery can leave
+        // stages like Headers ahead of Execution, which would cause the engine tree
+        // to return VALID for blocks whose state was never computed (#23234).
+        // Unwind to the minimum checkpoint so that all stages are consistent.
+        if let Some(stage_unwind) = Self::check_stage_checkpoint_consistency(&factory)? {
+            info!(
+                target: "reth::cli",
+                stage_unwind,
+                "Stage checkpoint inconsistency detected, \
+                 will unwind to lowest checkpoint"
+            );
+            unwind_target = Some(unwind_target.map_or(stage_unwind, |t| t.min(stage_unwind)));
+        }
+
+        if let Some(unwind_block) = unwind_target {
             let unwind_target = PipelineTarget::Unwind(unwind_block);
 
-            info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
+            info!(target: "reth::cli", %unwind_target, "Executing unwind after consistency check.");
 
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
@@ -582,7 +600,7 @@ where
                 let _ = tx.send(result);
             });
             rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
+                error!(target: "reth::cli", %unwind_target, %err, "failed to run unwind")
             })?;
         }
 
@@ -607,6 +625,53 @@ where
         };
 
         Ok(ctx)
+    }
+
+    /// Checks that all pipeline stage checkpoints are consistent with each other.
+    ///
+    /// A partial `stage unwind`, snapshot import, or crash recovery can leave earlier
+    /// stages (e.g. Headers) ahead of later stages (e.g. Execution). In that state
+    /// the engine tree would find a canonical header for the FCU head but no computed
+    /// state, returning `VALID` instead of `Syncing` and preventing the backfill
+    /// pipeline from ever running (#23234).
+    ///
+    /// Returns `Some(block_number)` with the minimum stage checkpoint if any stage is
+    /// ahead of it, indicating that an unwind is required. Returns `None` when all
+    /// stages are already consistent.
+    fn check_stage_checkpoint_consistency<N>(
+        factory: &ProviderFactory<N>,
+    ) -> eyre::Result<Option<BlockNumber>>
+    where
+        N: ProviderNodeTypes,
+    {
+        let mut min_checkpoint: Option<BlockNumber> = None;
+        let mut max_checkpoint: Option<BlockNumber> = None;
+
+        for stage_id in StageId::ALL {
+            let checkpoint = factory
+                .get_stage_checkpoint(stage_id)?
+                .map(|c| c.block_number);
+
+            if let Some(block_number) = checkpoint {
+                min_checkpoint =
+                    Some(min_checkpoint.map_or(block_number, |m: BlockNumber| m.min(block_number)));
+                max_checkpoint =
+                    Some(max_checkpoint.map_or(block_number, |m: BlockNumber| m.max(block_number)));
+            }
+        }
+
+        match (min_checkpoint, max_checkpoint) {
+            (Some(min), Some(max)) if max > min => {
+                debug!(
+                    target: "reth::cli",
+                    min_checkpoint = min,
+                    max_checkpoint = max,
+                    "Stage checkpoints are inconsistent"
+                );
+                Ok(Some(min))
+            }
+            _ => Ok(None),
+        }
     }
 }
 
