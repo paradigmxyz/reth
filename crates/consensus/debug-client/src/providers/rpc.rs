@@ -79,6 +79,10 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
         }
     }
 
+    /// Fetches optional payload side data for blocks that advertise a block access list hash.
+    ///
+    /// Block access lists are best effort here: RPC providers may not support
+    /// `eth_getBlockAccessListByHash`, so failed or missing responses fall back to empty extras.
     async fn payload_extras(&self, header: &N::HeaderResponse) -> PayloadExtras {
         if !self.fetch_block_access_list {
             return PayloadExtras::default()
