@@ -175,16 +175,25 @@ pub struct ParallelMerkleExecutionStage<Factory> {
     rebuild_threshold: u64,
     incremental_threshold: u64,
     parallel_storage_tries_threshold: usize,
+    /// Runtime used by `ParallelStateRoot` to dispatch storage-root workers onto reth's
+    /// named `storage_pool` rayon threads.
+    runtime: reth_tasks::Runtime,
 }
 
 impl<Factory> ParallelMerkleExecutionStage<Factory> {
     /// Create a new stage.
-    pub fn new(factory: Factory, rebuild_threshold: u64, incremental_threshold: u64) -> Self {
+    pub fn new(
+        factory: Factory,
+        rebuild_threshold: u64,
+        incremental_threshold: u64,
+        runtime: reth_tasks::Runtime,
+    ) -> Self {
         Self {
             overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
             rebuild_threshold,
             incremental_threshold,
             parallel_storage_tries_threshold: PARALLEL_MERKLE_STORAGE_TRIE_THRESHOLD,
+            runtime,
         }
     }
 
@@ -222,9 +231,13 @@ impl<Factory> ParallelMerkleExecutionStage<Factory> {
         );
 
         if use_parallel {
-            return ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
-                .incremental_root_with_updates()
-                .map_err(|e| StageError::Fatal(Box::new(e)))
+            return ParallelStateRoot::new(
+                self.overlay_factory.clone(),
+                prefix_sets,
+                self.runtime.clone(),
+            )
+            .incremental_root_with_updates()
+            .map_err(|e| StageError::Fatal(Box::new(e)))
         }
 
         reth_trie_db::with_adapter!(provider, |A| {
@@ -806,6 +819,7 @@ mod tests {
             factory.clone(),
             rebuild_threshold,
             incremental_threshold,
+            reth_tasks::Runtime::test(),
         );
         stage.parallel_storage_tries_threshold = 0;
 
@@ -900,7 +914,7 @@ mod tests {
             ChangesetCache::new(),
         );
         let (parallel_root, parallel_updates) =
-            ParallelStateRoot::new(overlay_factory, prefix_sets)
+            ParallelStateRoot::new(overlay_factory, prefix_sets, reth_tasks::Runtime::test())
                 .incremental_root_with_updates()
                 .unwrap();
 
@@ -949,6 +963,7 @@ mod tests {
             factory.clone(),
             rebuild_threshold,
             incremental_threshold,
+            reth_tasks::Runtime::test(),
         );
         parallel_stage.parallel_storage_tries_threshold = 0;
 

@@ -7,6 +7,7 @@ use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
@@ -36,6 +37,10 @@ pub struct ParallelStateRoot<Factory> {
     factory: Factory,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
+    /// Runtime handle. Storage-root workers are dispatched onto
+    /// [`Runtime::storage_pool`] so they get reth's named storage threads, panic handler,
+    /// and configurable pool size instead of rayon's anonymous global pool.
+    runtime: Runtime,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -43,10 +48,11 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(factory: Factory, prefix_sets: TriePrefixSets) -> Self {
+    pub fn new(factory: Factory, prefix_sets: TriePrefixSets, runtime: Runtime) -> Self {
         Self {
             factory,
             prefix_sets,
+            runtime,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -102,9 +108,13 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            // Dispatch storage-root computation onto the global rayon pool so a bounded set of
-            // worker threads (≈ CPU cores) consumes targets via work-stealing.
-            rayon::spawn(move || {
+            // Dispatch storage-root computation onto reth's `cpu_pool` — a rayon pool sized
+            // to `available_parallelism()` with named `cpu-NN` threads and a reth-wide
+            // panic handler. Sticking with the configured pool (rather than `rayon::spawn`
+            // on the global default) keeps the workers visible to profilers and respects
+            // reth's `RayonConfig`. `storage_pool` would oversubscribe on hosts where
+            // `DEFAULT_STORAGE_POOL_THREADS (= 16)` exceeds physical CPU threads.
+            self.runtime.cpu_pool().spawn(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider = factory.database_provider_ro()?;
                     Ok(StorageRoot::new_hashed(
@@ -331,8 +341,9 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
+        let runtime = reth_tasks::Runtime::test();
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory.clone(), Default::default())
+            ParallelStateRoot::new(overlay_factory.clone(), Default::default(), runtime.clone())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -368,7 +379,7 @@ mod tests {
             overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
 
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze())
+            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze(), runtime)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)
