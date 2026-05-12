@@ -6,6 +6,11 @@
 # drops Linux page cache, and measures only the testing fixture replay.
 
 on:
+  # Temporary test trigger for branch-only workflow validation.
+  # Remove before merging this workflow.
+  push:
+    branches:
+      - dan/create-benchmarkoor-replay-workflow
   workflow_dispatch:
     inputs:
       pr:
@@ -46,17 +51,12 @@ on:
       snapshot:
         description: "Snapshot manifest/archive URL, MinIO path, or prefix"
         required: false
-        default: "perfnet"
+        default: "minio/reth-snapshots/perfnet-24358000-full/"
         type: string
       snapshot_mc_root:
         description: "MinIO root used when snapshot is only a prefix"
         required: false
         default: "minio"
-        type: string
-      genesis:
-        description: "Genesis URL/path override; empty tries snapshot sibling genesis.json"
-        required: false
-        default: ""
         type: string
       fixture_url:
         description: "Fixture archive URL/path override (empty uses suite default)"
@@ -161,20 +161,19 @@ jobs:
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-benchmarkoor.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
-      BENCH_CORES: ${{ inputs.cores }}
-      BENCH_BASELINE_ARGS: ${{ inputs.baseline_args }}
-      BENCH_FEATURE_ARGS: ${{ inputs.feature_args }}
+      BENCH_CORES: ${{ inputs.cores || '0' }}
+      BENCH_BASELINE_ARGS: ${{ inputs.baseline_args || '' }}
+      BENCH_FEATURE_ARGS: ${{ inputs.feature_args || '' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      BENCHMARKOOR_SUITE: ${{ inputs.suite }}
-      BENCHMARKOOR_CONTEXT: ${{ inputs.context }}
-      BENCHMARKOOR_FORK: ${{ inputs.fork }}
-      BENCHMARKOOR_TEST_TYPE: ${{ inputs.test_type }}
-      BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root }}
-      BENCHMARKOOR_SNAPSHOT: ${{ inputs.snapshot }}
-      BENCHMARKOOR_SNAPSHOT_MC_ROOT: ${{ inputs.snapshot_mc_root }}
-      BENCHMARKOOR_GENESIS: ${{ inputs.genesis }}
+      BENCHMARKOOR_SUITE: ${{ inputs.suite || 'perf-devnet-3/24358000' }}
+      BENCHMARKOOR_CONTEXT: ${{ inputs.context || 'repricing' }}
+      BENCHMARKOOR_FORK: ${{ inputs.fork || 'amsterdam' }}
+      BENCHMARKOOR_TEST_TYPE: ${{ inputs.test_type || 'stateful' }}
+      BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root || '/home/ubuntu/projects/benchmarkoor-tests/configs' }}
+      BENCHMARKOOR_SNAPSHOT: ${{ inputs.snapshot || 'minio/reth-snapshots/perfnet-24358000-full/' }}
+      BENCHMARKOOR_SNAPSHOT_MC_ROOT: ${{ inputs.snapshot_mc_root || 'minio' }}
       BENCHMARKOOR_MIGRATE_V2: ${{ inputs.migrate_v2 && 'true' || 'false' }}
-      BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path }}
+      BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '/home/ubuntu/projects/benchmarkoor-replay' }}
       BENCHMARKOOR_CACHE: ${{ github.workspace }}/bench-work/benchmarkoor-cache
     steps:
       - name: Clean up previous bench-work
@@ -256,9 +255,9 @@ jobs:
       - name: Resolve refs
         id: refs
         env:
-          INPUT_PR: ${{ inputs.pr }}
-          INPUT_FEATURE: ${{ inputs.feature }}
-          INPUT_BASELINE: ${{ inputs.baseline }}
+          INPUT_PR: ${{ inputs.pr || '' }}
+          INPUT_FEATURE: ${{ inputs.feature || '' }}
+          INPUT_BASELINE: ${{ inputs.baseline || 'main' }}
         run: |
           set -euo pipefail
           git fetch origin main --quiet
@@ -340,6 +339,8 @@ jobs:
           fi
 
       - name: Download fixtures
+        env:
+          FIXTURE_URL: ${{ inputs.fixture_url || '' }}
         run: |
           set -euo pipefail
           args=(
@@ -351,22 +352,22 @@ jobs:
             --cache-dir "$BENCHMARKOOR_CACHE"
             fixtures download
           )
-          if [ -n "${{ inputs.fixture_url }}" ]; then
-            args+=(--url "${{ inputs.fixture_url }}")
+          if [ -n "$FIXTURE_URL" ]; then
+            args+=(--url "$FIXTURE_URL")
           fi
           "$BENCHMARKOOR_BIN" "${args[@]}"
 
       - name: Resolve test set
         id: tests
         env:
-          EXACT_TEST: ${{ inputs.exact_test }}
-          CONTAINS: ${{ inputs.contains }}
-          PATTERN: ${{ inputs.pattern }}
-          OPCODE: ${{ inputs.opcode }}
-          GAS_BUCKET: ${{ inputs.gas_bucket }}
-          CACHE_STRATEGY: ${{ inputs.cache_strategy }}
-          ACCOUNT_MODE: ${{ inputs.account_mode }}
-          LIMIT: ${{ inputs.limit }}
+          EXACT_TEST: ${{ inputs.exact_test || '' }}
+          CONTAINS: ${{ inputs.contains || 'test_account_access' }}
+          PATTERN: ${{ inputs.pattern || '' }}
+          OPCODE: ${{ inputs.opcode || '' }}
+          GAS_BUCKET: ${{ inputs.gas_bucket || '' }}
+          CACHE_STRATEGY: ${{ inputs.cache_strategy || '' }}
+          ACCOUNT_MODE: ${{ inputs.account_mode || '' }}
+          LIMIT: ${{ inputs.limit || '1' }}
         run: |
           set -euo pipefail
           if ! [[ "$LIMIT" =~ ^[0-9]+$ ]] || [ "$LIMIT" -lt 1 ]; then
@@ -481,12 +482,14 @@ jobs:
             "$BENCH_WORK_DIR/prerun"
 
       - name: Run benchmarkoor comparison
+        env:
+          BENCHMARKOOR_REPETITIONS: ${{ inputs.repetitions || '1' }}
         run: |
           set -euo pipefail
           BASELINE_BIN="$(pwd)/../reth-baseline/target/profiling/reth"
           FEATURE_BIN="$(pwd)/../reth-feature/target/profiling/reth"
 
-          if [ "${{ inputs.repetitions }}" = "2" ]; then
+          if [ "$BENCHMARKOOR_REPETITIONS" = "2" ]; then
             RUNS=(
               "feature-1:$FEATURE_BIN"
               "baseline-1:$BASELINE_BIN"

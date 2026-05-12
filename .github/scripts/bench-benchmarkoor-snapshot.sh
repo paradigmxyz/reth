@@ -19,7 +19,6 @@
 # Optional env:
 #   BENCHMARKOOR_SNAPSHOT_MC_ROOT  MinIO alias/root used when
 #                                  BENCHMARKOOR_SNAPSHOT is a bare prefix.
-#   BENCHMARKOOR_GENESIS           Genesis URL, mc path, or local path.
 #   BENCHMARKOOR_MIGRATE_V2        true to run reth db migrate-v2.
 set -euo pipefail
 
@@ -176,48 +175,6 @@ resolve_snapshot_object() {
   printf '%s\n' "$found"
 }
 
-download_optional_genesis() {
-  local manifest_source="$1"
-  local genesis_dest="${DATADIR}/genesis.json"
-  local sibling=""
-  local fallback_url=""
-
-  if [ -n "${BENCHMARKOOR_GENESIS:-}" ]; then
-    echo "Downloading explicit benchmarkoor genesis"
-    copy_source_to_file "$BENCHMARKOOR_GENESIS" "$genesis_dest"
-    return 0
-  fi
-
-  if [[ "$manifest_source" =~ ^https?:// ]]; then
-    sibling="$(dirname "$manifest_source")/genesis.json"
-  elif [[ "$manifest_source" == */* ]]; then
-    sibling="$(dirname "$manifest_source")/genesis.json"
-  fi
-
-  if [ -n "$sibling" ] && source_exists "$sibling"; then
-    echo "Downloading genesis from snapshot location"
-    copy_source_to_file "$sibling" "$genesis_dest"
-    return 0
-  fi
-
-  fallback_url="$(known_suite_genesis_url)"
-  if [ -n "$fallback_url" ]; then
-    echo "Downloading genesis from benchmarkoor suite fallback"
-    copy_source_to_file "$fallback_url" "$genesis_dest"
-  fi
-}
-
-known_suite_genesis_url() {
-  case "$BENCHMARKOOR_SUITE" in
-    perf-devnet-3/24358000)
-      printf '%s\n' "https://gist.githubusercontent.com/skylenet/83b19b06b91fb44e0131d275a1aa0495/raw/4fb5ed66370bc5dc7c6745a775d4972dd6c1a098/genesis-perf-devnet-3-24358000-amsterdam-genesis.json"
-      ;;
-    jochemnet/24402727)
-      printf '%s\n' "https://gist.githubusercontent.com/skylenet/8226878ba786efcf10b5fd74be97fe41/raw/ab888a0f90dcf214bd5d3c36b3dfa1827335ecf9/genesis-jochemnet-24402727-amsterdam-genesis.json"
-      ;;
-  esac
-}
-
 network="${BENCHMARKOOR_SUITE%%/*}"
 block="${BENCHMARKOOR_SUITE#*/}"
 suite_slug="$(
@@ -258,7 +215,15 @@ if manifest_object="$(resolve_manifest_object "$BENCHMARKOOR_SNAPSHOT")"; then
     --minimal \
     --datadir "$DATADIR"
 
-  download_optional_genesis "$manifest_object"
+  "$BENCHMARKOOR_BIN" \
+    --suite "$BENCHMARKOOR_SUITE" \
+    --context "$BENCHMARKOOR_CONTEXT" \
+    --fork "$BENCHMARKOOR_FORK" \
+    --test-type "$BENCHMARKOOR_TEST_TYPE" \
+    --metadata-root "$BENCHMARKOOR_METADATA_ROOT" \
+    --cache-dir "$BENCHMARKOOR_CACHE" \
+    genesis download \
+    --datadir "$DATADIR"
 
   if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
     echo "::error::Manifest download did not produce expected db/ and static_files/ directories"
