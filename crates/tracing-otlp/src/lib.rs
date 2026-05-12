@@ -221,10 +221,7 @@ impl OtlpLogsConfig {
 }
 
 // Builds OTLP resource with service information.
-fn build_resource(
-    service_name: impl Into<Value>,
-    service_version: Option<&str>,
-) -> Resource {
+fn build_resource(service_name: impl Into<Value>, service_version: Option<&str>) -> Resource {
     let version = service_version.unwrap_or(env!("CARGO_PKG_VERSION"));
     Resource::builder()
         .with_service_name(service_name)
