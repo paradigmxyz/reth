@@ -30,14 +30,20 @@ pub struct RethPayloadStatus {
 }
 
 /// Input for `reth_newPayload` that accepts either `ExecutionData` directly or an RLP-encoded
-/// block.
+/// block with an optional block access list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RethNewPayloadInput<ExecutionData> {
     /// Standard execution data (payload + sidecar).
     ExecutionData(ExecutionData),
-    /// An RLP-encoded block.
-    BlockRlp(Bytes),
+    /// An RLP-encoded block with an optional RLP-encoded block access list.
+    BlockRlp {
+        /// The RLP-encoded block.
+        rlp: Bytes,
+        /// Optional RLP-encoded block access list.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bal: Option<Bytes>,
+    },
 }
 
 /// Reth-specific engine API extensions.
