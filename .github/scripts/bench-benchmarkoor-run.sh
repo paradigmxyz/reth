@@ -60,6 +60,142 @@ drop_caches() {
   grep Cached /proc/meminfo
 }
 
+rpc_call() {
+  local method="$1"
+  local params="${2:-[]}"
+  curl -sf "$HTTP_URL" -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"method\":\"${method}\",\"params\":${params},\"id\":1}"
+}
+
+prerun_head_file() {
+  if [ -n "${BENCH_PRERUN_HEAD_FILE:-}" ]; then
+    printf '%s\n' "$BENCH_PRERUN_HEAD_FILE"
+  elif [ -n "${BENCH_WORK_DIR:-}" ]; then
+    printf '%s\n' "${BENCH_WORK_DIR}/prerun-head.json"
+  else
+    printf '%s\n' "${SCHELK_MOUNT}/prerun-head.json"
+  fi
+}
+
+write_prerun_head_marker() {
+  local marker head_hex head_dec block_hash
+  marker="$(prerun_head_file)"
+  head_hex="$(rpc_call eth_blockNumber | jq -er '.result')"
+  head_dec=$(( 16#${head_hex#0x} ))
+  block_hash="$(rpc_call eth_getBlockByNumber "[\"${head_hex}\",false]" | jq -er '.result.hash')"
+  mkdir -p "$(dirname "$marker")"
+  jq -n \
+    --argjson number "$head_dec" \
+    --arg number_hex "$head_hex" \
+    --arg hash "$block_hash" \
+    '{number: $number, number_hex: $number_hex, hash: $hash}' > "$marker"
+  echo "Recorded post-prerun head ${head_dec} (${block_hash}) in ${marker}"
+}
+
+wait_for_prerun_head() {
+  local marker
+  marker="$(prerun_head_file)"
+  [ -f "$marker" ] || return 0
+
+  local expected_number_hex expected_hash actual_hash
+  expected_number_hex="$(jq -er '.number_hex' "$marker")"
+  expected_hash="$(jq -er '.hash' "$marker")"
+
+  for i in $(seq 1 60); do
+    actual_hash="$(rpc_call eth_getBlockByNumber "[\"${expected_number_hex}\",false]" \
+      | jq -r '.result.hash // empty' 2>/dev/null || true)"
+    if [ "$actual_hash" = "$expected_hash" ]; then
+      echo "Recovered post-prerun head ${expected_number_hex} (${expected_hash}) after ${i}s"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "::error::Recovered datadir did not expose expected post-prerun head ${expected_number_hex} (${expected_hash})"
+  rpc_call eth_blockNumber || true
+  exit 1
+}
+
+reth_db_capture() {
+  local binary="$1"
+  shift
+
+  local -a db_args=(db)
+  if [ -f "$DATADIR/genesis.json" ]; then
+    db_args+=(--chain "$DATADIR/genesis.json")
+  fi
+  db_args+=(--datadir "$DATADIR" "$@")
+
+  "$binary" "${db_args[@]}" 2>&1
+}
+
+has_table_content() {
+  local output="$1"
+  [ -n "$output" ] && [[ "$output" != *"No content for the given table key"* ]]
+}
+
+has_header_content() {
+  local output="$1"
+  has_table_content "$output" && {
+    [[ "$output" == *"BlockHash"* ]] || [[ "$output" == *"parent_hash"* ]]
+  }
+}
+
+persisted_prerun_head_present() {
+  local binary="$1"
+  local expected_number="$2"
+  local expected_hash="$3"
+  local canonical header
+
+  canonical="$(reth_db_capture "$binary" get mdbx CanonicalHeaders "$expected_number" || true)"
+  if ! has_table_content "$canonical" || ! grep -qi "${expected_hash#0x}" <<< "$canonical"; then
+    return 1
+  fi
+
+  header="$(reth_db_capture "$binary" get static-file headers "$expected_number" || true)"
+  if has_header_content "$header"; then
+    return 0
+  fi
+
+  header="$(reth_db_capture "$binary" get mdbx Headers "$expected_number" || true)"
+  has_header_content "$header"
+}
+
+wait_for_persisted_prerun_head() {
+  local binary="$1"
+  local required="${2:-true}"
+  local marker
+  marker="$(prerun_head_file)"
+  [ -f "$marker" ] || return 0
+
+  local expected_number expected_hash
+  expected_number="$(jq -er '.number' "$marker")"
+  expected_hash="$(jq -er '.hash' "$marker")"
+
+  for i in $(seq 1 120); do
+    if persisted_prerun_head_present "$binary" "$expected_number" "$expected_hash"; then
+      echo "Post-prerun head ${expected_number} (${expected_hash}) is persisted after ${i}s"
+      return 0
+    fi
+    sleep 1
+  done
+
+  if [ "$required" != "true" ]; then
+    echo "Post-prerun head ${expected_number} (${expected_hash}) was not confirmed in on-disk Reth tables after 120s"
+    return 1
+  fi
+
+  echo "::error::Post-prerun head ${expected_number} (${expected_hash}) was not found in on-disk Reth tables"
+  echo "CanonicalHeaders:"
+  reth_db_capture "$binary" get mdbx CanonicalHeaders "$expected_number" || true
+  echo "Static-file header:"
+  reth_db_capture "$binary" get static-file headers "$expected_number" || true
+  echo "MDBX header:"
+  reth_db_capture "$binary" get mdbx Headers "$expected_number" || true
+  exit 1
+}
+
 stop_node() {
   if [ -n "${TAIL_PID:-}" ]; then
     kill "$TAIL_PID" 2>/dev/null || true
@@ -134,10 +270,19 @@ start_node() {
     reth_args+=(--chain "$DATADIR/genesis.json")
   fi
 
+  local node_help
+  node_help="$("$binary" node --help 2>/dev/null || true)"
+
   local sync_state_idle=false
-  if "$binary" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
+  if grep -qF -- '--debug.startup-sync-state-idle' <<< "$node_help"; then
     reth_args+=(--debug.startup-sync-state-idle)
     sync_state_idle=true
+  fi
+
+  if [[ "$phase" == "prerun" || "$phase" == *-setup ]] &&
+    grep -qF -- '--engine.persistence-threshold' <<< "$node_help" &&
+    grep -qF -- '--engine.persistence-backpressure-threshold' <<< "$node_help"; then
+    reth_args+=(--engine.persistence-threshold 0 --engine.persistence-backpressure-threshold 1)
   fi
 
   local extra_node_args=""
@@ -154,9 +299,15 @@ start_node() {
     reth_args+=(--metrics "$BENCH_METRICS_ADDR")
   fi
 
-  local total_mem_kb mem_limit
-  total_mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
-  mem_limit=$(( total_mem_kb * 95 / 100 * 1024 ))
+  local mem_limit
+  mem_limit="${BENCH_MEMORY_MAX:-32G}"
+  if [ -z "$mem_limit" ] || [ "$mem_limit" = "0" ]; then
+    local total_mem_kb
+    total_mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+    mem_limit=$(( total_mem_kb * 95 / 100 * 1024 ))
+  fi
+
+  echo "Starting reth (${label}/${phase}) with AllowedCPUs=${reth_cpus}, MemoryMax=${mem_limit}"
 
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
     -p MemoryMax="$mem_limit" -p AllowedCPUs="$reth_cpus" \
@@ -201,6 +352,10 @@ start_node() {
       sleep 1
     done
   fi
+
+  if [[ "$phase" == *-setup ]]; then
+    wait_for_prerun_head
+  fi
 }
 
 benchmarkoor_common_args() {
@@ -231,7 +386,8 @@ run_benchmarkoor() {
     "BENCHMARKOOR_TEST_TYPE=$BENCHMARKOOR_TEST_TYPE" \
     "BENCHMARKOOR_METADATA_ROOT=$BENCHMARKOOR_METADATA_ROOT" \
     "BENCHMARKOOR_CACHE=$BENCHMARKOOR_CACHE" \
-    "BENCH_CORES=${BENCH_CORES:-0}" \
+    "BENCH_CORES=${BENCH_CORES:-6}" \
+    "BENCH_MEMORY_MAX=${BENCH_MEMORY_MAX:-32G}" \
     "BENCH_BASELINE_ARGS=${BENCH_BASELINE_ARGS:-}" \
     "BENCH_FEATURE_ARGS=${BENCH_FEATURE_ARGS:-}" \
     "BENCH_METRICS_ADDR=${BENCH_METRICS_ADDR:-}" \
@@ -268,9 +424,14 @@ SH
   chmod +x "$sudo_schelk"
 
   mapfile -d '' common < <(benchmarkoor_common_args "$binary" "$sudo_schelk")
-  run_benchmarkoor "${common[@]}" baseline promote-prerun --kill
+  run_benchmarkoor "${common[@]}" baseline prepare --no-mount
+  write_prerun_head_marker
+  wait_for_persisted_prerun_head "$binary" false ||
+    echo "Post-prerun head was not confirmed before shutdown; checking again after graceful stop"
 
   stop_node
+  wait_for_persisted_prerun_head "$binary" true
+  sudo schelk promote -y
   sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
   echo "Promoted schelk baseline after benchmarkoor gas-bump/funding"
   exit 0

@@ -119,7 +119,12 @@ on:
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
-        default: "0"
+        default: "6"
+        type: string
+      memory:
+        description: "Limit reth memory via systemd MemoryMax (0 = 95% RAM)"
+        required: false
+        default: "32G"
         type: string
       baseline_args:
         description: "Extra CLI args for the baseline reth node"
@@ -161,7 +166,8 @@ jobs:
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-benchmarkoor.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
-      BENCH_CORES: ${{ inputs.cores || '0' }}
+      BENCH_CORES: ${{ inputs.cores || '6' }}
+      BENCH_MEMORY_MAX: ${{ inputs.memory || '32G' }}
       BENCH_BASELINE_ARGS: ${{ inputs.baseline_args || '' }}
       BENCH_FEATURE_ARGS: ${{ inputs.feature_args || '' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
