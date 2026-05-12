@@ -14,10 +14,10 @@ use reth_db_api::{
     cursor::{DbCursorRW, DbDupCursorRW},
     models::{
         storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, IntegerList,
-        ShardedKey, StorageBeforeTx,
+        ShardedKey,
     },
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     DatabaseError,
 };
 use reth_etl::Collector;
@@ -26,14 +26,12 @@ use reth_primitives_traits::{
     Account, Bytecode, GotExpected, NodePrimitives, SealedHeader, StorageEntry,
 };
 use reth_provider::{
-    errors::provider::ProviderResult,
-    providers::{RocksDBBatch, StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
-    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
-    MetadataProvider, MetadataWriter, NodePrimitivesProvider, OriginalValuesKnown, ProviderError,
-    RevertsInit, RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StateWriteConfig, StateWriter, StaticFileProviderFactory, StorageSettings,
-    StorageSettingsCache, TrieWriter,
+    errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
+    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
+    HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
+    NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
+    RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -686,40 +684,27 @@ fn parse_accounts(
 /// NOTE: This function is not idempotent. If the process crashes mid-import, the database
 /// must be wiped before retrying.
 fn dump_state<PF>(
-    collector: Collector<Address, GenesisAccount>,
-    provider_factory: &PF,
-    block: u64,
-) -> Result<(), eyre::Error>
-where
-    PF: DatabaseProviderFactory<
-        ProviderRW: StaticFileProviderFactory
-                        + DBProvider<Tx: DbTxMut>
-                        + StorageSettingsCache
-                        + RocksDBProviderFactory
-                        + NodePrimitivesProvider,
-    >,
-{
-    let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
-    if storage_settings.storage_v2 {
-        return dump_state_v2(collector, provider_factory, block)
-    }
-
-    dump_state_v1(collector, provider_factory, block)
-}
-
-fn dump_state_v1<PF>(
     mut collector: Collector<Address, GenesisAccount>,
     provider_factory: &PF,
     block: u64,
 ) -> Result<(), eyre::Error>
 where
     PF: DatabaseProviderFactory<ProviderRW: DBProvider<Tx: DbTxMut>>,
+    PF::ProviderRW: StaticFileProviderFactory
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
 {
+    let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
+    if storage_settings.storage_v2 {
+        return dump_state_v2(collector, provider_factory, block)
+    }
+
     let accounts_len = collector.len();
     let mut total_accounts: usize = 0;
     let mut storage_units: usize = 0;
 
-    // pre-allocate the history list once - every entry uses the same single-block bitmap
+    // pre-allocate the history list once — every entry uses the same single-block bitmap
     let history_list = IntegerList::new([block])?;
 
     // track seen bytecode hashes to avoid re-hashing and re-writing duplicates
@@ -749,7 +734,7 @@ where
             seen_bytecodes = B256Set::default();
         }
 
-        write_account_to_db_v1(
+        write_account_to_db(
             provider_rw.tx_ref(),
             &address,
             &account,
@@ -792,7 +777,7 @@ where
     let mut total_accounts: usize = 0;
     let mut storage_units: usize = 0;
 
-    // pre-allocate the history list once - every entry uses the same single-block bitmap
+    // pre-allocate the history list once — every entry uses the same single-block bitmap
     let history_list = IntegerList::new([block])?;
 
     // track seen bytecode hashes to avoid re-hashing and re-writing duplicates
@@ -877,7 +862,7 @@ where
 }
 
 fn prepare_account_changeset_writer<N: NodePrimitives>(
-    writer: &mut StaticFileProviderRWRefMut<'_, N>,
+    writer: &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
     block: u64,
 ) -> ProviderResult<()> {
     let next_block = writer.next_block_number();
@@ -904,7 +889,7 @@ fn prepare_account_changeset_writer<N: NodePrimitives>(
 }
 
 fn prepare_storage_changeset_writer<N: NodePrimitives>(
-    writer: &mut StaticFileProviderRWRefMut<'_, N>,
+    writer: &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
     block: u64,
 ) -> ProviderResult<()> {
     let next_block = writer.next_block_number();
@@ -930,7 +915,9 @@ fn prepare_storage_changeset_writer<N: NodePrimitives>(
     writer.begin_storage_changeset(block)
 }
 
-fn snapshot_state_tables_empty<TX: DbTx>(tx: &TX) -> ProviderResult<bool> {
+fn snapshot_state_tables_empty<TX: reth_db_api::transaction::DbTx>(
+    tx: &TX,
+) -> ProviderResult<bool> {
     Ok(tx.entries::<tables::PlainAccountState>()? == 0 &&
         tx.entries::<tables::PlainStorageState>()? == 0 &&
         tx.entries::<tables::HashedAccounts>()? == 0 &&
@@ -941,7 +928,7 @@ fn snapshot_state_tables_empty<TX: DbTx>(tx: &TX) -> ProviderResult<bool> {
 }
 
 fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
-    static_file_provider: &StaticFileProvider<N>,
+    static_file_provider: &reth_provider::providers::StaticFileProvider<N>,
     segment: StaticFileSegment,
     block: u64,
 ) -> ProviderResult<()> {
@@ -975,7 +962,7 @@ fn commit_mdbx_only<Provider>(provider: Provider) -> ProviderResult<()>
 where
     Provider: DBProvider<Tx: DbTxMut>,
 {
-    provider.into_tx().commit().map_err(ProviderError::from)
+    reth_db_api::transaction::DbTx::commit(provider.into_tx()).map_err(ProviderError::from)
 }
 
 /// Writes a single account and all its storage to every required DB table directly,
@@ -986,7 +973,7 @@ where
 /// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
 /// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
 /// use `put`/`upsert` which do a full B-tree lookup.
-fn write_account_to_db_v1<TX: DbTxMut>(
+fn write_account_to_db<TX: DbTxMut>(
     tx: &TX,
     address: &Address,
     genesis_account: &GenesisAccount,
@@ -1014,13 +1001,13 @@ fn write_account_to_db_v1<TX: DbTxMut>(
 
     let hashed_address = keccak256(address);
 
-    // plain state - sorted by address (ETL order), use append
+    // plain state — sorted by address (ETL order), use append
     tx.put::<tables::PlainAccountState>(*address, account)?;
 
-    // hashed state - unsorted (keccak scrambles order), must use put
+    // hashed state — unsorted (keccak scrambles order), must use put
     tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
-    // account changeset - DupSort keyed by block, subkey sorted by address (ETL order)
+    // account changeset — DupSort keyed by block, subkey sorted by address (ETL order)
     let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
     acct_cs_cursor.append_dup(block, AccountBeforeTx { address: *address, info: None })?;
 
@@ -1036,15 +1023,15 @@ fn write_account_to_db_v1<TX: DbTxMut>(
         for (&key, &value) in storage {
             let value_u256 = U256::from_be_bytes(value.0);
 
-            // plain storage - sorted by (address, key), use append_dup
+            // plain storage — sorted by (address, key), use append_dup
             plain_storage_cursor.append_dup(*address, StorageEntry { key, value: value_u256 })?;
 
-            // hashed storage - unsorted keccak order, use upsert
+            // hashed storage — unsorted keccak order, use upsert
             let hashed_key = keccak256(key);
             hashed_storage_cursor
                 .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
 
-            // storage changeset - sorted by (block, address), then by key via append_dup
+            // storage changeset — sorted by (block, address), then by key via append_dup
             storage_cs_cursor.append_dup(
                 BlockNumberAddress((block, *address)),
                 StorageEntry { key, value: U256::ZERO },
@@ -1069,10 +1056,10 @@ fn write_account_to_db_v1<TX: DbTxMut>(
 fn write_account_to_db_v2<TX, N>(
     tx: &TX,
     changeset_writers: (
-        &mut StaticFileProviderRWRefMut<'_, N>,
-        &mut StaticFileProviderRWRefMut<'_, N>,
+        &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
+        &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
     ),
-    history_batch: &mut RocksDBBatch<'_>,
+    history_batch: &mut reth_provider::providers::RocksDBBatch<'_>,
     address: &Address,
     genesis_account: &GenesisAccount,
     history_list: &IntegerList,
@@ -1119,11 +1106,9 @@ where
             hashed_storage_cursor
                 .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
 
-            storage_changeset_writer.append_storage_changeset_entry(StorageBeforeTx {
-                address: *address,
-                key,
-                value: U256::ZERO,
-            })?;
+            storage_changeset_writer.append_storage_changeset_entry(
+                reth_db_api::models::StorageBeforeTx { address: *address, key, value: U256::ZERO },
+            )?;
 
             history_batch.put::<tables::StoragesHistory>(
                 StorageShardedKey::new(*address, key, u64::MAX),
@@ -1320,7 +1305,7 @@ mod tests {
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        ChangeSetReader, ProviderFactory, RocksDBProviderFactory, StorageChangeSetReader,
+        ProviderFactory, RocksDBProviderFactory,
     };
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -1390,14 +1375,14 @@ mod tests {
         let address_with_balance = Address::with_last_byte(1);
         let address_with_storage = Address::with_last_byte(2);
         assert_eq!(
-            provider.account_block_changeset(block).unwrap(),
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, block).unwrap(),
             vec![
                 AccountBeforeTx { address: address_with_balance, info: None },
                 AccountBeforeTx { address: address_with_storage, info: None }
             ]
         );
         assert_eq!(
-            provider.storage_changeset(block).unwrap(),
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
             vec![(
                 BlockNumberAddress((block, address_with_storage)),
                 StorageEntry { key: storage_key, value: U256::ZERO }
@@ -1467,8 +1452,12 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let address = Address::with_last_byte(2);
-        assert!(provider.account_block_changeset(5).unwrap().is_empty());
-        assert!(provider.storage_changeset(5).unwrap().is_empty());
+        assert!(reth_provider::ChangeSetReader::account_block_changeset(&provider, 5)
+            .unwrap()
+            .is_empty());
+        assert!(reth_provider::StorageChangeSetReader::storage_changeset(&provider, 5)
+            .unwrap()
+            .is_empty());
 
         let account_file_start =
             static_files.find_fixed_range(StaticFileSegment::AccountChangeSets, block).start();
@@ -1476,15 +1465,25 @@ mod tests {
             static_files.find_fixed_range(StaticFileSegment::StorageChangeSets, block).start();
         assert_eq!(account_file_start, 500_000);
         assert_eq!(storage_file_start, 500_000);
-        assert!(provider.account_block_changeset(account_file_start).unwrap().is_empty());
-        assert!(provider.storage_changeset(storage_file_start).unwrap().is_empty());
+        assert!(reth_provider::ChangeSetReader::account_block_changeset(
+            &provider,
+            account_file_start
+        )
+        .unwrap()
+        .is_empty());
+        assert!(reth_provider::StorageChangeSetReader::storage_changeset(
+            &provider,
+            storage_file_start
+        )
+        .unwrap()
+        .is_empty());
 
         assert_eq!(
-            provider.account_block_changeset(block).unwrap(),
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, block).unwrap(),
             vec![AccountBeforeTx { address, info: None }]
         );
         assert_eq!(
-            provider.storage_changeset(block).unwrap(),
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
             vec![(
                 BlockNumberAddress((block, address)),
                 StorageEntry { key: storage_key, value: U256::ZERO }
