@@ -104,9 +104,9 @@ on:
         default: ""
         type: string
       limit:
-        description: "Maximum matching tests to run"
+        description: "Maximum matching tests to run (0 = all)"
         required: false
-        default: "20"
+        default: "0"
         type: string
       repetitions:
         description: "Runs per side: 1 or 2"
@@ -451,11 +451,11 @@ jobs:
           GAS_BUCKET: ${{ inputs.gas_bucket || '' }}
           CACHE_STRATEGY: ${{ inputs.cache_strategy || '' }}
           ACCOUNT_MODE: ${{ inputs.account_mode || '' }}
-          LIMIT: ${{ inputs.limit || '1' }}
+          LIMIT: ${{ inputs.limit || '0' }}
         run: |
           set -euo pipefail
-          if ! [[ "$LIMIT" =~ ^[0-9]+$ ]] || [ "$LIMIT" -lt 1 ]; then
-            echo "::error::limit must be a positive integer"
+          if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::limit must be a non-negative integer"
             exit 1
           fi
 
@@ -494,7 +494,7 @@ jobs:
               | select($gas_bucket == "" or ((.metadata.gas_bucket // "" | norm) == ($gas_bucket | norm)))
               | select($cache_strategy == "" or ((.metadata.cache_strategy // "" | norm) == ($cache_strategy | norm)))
               | select($account_mode == "" or ((.metadata.account_mode // "" | norm) == ($account_mode | norm)))
-            ][: $limit]
+            ] | if $limit > 0 then .[: $limit] else . end
             | .[]
             | {name, gas_bucket: .metadata.gas_bucket, opcode: .metadata.opcode, cache_strategy: .metadata.cache_strategy, account_mode: .metadata.account_mode}
             ' "$INDEX" > "$TESTS_FILE"
