@@ -19,7 +19,7 @@ use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
-    stages::{EraImportSource, ExecutionStage},
+    stages::{EraImportSource, ExecutionStage, ParallelMerkleExecutionStage},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
@@ -70,6 +70,7 @@ where
         evm_config,
         exex_manager_handle,
         era_import_source,
+        task_executor.clone(),
     )?;
 
     Ok(pipeline)
@@ -90,6 +91,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -121,6 +123,12 @@ where
                 prune_config.segments,
                 era_import_source,
             )
+            .set(ParallelMerkleExecutionStage::new(
+                provider_factory.clone(),
+                stage_config.merkle.rebuild_threshold,
+                stage_config.merkle.incremental_threshold,
+                task_executor,
+            ))
             .set(ExecutionStage::new(
                 evm_config,
                 consensus,

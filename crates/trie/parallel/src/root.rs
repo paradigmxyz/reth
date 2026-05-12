@@ -37,7 +37,9 @@ pub struct ParallelStateRoot<Factory> {
     factory: Factory,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
-    /// The runtime handle for spawning blocking tasks.
+    /// Runtime handle. Storage-root workers are dispatched onto
+    /// [`Runtime::storage_pool`] so they get reth's named storage threads, panic handler,
+    /// and configurable pool size instead of rayon's anonymous global pool.
     runtime: Runtime,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
@@ -83,6 +85,7 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
+        let storage_prefix_sets = self.prefix_sets.storage_prefix_sets.clone();
         let storage_root_targets = StorageRootTargets::new(
             self.prefix_sets
                 .account_prefix_set
@@ -96,8 +99,6 @@ where
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
-        let handle = self.runtime.handle().clone();
-
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -107,22 +108,38 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            // Spawn a blocking task to calculate account's storage root from database I/O
-            drop(handle.spawn_blocking(move || {
+            // Dispatch storage-root computation onto reth's `cpu_pool` — a rayon pool sized
+            // to `available_parallelism()` with named `cpu-NN` threads and a reth-wide
+            // panic handler. Sticking with the configured pool (rather than `rayon::spawn`
+            // on the global default) keeps the workers visible to profilers and respects
+            // reth's `RayonConfig`. `storage_pool` would oversubscribe on hosts where
+            // `DEFAULT_STORAGE_POOL_THREADS (= 16)` exceeds physical CPU threads.
+            self.runtime.cpu_pool().spawn(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
+                    let storage_root = StorageRoot::new_hashed(
                         &provider,
                         &provider,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
-                    )
-                    .calculate(retain_updates)?)
+                    );
+                    // Use `root_with_updates` / `root`, not `calculate`: those wrappers set
+                    // `with_no_threshold()` first, guaranteeing the storage walker runs to
+                    // completion. `calculate` may return `Progress` for accounts whose
+                    // hashed-entries-walked exceeds the default threshold (XEN-class accounts
+                    // in pipeline chunks), and `ParallelStateRoot` has no mechanism to
+                    // resume a paused worker.
+                    Ok(if retain_updates {
+                        let (root, _, updates) = storage_root.root_with_updates()?;
+                        (root, updates)
+                    } else {
+                        (storage_root.root()?, Default::default())
+                    })
                 })();
                 let _ = tx.send(result);
-            }));
+            });
             storage_roots.insert(hashed_address, rx);
         }
 
@@ -149,7 +166,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let storage_root_result = match storage_roots.remove(&hashed_address) {
+                    let (storage_root, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                 DatabaseError::Other(format!(
@@ -161,26 +178,27 @@ where
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
-                            StorageRoot::new_hashed(
+                            // Defense-in-depth: if no worker ran this account's storage root,
+                            // fall back to the real prefix set. Using an empty `PrefixSet` would
+                            // return the on-disk root and drop this chunk's storage updates.
+                            let fallback_prefix_set = storage_prefix_sets
+                                .get(&hashed_address)
+                                .cloned()
+                                .unwrap_or_default();
+                            let storage_root = StorageRoot::new_hashed(
                                 &provider,
                                 &provider,
                                 hashed_address,
-                                Default::default(),
+                                fallback_prefix_set,
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
-                            )
-                            .calculate(retain_updates)?
-                        }
-                    };
-
-                    let (storage_root, _, updates) = match storage_root_result {
-                        reth_trie::StorageRootProgress::Complete(root, _, updates) => (root, (), updates),
-                        reth_trie::StorageRootProgress::Progress(..) => {
-                            return Err(ParallelStateRootError::StorageRoot(
-                                StorageRootError::Database(DatabaseError::Other(
-                                    "StorageRoot returned Progress variant in parallel trie calculation".to_string()
-                                ))
-                            ))
+                            );
+                            if retain_updates {
+                                let (root, _, updates) = storage_root.root_with_updates()?;
+                                (root, updates)
+                            } else {
+                                (storage_root.root()?, Default::default())
+                            }
                         }
                     };
 
@@ -282,7 +300,7 @@ mod tests {
         HashingWriter,
     };
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     #[tokio::test]
     async fn random_parallel_root() {
