@@ -79,8 +79,6 @@ pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Resu
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
     let rpath = path.as_ref();
-    warn_if_zfs(rpath);
-
     if is_database_empty(rpath) {
         reth_fs_util::create_dir_all(rpath)
             .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
@@ -92,6 +90,8 @@ pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Resu
             Err(err) => return Err(err.into()),
         }
     }
+
+    warn_if_zfs(rpath);
 
     Ok(DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?)
 }
