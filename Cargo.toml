@@ -441,7 +441,7 @@ revm-primitives = { version = "23.0.0", default-features = false }
 revm-interpreter = { version = "35.0.0", default-features = false }
 revm-database-interface = { version = "11.0.0", default-features = false }
 revm-inspectors = "0.39.0"
-revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "dani/alloy-evm-0.34", default-features = false, features = ["llvm-prefer-static"] }
+revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
 
 # eth
 alloy-dyn-abi = "1.5.6"
