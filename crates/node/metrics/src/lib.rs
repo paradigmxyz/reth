@@ -14,6 +14,7 @@ pub mod process;
 pub mod recorder;
 /// The metric server serving the metrics.
 pub mod server;
+pub mod storage;
 pub mod version;
 
 pub use metrics_exporter_prometheus::*;

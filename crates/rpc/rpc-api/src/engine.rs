@@ -419,6 +419,10 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<Value>>;
 
+    /// Returns the EIP-7928 block access list for a block by block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
