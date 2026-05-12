@@ -115,6 +115,20 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
         Ok(StaticFileProviderRWRefMut(write_guard))
     }
 
+    /// Drops the cached writer for a segment before destructive segment-level operations.
+    pub(crate) fn remove(&self, segment: StaticFileSegment) {
+        let mut write_guard = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
+        };
+
+        *write_guard = None;
+    }
+
     #[instrument(
         name = "StaticFileWriters::commit",
         level = "debug",

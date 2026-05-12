@@ -27,7 +27,7 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     errors::provider::ProviderResult,
-    providers::{RocksDBBatch, StaticFileProviderRWRefMut, StaticFileWriter},
+    providers::{RocksDBBatch, StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
     MetadataProvider, MetadataWriter, NodePrimitivesProvider, OriginalValuesKnown, ProviderError,
@@ -802,6 +802,18 @@ where
     let static_file_provider = provider_rw.static_file_provider();
     let rocksdb_provider = provider_rw.rocksdb_provider();
     let mut history_batch = rocksdb_provider.batch_with_auto_commit();
+    if snapshot_state_tables_empty(provider_rw.tx_ref())? {
+        reset_pre_snapshot_changeset_segment(
+            &static_file_provider,
+            StaticFileSegment::AccountChangeSets,
+            block,
+        )?;
+        reset_pre_snapshot_changeset_segment(
+            &static_file_provider,
+            StaticFileSegment::StorageChangeSets,
+            block,
+        )?;
+    }
 
     {
         let mut account_changeset_writer =
@@ -868,10 +880,6 @@ fn prepare_account_changeset_writer<N: NodePrimitives>(
     writer: &mut StaticFileProviderRWRefMut<'_, N>,
     block: u64,
 ) -> ProviderResult<()> {
-    if block > 0 && writer.current_block_number().is_none() {
-        writer.user_header_mut().set_expected_block_start(block);
-    }
-
     let next_block = writer.next_block_number();
     if next_block < block {
         info!(
@@ -899,10 +907,6 @@ fn prepare_storage_changeset_writer<N: NodePrimitives>(
     writer: &mut StaticFileProviderRWRefMut<'_, N>,
     block: u64,
 ) -> ProviderResult<()> {
-    if block > 0 && writer.current_block_number().is_none() {
-        writer.user_header_mut().set_expected_block_start(block);
-    }
-
     let next_block = writer.next_block_number();
     if next_block < block {
         info!(
@@ -924,6 +928,47 @@ fn prepare_storage_changeset_writer<N: NodePrimitives>(
     }
 
     writer.begin_storage_changeset(block)
+}
+
+fn snapshot_state_tables_empty<TX: DbTx>(tx: &TX) -> ProviderResult<bool> {
+    Ok(tx.entries::<tables::PlainAccountState>()? == 0 &&
+        tx.entries::<tables::PlainStorageState>()? == 0 &&
+        tx.entries::<tables::HashedAccounts>()? == 0 &&
+        tx.entries::<tables::HashedStorages>()? == 0 &&
+        tx.entries::<tables::AccountChangeSets>()? == 0 &&
+        tx.entries::<tables::StorageChangeSets>()? == 0 &&
+        tx.entries::<tables::Bytecodes>()? == 0)
+}
+
+fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
+    static_file_provider: &StaticFileProvider<N>,
+    segment: StaticFileSegment,
+    block: u64,
+) -> ProviderResult<()> {
+    if block == 0 {
+        return Ok(())
+    }
+
+    let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment) else {
+        return Ok(())
+    };
+
+    if highest_block >= block {
+        return Ok(())
+    }
+
+    let file_start = static_file_provider.find_fixed_range(segment, block).start();
+    info!(
+        target: "reth::cli",
+        ?segment,
+        highest_block,
+        import_block = block,
+        file_start,
+        "Resetting pre-snapshot changeset static files before state import"
+    );
+    static_file_provider.delete_segment(segment)?;
+
+    Ok(())
 }
 
 fn commit_mdbx_only<Provider>(provider: Provider) -> ProviderResult<()>
@@ -1394,7 +1439,7 @@ mod tests {
     }
 
     #[test]
-    fn dump_state_v2_handles_existing_genesis_changeset_static_files() {
+    fn dump_state_v2_resets_presnapshot_changeset_static_files() {
         let storage_key = B256::with_last_byte(3);
         let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x0","storage":{"0x0000000000000000000000000000000000000000000000000000000000000003":"0x0000000000000000000000000000000000000000000000000000000000000004"}}
 "#;
@@ -1416,13 +1461,24 @@ mod tests {
         }
         static_files.commit().unwrap();
 
-        let block = 10;
+        let block = 500_010;
         dump_state(collector, &factory, block).unwrap();
+        static_files.initialize_index().unwrap();
 
         let provider = factory.provider().unwrap();
         let address = Address::with_last_byte(2);
         assert!(provider.account_block_changeset(5).unwrap().is_empty());
         assert!(provider.storage_changeset(5).unwrap().is_empty());
+
+        let account_file_start =
+            static_files.find_fixed_range(StaticFileSegment::AccountChangeSets, block).start();
+        let storage_file_start =
+            static_files.find_fixed_range(StaticFileSegment::StorageChangeSets, block).start();
+        assert_eq!(account_file_start, 500_000);
+        assert_eq!(storage_file_start, 500_000);
+        assert!(provider.account_block_changeset(account_file_start).unwrap().is_empty());
+        assert!(provider.storage_changeset(storage_file_start).unwrap().is_empty());
+
         assert_eq!(
             provider.account_block_changeset(block).unwrap(),
             vec![AccountBeforeTx { address, info: None }]
@@ -1434,6 +1490,21 @@ mod tests {
                 StorageEntry { key: storage_key, value: U256::ZERO }
             )]
         );
+
+        let account_offsets = static_files
+            .get_segment_provider_for_block(StaticFileSegment::AccountChangeSets, block, None)
+            .unwrap()
+            .read_changeset_offsets()
+            .unwrap()
+            .unwrap();
+        let storage_offsets = static_files
+            .get_segment_provider_for_block(StaticFileSegment::StorageChangeSets, block, None)
+            .unwrap()
+            .read_changeset_offsets()
+            .unwrap()
+            .unwrap();
+        assert_eq!(account_offsets.len() as u64, block - account_file_start + 1);
+        assert_eq!(storage_offsets.len() as u64, block - storage_file_start + 1);
     }
 
     #[test]
