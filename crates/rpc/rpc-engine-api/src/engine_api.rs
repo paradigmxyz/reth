@@ -1343,7 +1343,7 @@ where
 
     /// Handler for `engine_getPayloadV6`
     ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    /// Post-Amsterdam payload handler that includes Block Access Lists (BAL).
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     async fn get_payload_v6(
