@@ -100,17 +100,42 @@ where
 }
 
 /// Allows collecting indices from a cache with a custom insert fn
-fn collect_indices<K, F>(
-    cache: impl Iterator<Item = (K, Vec<u64>)>,
+fn collect_indices<K, V, F>(
+    cache: impl Iterator<Item = (K, V)>,
     mut insert_fn: F,
 ) -> Result<(), StageError>
 where
-    F: FnMut(K, Vec<u64>) -> Result<(), StageError>,
+    F: FnMut(K, V) -> Result<(), StageError>,
 {
     for (key, indices) in cache {
         insert_fn(key, indices)?
     }
     Ok(())
+}
+
+struct StorageHistoryBlockList {
+    first: u64,
+    rest: Vec<u64>,
+}
+
+impl StorageHistoryBlockList {
+    const fn new(first: u64) -> Self {
+        Self { first, rest: Vec::new() }
+    }
+
+    fn push(&mut self, block_number: u64) {
+        self.rest.push(block_number);
+    }
+
+    fn into_vec(self) -> Vec<u64> {
+        if self.rest.is_empty() {
+            return vec![self.first]
+        }
+
+        let Self { first, mut rest } = self;
+        rest.insert(0, first);
+        rest
+    }
 }
 
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
@@ -179,9 +204,10 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: HashMap<AddressStorageKey, StorageHistoryBlockList> = HashMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
+    let mut insert_fn = |key: AddressStorageKey, indices: StorageHistoryBlockList| {
+        let indices = indices.into_vec();
         let last = indices.last().expect("qed");
         collector.insert(
             StorageShardedKey::new(key.0 .0, key.0 .1, *last),
@@ -201,7 +227,10 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache
+            .entry(AddressStorageKey((address, storage.key)))
+            .and_modify(|indices| indices.push(block_number))
+            .or_insert_with(|| StorageHistoryBlockList::new(block_number));
 
         if block_number != current_block_number {
             current_block_number = block_number;
