@@ -49,7 +49,7 @@ on:
         default: "stateful"
         type: string
       snapshot:
-        description: "Snapshot manifest/archive URL, MinIO path, or prefix"
+        description: "Snapshot manifest URL, MinIO manifest path, or MinIO prefix"
         required: false
         default: "minio/reth-snapshots/perfnet-24358000-full/"
         type: string
@@ -136,11 +136,6 @@ on:
         required: false
         default: "~/projects/benchmarkoor-tests/configs"
         type: string
-      migrate_v2:
-        description: "Run reth db migrate-v2 after snapshot import"
-        required: false
-        default: false
-        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -172,7 +167,6 @@ jobs:
       BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root || '~/projects/benchmarkoor-tests/configs' }}
       BENCHMARKOOR_SNAPSHOT: ${{ inputs.snapshot || 'minio/reth-snapshots/perfnet-24358000-full/' }}
       BENCHMARKOOR_SNAPSHOT_MC_ROOT: ${{ inputs.snapshot_mc_root || 'minio' }}
-      BENCHMARKOOR_MIGRATE_V2: ${{ inputs.migrate_v2 && 'true' || 'false' }}
       BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '~/projects/benchmarkoor-replay' }}
       BENCHMARKOOR_CACHE: ${{ github.workspace }}/bench-work/benchmarkoor-cache
     steps:
