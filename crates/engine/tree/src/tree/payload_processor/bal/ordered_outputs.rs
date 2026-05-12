@@ -39,13 +39,7 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
         result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalExecutionError>>,
         total: usize,
     ) -> Self {
-        Self {
-            result_rx,
-            pending: (0..total).map(|_| None).collect(),
-            next: 0,
-            total,
-            failed: false,
-        }
+        Self { result_rx, pending: Vec::new(), next: 0, total, failed: false }
     }
 }
 
@@ -58,9 +52,11 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
-                self.next += 1;
-                return Some(Ok(output));
+            if self.next < self.pending.len() {
+                if let Some(output) = self.pending[self.next].take() {
+                    self.next += 1;
+                    return Some(Ok(output));
+                }
             }
 
             let output = match self.result_rx.recv() {
@@ -85,7 +81,23 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 ))));
             }
 
-            if index < self.next || self.pending[index].is_some() {
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            if index < self.next {
+                self.failed = true;
+                return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
+                    "BAL worker returned duplicate transaction index",
+                ))));
+            }
+
+            if self.pending.len() <= index {
+                self.pending.resize_with(index + 1, || None);
+            }
+
+            if self.pending[index].is_some() {
                 self.failed = true;
                 return Some(Err(BalExecutionError::Evm(BlockExecutionError::msg(
                     "BAL worker returned duplicate transaction index",
