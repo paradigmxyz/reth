@@ -127,12 +127,12 @@ on:
         default: ""
         type: string
       benchmarkoor_replay_path:
-        description: "Local benchmarkoor-replay checkout on the runner"
+        description: "Optional local benchmarkoor-replay checkout on the runner"
         required: false
         default: "/home/ubuntu/projects/benchmarkoor-replay"
         type: string
       metadata_root:
-        description: "benchmarkoor-tests config root"
+        description: "Optional local benchmarkoor-tests config root"
         required: false
         default: "/home/ubuntu/projects/benchmarkoor-tests/configs"
         type: string
@@ -239,18 +239,42 @@ jobs:
       - name: Install benchmarkoor-replay
         run: |
           set -euo pipefail
-          if [ ! -d "$BENCHMARKOOR_REPLAY_PATH" ]; then
-            echo "::error::benchmarkoor-replay checkout not found at ${BENCHMARKOOR_REPLAY_PATH}"
-            exit 1
+
+          replay_path="$BENCHMARKOOR_REPLAY_PATH"
+          if [ -d "$replay_path" ]; then
+            if git -C "$replay_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              git -C "$replay_path" fetch origin main --quiet
+              git -C "$replay_path" checkout --force origin/main
+            fi
+          else
+            replay_path="$BENCH_WORK_DIR/benchmarkoor-replay"
+            rm -rf "$replay_path"
+            git clone --depth 1 https://github.com/tempoxyz/benchmarkoor-replay "$replay_path"
           fi
-          if git -C "$BENCHMARKOOR_REPLAY_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            git -C "$BENCHMARKOOR_REPLAY_PATH" fetch origin main --quiet
-            git -C "$BENCHMARKOOR_REPLAY_PATH" checkout --force origin/main
-          fi
-          cargo install --path "$BENCHMARKOOR_REPLAY_PATH" --locked --force
+
+          cargo install --path "$replay_path" --locked --force
           BENCHMARKOOR_BIN="$(command -v benchmarkoor-replay)"
           "$BENCHMARKOOR_BIN" run-many --help | grep -q -- 'setup-then-testing'
           echo "BENCHMARKOOR_BIN=${BENCHMARKOOR_BIN}" >> "$GITHUB_ENV"
+
+      - name: Prepare benchmarkoor metadata
+        run: |
+          set -euo pipefail
+
+          metadata_root="$BENCHMARKOOR_METADATA_ROOT"
+          if [ ! -d "$metadata_root" ]; then
+            tests_path="$BENCH_WORK_DIR/benchmarkoor-tests"
+            rm -rf "$tests_path"
+            git clone --depth 1 https://github.com/ethpandaops/benchmarkoor-tests "$tests_path"
+            metadata_root="$tests_path/configs"
+          fi
+
+          if [ ! -d "$metadata_root" ]; then
+            echo "::error::benchmarkoor metadata root not found at ${metadata_root}"
+            exit 1
+          fi
+
+          echo "BENCHMARKOOR_METADATA_ROOT=${metadata_root}" >> "$GITHUB_ENV"
 
       - name: Resolve refs
         id: refs
