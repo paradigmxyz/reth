@@ -176,7 +176,7 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "reth_revmc_jit_jit_promotions",
+          "expr": "reth_revmc_jit_compilations_dispatched",
           "legendFormat": "promotions"
         },
         {
@@ -184,7 +184,7 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "reth_revmc_jit_jit_successes",
+          "expr": "reth_revmc_jit_compilations_succeeded",
           "legendFormat": "successes"
         },
         {
@@ -192,7 +192,7 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "reth_revmc_jit_jit_failures",
+          "expr": "reth_revmc_jit_compilations_failed",
           "legendFormat": "failures"
         }
       ],
@@ -222,7 +222,7 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "rate(reth_revmc_jit_jit_promotions[1m])",
+          "expr": "rate(reth_revmc_jit_compilations_dispatched[1m])",
           "legendFormat": "promotions/s"
         },
         {
@@ -230,7 +230,7 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "rate(reth_revmc_jit_jit_successes[1m])",
+          "expr": "rate(reth_revmc_jit_compilations_succeeded[1m])",
           "legendFormat": "successes/s"
         },
         {
@@ -238,7 +238,7 @@
             "type": "prometheus",
             "uid": "cfh1s6prbv4lcc"
           },
-          "expr": "rate(reth_revmc_jit_jit_failures[1m])",
+          "expr": "rate(reth_revmc_jit_compilations_failed[1m])",
           "legendFormat": "failures/s"
         }
       ],
