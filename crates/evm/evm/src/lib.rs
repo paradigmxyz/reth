@@ -177,7 +177,6 @@ pub use alloy_evm::{
 /// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
-/// A type that configures EVM execution.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
