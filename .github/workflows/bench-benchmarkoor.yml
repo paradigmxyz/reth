@@ -240,6 +240,9 @@ jobs:
 
       - name: Install benchmarkoor-replay
         env:
+          BENCHMARKOOR_REPLAY_DEPLOY_KEY: ${{ secrets.BENCHMARKOOR_REPLAY_DEPLOY_KEY }}
+          BENCHMARKOOR_REPLAY_TOKEN: ${{ secrets.BENCHMARKOOR_REPLAY_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
           set -euo pipefail
@@ -257,14 +260,28 @@ jobs:
           else
             replay_path="$BENCH_WORK_DIR/benchmarkoor-replay"
             rm -rf "$replay_path"
-            clone_url="https://github.com/tempoxyz/benchmarkoor-replay"
-            if [ -n "${DEREK_TOKEN:-}" ]; then
-              clone_url="https://x-access-token:${DEREK_TOKEN}@github.com/tempoxyz/benchmarkoor-replay"
+
+            if [ -n "${BENCHMARKOOR_REPLAY_DEPLOY_KEY:-}" ]; then
+              mkdir -p "$HOME/.ssh"
+              printf '%s\n' "$BENCHMARKOOR_REPLAY_DEPLOY_KEY" > "$HOME/.ssh/benchmarkoor_replay_deploy_key"
+              chmod 600 "$HOME/.ssh/benchmarkoor_replay_deploy_key"
+              ssh-keyscan github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+              GIT_SSH_COMMAND="ssh -i $HOME/.ssh/benchmarkoor_replay_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+                git clone --depth 1 git@github.com:tempoxyz/benchmarkoor-replay.git "$replay_path" || rm -rf "$replay_path"
             fi
-            if ! git clone --depth 1 "$clone_url" "$replay_path"; then
+
+            auth_token="${BENCHMARKOOR_REPLAY_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_TOKEN:-}}}"
+            if [ ! -d "$replay_path" ] && [ -n "$auth_token" ]; then
+              git clone --depth 1 "https://x-access-token:${auth_token}@github.com/tempoxyz/benchmarkoor-replay" "$replay_path" || rm -rf "$replay_path"
+            fi
+
+            if [ ! -d "$replay_path" ]; then
               rm -rf "$replay_path"
               GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
-                git clone --depth 1 git@github.com:tempoxyz/benchmarkoor-replay.git "$replay_path"
+                git clone --depth 1 git@github.com:tempoxyz/benchmarkoor-replay.git "$replay_path" || {
+                  echo "::error::benchmarkoor-replay was not found at ${BENCHMARKOOR_REPLAY_PATH} and could not be cloned. Install it under ~/projects/benchmarkoor-replay on the runner, grant GH_PROJECT_TOKEN/DEREK_TOKEN read access to tempoxyz/benchmarkoor-replay, or add BENCHMARKOOR_REPLAY_DEPLOY_KEY/BENCHMARKOOR_REPLAY_TOKEN."
+                  exit 1
+                }
             fi
           fi
 
