@@ -129,12 +129,12 @@ on:
       benchmarkoor_replay_path:
         description: "Optional local benchmarkoor-replay checkout on the runner"
         required: false
-        default: "/home/ubuntu/projects/benchmarkoor-replay"
+        default: "~/projects/benchmarkoor-replay"
         type: string
       metadata_root:
         description: "Optional local benchmarkoor-tests config root"
         required: false
-        default: "/home/ubuntu/projects/benchmarkoor-tests/configs"
+        default: "~/projects/benchmarkoor-tests/configs"
         type: string
       migrate_v2:
         description: "Run reth db migrate-v2 after snapshot import"
@@ -169,11 +169,11 @@ jobs:
       BENCHMARKOOR_CONTEXT: ${{ inputs.context || 'repricing' }}
       BENCHMARKOOR_FORK: ${{ inputs.fork || 'amsterdam' }}
       BENCHMARKOOR_TEST_TYPE: ${{ inputs.test_type || 'stateful' }}
-      BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root || '/home/ubuntu/projects/benchmarkoor-tests/configs' }}
+      BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root || '~/projects/benchmarkoor-tests/configs' }}
       BENCHMARKOOR_SNAPSHOT: ${{ inputs.snapshot || 'minio/reth-snapshots/perfnet-24358000-full/' }}
       BENCHMARKOOR_SNAPSHOT_MC_ROOT: ${{ inputs.snapshot_mc_root || 'minio' }}
       BENCHMARKOOR_MIGRATE_V2: ${{ inputs.migrate_v2 && 'true' || 'false' }}
-      BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '/home/ubuntu/projects/benchmarkoor-replay' }}
+      BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '~/projects/benchmarkoor-replay' }}
       BENCHMARKOOR_CACHE: ${{ github.workspace }}/bench-work/benchmarkoor-cache
     steps:
       - name: Clean up previous bench-work
@@ -208,7 +208,9 @@ jobs:
             chmod +x "$HOME/.local/bin/mc"
           fi
 
-          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+          if [ -n "${DEREK_TOKEN:-}" ]; then
+            git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
 
           if ! command -v era_invalidate &>/dev/null; then
             git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
@@ -237,10 +239,16 @@ jobs:
           fi
 
       - name: Install benchmarkoor-replay
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
           set -euo pipefail
 
           replay_path="$BENCHMARKOOR_REPLAY_PATH"
+          case "$replay_path" in
+            "~") replay_path="$HOME" ;;
+            "~/"*) replay_path="$HOME/${replay_path#"~/"}" ;;
+          esac
           if [ -d "$replay_path" ]; then
             if git -C "$replay_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
               git -C "$replay_path" fetch origin main --quiet
@@ -249,7 +257,15 @@ jobs:
           else
             replay_path="$BENCH_WORK_DIR/benchmarkoor-replay"
             rm -rf "$replay_path"
-            git clone --depth 1 https://github.com/tempoxyz/benchmarkoor-replay "$replay_path"
+            clone_url="https://github.com/tempoxyz/benchmarkoor-replay"
+            if [ -n "${DEREK_TOKEN:-}" ]; then
+              clone_url="https://x-access-token:${DEREK_TOKEN}@github.com/tempoxyz/benchmarkoor-replay"
+            fi
+            if ! git clone --depth 1 "$clone_url" "$replay_path"; then
+              rm -rf "$replay_path"
+              GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+                git clone --depth 1 git@github.com:tempoxyz/benchmarkoor-replay.git "$replay_path"
+            fi
           fi
 
           cargo install --path "$replay_path" --locked --force
@@ -262,6 +278,10 @@ jobs:
           set -euo pipefail
 
           metadata_root="$BENCHMARKOOR_METADATA_ROOT"
+          case "$metadata_root" in
+            "~") metadata_root="$HOME" ;;
+            "~/"*) metadata_root="$HOME/${metadata_root#"~/"}" ;;
+          esac
           if [ ! -d "$metadata_root" ]; then
             tests_path="$BENCH_WORK_DIR/benchmarkoor-tests"
             rm -rf "$tests_path"
