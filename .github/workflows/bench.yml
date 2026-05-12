@@ -34,7 +34,6 @@ on:
       warmup:
         description: "Number of warmup blocks (default: one-quarter of blocks)"
         required: false
-        default: ""
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
