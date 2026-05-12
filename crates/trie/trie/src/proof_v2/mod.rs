@@ -268,11 +268,11 @@ where
     ///
     /// Calling this method indicates that the child will not undergo any further modifications, and
     /// therefore can be retained as a proof node if applicable.
-    fn commit_child<'a>(
+    fn commit_child(
         &mut self,
-        targets: &mut Option<TargetsCursor<'a>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
+        retain: bool,
     ) -> Result<RlpNode, StateProofError> {
         // If the child is already an `RlpNode` then there is nothing to do.
         if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
@@ -280,7 +280,7 @@ where
         }
 
         // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path, true) {
+        if retain {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
             // Convert to `ProofTrieNodeV2`, which will be what is retained.
@@ -380,7 +380,7 @@ where
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
         if self.should_retain(targets, &child_path, true) {
-            let child_rlp_node = self.commit_child(targets, child_path, child)?;
+            let child_rlp_node = self.commit_child(child_path, child, true)?;
             trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {
