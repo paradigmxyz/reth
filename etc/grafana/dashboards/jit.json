@@ -22,7 +22,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "rate(reth_revmc_jit_lookup_hits[1m])",
           "legendFormat": "hits/s"
@@ -30,7 +30,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "rate(reth_revmc_jit_lookup_misses[1m])",
           "legendFormat": "misses/s"
@@ -60,7 +60,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_lookup_hits",
           "legendFormat": "hits"
@@ -68,7 +68,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_lookup_misses",
           "legendFormat": "misses"
@@ -98,7 +98,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_jit_code_bytes",
           "legendFormat": "code bytes"
@@ -106,7 +106,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_jit_data_bytes",
           "legendFormat": "data bytes"
@@ -114,7 +114,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_jit_code_bytes + reth_revmc_jit_jit_data_bytes",
           "legendFormat": "total"
@@ -144,7 +144,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_resident_entries",
           "legendFormat": "resident entries"
@@ -174,7 +174,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_compilations_dispatched",
           "legendFormat": "promotions"
@@ -182,7 +182,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_compilations_succeeded",
           "legendFormat": "successes"
@@ -190,7 +190,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_compilations_failed",
           "legendFormat": "failures"
@@ -220,7 +220,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "rate(reth_revmc_jit_compilations_dispatched[1m])",
           "legendFormat": "promotions/s"
@@ -228,7 +228,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "rate(reth_revmc_jit_compilations_succeeded[1m])",
           "legendFormat": "successes/s"
@@ -236,7 +236,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "rate(reth_revmc_jit_compilations_failed[1m])",
           "legendFormat": "failures/s"
@@ -266,7 +266,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_evictions",
           "legendFormat": "evictions (total)"
@@ -296,7 +296,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "rate(reth_revmc_jit_evictions[1m])",
           "legendFormat": "evictions/s"
@@ -326,7 +326,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_events_queued",
           "legendFormat": "events queued"
@@ -334,7 +334,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_events_dropped",
           "legendFormat": "events dropped"
@@ -364,7 +364,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfh1s6prbv4lcc"
+            "uid": "${datasource}"
           },
           "expr": "reth_revmc_jit_pending_jobs",
           "legendFormat": "pending jobs"
@@ -374,22 +374,38 @@
       "type": "timeseries"
     },
     {
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
       "title": "Compilation Timings",
       "type": "row"
     },
     {
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_compilation_duration_last",
           "legendFormat": "last compilation"
         }
@@ -400,25 +416,42 @@
     {
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_compilation_duration{quantile=\"0.5\"}",
           "legendFormat": "p50"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_compilation_duration{quantile=\"0.9\"}",
           "legendFormat": "p90"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_compilation_duration{quantile=\"0.99\"}",
           "legendFormat": "p99"
         }
@@ -429,30 +462,50 @@
     {
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_parse_duration{quantile=\"0.5\"}",
           "legendFormat": "parse"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_translate_duration{quantile=\"0.5\"}",
           "legendFormat": "translate"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_optimize_duration{quantile=\"0.5\"}",
           "legendFormat": "optimize"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_codegen_duration{quantile=\"0.5\"}",
           "legendFormat": "codegen"
         }
@@ -463,30 +516,50 @@
     {
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_parse_duration{quantile=\"0.99\"}",
           "legendFormat": "parse"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_translate_duration{quantile=\"0.99\"}",
           "legendFormat": "translate"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_optimize_duration{quantile=\"0.99\"}",
           "legendFormat": "optimize"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "cfh1s6prbv4lcc" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "reth_revmc_jit_jit_codegen_duration{quantile=\"0.99\"}",
           "legendFormat": "codegen"
         }
@@ -497,11 +570,30 @@
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["reth", "revmc", "jit"],
+  "tags": [
+    "reth",
+    "revmc",
+    "jit"
+  ],
   "time": {
     "from": "now-1h",
     "to": "now"
   },
   "timezone": "browser",
-  "title": "Reth - JIT"
+  "title": "Reth - JIT",
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      }
+    ]
+  }
 }
