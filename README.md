@@ -85,7 +85,7 @@ When updating this, also update:
 - .github/workflows/lint.yml
 -->
 
-The Minimum Supported Rust Version (MSRV) of this project is 1.94.
+The Minimum Supported Rust Version (MSRV) of this project is 1.95.
 
 See the docs for detailed instructions on how to [build from source](https://reth.rs/installation/source/).
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -uxo pipefail
 
 readarray -t crates < <(
   cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort

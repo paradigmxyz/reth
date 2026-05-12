@@ -1,6 +1,6 @@
 # syntax=docker.io/docker/dockerfile:1.7-labs
 
-FROM lukemathwalker/cargo-chef:latest-rust-1.94-trixie AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.95-trixie AS chef
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
