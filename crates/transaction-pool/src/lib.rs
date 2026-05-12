@@ -818,7 +818,7 @@ where
     }
 
     fn blob_store(&self) -> Arc<dyn BlobStore> {
-        Arc::new(Clone::clone(self.pool.blob_store()))
+        Arc::new(self.pool.blob_store().clone())
     }
 }
 

@@ -88,23 +88,11 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
             metrics: Default::default(),
         }
     }
-}
 
-impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
-    /// Create a new instance with access to blob cells from the transaction pool.
-    pub fn with_blob_store(
-        client: C,
-        blob_store: Arc<dyn BlobStore>,
-        peers: PeersHandle,
-        incoming: Receiver<IncomingEthRequest<N>>,
-    ) -> Self {
-        Self {
-            client,
-            blob_store,
-            peers,
-            incoming_requests: ReceiverStream::new(incoming),
-            metrics: Default::default(),
-        }
+    /// Set blob store for the request handler
+    pub fn with_blob_store(mut self, blob_store: Arc<dyn BlobStore>) -> Self {
+        self.blob_store = blob_store;
+        self
     }
 }
 
@@ -357,8 +345,6 @@ where
             cells_response.cells.push(cells);
 
             if cells_response.length() > SOFT_RESPONSE_LIMIT {
-                cells_response.hashes.pop();
-                cells_response.cells.pop();
                 break
             }
         }

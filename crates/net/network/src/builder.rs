@@ -92,7 +92,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
-        let request_handler = EthRequestHandler::with_blob_store(client, blob_store, peers, rx);
+        let request_handler = EthRequestHandler::new(client, peers, rx).with_blob_store(blob_store);
         NetworkBuilder { network, request_handler, transactions }
     }
 
