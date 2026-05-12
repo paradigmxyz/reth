@@ -1,11 +1,11 @@
 use crate::PayloadProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::Bytes;
 use alloy_provider::{
     network::{primitives::HeaderResponse, BlockResponse, Network},
     ConnectionConfig, Provider, ProviderBuilder, WebSocketConfig,
 };
+use alloy_rpc_types_engine::PayloadExtras;
 use alloy_transport::TransportResult;
 use eyre::WrapErr;
 use futures::{Stream, StreamExt};
@@ -23,21 +23,14 @@ pub struct RpcBlockProvider<N: Network, ExecutionData> {
     url: String,
     fetch_block_access_list: bool,
     #[debug(skip)]
-    convert: Arc<dyn Fn(N::BlockResponse, Option<Bytes>) -> ExecutionData + Send + Sync>,
+    convert: Arc<dyn Fn(N::BlockResponse, PayloadExtras) -> ExecutionData + Send + Sync>,
 }
 
 impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
     /// Create a new RPC block provider with the given RPC URL.
     pub async fn new(
         rpc_url: &str,
-        convert: impl Fn(N::BlockResponse) -> ExecutionData + Send + Sync + 'static,
-    ) -> eyre::Result<Self> {
-        Self::new_with_payload_side_data(rpc_url, move |block, _| convert(block)).await
-    }
-    /// Create a new RPC block provider with the given RPC URL and payload conversion function.
-    pub async fn new_with_payload_side_data(
-        rpc_url: &str,
-        convert: impl Fn(N::BlockResponse, Option<Bytes>) -> ExecutionData + Send + Sync + 'static,
+        convert: impl Fn(N::BlockResponse, PayloadExtras) -> ExecutionData + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider: Arc::new(
@@ -87,21 +80,15 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
         }
     }
 
-    async fn get_payload_from_block(&self, block: N::BlockResponse) -> eyre::Result<ExecutionData> {
-        let block_access_list = self.get_block_access_list(block.header()).await?;
-        Ok((self.convert)(block, block_access_list))
-    }
-
-    async fn get_block_access_list(
-        &self,
-        header: &N::HeaderResponse,
-    ) -> eyre::Result<Option<Bytes>> {
+    async fn payload_extras(&self, header: &N::HeaderResponse) -> eyre::Result<PayloadExtras> {
         if !self.fetch_block_access_list {
-            return Ok(None)
+            return Ok(PayloadExtras::default())
         }
 
         let block_hash = header.hash();
-        let Some(block_access_list_hash) = header.block_access_list_hash() else { return Ok(None) };
+        let Some(block_access_list_hash) = header.block_access_list_hash() else {
+            return Ok(PayloadExtras::default())
+        };
 
         let block_access_list = self
             .provider
@@ -126,7 +113,7 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
             )
         })?;
 
-        Ok(Some(block_access_list))
+        Ok(PayloadExtras::from(Some(block_access_list)))
     }
 }
 
@@ -157,8 +144,9 @@ where
 
             while let Some(res) = stream.next().await {
                 match res {
-                    Ok(block) => match self.get_payload_from_block(block).await {
-                        Ok(payload) => {
+                    Ok(block) => match self.payload_extras(block.header()).await {
+                        Ok(extras) => {
+                            let payload = (self.convert)(block, extras);
                             if tx.send(payload).await.is_err() {
                                 // Channel closed - receiver dropped, exit completely.
                                 return;
@@ -199,6 +187,7 @@ where
             .full()
             .await?
             .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
-        self.get_payload_from_block(block).await
+        let extras = self.payload_extras(block.header()).await?;
+        Ok((self.convert)(block, extras))
     }
 }

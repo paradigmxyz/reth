@@ -452,17 +452,7 @@ where
 impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
-    fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> ExecutionData {
-        <Self as DebugNode<N>>::rpc_to_execution_data_with_extras(
-            rpc_block,
-            PayloadExtras::default(),
-        )
-    }
-
-    fn rpc_to_execution_data_with_extras(
-        rpc_block: Self::RpcBlock,
-        extras: PayloadExtras,
-    ) -> ExecutionData {
+    fn rpc_to_execution_data(rpc_block: Self::RpcBlock, extras: PayloadExtras) -> ExecutionData {
         let (block, hash) = rpc_block.into_consensus_sealed().into_parts();
         let block = block.convert_transactions::<TransactionSigned>();
         let (payload, sidecar) =

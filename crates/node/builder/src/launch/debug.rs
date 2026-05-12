@@ -1,7 +1,6 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_consensus::transaction::Either;
-use alloy_primitives::Bytes;
 use alloy_provider::network::AnyNetwork;
 use alloy_rpc_types_engine::PayloadExtras;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
@@ -16,7 +15,6 @@ use reth_node_api::{
 };
 use std::{
     future::{Future, IntoFuture},
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
 };
@@ -54,6 +52,7 @@ pub(crate) type PayloadDataTy<N> = <<N as NodeTypes>::Payload as PayloadTypes>::
 ///
 ///     fn rpc_to_execution_data(
 ///         rpc_block: Self::RpcBlock,
+///         extras: PayloadExtras,
 ///     ) -> PayloadDataTy<Self> {
 ///         // Convert from RPC format to the Engine API payload data expected by the node.
 ///     }
@@ -73,15 +72,10 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     ///
     /// For Ethereum nodes, this typically converts from `alloy_rpc_types_eth::Block`
     /// to the node's internal execution payload data representation.
-    fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> PayloadDataTy<Self>;
-
-    /// Converts an RPC block and payload extras to execution payload data.
-    fn rpc_to_execution_data_with_extras(
+    fn rpc_to_execution_data(
         rpc_block: Self::RpcBlock,
-        _extras: PayloadExtras,
-    ) -> PayloadDataTy<Self> {
-        Self::rpc_to_execution_data(rpc_block)
-    }
+        payload_extras: PayloadExtras,
+    ) -> PayloadDataTy<Self>;
 
     /// Creates a payload attributes builder for local mining in dev mode.
     ///
@@ -92,36 +86,6 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     fn local_payload_attributes_builder(
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
-}
-
-/// Converts provider block responses and optional payload side data into execution payload data.
-pub(crate) trait DebugPayloadConverter<Block> {
-    /// The execution payload data type.
-    type ExecutionData;
-
-    /// Converts a provider block response and payload extras.
-    fn convert(block: Block, block_access_list: Option<Bytes>) -> Self::ExecutionData;
-}
-
-/// Default debug payload converter for node launchers.
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct DefaultDebugPayloadConverter<N>(PhantomData<fn() -> N>);
-
-impl<N, Block> DebugPayloadConverter<Block> for DefaultDebugPayloadConverter<N>
-where
-    N: FullNodeComponents<Types: DebugNode<N>>,
-    Block: Serialize,
-{
-    type ExecutionData = PayloadDataTy<N::Types>;
-
-    fn convert(block: Block, block_access_list: Option<Bytes>) -> Self::ExecutionData {
-        let json = serde_json::to_value(block).expect("Block serialization cannot fail");
-        let rpc_block = serde_json::from_value(json).expect("Block deserialization cannot fail");
-        N::Types::rpc_to_execution_data_with_extras(
-            rpc_block,
-            PayloadExtras::from(block_access_list),
-        )
-    }
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -278,11 +242,15 @@ where
         } else if let Some(url) = config.debug.rpc_consensus_url.clone() {
             info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
-            let block_provider = RpcBlockProvider::<AnyNetwork, _>::new_with_payload_side_data(
-                url.as_str(),
-                DefaultDebugPayloadConverter::<N>::convert,
-            )
-            .await?;
+            let block_provider =
+                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response, extras| {
+                    let json = serde_json::to_value(block_response)
+                        .expect("Block serialization cannot fail");
+                    let rpc_block =
+                        serde_json::from_value(json).expect("Block deserialization cannot fail");
+                    N::Types::rpc_to_execution_data(rpc_block, extras)
+                })
+                .await?;
 
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
@@ -311,7 +279,7 @@ where
                     )
                 })?,
                 chain.id(),
-                N::Types::rpc_to_execution_data,
+                |rpc_block| N::Types::rpc_to_execution_data(rpc_block, PayloadExtras::default()),
             );
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
