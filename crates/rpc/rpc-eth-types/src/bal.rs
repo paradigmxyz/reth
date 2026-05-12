@@ -2,7 +2,7 @@
 
 use crate::cache::db::StateProviderTraitObjWrapper;
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::bal::DecodedBal;
+use alloy_eips::eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
@@ -10,12 +10,12 @@ use reth_primitives_traits::{BlockTy, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_storage_api::{NodePrimitivesProvider, StateProviderFactory};
 
-/// Recomputes the revm BAL for a block by replaying it on top of its parent state.
-pub fn build_revm_bal_for_block<Provider, EvmConfig>(
+/// Recomputes the BAL for a block by replaying it on top of its parent state.
+pub fn build_bal_for_block<Provider, EvmConfig>(
     provider: &Provider,
     evm_config: &EvmConfig,
     block: &RecoveredBlock<BlockTy<Provider::Primitives>>,
-) -> Result<DecodedBal<revm::database::state::bal::Bal>, ProviderError>
+) -> Result<BlockAccessList, ProviderError>
 where
     Provider: NodePrimitivesProvider + StateProviderFactory,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives>,
@@ -40,7 +40,20 @@ where
 
     executor.apply_post_execution_changes().map_err(ProviderError::other)?;
 
-    let bal = db.take_built_alloy_bal().expect("BAL builder configured");
+    Ok(db.take_built_alloy_bal().expect("BAL builder configured"))
+}
+
+/// Recomputes the revm BAL for a block by replaying it on top of its parent state.
+pub fn build_revm_bal_for_block<Provider, EvmConfig>(
+    provider: &Provider,
+    evm_config: &EvmConfig,
+    block: &RecoveredBlock<BlockTy<Provider::Primitives>>,
+) -> Result<DecodedBal<revm::database::state::bal::Bal>, ProviderError>
+where
+    Provider: NodePrimitivesProvider + StateProviderFactory,
+    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives>,
+{
+    let bal = build_bal_for_block(provider, evm_config, block)?;
     let raw = Bytes::from(alloy_rlp::encode(&bal));
     let revm_bal = bal.try_into().map_err(ProviderError::other)?;
 
