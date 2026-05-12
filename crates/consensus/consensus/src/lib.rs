@@ -38,6 +38,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::Header;
+use alloy_eip7928::BlockAccessListGasError;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::{error::Error, fmt::Display};
 
@@ -476,8 +477,8 @@ pub enum ConsensusError {
     #[error(transparent)]
     TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
     /// Error when an unexpected block access list cost is encountered.
-    #[error("block access list cost exceeds gas limit")]
-    BlockAccessListCostMoreThanGasLimit,
+    #[error(transparent)]
+    BlockAccessListCostMoreThanGasLimit(Box<BlockAccessListGasError>),
     /// Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
@@ -526,23 +527,6 @@ impl ConsensusError {
     }
 }
 
-/// Validates the block access list against the gas limit.
-///
-/// EIP-7925 specifies that the total cost of the block access list items must not exceed
-/// the gas limit. Each item costs `ITEM_COST` gas.
-pub fn validate_block_access_list_gas(
-    block_access_list: Option<&alloy_eip7928::BlockAccessList>,
-    gas_limit: u64,
-) -> Result<(), ConsensusError> {
-    if let Some(bal) = block_access_list {
-        let bal_items = alloy_eip7928::total_bal_items(bal);
-        if bal_items > gas_limit / alloy_eip7928::ITEM_COST as u64 {
-            return Err(ConsensusError::BlockAccessListCostMoreThanGasLimit)
-        }
-    }
-    Ok(())
-}
-
 impl From<InvalidTransactionError> for ConsensusError {
     fn from(value: InvalidTransactionError) -> Self {
         Self::InvalidTransaction(value)
@@ -552,6 +536,12 @@ impl From<InvalidTransactionError> for ConsensusError {
 impl From<TxGasLimitTooHighErr> for ConsensusError {
     fn from(value: TxGasLimitTooHighErr) -> Self {
         Self::TransactionGasLimitTooHigh(Box::new(value))
+    }
+}
+
+impl From<BlockAccessListGasError> for ConsensusError {
+    fn from(value: BlockAccessListGasError) -> Self {
+        Self::BlockAccessListCostMoreThanGasLimit(Box::new(value))
     }
 }
 

@@ -314,6 +314,13 @@ impl From<EthBuiltPayload> for ExecutionData {
     }
 }
 
+#[cfg(feature = "std")]
+impl From<EthBuiltPayload> for reth_engine_primitives::BigBlockData<ExecutionData> {
+    fn from(_value: EthBuiltPayload) -> Self {
+        unreachable!("payload building is not supported for big blocks");
+    }
+}
+
 /// An enum representing blob transaction sidecars belonging to [`EthBuiltPayload`].
 #[derive(Clone, Default, Debug)]
 pub enum BlobSidecars {

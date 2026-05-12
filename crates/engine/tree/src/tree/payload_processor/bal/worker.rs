@@ -1,15 +1,12 @@
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor},
+    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
     Evm,
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{
-    block::BlockExecutorFactory, execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor,
-    ExecutionCtxFor,
-};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
@@ -53,8 +50,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .with_bundle_update()
                 .build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
-            let mut executor =
-                evm_config.block_executor_factory().create_executor(evm, ctx.clone());
+            let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
             loop {
                 let (index, tx) = crossbeam_channel::select_biased! {
