@@ -1032,7 +1032,7 @@ mod tests {
 
         // Tamper: append a phantom address not accessed during execution.
         let phantom = alloy_primitives::Address::from([0xFF; 20]);
-        let mut tampered_entries: Vec<AccountChanges> = real_bal.clone().into();
+        let mut tampered_entries: Vec<AccountChanges> = real_bal;
         tampered_entries.push(AccountChanges::new(phantom));
         let tampered_bal: alloy_eip7928::bal::Bal = alloy_eip7928::bal::Bal::new(tampered_entries);
 
