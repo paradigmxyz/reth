@@ -12,6 +12,7 @@
 extern crate alloc;
 
 mod payload;
+use alloy_primitives::Bytes;
 pub use payload::{BlobSidecars, EthBuiltPayload};
 
 mod error;
@@ -52,8 +53,9 @@ where
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
+        bal: Option<Bytes>,
     ) -> Self::ExecutionData {
-        T::block_to_payload(block)
+        T::block_to_payload(block, bal)
     }
 }
 
@@ -91,9 +93,13 @@ impl PayloadTypes for EthPayloadTypes {
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
+        bal: Option<Bytes>,
     ) -> Self::ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
+            block.hash(),
+            &block.into_block(),
+            bal,
+        );
         ExecutionData { payload, sidecar }
     }
 }
