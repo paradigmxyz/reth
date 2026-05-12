@@ -184,18 +184,14 @@ impl BalStore for InMemoryBalStore {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         let inner = self.inner.read();
         let mut size = 0;
 
         for hash in block_hashes {
-            let bal = inner
-                .entries
-                .get(hash)
-                .map(|entry| entry.bal.clone())
-                .unwrap_or_else(|| Bytes::from_static(&[0xc0]));
-            size += bal.len();
+            let bal = inner.entries.get(hash).map(|entry| entry.bal.clone());
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
             out.push(bal);
 
             if limit.exceeds(size) {
@@ -293,7 +289,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(limited, vec![bal0, bal1]);
+        assert_eq!(limited, vec![Some(bal0), Some(bal1)]);
     }
 
     #[test]

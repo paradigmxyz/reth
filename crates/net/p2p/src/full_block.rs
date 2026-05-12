@@ -30,9 +30,6 @@ use std::{
 };
 use tracing::{debug, trace};
 
-/// RLP encoding for an empty list.
-const EMPTY_LIST_CODE: u8 = 0xc0;
-
 /// A sealed block with associated data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SealedBlockWith<B: Block, T = Option<Sealed<Bytes>>> {
@@ -541,7 +538,7 @@ where
 /// Tracks the BAL request and its completed result.
 enum BalRequestState<Req> {
     Pending(Req),
-    Ready(Option<WithPeerId<Bytes>>),
+    Ready(Option<WithPeerId<Option<Bytes>>>),
 }
 
 impl<Req> BalRequestState<Req> {
@@ -1165,23 +1162,19 @@ impl<Net> Default for NoopFullBlockClient<Net> {
 /// Validates one raw block access-list entry against the block's access-list hash.
 ///
 /// Returns `Ok(Some(_))` for a matching entry, `Ok(None)` when the block has no access-list hash
-/// or the peer returned the RLP empty-list unavailable marker, and `Err(peer)` for a non-empty hash
-/// mismatch that should be reported as a bad message.
+/// or the peer returned an unavailable entry, and `Err(peer)` for a hash mismatch that should be
+/// reported as a bad message.
 fn seal_block_access_list_for_block<B: Block>(
     block: &SealedBlock<B>,
-    access_list: WithPeerId<Bytes>,
+    access_list: WithPeerId<Option<Bytes>>,
 ) -> Result<Option<Sealed<Bytes>>, PeerId> {
     let Some(expected) = block.header().block_access_list_hash() else { return Ok(None) };
 
     let (peer, access_list) = access_list.split();
+    let Some(access_list) = access_list else { return Ok(None) };
     let computed = keccak256(access_list.as_ref());
     if computed == expected {
         return Ok(Some(Sealed::new_unchecked(access_list, expected)))
-    }
-
-    // A mismatched RLP empty list means the peer returned the "unavailable" BAL entry.
-    if access_list.as_ref() == [EMPTY_LIST_CODE] {
-        return Ok(None)
     }
 
     debug!(
@@ -1271,6 +1264,8 @@ mod tests {
             Arc,
         },
     };
+
+    const EMPTY_LIST_CODE: u8 = 0xc0;
     use tokio::time::{timeout, Duration};
 
     fn sealed_access_list(access_list: Bytes) -> Sealed<Bytes> {
@@ -1407,13 +1402,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_single_full_block_with_access_lists_treats_empty_entry_as_unavailable() {
+    async fn download_single_full_block_with_access_lists_treats_none_as_unavailable() {
         let client = FullBlockWithAccessListsClient::default();
         let body = BlockBody::default();
         let expected_access_list = Bytes::from_static(&[0xc1, 0x01]);
-        let unavailable_access_list = Bytes::from_static(&[EMPTY_LIST_CODE]);
         let header = sealed_header_with_access_list_hash(&expected_access_list);
-        client.insert(header.clone(), body.clone(), unavailable_access_list);
+        client.inner.insert(header.clone(), body.clone());
 
         let bad_messages = Arc::clone(&client.bad_messages);
         let client = FullBlockClient::test_client(client);
@@ -1426,6 +1420,28 @@ mod tests {
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
         assert!(received.access_list().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn download_single_full_block_with_access_lists_rejects_wrong_empty_list() {
+        let client = FullBlockWithAccessListsClient::default();
+        let body = BlockBody::default();
+        let expected_access_list = Bytes::from_static(&[0xc1, 0x01]);
+        let wrong_empty_access_list = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        let header = sealed_header_with_access_list_hash(&expected_access_list);
+        client.insert(header.clone(), body.clone(), wrong_empty_access_list);
+
+        let bad_messages = Arc::clone(&client.bad_messages);
+        let client = FullBlockClient::test_client(client);
+
+        let received =
+            timeout(Duration::from_secs(1), client.get_full_block_with_access_lists(header.hash()))
+                .await
+                .expect("block request should complete without access lists");
+
+        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert!(received.access_list().is_none());
+        assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -1672,16 +1688,10 @@ mod tests {
             let mut access_lists: Vec<_> = hashes
                 .into_iter()
                 .take(self.access_list_soft_limit.load(Ordering::SeqCst))
-                .map(|hash| {
-                    self.access_lists
-                        .lock()
-                        .get(&hash)
-                        .cloned()
-                        .unwrap_or_else(|| Bytes::from_static(&[EMPTY_LIST_CODE]))
-                })
+                .map(|hash| self.access_lists.lock().get(&hash).cloned())
                 .collect();
             for _ in 0..self.extra_access_list_entries.load(Ordering::SeqCst) {
-                access_lists.push(Bytes::from_static(&[EMPTY_LIST_CODE]));
+                access_lists.push(None);
             }
 
             MaybePendingAccessLists::new(
@@ -1936,7 +1946,7 @@ mod tests {
     async fn download_full_block_range_with_access_lists_preserves_unavailable_entries() {
         let client = FullBlockWithAccessListsClient::default();
         let (header, _) = insert_headers_with_access_lists_into_client(&client, 0..3);
-        client.access_lists.lock().insert(header.hash(), Bytes::from_static(&[EMPTY_LIST_CODE]));
+        client.access_lists.lock().remove(&header.hash());
 
         let access_lists = Arc::clone(&client.access_lists);
         let bad_messages = Arc::clone(&client.bad_messages);

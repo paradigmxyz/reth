@@ -105,13 +105,13 @@ pub trait BalStore: Send + Sync + 'static {
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
     /// exceeded.
     ///
-    /// Entries are returned in request order. Unavailable BALs are represented as an RLP-encoded
-    /// empty list (`0xc0`). The limit is soft: the entry that exceeds the limit is included.
+    /// Entries are returned in request order. Unavailable BALs are represented as `None`. The
+    /// limit is soft: the entry that exceeds the limit is included.
     fn get_by_hashes_with_limit(
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-    ) -> ProviderResult<Vec<Bytes>> {
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
         let mut out = Vec::new();
         self.append_by_hashes_with_limit(block_hashes, limit, &mut out)?;
         out.shrink_to_fit();
@@ -125,12 +125,11 @@ pub trait BalStore: Send + Sync + 'static {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         let mut size = 0;
         for bal in self.get_by_hashes(block_hashes)? {
-            let bal = bal.unwrap_or_else(|| Bytes::from_static(&[0xc0]));
-            size += bal.len();
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
             out.push(bal);
 
             if limit.exceeds(size) {
@@ -248,7 +247,7 @@ impl BalStoreHandle {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-    ) -> ProviderResult<Vec<Bytes>> {
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
         self.inner.get_by_hashes_with_limit(block_hashes, limit)
     }
 
@@ -258,7 +257,7 @@ impl BalStoreHandle {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         self.inner.append_by_hashes_with_limit(block_hashes, limit, out)
     }
@@ -321,13 +320,12 @@ impl BalStore for NoopBalStore {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         let mut size = 0;
         for _ in block_hashes {
-            let bal = Bytes::from_static(&[0xc0]);
-            size += bal.len();
-            out.push(bal);
+            size += 1;
+            out.push(None);
 
             if limit.exceeds(size) {
                 break
@@ -352,6 +350,8 @@ mod tests {
     use alloy_primitives::B256;
     #[cfg(feature = "std")]
     use tokio_stream::StreamExt;
+
+    const EMPTY_LIST_CODE: u8 = 0xc0;
 
     #[test]
     fn noop_store_returns_empty_results() {
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn decoded_lookup_decodes_raw_bal() {
         let hash = B256::random();
-        let raw_bal = Bytes::from_static(&[0xc0]);
+        let raw_bal = Bytes::from_static(&[EMPTY_LIST_CODE]);
         let store = BalStoreHandle::new(TestBalStore { hash, raw_bal: raw_bal.clone() });
 
         assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw_bal.clone()));
@@ -408,7 +408,7 @@ mod tests {
             .get_by_hashes_with_limit(&hashes, GetBlockAccessListLimit::ResponseSizeSoftLimit(1))
             .unwrap();
 
-        assert_eq!(limited, vec![Bytes::from_static(&[0xc0]), Bytes::from_static(&[0xc0])]);
+        assert_eq!(limited, vec![None, None]);
     }
 
     #[test]
