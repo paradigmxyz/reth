@@ -603,7 +603,15 @@ jobs:
         run: |
           set -euo pipefail
           RESULTS="$BENCH_WORK_DIR/results.jsonl"
-          find "$BENCH_WORK_DIR" -path '*/results.jsonl' -print0 | xargs -0 cat > "$RESULTS"
+          TMP_RESULTS="$BENCH_WORK_DIR/results.merged.jsonl"
+          rm -f "$RESULTS" "$TMP_RESULTS"
+          mapfile -d '' RESULT_FILES < <(find "$BENCH_WORK_DIR" -path '*/results.jsonl' -print0)
+          if [ "${#RESULT_FILES[@]}" -eq 0 ]; then
+            echo "::error::No per-run benchmarkoor results found"
+            exit 1
+          fi
+          cat "${RESULT_FILES[@]}" > "$TMP_RESULTS"
+          mv "$TMP_RESULTS" "$RESULTS"
           python3 .github/scripts/bench-benchmarkoor-summary.py \
             --results "$RESULTS" \
             --output-json "$BENCH_WORK_DIR/summary.json" \
