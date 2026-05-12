@@ -332,7 +332,7 @@ mod tests {
         let bal2 = Bytes::from_static(b"bal2");
 
         store.insert(NumHash::new(1, B256::random()), sealed_bal(bal1a.clone())).unwrap();
-        store.insert(NumHash::new(1, B256::random()), sealed_bal(bal1b.clone())).unwrap();
+        store.insert(NumHash::new(1, B256::random()), sealed_bal(bal1b)).unwrap();
         store.insert(NumHash::new(2, B256::random()), sealed_bal(bal2.clone())).unwrap();
 
         assert_eq!(store.get_by_range(1, 2).unwrap(), vec![bal1a, bal2]);
