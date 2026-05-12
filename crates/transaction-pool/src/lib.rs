@@ -416,7 +416,7 @@ where
         + Clone
         + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
         + 'static,
-    S: BlobStore + Clone,
+    S: BlobStore,
     Evm: ConfigureEvm + 'static,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
@@ -470,7 +470,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore + Clone,
+    S: BlobStore,
 {
     type Transaction = T::Transaction;
 
@@ -818,7 +818,7 @@ where
     }
 
     fn blob_store(&self) -> Arc<dyn BlobStore> {
-        Arc::new(self.pool.blob_store().clone())
+        self.pool.blob_store_arc()
     }
 }
 
@@ -827,7 +827,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore + Clone,
+    S: BlobStore,
 {
     type Block = V::Block;
 
