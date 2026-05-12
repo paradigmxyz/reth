@@ -32,9 +32,9 @@ on:
           - "feature"
           - "baseline"
       warmup:
-        description: "Number of warmup blocks"
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
         required: false
-        default: "200"
+        default: ""
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
@@ -135,6 +135,8 @@ jobs:
       node-bin: ${{ steps.args.outputs.node-bin }}
       driver-reason: ${{ steps.args.outputs.driver-reason }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
+      pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
+      pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
@@ -142,17 +144,30 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const user = context.payload.comment.user.login;
-            try {
-              const { status } = await github.rest.orgs.checkMembershipForUser({
-                org: 'paradigmxyz',
-                username: user,
-              });
-              if (status !== 204 && status !== 302) {
-                core.setFailed(`@${user} is not a member of paradigmxyz`);
+            const org = 'paradigmxyz';
+            const checkMembership = async (username) => {
+              try {
+                const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
+                return status === 204 || status === 302;
+              } catch {
+                return false;
               }
-            } catch (e) {
-              core.setFailed(`@${user} is not a member of paradigmxyz`);
+            };
+
+            const commenter = context.payload.comment.user.login;
+            if (!await checkMembership(commenter)) {
+              core.setFailed(`@${commenter} is not a member of ${org}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const prAuthor = pr.user.login;
+            if (!await checkMembership(prAuthor)) {
+              core.setFailed(`PR author @${prAuthor} is not a member of ${org}`);
             }
 
       - name: Parse arguments
@@ -175,12 +190,13 @@ jobs:
               if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
               return null;
             };
+            const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
               blocks = '${{ github.event.inputs.blocks }}' || '500';
-              warmup = '${{ github.event.inputs.warmup }}' || '200';
-              if (warmup !== '200') explicitWarmup = true;
+              warmup = '${{ github.event.inputs.warmup }}' || '';
+              explicitWarmup = warmup !== '';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
@@ -225,7 +241,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -330,9 +346,16 @@ jobs:
               var featureNodeArgs = defaults['feature-args'];
             }
 
-            // Default warmup to 20 for big-blocks mode unless explicitly set
-            if (bigBlocks === 'true' && !explicitWarmup) {
-              warmup = '20';
+            if (!/^\d+$/.test(blocks)) {
+              core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
+              return;
+            }
+            if (explicitWarmup && !/^\d+$/.test(warmup)) {
+              core.setFailed(`Invalid warmup value: ${warmup} (must be a positive integer)`);
+              return;
+            }
+            if (!explicitWarmup) {
+              warmup = defaultWarmup(blocks);
             }
 
             if (!validBalModes.has(bal)) {
@@ -356,17 +379,17 @@ jobs:
             // Resolve display names for baseline/feature
             let baselineName = baseline || 'main';
             let featureName = feature;
-            if (!featureName) {
-              if (pr) {
-                const { data: prData } = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: parseInt(pr),
-                });
-                featureName = prData.head.ref;
-              } else {
-                featureName = '${{ github.ref_name }}';
-              }
+            if (pr) {
+              const { data: prData } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parseInt(pr),
+              });
+              core.setOutput('pr-head-sha', prData.head.sha);
+              core.setOutput('pr-head-ref', prData.head.ref);
+              if (!featureName) featureName = prData.head.ref;
+            } else {
+              if (!featureName) featureName = '${{ github.ref_name }}';
             }
 
             const fallbackReasons = [];
@@ -587,6 +610,8 @@ jobs:
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ${{ needs.reth-bench-ack.outputs.pr }}
+      BENCH_PR_HEAD_SHA: ${{ needs.reth-bench-ack.outputs.pr-head-sha }}
+      BENCH_PR_HEAD_REF: ${{ needs.reth-bench-ack.outputs.pr-head-ref }}
       BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
@@ -623,16 +648,13 @@ jobs:
               core.setOutput('ref', '${{ github.ref }}');
               return;
             }
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: parseInt(process.env.BENCH_PR),
-            });
-            // Always use head SHA — the merge ref (refs/pull/N/merge) may not
-            // exist if the PR has conflicts, was force-pushed, or was
-            // merged/closed between this step and checkout.
-            core.info(`PR #${process.env.BENCH_PR} (${pr.state}), using head SHA ${pr.head.sha}`);
-            core.setOutput('ref', pr.head.sha);
+            const sha = process.env.BENCH_PR_HEAD_SHA;
+            if (!sha) {
+              core.setFailed('BENCH_PR_HEAD_SHA is not set — ack job must pin the PR head SHA');
+              return;
+            }
+            core.info(`PR #${process.env.BENCH_PR}, using pinned head SHA ${sha}`);
+            core.setOutput('ref', sha);
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -768,13 +790,10 @@ jobs:
         with:
           script: |
             if (process.env.BENCH_PR) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: parseInt(process.env.BENCH_PR),
-              });
-              core.setOutput('head-ref', pr.head.ref);
-              core.setOutput('head-sha', pr.head.sha);
+              const ref = process.env.BENCH_PR_HEAD_REF || '${{ github.ref_name }}';
+              const sha = process.env.BENCH_PR_HEAD_SHA || '${{ github.sha }}';
+              core.setOutput('head-ref', ref);
+              core.setOutput('head-sha', sha);
             } else {
               core.setOutput('head-ref', '${{ github.ref_name }}');
               core.setOutput('head-sha', '${{ github.sha }}');
@@ -940,7 +959,14 @@ jobs:
             echo 0 | sudo tee "$irq" 2>/dev/null || true
           done
           # Stop noisy background services
-          sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+          sudo systemctl stop \
+            irqbalance cron atd unattended-upgrades snapd \
+            prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+            prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+            prometheus-node-exporter-ipmitool-sensor.timer prometheus-node-exporter-ipmitool-sensor.service \
+            sysstat-collect.timer sysstat-collect.service \
+            sysstat-summary.timer sysstat-summary.service \
+            2>/dev/null || true
           # Log environment for reproducibility
           echo "=== Benchmark environment ==="
           uname -r

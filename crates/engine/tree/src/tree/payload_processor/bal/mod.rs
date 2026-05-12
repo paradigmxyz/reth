@@ -8,7 +8,6 @@
 //! the rebuilt block-level BAL hash after post-execution. It does not yet run per-transaction
 //! fragment checks. It does not yet report rich undeclared-access diagnostics.
 
-mod debug;
 mod ordered_outputs;
 mod worker;
 
@@ -17,3 +16,4 @@ pub mod execute;
 
 pub use error::{BalExecutionError, RejectReason};
 pub use execute::execute_block;
+pub(crate) use execute::validate_bal;
