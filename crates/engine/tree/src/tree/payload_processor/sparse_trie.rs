@@ -1110,21 +1110,31 @@ where
         current_storage_workers: usize,
         current_account_workers: usize,
     ) -> (usize, usize) {
-        if target_counts.total() <= self.max_targets_for_chunking {
-            return (current_storage_workers, current_account_workers);
-        }
-
-        let chunk_size = self.chunk_size.max(1);
-        let target_chunks = target_counts.total().div_ceil(chunk_size);
-        let storage_chunks = target_counts.storage.div_ceil(chunk_size);
-
-        let desired_account_workers = current_account_workers
-            .max(target_chunks.div_ceil(ACCOUNT_PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
-        let desired_storage_workers = current_storage_workers
-            .max(storage_chunks.div_ceil(STORAGE_PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
-
-        (desired_storage_workers, desired_account_workers)
+        desired_worker_capacity(
+            target_counts,
+            self.chunk_size,
+            current_storage_workers,
+            current_account_workers,
+        )
     }
+}
+
+fn desired_worker_capacity(
+    target_counts: PendingTargetCounts,
+    chunk_size: usize,
+    current_storage_workers: usize,
+    current_account_workers: usize,
+) -> (usize, usize) {
+    let chunk_size = chunk_size.max(1);
+    let target_chunks = target_counts.total().div_ceil(chunk_size);
+    let storage_chunks = target_counts.storage.div_ceil(chunk_size);
+
+    let desired_account_workers = current_account_workers
+        .max(target_chunks.div_ceil(ACCOUNT_PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
+    let desired_storage_workers = current_storage_workers
+        .max(storage_chunks.div_ceil(STORAGE_PROOF_TARGET_CHUNKS_PER_BURST_WORKER));
+
+    (desired_storage_workers, desired_account_workers)
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
@@ -1351,6 +1361,15 @@ mod tests {
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
+
+    #[test]
+    fn desired_worker_capacity_bursts_for_chunk_pressure_below_chunking_limit() {
+        let (storage_workers, account_workers) =
+            desired_worker_capacity(PendingTargetCounts { account: 101, storage: 0 }, 5, 6, 6);
+
+        assert_eq!(storage_workers, 6);
+        assert_eq!(account_workers, 21);
+    }
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
