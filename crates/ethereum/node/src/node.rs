@@ -535,7 +535,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
             hot_threshold = tuning.jit_hot_threshold,
             workers = tuning.jit_worker_count,
             blocking = jit.blocking,
-            "Started unstable revmc JIT backend; JIT is experimental and may cause instability",
+            "Started experimental revmc JIT backend; this may cause instability",
         );
     }
 
