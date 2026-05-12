@@ -53,7 +53,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, info, warn};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
@@ -531,11 +531,11 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     let backend = JitBackend::new(config)?;
 
     if jit.enabled || jit.blocking {
-        info!(target: "reth::cli",
+        warn!(target: "reth::cli",
             hot_threshold = tuning.jit_hot_threshold,
             workers = tuning.jit_worker_count,
             blocking = jit.blocking,
-            "Started revmc JIT backend",
+            "Started unstable revmc JIT backend; JIT is experimental and may cause instability",
         );
     }
 
