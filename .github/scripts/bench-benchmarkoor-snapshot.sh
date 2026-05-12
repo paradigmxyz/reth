@@ -134,6 +134,55 @@ resolve_manifest_object() {
   return 1
 }
 
+log_manifest_lookup_diagnostics() {
+  local source="$1"
+  local root="${BENCHMARKOOR_SNAPSHOT_MC_ROOT:-minio}"
+  local trimmed candidate alias alias_url parent
+
+  trimmed="$(trim_slashes "$source")"
+  if [[ "$(basename "$trimmed")" == "manifest.json" ]]; then
+    candidate="$trimmed"
+  else
+    candidate="${trimmed}/manifest.json"
+  fi
+
+  echo "::group::Snapshot manifest lookup diagnostics"
+  echo "BENCHMARKOOR_SNAPSHOT=${source}"
+  echo "BENCHMARKOOR_SNAPSHOT_MC_ROOT=${root}"
+  echo "Candidate manifest: ${candidate}"
+
+  if [[ "$source" =~ ^https?:// ]]; then
+    echo "HTTP HEAD for candidate:"
+    curl -fsI --retry 2 --retry-delay 2 "$candidate" || true
+    echo "::endgroup::"
+    return 0
+  fi
+
+  alias="${candidate%%/*}"
+  alias_url="$(mc_alias_url "$alias" || true)"
+  if [ -n "$alias_url" ]; then
+    echo "MinIO alias '${alias}' URL: ${alias_url}"
+  else
+    echo "MinIO alias '${alias}' is not configured or has no exported URL"
+  fi
+
+  echo "mc stat candidate:"
+  mc stat "$candidate" || true
+
+  echo "mc ls snapshot prefix:"
+  mc ls "${trimmed}/" || true
+
+  parent="$(dirname "$trimmed")"
+  if [ "$parent" != "." ] && [ "$parent" != "$trimmed" ]; then
+    echo "mc ls parent prefix (${parent}/):"
+    mc ls "${parent}/" || true
+  fi
+
+  echo "Nearby manifest.json objects under ${root}:"
+  mc find "$root" --name manifest.json 2>/dev/null | grep -F "$(basename "$trimmed")" | head -20 || true
+  echo "::endgroup::"
+}
+
 network="${BENCHMARKOOR_SUITE%%/*}"
 block="${BENCHMARKOOR_SUITE#*/}"
 suite_slug="$(
@@ -146,6 +195,7 @@ sudo schelk recover -y --kill || sudo schelk full-recover -y || true
 sudo schelk mount -y
 
 if ! manifest_object="$(resolve_manifest_object "$BENCHMARKOOR_SNAPSHOT")"; then
+  log_manifest_lookup_diagnostics "$BENCHMARKOOR_SNAPSHOT"
   echo "::error::Could not find snapshot manifest for BENCHMARKOOR_SNAPSHOT=${BENCHMARKOOR_SNAPSHOT}"
   echo "Pass a MinIO manifest path, a MinIO prefix containing manifest.json, or an HTTP(S) manifest URL."
   exit 1
