@@ -684,10 +684,15 @@ pub trait Call:
         F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_with_state_at_block(at, move |this, mut db| {
-            bal::attach_block_bal(this.provider(), bal_block_hash, &mut db);
-            f(this, db)
-        })
+        let at = at.into();
+        async move {
+            let cached_bal = self.cache().get_bal(bal_block_hash).await?;
+            self.spawn_with_state_at_block(at, move |this, mut db| {
+                bal::attach_cached_block_bal(&mut db, cached_bal);
+                f(this, db)
+            })
+            .await
+        }
     }
 
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and

@@ -1060,6 +1060,7 @@ mod tests {
                 max_blocks: 5000,
                 max_receipts: 2000,
                 max_headers: 1000,
+                max_bals: 1000,
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 30_000,
             },

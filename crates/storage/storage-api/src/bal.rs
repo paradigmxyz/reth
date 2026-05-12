@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
+use revm_database::state::bal::Bal as RevmBal;
 
 /// Raw BAL RLP bytes sealed by the BAL hash.
 pub type SealedBal = Sealed<Bytes>;
@@ -49,7 +50,10 @@ pub trait BalStore: Send + Sync + 'static {
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>>;
 
     /// Fetches and decodes the BAL for the given block hash.
-    fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
+    fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
         self.get_by_hashes(&[block_hash])?
             .into_iter()
             .next()
@@ -57,6 +61,16 @@ pub trait BalStore: Send + Sync + 'static {
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
+            .and_then(|maybe_bal| {
+                maybe_bal
+                    .map(|decoded| {
+                        decoded.try_map(|bal| {
+                            RevmBal::try_from(Vec::from(bal))
+                                .map_err(reth_storage_errors::provider::ProviderError::other)
+                        })
+                    })
+                    .transpose()
+            })
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -159,10 +173,13 @@ impl BalStoreHandle {
         self.inner.get_by_hashes(block_hashes)
     }
 
-    /// Fetches and decodes the BAL for the given block hash.
+    /// Fetches the BAL for the given block hash in revm representation.
     #[inline]
-    pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
-        self.inner.get_decoded_by_hash(block_hash)
+    pub fn revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
+        self.inner.revm_bal_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is

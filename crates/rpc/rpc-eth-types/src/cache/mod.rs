@@ -3,14 +3,22 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{TxHash, B256};
+use alloy_eips::{eip7928::bal::DecodedBal, BlockHashOrNumber};
+use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives_traits::{Block, BlockBody, NodePrimitives, RecoveredBlock};
-use reth_storage_api::{BlockReader, TransactionVariant};
+use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
+use reth_revm::{
+    bytecode::Bytecode,
+    primitives::{StorageKey, StorageValue},
+    state::bal::{
+        AccountBal as RevmAccountBal, AccountInfoBal as RevmAccountInfoBal, Bal as RevmBal,
+        BalWrites as RevmBalWrites, StorageBal as RevmStorageBal,
+    },
+};
+use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
@@ -51,6 +59,9 @@ type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBloc
 /// The type that can send the response for a transaction hash lookup
 type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransaction<B, R>>>;
 
+/// The type that can send the response to a requested revm BAL.
+type BalResponseSender = oneshot::Sender<ProviderResult<Option<CachedRevmBal>>>;
+
 type BlockLruCache<B, L> =
     MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
 
@@ -58,6 +69,8 @@ type ReceiptsLruCache<R, L> =
     MultiConsumerLruCache<B256, Arc<Vec<R>>, L, ReceiptsResponseSender<R>>;
 
 type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
+
+type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -79,15 +92,19 @@ impl<N: NodePrimitives> EthStateCache<N> {
     fn create<Provider>(
         provider: Provider,
         action_task_spawner: Runtime,
-        max_blocks: u32,
-        max_receipts: u32,
-        max_headers: u32,
-        max_concurrent_db_operations: usize,
-        max_cached_tx_hashes: u32,
+        config: EthStateCacheConfig,
     ) -> (Self, EthStateCacheService<Provider, Runtime>)
     where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt>,
+        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + BalProvider,
     {
+        let EthStateCacheConfig {
+            max_blocks,
+            max_receipts,
+            max_headers,
+            max_bals,
+            max_concurrent_db_requests,
+            max_cached_tx_hashes,
+        } = config;
         let (to_service, rx) = unbounded_channel();
 
         let service = EthStateCacheService {
@@ -95,10 +112,11 @@ impl<N: NodePrimitives> EthStateCache<N> {
             full_block_cache: BlockLruCache::new(max_blocks, "blocks"),
             receipts_cache: ReceiptsLruCache::new(max_receipts, "receipts"),
             headers_cache: HeaderLruCache::new(max_headers, "headers"),
+            bal_cache: BalLruCache::new(max_bals, "bals"),
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
-            rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
+            rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_requests)),
             tx_hash_index: LruMap::new(ByLength::new(max_cached_tx_hashes)),
         };
         let cache = Self { to_service };
@@ -115,24 +133,13 @@ impl<N: NodePrimitives> EthStateCache<N> {
         executor: Runtime,
     ) -> Self
     where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + Clone + Unpin + 'static,
+        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt>
+            + BalProvider
+            + Clone
+            + Unpin
+            + 'static,
     {
-        let EthStateCacheConfig {
-            max_blocks,
-            max_receipts,
-            max_headers,
-            max_concurrent_db_requests,
-            max_cached_tx_hashes,
-        } = config;
-        let (this, service) = Self::create(
-            provider,
-            executor.clone(),
-            max_blocks,
-            max_receipts,
-            max_headers,
-            max_concurrent_db_requests,
-            max_cached_tx_hashes,
-        );
+        let (this, service) = Self::create(provider, executor.clone(), config);
         executor.spawn_critical_task("eth state cache", service);
         this
     }
@@ -265,6 +272,20 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let _ = self.to_service.send(CacheAction::GetTransactionByHash { tx_hash, response_tx });
         rx.await.ok()?
     }
+
+    /// Requests the revm BAL for the block hash.
+    ///
+    /// Returns `None` if the BAL does not exist.
+    pub async fn get_bal(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<DecodedBal<RevmBal>>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
+        rx.await
+            .map_err(|_| CacheServiceUnavailable)?
+            .map(|maybe_bal| maybe_bal.map(|cached| cached.0))
+    }
 }
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
@@ -300,11 +321,13 @@ pub(crate) struct EthStateCacheService<
     LimitBlocks = ByLength,
     LimitReceipts = ByLength,
     LimitHeaders = ByLength,
+    LimitBals = ByLength,
 > where
-    Provider: BlockReader,
+    Provider: BlockReader + BalProvider,
     LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
     LimitHeaders: Limiter<B256, Provider::Header>,
+    LimitBals: Limiter<B256, CachedRevmBal>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -317,6 +340,8 @@ pub(crate) struct EthStateCacheService<
     /// Headers are cached because they are required to populate the environment for execution
     /// (evm).
     headers_cache: HeaderLruCache<Provider::Header, LimitHeaders>,
+    /// The LRU cache for revm BALs grouped by the block hash.
+    bal_cache: BalLruCache<LimitBals>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
     /// Receiver half of the action channel.
@@ -333,7 +358,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider> EthStateCacheService<Provider, Runtime>
 where
-    Provider: BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
@@ -386,6 +411,18 @@ where
         }
     }
 
+    fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+        if let Some(queued) = self.bal_cache.remove(&block_hash) {
+            for tx in queued {
+                let _ = tx.send(res.clone());
+            }
+        }
+
+        if let Ok(Some(bal)) = res {
+            self.bal_cache.insert(block_hash, bal);
+        }
+    }
+
     fn on_reorg_block(
         &mut self,
         block_hash: B256,
@@ -422,24 +459,34 @@ where
         }
     }
 
+    fn on_reorg_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+        if let Some(queued) = self.bal_cache.remove(&block_hash) {
+            for tx in queued {
+                let _ = tx.send(res.clone());
+            }
+        }
+    }
+
     /// Shrinks the queues but leaves some space for the next requests
     fn shrink_queues(&mut self) {
         let min_capacity = 2;
         self.full_block_cache.shrink_to(min_capacity);
         self.receipts_cache.shrink_to(min_capacity);
         self.headers_cache.shrink_to(min_capacity);
+        self.bal_cache.shrink_to(min_capacity);
     }
 
     fn update_cached_metrics(&self) {
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
         self.headers_cache.update_cached_metrics();
+        self.bal_cache.update_cached_metrics();
     }
 }
 
 impl<Provider> Future for EthStateCacheService<Provider, Runtime>
 where
-    Provider: BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
     type Output = ();
 
@@ -554,8 +601,33 @@ where
                                 });
                             }
                         }
+                        CacheAction::GetBal { block_hash, response_tx } => {
+                            if let Some(bal) = this.bal_cache.get(&block_hash).cloned() {
+                                let _ = response_tx.send(Ok(Some(bal)));
+                                continue
+                            }
+
+                            if this.bal_cache.queue(block_hash, response_tx) {
+                                let provider = this.provider.clone();
+                                let action_tx = this.action_tx.clone();
+                                let rate_limiter = this.rate_limiter.clone();
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Bal, block_hash, action_tx);
+                                this.action_task_spawner.spawn_blocking_task(async move {
+                                    let _permit = rate_limiter.acquire().await;
+                                    let res = provider
+                                        .bal_store()
+                                        .revm_bal_by_hash(block_hash)
+                                        .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
+                                    action_sender.send_bal(res);
+                                });
+                            }
+                        }
                         CacheAction::ReceiptsResult { block_hash, res } => {
                             this.on_new_receipts(block_hash, res);
+                        }
+                        CacheAction::BalResult { block_hash, res } => {
+                            this.on_new_bal(block_hash, res);
                         }
                         CacheAction::BlockWithSendersResult { block_hash, res } => match res {
                             Ok(Some(block_with_senders)) => {
@@ -604,6 +676,7 @@ where
                                 this.remove_block_transactions(&block);
                                 this.on_reorg_block(block_hash, Ok(Some(block)));
                                 this.on_reorg_header(block_hash, Ok(header));
+                                this.on_reorg_bal(block_hash, Ok(None));
                             }
 
                             for block_receipts in chain_change.receipts {
@@ -668,6 +741,10 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         response_tx: ReceiptsResponseSender<R>,
     },
+    GetBal {
+        block_hash: B256,
+        response_tx: BalResponseSender,
+    },
     GetCachedBlock {
         block_hash: B256,
         response_tx: CachedBlockResponseSender<B>,
@@ -687,6 +764,10 @@ enum CacheAction<B: Block, R> {
     HeaderResult {
         block_hash: B256,
         res: Box<ProviderResult<B::Header>>,
+    },
+    BalResult {
+        block_hash: B256,
+        res: ProviderResult<Option<CachedRevmBal>>,
     },
     CacheNewCanonicalChain {
         chain_change: ChainChange<B, R>,
@@ -740,6 +821,7 @@ enum CacheKind {
     Block,
     Receipt,
     Header,
+    Bal,
 }
 
 /// Drop aware sender struct that ensures a response is always emitted even if the db task panics
@@ -782,6 +864,12 @@ impl<R: Send + Sync, B: Block> ActionSender<B, R> {
             });
         }
     }
+
+    fn send_bal(&mut self, bal: Result<Option<CachedRevmBal>, ProviderError>) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(CacheAction::BalResult { block_hash: self.blockhash, res: bal });
+        }
+    }
 }
 impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
     fn drop(&mut self) {
@@ -799,10 +887,75 @@ impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
                     block_hash: self.blockhash,
                     res: Box::new(Err(CacheServiceUnavailable.into())),
                 },
+                CacheKind::Bal => CacheAction::BalResult {
+                    block_hash: self.blockhash,
+                    res: Err(CacheServiceUnavailable.into()),
+                },
             };
             let _ = tx.send(msg);
         }
     }
+}
+
+/// Cached decoded revm BAL.
+#[derive(Clone, Debug)]
+pub(crate) struct CachedRevmBal(Arc<DecodedBal<RevmBal>>);
+
+impl CachedRevmBal {
+    /// Creates a cached revm BAL from an owned decoded BAL.
+    #[inline]
+    fn new(bal: DecodedBal<RevmBal>) -> Self {
+        Self(Arc::new(bal))
+    }
+}
+
+impl InMemorySize for CachedRevmBal {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>() + decoded_revm_bal_size(&self.0)
+    }
+}
+
+fn decoded_revm_bal_size(bal: &DecodedBal<RevmBal>) -> usize {
+    core::mem::size_of::<DecodedBal<RevmBal>>() + bal.as_raw().len() + revm_bal_size(bal.as_bal())
+}
+
+fn revm_bal_size(bal: &RevmBal) -> usize {
+    core::mem::size_of::<RevmBal>() +
+        bal.accounts.capacity() * core::mem::size_of::<(Address, RevmAccountBal)>() +
+        bal.accounts.values().map(revm_account_bal_heap_size).sum::<usize>()
+}
+
+fn revm_account_bal_heap_size(account: &RevmAccountBal) -> usize {
+    revm_account_info_bal_heap_size(&account.account_info) +
+        revm_storage_bal_heap_size(&account.storage)
+}
+
+fn revm_account_info_bal_heap_size(account_info: &RevmAccountInfoBal) -> usize {
+    revm_bal_writes_heap_size(&account_info.nonce, |_| 0) +
+        revm_bal_writes_heap_size(&account_info.balance, |_| 0) +
+        revm_bal_writes_heap_size(&account_info.code, revm_code_write_heap_size)
+}
+
+fn revm_storage_bal_heap_size(storage: &RevmStorageBal) -> usize {
+    storage.storage.len() * core::mem::size_of::<(StorageKey, RevmBalWrites<StorageValue>)>() +
+        storage
+            .storage
+            .values()
+            .map(|writes| revm_bal_writes_heap_size(writes, |_| 0))
+            .sum::<usize>()
+}
+
+fn revm_bal_writes_heap_size<T, F>(writes: &RevmBalWrites<T>, mut item_heap_size: F) -> usize
+where
+    T: PartialEq + Clone,
+    F: FnMut(&T) -> usize,
+{
+    writes.writes.capacity() * core::mem::size_of::<(u64, T)>() +
+        writes.writes.iter().map(|(_, item)| item_heap_size(item)).sum::<usize>()
+}
+
+fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
+    bytecode.bytes_ref().len()
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
