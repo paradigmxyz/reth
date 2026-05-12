@@ -111,7 +111,7 @@ grep Cached /proc/meminfo
 # Start reth
 # CPU layout: core 0 = OS/IRQs/reth-bench/aux, cores 1+ = reth node
 RETH_BENCH="$(which reth-bench)"
-ONLINE=$(nproc --all)
+ONLINE=$(nproc)
 MAX_RETH=$(( ONLINE - 1 ))
 if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
   MAX_RETH=$BENCH_CORES
