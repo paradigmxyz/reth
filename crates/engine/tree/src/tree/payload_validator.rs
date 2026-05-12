@@ -39,7 +39,7 @@
 //! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
 use crate::tree::{
-    error::{InsertBlockError, InsertBlockErrorKind},
+    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
@@ -53,6 +53,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
+use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
@@ -106,6 +107,11 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
+
+/// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
+/// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
+/// without entering execution.
+const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -332,48 +338,6 @@ where
         }
     }
 
-    /// Handles execution errors by checking if header validation errors should take precedence.
-    ///
-    /// When an execution error occurs, this function checks if there are any header validation
-    /// errors that should be reported instead, as header validation errors have higher priority.
-    fn handle_execution_error<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
-        &self,
-        input: BlockOrPayload<T>,
-        execution_err: InsertBlockErrorKind,
-        parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> InsertPayloadResult<N>
-    where
-        V: PayloadValidator<T, Block = N::Block>,
-    {
-        debug!(
-            target: "engine::tree::payload_validator",
-            ?execution_err,
-            block = ?input.num_hash(),
-            "Block execution failed, checking for header validation errors"
-        );
-
-        // If execution failed, we should first check if there are any header validation
-        // errors that take precedence over the execution error
-        let block = self.convert_to_block(input)?;
-
-        // Validate block consensus rules which includes header validation
-        if let Err(consensus_err) = self.validate_block_inner(&block, None) {
-            // Header validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
-        }
-
-        // Also validate against the parent
-        if let Err(consensus_err) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
-        {
-            // Parent validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
-        }
-
-        // No header validation errors, return the original execution error
-        Err(InsertBlockError::new(block, execution_err).into())
-    }
-
     /// Validates a block that has already been converted from a payload.
     ///
     /// This method performs:
@@ -399,40 +363,28 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        // Spawn payload conversion on a background thread so it runs concurrently with the
-        // rest of the function (setup + execution). For payloads this overlaps the cost of
-        // RLP decoding + header hashing.
-        let is_payload = input.is_payload();
-        let convert_to_block = match &input {
-            BlockOrPayload::Payload(_) => {
-                let payload_clone = input.clone();
-                let validator = self.validator.clone();
-                let handle = self.payload_processor.executor().spawn_blocking_named(
-                    "payload-convert",
-                    move || {
-                        let BlockOrPayload::Payload(payload) = payload_clone else {
-                            unreachable!()
-                        };
-                        validator.convert_payload_to_block(payload)
-                    },
-                );
-                Either::Left(handle)
+        let parent_hash = input.parent_hash();
+
+        // Fetch parent block. This goes to memory most of the time unless the parent block is
+        // beyond the in-memory buffer.
+        let parent_block = match self.sealed_header_by_hash(parent_hash, ctx.state()) {
+            Ok(Some(parent_block)) => parent_block,
+            Ok(None) => {
+                return Err(InsertBlockError::new(
+                    self.convert_to_block(input)?,
+                    ProviderError::HeaderNotFound(parent_hash.into()).into(),
+                )
+                .into())
             }
-            BlockOrPayload::Block(_) => Either::Right(()),
+            Err(e) => {
+                return Err(InsertBlockError::new(self.convert_to_block(input)?, e.into()).into())
+            }
         };
 
-        // Returns the sealed block, either by awaiting the background conversion task (for
-        // payloads) or by extracting the already-converted block directly.
-        let convert_to_block =
-            move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
-                match convert_to_block {
-                    Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
-                    Either::Right(()) => {
-                        let BlockOrPayload::Block(block) = input else { unreachable!() };
-                        Ok(block)
-                    }
-                }
-            };
+        // Spawn payload conversion and basic validation on a background thread so it runs
+        // concurrently with the rest of the function (setup + execution). For payloads this
+        // overlaps the cost of RLP decoding + header hashing.
+        let validated_block = self.spawn_convert_and_validate(&input, parent_block.clone());
 
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
@@ -441,7 +393,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let block = convert_to_block(input)?;
+                        let block = validated_block.try_into_inner().expect("sole handle")?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -462,7 +414,17 @@ where
             };
         }
 
-        let parent_hash = input.parent_hash();
+        // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
+        // cautious and block on pre-execution checks of the block.
+        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+            // Call `.get()` to await the pre-execution checks and exit early if they fail.
+            if validated_block.get().is_err() {
+                return Err(validated_block
+                    .try_into_inner()
+                    .expect("sole handle")
+                    .expect_err("Err result checked"))
+            }
+        }
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
@@ -472,24 +434,13 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                convert_to_block(input)?,
+                validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
         };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
-
-        // Fetch parent block. This goes to memory most of the time unless the parent block is
-        // beyond the in-memory buffer.
-        let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
-        else {
-            return Err(InsertBlockError::new(
-                convert_to_block(input)?,
-                ProviderError::HeaderNotFound(parent_hash.into()).into(),
-            )
-            .into())
-        };
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
@@ -581,15 +532,15 @@ where
         let (output, senders, receipt_root_rx) = if bal_eligible {
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
-            match self.execute_block_bal(state_provider, env, &input, &handle, provider_builder) {
-                Ok(output) => output,
-                Err(err) => return self.handle_execution_error(input, err, &parent_block),
-            }
+            ensure_ok!(self.execute_block_bal(
+                state_provider,
+                env,
+                &input,
+                &handle,
+                provider_builder
+            ))
         } else {
-            match self.execute_block(state_provider, env, &input, &mut handle) {
-                Ok(output) => output,
-                Err(err) => return self.handle_execution_error(input, err, &parent_block),
-            }
+            ensure_ok!(self.execute_block(state_provider, env, &input, &mut handle))
         };
         let block_access_list_hash = decoded_bal.as_ref().map(|decoded_bal| decoded_bal.hash());
         let execution_duration = execute_block_start.elapsed();
@@ -621,18 +572,7 @@ where
                 Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
             });
 
-        let block = convert_to_block(input)?;
-        let transaction_root = is_payload.then(|| {
-            let body = block.body().clone();
-            let parent_span = Span::current();
-            let num_hash = block.num_hash();
-            self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
-                let _span =
-                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
-                        .entered();
-                body.calculate_tx_root()
-            })
-        });
+        let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -653,12 +593,6 @@ where
                 })
                 .ok()
         };
-        let transaction_root = transaction_root.map(|handle| {
-            let _span =
-                debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
-                    .entered();
-            handle.try_into_inner().expect("sole handle")
-        });
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -666,7 +600,6 @@ where
                 &parent_block,
                 &output,
                 &mut ctx,
-                transaction_root,
                 receipt_root_bloom,
                 hashed_state,
                 block_access_list_hash
@@ -879,6 +812,61 @@ where
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
+    /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
+    /// basic consensus validations on it.
+    #[expect(clippy::type_complexity)]
+    pub fn spawn_convert_and_validate<T>(
+        &self,
+        input: &BlockOrPayload<T>,
+        parent: SealedHeader<N::BlockHeader>,
+    ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
+    where
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        V: PayloadValidator<T, Block = N::Block> + Clone,
+    {
+        let input = input.clone();
+        let validator = self.validator.clone();
+        let consensus = self.consensus.clone();
+        let parent_span = Span::current();
+        self.payload_processor.executor().spawn_blocking_named("payload-convert", move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                parent: parent_span,
+                "convert_and_validate",
+            )
+            .entered();
+            let block = match input {
+                BlockOrPayload::Block(block) => block,
+                BlockOrPayload::Payload(payload) => {
+                    validator.convert_payload_to_block(payload)?
+                }
+            };
+
+            if let Err(e) = consensus.validate_header(block.sealed_header()) {
+                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+                return Err(InsertBlockError::consensus_error(e, block).into())
+            }
+
+            // now validate against the parent
+            let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
+            if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
+            {
+                warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                return Err(InsertBlockError::consensus_error(e, block).into())
+            }
+            drop(_enter);
+
+            if let Err(e) =
+                consensus.validate_block_pre_execution_with_tx_root(&block, None)
+            {
+                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+                return Err(InsertBlockError::consensus_error(e, block).into())
+            }
+
+            Ok(block)
+        })
+    }
+
     /// Return sealed block header from database or in-memory state by hash.
     fn sealed_header_by_hash(
         &self,
@@ -893,29 +881,6 @@ where
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
-    }
-
-    /// Validate if block is correct and satisfies all the consensus rules that concern the header
-    /// and block body itself.
-    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_block_inner(
-        &self,
-        block: &SealedBlock<N::Block>,
-        transaction_root: Option<B256>,
-    ) -> Result<(), ConsensusError> {
-        if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
-            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
-            return Err(e)
-        }
-
-        if let Err(e) =
-            self.consensus.validate_block_pre_execution_with_tx_root(block, transaction_root)
-        {
-            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
-            return Err(e)
-        }
-
-        Ok(())
     }
 
     /// Executes a block with the given state provider.
@@ -1531,7 +1496,6 @@ where
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
-        transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         hashed_state: LazyHashedPostState,
         block_access_list_hash: Option<B256>,
@@ -1542,20 +1506,6 @@ where
         let start = Instant::now();
 
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
-        // validate block consensus rules
-        if let Err(e) = self.validate_block_inner(block, transaction_root) {
-            return Err(e.into())
-        }
-
-        // now validate against the parent
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
-        if let Err(e) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
-        {
-            warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
-        }
-        drop(_enter);
 
         // Validate block post-execution rules
         let _enter =
