@@ -117,15 +117,26 @@ where
             self.runtime.cpu_pool().spawn(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
+                    let storage_root = StorageRoot::new_hashed(
                         &provider,
                         &provider,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
-                    )
-                    .calculate(retain_updates)?)
+                    );
+                    // Use `root_with_updates` / `root`, not `calculate`: those wrappers set
+                    // `with_no_threshold()` first, guaranteeing the storage walker runs to
+                    // completion. `calculate` may return `Progress` for accounts whose
+                    // hashed-entries-walked exceeds the default threshold (XEN-class accounts
+                    // in pipeline chunks), and `ParallelStateRoot` has no mechanism to
+                    // resume a paused worker.
+                    Ok(if retain_updates {
+                        let (root, _, updates) = storage_root.root_with_updates()?;
+                        (root, updates)
+                    } else {
+                        (storage_root.root()?, Default::default())
+                    })
                 })();
                 let _ = tx.send(result);
             });
@@ -155,7 +166,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let storage_root_result = match storage_roots.remove(&hashed_address) {
+                    let (storage_root, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                 DatabaseError::Other(format!(
@@ -174,26 +185,20 @@ where
                                 .get(&hashed_address)
                                 .cloned()
                                 .unwrap_or_default();
-                            StorageRoot::new_hashed(
+                            let storage_root = StorageRoot::new_hashed(
                                 &provider,
                                 &provider,
                                 hashed_address,
                                 fallback_prefix_set,
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
-                            )
-                            .calculate(retain_updates)?
-                        }
-                    };
-
-                    let (storage_root, _, updates) = match storage_root_result {
-                        reth_trie::StorageRootProgress::Complete(root, _, updates) => (root, (), updates),
-                        reth_trie::StorageRootProgress::Progress(..) => {
-                            return Err(ParallelStateRootError::StorageRoot(
-                                StorageRootError::Database(DatabaseError::Other(
-                                    "StorageRoot returned Progress variant in parallel trie calculation".to_string()
-                                ))
-                            ))
+                            );
+                            if retain_updates {
+                                let (root, _, updates) = storage_root.root_with_updates()?;
+                                (root, updates)
+                            } else {
+                                (storage_root.root()?, Default::default())
+                            }
                         }
                     };
 
