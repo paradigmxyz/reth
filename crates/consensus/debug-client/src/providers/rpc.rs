@@ -7,7 +7,6 @@ use alloy_provider::{
 };
 use alloy_rpc_types_engine::PayloadExtras;
 use alloy_transport::TransportResult;
-use eyre::WrapErr;
 use futures::{Stream, StreamExt};
 use reth_node_api::ExecutionPayload;
 use reth_tracing::tracing::{debug, warn};
@@ -80,14 +79,14 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
         }
     }
 
-    async fn payload_extras(&self, header: &N::HeaderResponse) -> eyre::Result<PayloadExtras> {
+    async fn payload_extras(&self, header: &N::HeaderResponse) -> PayloadExtras {
         if !self.fetch_block_access_list {
-            return Ok(PayloadExtras::default())
+            return PayloadExtras::default()
         }
 
         let block_hash = header.hash();
-        let Some(block_access_list_hash) = header.block_access_list_hash() else {
-            return Ok(PayloadExtras::default())
+        if header.block_access_list_hash().is_none() {
+            return PayloadExtras::default()
         };
 
         let block_access_list = self
@@ -103,17 +102,10 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
                     "Failed to fetch block access list",
                 );
             })
-            .wrap_err_with(|| {
-                format!("failed to fetch block access list for Amsterdam block {block_hash}")
-            })?;
+            .ok()
+            .flatten();
 
-        let block_access_list = block_access_list.ok_or_else(|| {
-            eyre::eyre!(
-                "missing block access list for Amsterdam block {block_hash} with block access list hash {block_access_list_hash}"
-            )
-        })?;
-
-        Ok(PayloadExtras::from(Some(block_access_list)))
+        PayloadExtras::from(block_access_list)
     }
 }
 
@@ -144,23 +136,14 @@ where
 
             while let Some(res) = stream.next().await {
                 match res {
-                    Ok(block) => match self.payload_extras(block.header()).await {
-                        Ok(extras) => {
-                            let payload = (self.convert)(block, extras);
-                            if tx.send(payload).await.is_err() {
-                                // Channel closed - receiver dropped, exit completely.
-                                return;
-                            }
+                    Ok(block) => {
+                        let extras = self.payload_extras(block.header()).await;
+                        let payload = (self.convert)(block, extras);
+                        if tx.send(payload).await.is_err() {
+                            // Channel closed - receiver dropped, exit completely.
+                            return;
                         }
-                        Err(err) => {
-                            warn!(
-                                target: "consensus::debug-client",
-                                %err,
-                                url=%self.url,
-                                "Failed to convert block into execution payload",
-                            );
-                        }
-                    },
+                    }
                     Err(err) => {
                         warn!(
                             target: "consensus::debug-client",
@@ -187,7 +170,7 @@ where
             .full()
             .await?
             .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
-        let extras = self.payload_extras(block.header()).await?;
+        let extras = self.payload_extras(block.header()).await;
         Ok((self.convert)(block, extras))
     }
 }
