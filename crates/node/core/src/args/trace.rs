@@ -115,6 +115,20 @@ pub struct TraceArgs {
     )]
     pub service_name: String,
 
+    /// Service version to use for OTLP tracing export.
+    ///
+    /// Overrides the default version reported in the `service.version` OTLP resource attribute.
+    /// Falls back to the crate's `CARGO_PKG_VERSION` if not specified.
+    #[arg(
+        long = "tracing-otlp.service-version",
+        env = "OTEL_SERVICE_VERSION",
+        global = true,
+        value_name = "VERSION",
+        hide = true,
+        help_heading = "Tracing"
+    )]
+    pub service_version: Option<String>,
+
     /// Trace sampling ratio to control the percentage of traces to export.
     ///
     /// Valid range: 0.0 to 1.0
@@ -143,6 +157,7 @@ impl Default for TraceArgs {
             logs_otlp_filter: EnvFilter::try_new("info").expect("valid filter"),
             sample_ratio: None,
             service_name: "reth".to_string(),
+            service_version: None,
         }
     }
 }
@@ -168,12 +183,15 @@ impl TraceArgs {
             #[cfg(feature = "otlp")]
             {
                 {
-                    let config = reth_tracing_otlp::OtlpConfig::new(
+                    let mut config = reth_tracing_otlp::OtlpConfig::new(
                         self.service_name.clone(),
                         endpoint.clone(),
                         self.protocol,
                         self.sample_ratio,
                     )?;
+                    if let Some(version) = &self.service_version {
+                        config = config.with_service_version(version.clone());
+                    }
 
                     _layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
 
@@ -201,11 +219,14 @@ impl TraceArgs {
 
             #[cfg(feature = "otlp-logs")]
             {
-                let config = reth_tracing_otlp::OtlpLogsConfig::new(
+                let mut config = reth_tracing_otlp::OtlpLogsConfig::new(
                     self.service_name.clone(),
                     endpoint.clone(),
                     self.protocol,
                 )?;
+                if let Some(version) = &self.service_version {
+                    config = config.with_service_version(version.clone());
+                }
 
                 _layers.with_log_layer(config.clone(), self.logs_otlp_filter.clone())?;
 

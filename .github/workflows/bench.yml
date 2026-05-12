@@ -846,29 +846,6 @@ jobs:
             core.setOutput('feature-ref', featureRef);
             core.setOutput('feature-name', featureName);
 
-      - name: Validate local big blocks
-        if: env.BENCH_BIG_BLOCKS == 'true'
-        id: big-blocks-check
-        run: |
-          set -euo pipefail
-          BIG_BLOCKS_DIR="$HOME/.reth-bench-big-blocks"
-          MANIFEST="$BIG_BLOCKS_DIR/manifest.json"
-          echo "BENCH_BIG_BLOCKS_DIR=${BIG_BLOCKS_DIR}" >> "$GITHUB_ENV"
-
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error::Missing local big-blocks manifest at $MANIFEST"
-            exit 1
-          fi
-
-          BASE_SNAPSHOT=$(jq -r '.base_snapshot // empty' "$MANIFEST")
-          if [ -z "$BASE_SNAPSHOT" ]; then
-            echo "::error::Big-blocks manifest missing base_snapshot field"
-            exit 1
-          fi
-
-          echo "Big-blocks base snapshot: $BASE_SNAPSHOT"
-          echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
-
       - name: Prepare source dirs
         run: |
           prepare_source_dir() {
@@ -1447,9 +1424,7 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
@@ -1485,9 +1460,7 @@ jobs:
         with:
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
