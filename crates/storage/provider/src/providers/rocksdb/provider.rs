@@ -1432,7 +1432,7 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        let mut storage_history = Vec::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1444,17 +1444,28 @@ impl RocksDBProvider {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
                         let plain_key = B256::new(slot.to_be_bytes());
-                        storage_history
-                            .entry((revert.address, plain_key))
-                            .or_default()
-                            .push(block_number);
+                        storage_history.push((revert.address, plain_key, block_number));
                     }
                 }
             }
         }
 
+        storage_history
+            .sort_unstable_by_key(|(address, slot, block_number)| (*address, *slot, *block_number));
+
         // Write storage history using proper shard append logic
-        for ((address, slot), indices) in storage_history {
+        let mut iter = storage_history.into_iter().peekable();
+        while let Some((address, slot, block_number)) = iter.next() {
+            let mut indices = vec![block_number];
+
+            while let Some((next_address, next_slot, _)) = iter.peek() {
+                if *next_address != address || *next_slot != slot {
+                    break;
+                }
+                let (_, _, block_number) = iter.next().expect("peeked entry exists");
+                indices.push(block_number);
+            }
+
             batch.append_storage_history_shard(address, slot, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
