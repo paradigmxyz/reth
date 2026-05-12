@@ -170,6 +170,7 @@ where
         // Forces updating the root instead of calculating from scratch
         rebuild_threshold: u64::MAX,
         incremental_threshold: u64::MAX,
+        parallel: None,
     };
 
     loop {

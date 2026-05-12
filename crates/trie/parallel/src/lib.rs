@@ -17,6 +17,9 @@ pub mod stats;
 /// Implementation of parallel state root computation.
 pub mod root;
 
+/// Dispatcher trait for type-erased parallel incremental state-root computation.
+pub mod dispatcher;
+
 /// Implementation of parallel proof computation.
 pub mod proof_task;
 

@@ -8,8 +8,7 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    providers::OverlayStateProviderFactory, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HeaderProvider, ProviderError, StageCheckpointReader,
+    ChangeSetReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_api::{
@@ -17,13 +16,12 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    updates::{TrieUpdates, TrieUpdatesSorted},
     IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode,
 };
-use reth_trie_db::{load_prefix_sets_with_provider, ChangesetCache, DatabaseStateRoot};
-use reth_trie_parallel::root::ParallelStateRoot;
-
-use std::fmt::Debug;
+use reth_trie_db::{load_prefix_sets_with_provider, DatabaseStateRoot};
+use reth_trie_parallel::dispatcher::IncrementalStateRootDispatcher;
+use std::{fmt::Debug, sync::Arc};
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -58,8 +56,35 @@ pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
 /// new state root for this many blocks, in batches, repeating until we reach the desired block
 /// number.
 pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
-/// Minimum number of modified storage tries in a chunk before using parallel state root.
-const PARALLEL_MERKLE_STORAGE_TRIE_THRESHOLD: usize = 1_024;
+/// Default minimum number of modified storage tries in a chunk before using the parallel
+/// state-root dispatcher. Below this threshold the per-chunk rayon scheduling overhead is not
+/// worth the parallelism.
+pub const MERKLE_STAGE_DEFAULT_PARALLEL_STORAGE_TRIE_THRESHOLD: usize = 1_024;
+
+/// Optional parallel-execution configuration for [`MerkleStage::Execution`].
+///
+/// When set, the incremental chunked path will dispatch through
+/// [`IncrementalStateRootDispatcher`] for chunks whose modified storage-trie count meets
+/// `storage_tries_threshold`. Smaller chunks fall through to the serial `DbStateRoot` path
+/// (the rayon scheduling overhead isn't worth it).
+#[derive(Clone, Debug)]
+pub struct MerkleParallelConfig {
+    /// Dispatcher used for the parallel path.
+    pub dispatcher: Arc<dyn IncrementalStateRootDispatcher>,
+    /// Minimum number of modified storage tries in a chunk before using the dispatcher.
+    pub storage_tries_threshold: usize,
+}
+
+impl MerkleParallelConfig {
+    /// Create a new configuration using
+    /// [`MERKLE_STAGE_DEFAULT_PARALLEL_STORAGE_TRIE_THRESHOLD`] as the chunk threshold.
+    pub fn new(dispatcher: Arc<dyn IncrementalStateRootDispatcher>) -> Self {
+        Self {
+            dispatcher,
+            storage_tries_threshold: MERKLE_STAGE_DEFAULT_PARALLEL_STORAGE_TRIE_THRESHOLD,
+        }
+    }
+}
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -95,6 +120,10 @@ pub enum MerkleStage {
         /// incremental mode will calculate the state root by calculating the new state root for
         /// some number of blocks, repeating until we reach the desired block number.
         incremental_threshold: u64,
+        /// Optional parallel execution configuration. When `None`, the incremental path runs
+        /// the serial `DbStateRoot`. When `Some`, chunks whose modified-storage-trie count
+        /// meets the threshold are dispatched through the parallel calculator.
+        parallel: Option<MerkleParallelConfig>,
     },
     /// The unwind portion of the merkle stage.
     Unwind,
@@ -108,6 +137,8 @@ pub enum MerkleStage {
         /// incremental mode will calculate the state root by calculating the new state root for
         /// some number of blocks, repeating until we reach the desired block number.
         incremental_threshold: u64,
+        /// Optional parallel execution configuration; see [`MerkleStage::Execution`].
+        parallel: Option<MerkleParallelConfig>,
     },
 }
 
@@ -117,6 +148,7 @@ impl MerkleStage {
         Self::Execution {
             rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
+            parallel: None,
         }
     }
 
@@ -127,7 +159,24 @@ impl MerkleStage {
 
     /// Create new instance of [`MerkleStage::Execution`].
     pub const fn new_execution(rebuild_threshold: u64, incremental_threshold: u64) -> Self {
-        Self::Execution { rebuild_threshold, incremental_threshold }
+        Self::Execution { rebuild_threshold, incremental_threshold, parallel: None }
+    }
+
+    /// Enable parallel execution for the incremental path.
+    ///
+    /// Only applies to [`MerkleStage::Execution`] and [`MerkleStage::Both`]; other variants
+    /// are returned unchanged.
+    pub fn with_parallel(self, config: MerkleParallelConfig) -> Self {
+        match self {
+            Self::Execution { rebuild_threshold, incremental_threshold, .. } => {
+                Self::Execution { rebuild_threshold, incremental_threshold, parallel: Some(config) }
+            }
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Both { rebuild_threshold, incremental_threshold, .. } => {
+                Self::Both { rebuild_threshold, incremental_threshold, parallel: Some(config) }
+            }
+            other => other,
+        }
     }
 
     /// Gets the hashing progress
@@ -165,176 +214,6 @@ impl MerkleStage {
     }
 }
 
-/// Executes the incremental merkle stage using the existing parallel state-root calculator.
-///
-/// This is intentionally limited to the incremental path. Rebuild/unwind still use the original
-/// implementation until the parallel path has stronger validation coverage.
-#[derive(Debug, Clone)]
-pub struct ParallelMerkleExecutionStage<Factory> {
-    overlay_factory: OverlayStateProviderFactory<Factory>,
-    rebuild_threshold: u64,
-    incremental_threshold: u64,
-    parallel_storage_tries_threshold: usize,
-    /// Runtime used by `ParallelStateRoot` to dispatch storage-root workers onto reth's
-    /// named `storage_pool` rayon threads.
-    runtime: reth_tasks::Runtime,
-}
-
-impl<Factory> ParallelMerkleExecutionStage<Factory> {
-    /// Create a new stage.
-    pub fn new(
-        factory: Factory,
-        rebuild_threshold: u64,
-        incremental_threshold: u64,
-        runtime: reth_tasks::Runtime,
-    ) -> Self {
-        Self {
-            overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
-            rebuild_threshold,
-            incremental_threshold,
-            parallel_storage_tries_threshold: PARALLEL_MERKLE_STORAGE_TRIE_THRESHOLD,
-            runtime,
-        }
-    }
-
-    const fn fallback_stage(&self) -> MerkleStage {
-        MerkleStage::new_execution(self.rebuild_threshold, self.incremental_threshold)
-    }
-
-    fn incremental_root<Provider>(
-        &self,
-        provider: &Provider,
-        range: std::ops::RangeInclusive<BlockNumber>,
-    ) -> Result<(B256, TrieUpdates), StageError>
-    where
-        Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + StorageSettingsCache,
-        Factory: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-        Factory::Provider: StageCheckpointReader
-            + reth_provider::PruneCheckpointReader
-            + reth_provider::BlockNumReader
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + StorageSettingsCache,
-    {
-        let prefix_sets = load_prefix_sets_with_provider(provider, range.clone())
-            .map_err(|e| StageError::Fatal(Box::new(e)))?;
-        let storage_trie_count = prefix_sets.storage_prefix_sets.len();
-        let use_parallel = storage_trie_count >= self.parallel_storage_tries_threshold;
-
-        debug!(
-            target: "sync::stages::merkle::exec",
-            ?range,
-            storage_trie_count,
-            parallel_threshold = self.parallel_storage_tries_threshold,
-            use_parallel,
-            "Loaded prefix sets for incremental merkle chunk"
-        );
-
-        if use_parallel {
-            return ParallelStateRoot::new(
-                self.overlay_factory.clone(),
-                prefix_sets,
-                self.runtime.clone(),
-            )
-            .incremental_root_with_updates()
-            .map_err(|e| StageError::Fatal(Box::new(e)))
-        }
-
-        reth_trie_db::with_adapter!(provider, |A| {
-            DbStateRoot::<_, A>::from_tx(provider.tx_ref())
-                .with_prefix_sets(prefix_sets)
-                .root_with_updates()
-        })
-        .map_err(|e| StageError::Fatal(Box::new(e)))
-    }
-}
-
-impl<Provider, Factory> Stage<Provider> for ParallelMerkleExecutionStage<Factory>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + TrieWriter
-        + StatsReader
-        + HeaderProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + StorageSettingsCache
-        + StageCheckpointReader
-        + StageCheckpointWriter,
-    Factory: DatabaseProviderFactory + Clone + Send + Sync + 'static,
-    Factory::Provider: StageCheckpointReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::BlockNumReader
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + StorageSettingsCache,
-    OverlayStateProviderFactory<Factory>: DatabaseProviderROFactory,
-    <OverlayStateProviderFactory<Factory> as DatabaseProviderROFactory>::Provider:
-        TrieCursorFactory + HashedCursorFactory,
-{
-    fn id(&self) -> StageId {
-        StageId::MerkleExecute
-    }
-
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        let (from_block, to_block) = range.clone().into_inner();
-
-        if range.is_empty() || to_block - from_block > self.rebuild_threshold || from_block == 1 {
-            return self.fallback_stage().execute(provider, input)
-        }
-
-        let current_block_number = input.checkpoint().block_number;
-        let target_block = provider
-            .header_by_number(to_block)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
-
-        let chunk_to = std::cmp::min(from_block + self.incremental_threshold, to_block);
-        let chunk_range = from_block..=chunk_to;
-        debug!(
-            target: "sync::stages::merkle::exec",
-            current = ?current_block_number,
-            target = ?to_block,
-            incremental_threshold = self.incremental_threshold,
-            chunk_range = ?chunk_range,
-            "Processing chunk"
-        );
-
-        let (root, updates) =
-            self.incremental_root(provider, chunk_range.clone()).map_err(|e| {
-                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, ?chunk_range, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                e
-            })?;
-        provider.write_trie_updates(updates)?;
-
-        if chunk_to < to_block {
-            return Ok(ExecOutput { checkpoint: StageCheckpoint::new(chunk_to), done: false })
-        }
-
-        let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
-            provider.count_entries::<tables::HashedStorages>()?)
-            as u64;
-        let entities_checkpoint =
-            EntitiesCheckpoint { processed: total_hashed_entries, total: total_hashed_entries };
-
-        validate_state_root(root, SealedHeader::seal_slow(target_block), to_block)?;
-
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(to_block)
-                .with_entities_stage_checkpoint(entities_checkpoint),
-            done: true,
-        })
-    }
-
-    fn unwind(
-        &mut self,
-        _provider: &Provider,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
-    }
-}
-
 impl<Provider> Stage<Provider> for MerkleStage
 where
     Provider: DBProvider<Tx: DbTxMut>
@@ -359,17 +238,17 @@ where
 
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let (threshold, incremental_threshold) = match self {
+        let (threshold, incremental_threshold, parallel) = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            Self::Execution { rebuild_threshold, incremental_threshold } => {
-                (*rebuild_threshold, *incremental_threshold)
+            Self::Execution { rebuild_threshold, incremental_threshold, parallel } => {
+                (*rebuild_threshold, *incremental_threshold, parallel.clone())
             }
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { rebuild_threshold, incremental_threshold } => {
-                (*rebuild_threshold, *incremental_threshold)
+            Self::Both { rebuild_threshold, incremental_threshold, parallel } => {
+                (*rebuild_threshold, *incremental_threshold, parallel.clone())
             }
         };
 
@@ -488,6 +367,7 @@ where
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
+            let mut trie_updates_overlay = Arc::new(TrieUpdatesSorted::default());
             for start_block in range.step_by(incremental_threshold as usize) {
                 let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
                 let chunk_range = start_block..=chunk_to;
@@ -499,14 +379,28 @@ where
                     chunk_range = ?chunk_range,
                     "Processing chunk"
                 );
-                let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-                    DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
-                })
+                let (root, updates) = compute_incremental_chunk(
+                    provider,
+                    chunk_range.clone(),
+                    parallel.as_ref(),
+                    Arc::clone(&trie_updates_overlay),
+                )
                 .map_err(|e| {
-                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                    StageError::Fatal(Box::new(e))
+                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, ?chunk_range, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    e
                 })?;
-                provider.write_trie_updates(updates)?;
+                if parallel.is_some() && chunk_to < to_block {
+                    // Parallel chunks open fresh read-only providers and cannot see writes made in
+                    // this transaction. Keep prior chunk updates in an in-memory trie overlay so
+                    // later parallel chunks observe the same intermediate trie state as serial
+                    // chunks using this provider transaction.
+                    let updates = updates.into_sorted();
+                    provider.write_trie_updates_sorted(&updates)?;
+                    Arc::make_mut(&mut trie_updates_overlay).extend_ref_and_sort(&updates);
+                } else {
+                    provider.write_trie_updates(updates)?;
+                }
+
                 final_root = Some(root);
             }
 
@@ -609,6 +503,57 @@ where
     }
 }
 
+/// Compute one incremental-chunk state root, dispatching to the parallel calculator when
+/// the optional `parallel` config is provided and the chunk's modified-storage-trie count
+/// crosses its threshold. Otherwise falls through to the serial [`DbStateRoot`].
+fn compute_incremental_chunk<Provider>(
+    provider: &Provider,
+    chunk_range: std::ops::RangeInclusive<BlockNumber>,
+    parallel: Option<&MerkleParallelConfig>,
+    trie_updates_overlay: Arc<TrieUpdatesSorted>,
+) -> Result<(B256, TrieUpdates), StageError>
+where
+    Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + StorageSettingsCache,
+{
+    if let Some(parallel) = parallel {
+        let prefix_sets = load_prefix_sets_with_provider(provider, chunk_range.clone())
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+        let storage_trie_count = prefix_sets.storage_prefix_sets.len();
+        let use_parallel = storage_trie_count >= parallel.storage_tries_threshold;
+
+        debug!(
+            target: "sync::stages::merkle::exec",
+            ?chunk_range,
+            storage_trie_count,
+            parallel_threshold = parallel.storage_tries_threshold,
+            use_parallel,
+            "Loaded prefix sets for incremental merkle chunk"
+        );
+
+        if use_parallel {
+            return parallel
+                .dispatcher
+                .incremental_root_with_updates(
+                    prefix_sets,
+                    (!trie_updates_overlay.is_empty()).then_some(trie_updates_overlay),
+                )
+                .map_err(|e| StageError::Fatal(Box::new(e)));
+        }
+
+        return reth_trie_db::with_adapter!(provider, |A| {
+            DbStateRoot::<_, A>::from_tx(provider.tx_ref())
+                .with_prefix_sets(prefix_sets)
+                .root_with_updates()
+        })
+        .map_err(|e| StageError::Fatal(Box::new(e)));
+    }
+
+    reth_trie_db::with_adapter!(provider, |A| {
+        DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
+    })
+    .map_err(|e| StageError::Fatal(Box::new(e)))
+}
+
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
 fn validate_state_root<H: BlockHeader + Sealable + Debug>(
@@ -640,7 +585,10 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives_traits::{SealedBlock, StorageEntry};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_provider::{
+        providers::{OverlayStateProviderFactory, StaticFileWriter},
+        StaticFileProviderFactory,
+    };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
@@ -648,7 +596,61 @@ mod tests {
         random_contract_account_range, BlockParams, BlockRangeParams,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
-    use std::collections::BTreeMap;
+    use reth_trie_db::ChangesetCache;
+    use reth_trie_parallel::{dispatcher::ParallelStateRootDispatcher, root::ParallelStateRoot};
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    /// Build a parallel-execution config that forces the parallel path (threshold = 0).
+    fn test_parallel_config<F>(factory: F) -> MerkleParallelConfig
+    where
+        F: reth_provider::DatabaseProviderFactory + Clone + Send + Sync + std::fmt::Debug + 'static,
+        F::Provider: reth_provider::StageCheckpointReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::BlockNumReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache,
+    {
+        test_parallel_config_with_counter(factory).0
+    }
+
+    fn test_parallel_config_with_counter<F>(factory: F) -> (MerkleParallelConfig, Arc<AtomicUsize>)
+    where
+        F: reth_provider::DatabaseProviderFactory + Clone + Send + Sync + std::fmt::Debug + 'static,
+        F::Provider: reth_provider::StageCheckpointReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::BlockNumReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache,
+    {
+        let overlay = OverlayStateProviderFactory::new(factory, ChangesetCache::new());
+        let inner =
+            Arc::new(ParallelStateRootDispatcher::new(overlay, reth_tasks::Runtime::test()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let dispatcher = Arc::new(CountingDispatcher { inner, calls: Arc::clone(&calls) });
+        (MerkleParallelConfig { dispatcher, storage_tries_threshold: 0 }, calls)
+    }
+
+    #[derive(Debug)]
+    struct CountingDispatcher {
+        inner: Arc<dyn IncrementalStateRootDispatcher>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl IncrementalStateRootDispatcher for CountingDispatcher {
+        fn incremental_root_with_updates(
+            &self,
+            prefix_sets: reth_trie::prefix_set::TriePrefixSets,
+            trie_updates_overlay: Option<Arc<TrieUpdatesSorted>>,
+        ) -> Result<(B256, TrieUpdates), reth_trie_parallel::root::ParallelStateRootError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.inner.incremental_root_with_updates(prefix_sets, trie_updates_overlay)
+        }
+    }
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
@@ -815,13 +817,9 @@ mod tests {
         runner.seed_execution(input).expect("failed to seed execution");
 
         let factory = runner.db().factory.clone();
-        let mut stage = ParallelMerkleExecutionStage::new(
-            factory.clone(),
-            rebuild_threshold,
-            incremental_threshold,
-            reth_tasks::Runtime::test(),
-        );
-        stage.parallel_storage_tries_threshold = 0;
+        let (parallel_config, parallel_calls) = test_parallel_config_with_counter(factory.clone());
+        let mut stage = MerkleStage::new_execution(rebuild_threshold, incremental_threshold)
+            .with_parallel(parallel_config);
 
         let mut current_input = input;
         let mut iterations = 0usize;
@@ -841,7 +839,8 @@ mod tests {
                 ExecInput { target: Some(previous_stage), checkpoint: Some(output.checkpoint) };
         };
 
-        assert!(iterations > 1, "expected multi-chunk execution");
+        assert_eq!(iterations, 1, "expected unified merkle stage to finish in one execute call");
+        assert!(parallel_calls.load(Ordering::Relaxed) > 1, "expected multiple parallel chunks");
         assert_eq!(result.checkpoint.block_number, previous_stage);
 
         let provider = factory.provider().unwrap();
@@ -876,7 +875,6 @@ mod tests {
     #[tokio::test]
     async fn parallel_trie_updates_match_serial() {
         use reth_trie::updates::TrieUpdatesSorted;
-        use reth_trie_db::ChangesetCache;
 
         let (previous_stage, stage_progress) = (200, 100);
         let mut runner = MerkleTestRunner {
@@ -909,10 +907,7 @@ mod tests {
             let provider = factory.provider().unwrap();
             load_prefix_sets_with_provider(&provider, stage_progress + 1..=previous_stage).unwrap()
         };
-        let overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            factory,
-            ChangesetCache::new(),
-        );
+        let overlay_factory = OverlayStateProviderFactory::new(factory, ChangesetCache::new());
         let (parallel_root, parallel_updates) =
             ParallelStateRoot::new(overlay_factory, prefix_sets, reth_tasks::Runtime::test())
                 .incremental_root_with_updates()
@@ -928,8 +923,8 @@ mod tests {
         );
     }
 
-    /// Reproduces the mainnet `MerkleUnwind` failure: multi-chunk `ParallelMerkleExecutionStage`
-    /// followed by a serial unwind must leave the trie tables in a state from which
+    /// Reproduces the mainnet `MerkleUnwind` failure: multi-chunk parallel merkle execution
+    /// followed by serial unwind must leave the trie tables in a state from which
     /// `DbStateRoot::incremental_root_with_updates(range)` produces the same root that the serial
     /// implementation would on a freshly executed chain.
     ///
@@ -959,13 +954,9 @@ mod tests {
         let factory = runner.db().factory.clone();
 
         // Run parallel multi-chunk.
-        let mut parallel_stage = ParallelMerkleExecutionStage::new(
-            factory.clone(),
-            rebuild_threshold,
-            incremental_threshold,
-            reth_tasks::Runtime::test(),
-        );
-        parallel_stage.parallel_storage_tries_threshold = 0;
+        let mut parallel_stage =
+            MerkleStage::new_execution(rebuild_threshold, incremental_threshold)
+                .with_parallel(test_parallel_config(factory.clone()));
 
         let mut current_input = input;
         loop {
@@ -1087,6 +1078,7 @@ mod tests {
             Self::S::Both {
                 rebuild_threshold: self.clean_threshold,
                 incremental_threshold: self.incremental_threshold,
+                parallel: None,
             }
         }
     }

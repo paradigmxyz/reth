@@ -136,6 +136,29 @@ impl<F> OverlayStateProviderFactory<F> {
         self
     }
 
+    /// Set a trie updates overlay while preserving any existing hashed state overlay.
+    pub fn with_trie_updates_overlay(
+        mut self,
+        trie_updates: Option<Arc<TrieUpdatesSorted>>,
+    ) -> Self {
+        self.overlay_source = trie_updates.map(|updates| {
+            let (mut trie, state) =
+                self.overlay_source.as_ref().map(OverlaySource::resolve).unwrap_or_else(|| {
+                    (
+                        Arc::new(TrieUpdatesSorted::default()),
+                        Arc::new(HashedPostStateSorted::default()),
+                    )
+                });
+
+            Arc::make_mut(&mut trie).extend_ref_and_sort(&updates);
+
+            OverlaySource::Immediate { trie, state }
+        });
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
+        self
+    }
+
     /// Set a lazy overlay that will be computed on first access.
     ///
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.

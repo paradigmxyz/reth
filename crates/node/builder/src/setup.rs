@@ -16,15 +16,20 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{
+    providers::{OverlayStateProviderFactory, ProviderNodeTypes},
+    ProviderFactory,
+};
 use reth_stages::{
     prelude::DefaultStages,
-    stages::{EraImportSource, ExecutionStage, ParallelMerkleExecutionStage},
+    stages::{EraImportSource, ExecutionStage, MerkleParallelConfig, MerkleStage},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
+use reth_trie_db::ChangesetCache;
+use reth_trie_parallel::dispatcher::ParallelStateRootDispatcher;
 use tokio::sync::watch;
 
 /// Constructs a [Pipeline] that's wired to the network
@@ -123,12 +128,21 @@ where
                 prune_config.segments,
                 era_import_source,
             )
-            .set(ParallelMerkleExecutionStage::new(
-                provider_factory.clone(),
-                stage_config.merkle.rebuild_threshold,
-                stage_config.merkle.incremental_threshold,
-                task_executor,
-            ))
+            .set(
+                MerkleStage::new_execution(
+                    stage_config.merkle.rebuild_threshold,
+                    stage_config.merkle.incremental_threshold,
+                )
+                .with_parallel(MerkleParallelConfig::new(Arc::new(
+                    ParallelStateRootDispatcher::new(
+                        OverlayStateProviderFactory::new(
+                            provider_factory.clone(),
+                            ChangesetCache::new(),
+                        ),
+                        task_executor,
+                    ),
+                ))),
+            )
             .set(ExecutionStage::new(
                 evm_config,
                 consensus,

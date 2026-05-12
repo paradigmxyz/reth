@@ -9088,6 +9088,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
+ "reth-trie-parallel",
  "secp256k1 0.30.0",
  "serde_json",
  "tempfile",
