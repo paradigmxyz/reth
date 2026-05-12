@@ -38,6 +38,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
         + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
+        + BalProvider
         + Send
         + Sync
         + Clone
@@ -132,6 +133,7 @@ where
         + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
+        + BalProvider
         + Send
         + Sync
         + Unpin

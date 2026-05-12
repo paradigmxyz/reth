@@ -23,6 +23,7 @@ reth-storage-errors.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }
 
@@ -55,6 +56,7 @@ test-utils = [
 std = [
     "reth-consensus/std",
     "reth-ethereum-primitives/std",
+    "alloy-eip7928/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "reth-primitives-traits/std",

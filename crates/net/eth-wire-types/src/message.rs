@@ -13,8 +13,8 @@ use super::{
     PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
-    status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
-    RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
+    status::StatusMessage, BlockRangeUpdate, Cells, EthNetworkPrimitives, EthVersion, GetCells,
+    NetworkPrimitives, RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
 use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{
@@ -206,6 +206,18 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 }
                 EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
+            EthMessageID::Cells => {
+                if version < EthVersion::Eth72 {
+                    return Err(MessageError::Invalid(version, EthMessageID::Cells))
+                }
+                EthMessage::Cells(RequestPair::decode(buf)?)
+            }
+            EthMessageID::GetCells => {
+                if version < EthVersion::Eth72 {
+                    return Err(MessageError::Invalid(version, EthMessageID::GetCells))
+                }
+                EthMessage::GetCells(RequestPair::decode(buf)?)
+            }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -376,6 +388,10 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts70(RequestPair<Receipts70<N::Receipt>>),
     /// Represents a `BlockAccessLists` request-response pair for eth/71.
     BlockAccessLists(RequestPair<BlockAccessLists>),
+    /// Represents a `Cells` request-response pair for eth/72.
+    Cells(RequestPair<Cells>),
+    /// Represents a `GetCells` request-response pair for eth/72.
+    GetCells(RequestPair<GetCells>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
@@ -410,6 +426,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockRangeUpdate(_) => EthMessageID::BlockRangeUpdate,
             Self::GetBlockAccessLists(_) => EthMessageID::GetBlockAccessLists,
             Self::BlockAccessLists(_) => EthMessageID::BlockAccessLists,
+            Self::Cells(_) => EthMessageID::Cells,
+            Self::GetCells(_) => EthMessageID::GetCells,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
@@ -423,6 +441,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::GetReceipts(_) |
                 Self::GetReceipts70(_) |
                 Self::GetBlockAccessLists(_) |
+                Self::GetCells(_) |
                 Self::GetPooledTransactions(_) |
                 Self::GetNodeData(_)
         )
@@ -439,7 +458,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::BlockAccessLists(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
-                Self::NodeData(_)
+                Self::NodeData(_) |
+                Self::Cells(_)
         )
     }
 
@@ -492,11 +512,13 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetReceipts(request) => request.encode(out),
             Self::GetReceipts70(request) => request.encode(out),
             Self::GetBlockAccessLists(request) => request.encode(out),
+            Self::GetCells(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
             Self::Receipts70(receipt70) => receipt70.encode(out),
             Self::BlockAccessLists(block_access_lists) => block_access_lists.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
+            Self::Cells(cells) => cells.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -519,11 +541,13 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetReceipts(request) => request.length(),
             Self::GetReceipts70(request) => request.length(),
             Self::GetBlockAccessLists(request) => request.length(),
+            Self::GetCells(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
             Self::Receipts70(receipt70) => receipt70.length(),
             Self::BlockAccessLists(block_access_lists) => block_access_lists.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
+            Self::Cells(cells) => cells.length(),
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -619,6 +643,15 @@ pub enum EthMessageID {
     ///
     /// Introduced in Eth71
     BlockAccessLists = 0x13,
+
+    /// Requests cells.
+    ///
+    /// Introduced in Eth72
+    GetCells = 0x14,
+    /// Represents Cells
+    ///
+    /// Introduced in Eth72
+    Cells = 0x15,
     /// Represents unknown message types.
     Other(u8),
 }
@@ -645,13 +678,17 @@ impl EthMessageID {
             Self::BlockRangeUpdate => 0x11,
             Self::GetBlockAccessLists => 0x12,
             Self::BlockAccessLists => 0x13,
+            Self::GetCells => 0x14,
+            Self::Cells => 0x15,
             Self::Other(value) => *value, // Return the stored `u8`
         }
     }
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth71() {
+        if version.is_eth72() {
+            Self::Cells.to_u8()
+        } else if version.is_eth71() {
             Self::BlockAccessLists.to_u8()
         } else if version.is_eth69_or_newer() {
             Self::BlockRangeUpdate.to_u8()
@@ -700,6 +737,8 @@ impl Decodable for EthMessageID {
             0x11 => Self::BlockRangeUpdate,
             0x12 => Self::GetBlockAccessLists,
             0x13 => Self::BlockAccessLists,
+            0x14 => Self::GetCells,
+            0x15 => Self::Cells,
             unknown => Self::Other(*unknown),
         };
         buf.advance(1);
@@ -730,6 +769,8 @@ impl TryFrom<usize> for EthMessageID {
             0x11 => Ok(Self::BlockRangeUpdate),
             0x12 => Ok(Self::GetBlockAccessLists),
             0x13 => Ok(Self::BlockAccessLists),
+            0x14 => Ok(Self::GetCells),
+            0x15 => Ok(Self::Cells),
             _ => Err("Invalid message ID"),
         }
     }

@@ -20,7 +20,10 @@ extern crate alloc;
 use crate::execute::{BasicBlockBuilder, Executor};
 use alloc::vec::Vec;
 use alloy_eips::eip4895::Withdrawals;
-use alloy_evm::{block::BlockExecutorFactory, precompiles::PrecompilesMap};
+use alloy_evm::{
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    precompiles::PrecompilesMap,
+};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
@@ -313,6 +316,19 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        self.block_executor_factory().create_executor(evm, ctx)
+    }
+
+    /// Creates a strategy with a DB state borrow that can be shorter than the execution context.
+    fn create_executor_with_state<'a, 'db, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'db mut State<DB>, I>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>, I>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'db mut State<DB>>,
     {
         self.block_executor_factory().create_executor(evm, ctx)
     }

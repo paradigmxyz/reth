@@ -130,8 +130,8 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
-# Gate flag on binary support (older baselines may not have it).
-# Uses --help which exits immediately via clap without node init.
+# Keep the engine in startup sync mode until the pipeline is idle. Older
+# baselines may not have this flag, so gate it on clap help output.
 SYNC_STATE_IDLE=false
 if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
   RETH_ARGS+=(--debug.startup-sync-state-idle)
@@ -220,9 +220,6 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
-# Wait for the pipeline to finish (eth_syncing returns false) so the
-# engine is in live mode and can accept newPayload calls.
-# Only possible when --debug.startup-sync-state-idle is supported.
 if [ "$SYNC_STATE_IDLE" = "true" ]; then
   for i in $(seq 1 300); do
     SYNC_RESULT=$(curl -sf http://127.0.0.1:8545 -X POST \
@@ -254,28 +251,30 @@ if [ -n "${BENCH_WAIT_TIME:-}" ]; then
 fi
 
 if [ "$BIG_BLOCKS" = "true" ]; then
-  # Big blocks mode: replay pre-generated payloads
-  BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
+  # Big blocks mode: generate synthetic payloads in flight with new-payload-fcu.
   BENCH_BAL_MODE="${BENCH_BAL:-false}"
 
   BB_BENCH_ARGS=(--reth-new-payload)
   if [ -n "${BENCH_WAIT_TIME:-}" ]; then
     BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
   fi
+  if [ -n "${BENCH_BIG_BLOCKS_TARGET_GAS:-}" ]; then
+    BB_BENCH_ARGS+=(--big-blocks-target-gas "$BENCH_BIG_BLOCKS_TARGET_GAS")
+  fi
   case "$BENCH_BAL_MODE" in
     false)
       ;;
     true)
-      BB_BENCH_ARGS+=(--bal)
+      BB_BENCH_ARGS+=(--enable-bal)
       ;;
     baseline)
       if [[ "$LABEL" == baseline* ]]; then
-        BB_BENCH_ARGS+=(--bal)
+        BB_BENCH_ARGS+=(--enable-bal)
       fi
       ;;
     feature)
       if [[ "$LABEL" == feature* ]]; then
-        BB_BENCH_ARGS+=(--bal)
+        BB_BENCH_ARGS+=(--enable-bal)
       fi
       ;;
     *)
@@ -288,12 +287,14 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
   if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
     echo "Running big blocks warmup (${WARMUP} payloads)..."
-    $BENCH_NICE "$RETH_BENCH" replay-payloads \
+    $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
+      --rpc-url "$BENCH_RPC_URL" \
       "${BB_BENCH_ARGS[@]}" \
-      --count "$WARMUP" \
-      --payload-dir "$BIG_BLOCKS_DIR/payloads" \
+      --big-blocks "$WARMUP" \
       --engine-rpc-url http://127.0.0.1:8551 \
       --jwt-secret "$DATADIR/jwt.hex" 2>&1 | sed -u "s/^/[bench] /"
+  else
+    echo "Skipping big blocks warmup (0 payloads)..."
   fi
 
   # Start tracy-capture after warmup so profile only covers the benchmark
@@ -304,20 +305,16 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     sleep 0.5  # give tracy-capture time to connect
   fi
 
-  # Benchmark — skip warmup payloads so they aren't measured
-  BB_SKIP=0
-  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
-    BB_SKIP="$WARMUP"
-  fi
-  if [ "${BENCH_BLOCKS:-0}" -gt 0 ] 2>/dev/null; then
-    BB_BENCH_ARGS+=(--count "$BENCH_BLOCKS")
+  if [ "${BENCH_BLOCKS:-0}" -le 0 ] 2>/dev/null; then
+    echo "::error::BENCH_BLOCKS must be greater than 0 for big-block benchmarks"
+    exit 1
   fi
 
-  echo "Running big blocks benchmark (replay-payloads, skip=${BB_SKIP})..."
-  $BENCH_NICE "$RETH_BENCH" replay-payloads \
+  echo "Running big blocks benchmark (new-payload-fcu, count=${BENCH_BLOCKS})..."
+  $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
+    --rpc-url "$BENCH_RPC_URL" \
     "${BB_BENCH_ARGS[@]}" \
-    --skip "$BB_SKIP" \
-    --payload-dir "$BIG_BLOCKS_DIR/payloads" \
+    --big-blocks "$BENCH_BLOCKS" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"

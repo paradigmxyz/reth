@@ -3,7 +3,7 @@
 use std::ops::RangeInclusive;
 
 /// Whether or not the benchmark should run as a continuous stream of payloads.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BenchMode {
     /// Run the benchmark as a continuous stream of payloads, until the benchmark is interrupted.
     Continuous(u64),

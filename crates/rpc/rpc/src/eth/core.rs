@@ -600,6 +600,7 @@ mod tests {
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + StageCheckpointReader
+            + BalProvider
             + Unpin
             + Clone
             + 'static,

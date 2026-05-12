@@ -76,11 +76,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
   const commitUrl = `https://github.com/${repo}/commit`;
+  const repoLink = `<https://github.com/${repo}|Reth>`;
   const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
   const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
 
   // Meta line
-  const metaParts = [];
+  const metaParts = [`*Repo:* ${repoLink}`];
   if (prNumber) metaParts.push(`*<${prUrl}|PR #${prNumber}>*`);
   metaParts.push(`triggered by ${actorSlackId ? `<@${actorSlackId}>` : `@${actor}`}`);
 
@@ -180,8 +181,10 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
 function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, failedStep }) {
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
+  const repoLink = `<https://github.com/${repo}|Reth>`;
   const actorMention = actorSlackId ? `<@${actorSlackId}>` : `@${actor}`;
   const parts = [
+    `*Repo:* ${repoLink}`,
     prNumber ? `*<${prUrl}|PR #${prNumber}>*` : '',
     `by ${actorMention}`,
     `failed while *${failedStep}*`,

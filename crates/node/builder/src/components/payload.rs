@@ -110,7 +110,11 @@ where
                 ctx.provider().canonical_state_stream(),
             );
 
-        ctx.task_executor().spawn_critical_task("payload builder service", payload_service);
+        ctx.task_executor().spawn_critical_os_thread(
+            "payload-builder",
+            "payload builder service",
+            payload_service,
+        );
 
         Ok(payload_service_handle)
     }
@@ -136,22 +140,26 @@ where
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        ctx.task_executor().spawn_critical_task("payload builder", async move {
-            #[expect(clippy::collection_is_never_read)]
-            let mut subscriptions = Vec::new();
+        ctx.task_executor().spawn_critical_os_thread(
+            "payload-builder",
+            "payload builder",
+            async move {
+                #[expect(clippy::collection_is_never_read)]
+                let mut subscriptions = Vec::new();
 
-            while let Some(message) = rx.recv().await {
-                match message {
-                    PayloadServiceCommand::Subscribe(tx) => {
-                        let (events_tx, events_rx) = broadcast::channel(100);
-                        // Retain senders to make sure that channels are not getting closed
-                        subscriptions.push(events_tx);
-                        let _ = tx.send(events_rx);
+                while let Some(message) = rx.recv().await {
+                    match message {
+                        PayloadServiceCommand::Subscribe(tx) => {
+                            let (events_tx, events_rx) = broadcast::channel(100);
+                            // Retain senders to make sure that channels are not getting closed
+                            subscriptions.push(events_tx);
+                            let _ = tx.send(events_rx);
+                        }
+                        message => warn!(?message, "Noop payload service received a message"),
                     }
-                    message => warn!(?message, "Noop payload service received a message"),
                 }
-            }
-        });
+            },
+        );
 
         Ok(PayloadBuilderHandle::new(tx))
     }

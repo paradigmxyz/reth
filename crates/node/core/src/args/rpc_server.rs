@@ -1151,6 +1151,8 @@ mod tests {
             "2000",
             "--rpc-cache.max-headers",
             "1000",
+            "--rpc-cache.max-bals",
+            "1000",
             "--rpc-cache.max-concurrent-db-requests",
             "512",
             "--gpo.blocks",

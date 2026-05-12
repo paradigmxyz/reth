@@ -10,7 +10,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
-use alloy_rlp as _;
 
 // Re-export used error types.
 pub use reth_storage_errors as errors;

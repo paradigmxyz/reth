@@ -20,7 +20,13 @@ fn main() {
     }
 
     let flags = format!("{:?}", cc.get_compiler().cflags_env());
-    cc.define("MDBX_BUILD_FLAGS", flags.as_str()).define("MDBX_TXN_CHECKOWNER", "0");
+    cc.define("MDBX_BUILD_FLAGS", flags.as_str())
+        .define("MDBX_TXN_CHECKOWNER", "0")
+        // Disable posix_fallocate() usage. On filesystems that do not support fallocate (e.g. ZFS),
+        // glibc's posix_fallocate() emulates it by writing zeros, which can spuriously fail with
+        // ENOSPC even when sufficient disk space is available. The fallback path uses ftruncate()
+        // which works correctly on all filesystems.
+        .define("MDBX_USE_FALLOCATE", "0");
 
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
