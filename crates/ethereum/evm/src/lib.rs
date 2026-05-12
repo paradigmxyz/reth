@@ -158,16 +158,32 @@ where
         &self.block_assembler
     }
 
-    fn set_jit(&self, enabled: bool) {
+    fn with_jit(self, enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
         #[cfg(feature = "jit")]
-        if let Some(factory) =
-            (self.evm_factory() as &dyn Any).downcast_ref::<factory::RethEvmFactory>()
         {
-            factory.set_jit(enabled);
+            let mut this = self;
+            let mut evm_factory = this.executor_factory.evm_factory().clone();
+            if let Some(factory) =
+                (&mut evm_factory as &mut dyn Any).downcast_mut::<factory::RethEvmFactory>()
+            {
+                factory.set_jit(enabled);
+            }
+            this.executor_factory = EthBlockExecutorFactory::new(
+                *this.executor_factory.receipt_builder(),
+                this.executor_factory.spec().clone(),
+                evm_factory,
+            );
+            this
         }
 
         #[cfg(not(feature = "jit"))]
-        let _ = enabled;
+        {
+            let _ = enabled;
+            self
+        }
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {

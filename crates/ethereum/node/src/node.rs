@@ -530,7 +530,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     let tuning = config.tuning;
     let backend = JitBackend::new(config)?;
 
-    if jit.enabled || jit.blocking {
+    if jit.enabled {
         warn!(target: "reth::cli",
             hot_threshold = tuning.jit_hot_threshold,
             workers = tuning.jit_worker_count,

@@ -177,6 +177,7 @@ pub use alloy_evm::{
 /// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
+/// A type that configures EVM execution.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
@@ -264,8 +265,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().evm_factory()
     }
 
-    /// Enables or disables JIT for subsequently created EVMs, if supported.
-    fn set_jit(&self, _enabled: bool) {}
+    /// Returns a config with JIT enabled or disabled for subsequently created EVMs, if supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit(self, _enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.

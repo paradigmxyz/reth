@@ -13,8 +13,6 @@ use revm::{
 };
 #[cfg(feature = "jit")]
 use revmc::alloy_evm::JitEvmFactory;
-#[cfg(feature = "jit")]
-use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "jit")]
 pub use revmc::{
@@ -39,7 +37,7 @@ pub struct RethEvmFactory {
     #[cfg(feature = "jit")]
     disabled: JitBackend,
     #[cfg(feature = "jit")]
-    jit: AtomicBool,
+    jit: bool,
 }
 
 impl Clone for RethEvmFactory {
@@ -49,7 +47,7 @@ impl Clone for RethEvmFactory {
             #[cfg(feature = "jit")]
             disabled: self.disabled.clone(),
             #[cfg(feature = "jit")]
-            jit: AtomicBool::new(self.jit.load(Ordering::Relaxed)),
+            jit: self.jit,
         }
     }
 }
@@ -72,11 +70,7 @@ impl Default for RethEvmFactory {
 impl RethEvmFactory {
     /// Creates a new factory that owns the backend.
     pub fn new(backend: JitBackend) -> Self {
-        Self {
-            inner: JitEvmFactory::new(backend),
-            disabled: JitBackend::disabled(),
-            jit: AtomicBool::new(false),
-        }
+        Self { inner: JitEvmFactory::new(backend), disabled: JitBackend::disabled(), jit: false }
     }
 
     /// Creates a [`RethEvmFactory`] with JIT disabled.
@@ -90,8 +84,8 @@ impl RethEvmFactory {
     }
 
     /// Enables or disables JIT for subsequently created EVMs.
-    pub fn set_jit(&self, enabled: bool) {
-        self.jit.store(enabled, Ordering::Relaxed);
+    pub const fn set_jit(&mut self, enabled: bool) {
+        self.jit = enabled;
     }
 }
 
@@ -109,7 +103,7 @@ impl EvmFactory for RethEvmFactory {
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         #[cfg(feature = "jit")]
         {
-            if self.jit.load(Ordering::Relaxed) {
+            if self.jit {
                 self.inner.create_evm(db, input)
             } else {
                 JitEvmFactory::new(self.disabled.clone()).create_evm(db, input)
@@ -129,7 +123,7 @@ impl EvmFactory for RethEvmFactory {
     ) -> Self::Evm<DB, I> {
         #[cfg(feature = "jit")]
         {
-            if self.jit.load(Ordering::Relaxed) {
+            if self.jit {
                 self.inner.create_evm_with_inspector(db, input, inspector)
             } else {
                 JitEvmFactory::new(self.disabled.clone())
