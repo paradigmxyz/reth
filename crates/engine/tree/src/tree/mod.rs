@@ -2116,7 +2116,10 @@ where
         let canonical_head_number = self.state.tree_state.canonical_block_number();
         let last_block_target_number = match target {
             PersistTarget::Threshold => {
-                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target()).min(
+                    last_state_trie_persisted_block_number
+                        .saturating_add(self.config.persistence_threshold()),
+                )
             }
             PersistTarget::Head => canonical_head_number,
         };
