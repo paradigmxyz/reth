@@ -5,17 +5,25 @@
 # Usage: bench-txgen-build.sh <baseline|feature> <source-dir> <commit>
 #
 # This intentionally does not build or install reth-bench. Big-block benchmarks
-# still use the legacy reth-bench path because txgen does not yet replay the
-# reth-bb payload/env-switch/BAL format.
+# build reth-bb because txgen replays reth-bb's extended payload format.
 set -euxo pipefail
 
 MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"
 
-if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
-  echo "::error::txgen path does not support big-block benchmarks yet; use the reth-bench driver"
+if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
+  echo "::error::txgen path does not support BAL replay yet; use big-blocks with the reth-bench driver"
   exit 1
+fi
+
+BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
+if [ "$BIG_BLOCKS" = "true" ]; then
+  NODE_BIN="reth-bb"
+  NODE_PKG="-p reth-bb"
+else
+  NODE_BIN="reth"
+  NODE_PKG="--bin reth"
 fi
 
 EXTRA_FEATURES=""
@@ -37,17 +45,17 @@ build_node_binary() {
 
   # shellcheck disable=SC2086
   RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
-    cargo build --locked --profile profiling --bin reth $workspace_arg $features_arg
+    cargo build --locked --profile profiling $NODE_PKG $workspace_arg $features_arg
 }
 
 case "$MODE" in
   baseline|main)
-    echo "Building baseline reth (${COMMIT}) from source for txgen benchmark..."
+    echo "Building baseline ${NODE_BIN} (${COMMIT}) from source for txgen benchmark..."
     build_node_binary
     ;;
 
   feature|branch)
-    echo "Building feature reth (${COMMIT}) from source for txgen benchmark..."
+    echo "Building feature ${NODE_BIN} (${COMMIT}) from source for txgen benchmark..."
     rustup show active-toolchain || rustup default stable
     build_node_binary
     ;;
