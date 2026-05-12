@@ -326,7 +326,11 @@ jobs:
           resolve_ref() {
             local ref="$1"
             git fetch origin "$ref" --quiet 2>/dev/null || true
-            git rev-parse "$ref" 2>/dev/null || git rev-parse "origin/$ref"
+            if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
+              git rev-parse --verify "${ref}^{commit}"
+            else
+              git rev-parse --verify "origin/${ref}^{commit}"
+            fi
           }
 
           if [ -n "$INPUT_PR" ]; then
@@ -345,10 +349,10 @@ jobs:
           BASELINE_REF="$(resolve_ref "$BASELINE_NAME")"
 
           {
-            echo "feature-ref=$FEATURE_REF"
-            echo "feature-name=$FEATURE_NAME"
-            echo "baseline-ref=$BASELINE_REF"
-            echo "baseline-name=$BASELINE_NAME"
+            printf 'feature-ref=%s\n' "$FEATURE_REF"
+            printf 'feature-name=%s\n' "$FEATURE_NAME"
+            printf 'baseline-ref=%s\n' "$BASELINE_REF"
+            printf 'baseline-name=%s\n' "$BASELINE_NAME"
           } >> "$GITHUB_OUTPUT"
 
       - name: Prepare source dirs
