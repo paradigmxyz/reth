@@ -9,9 +9,10 @@ use reth_consensus_debug_client::{
 };
 use reth_engine_local::{LocalMiner, MiningMode};
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes, PayloadAttrTy,
+    BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes, PayloadAttrTy,
     PayloadAttributesBuilder, PayloadTypes,
 };
+use reth_primitives_traits::SealedBlock;
 use std::{
     future::{Future, IntoFuture},
     pin::Pin,
@@ -51,6 +52,7 @@ pub(crate) type PayloadDataTy<N> = <<N as NodeTypes>::Payload as PayloadTypes>::
 ///
 ///     fn rpc_to_execution_data(
 ///         rpc_block: Self::RpcBlock,
+///         extras: PayloadExtras,
 ///     ) -> PayloadDataTy<Self> {
 ///         // Convert from RPC format to the Engine API payload data expected by the node.
 ///     }
@@ -61,16 +63,16 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// endpoint.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
 
-    /// Converts an RPC block to execution payload data.
+    /// Converts an RPC block to a primitive block.
     ///
-    /// This method handles the conversion between the RPC block format and the internal Engine API
-    /// payload data used by the node's consensus engine.
+    /// This method handles the conversion between the RPC block format and the internal primitive
+    /// block format used by the node's consensus engine.
     ///
     /// # Example
     ///
     /// For Ethereum nodes, this typically converts from `alloy_rpc_types_eth::Block`
-    /// to the node's internal execution payload data representation.
-    fn rpc_to_execution_data(rpc_block: Self::RpcBlock) -> PayloadDataTy<Self>;
+    /// to the node's internal block representation.
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> BlockTy<Self>;
 
     /// Creates a payload attributes builder for local mining in dev mode.
     ///
@@ -238,12 +240,16 @@ where
             info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
             let block_provider =
-                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {
+                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response, extras| {
                     let json = serde_json::to_value(block_response)
                         .expect("Block serialization cannot fail");
                     let rpc_block =
                         serde_json::from_value(json).expect("Block deserialization cannot fail");
-                    N::Types::rpc_to_execution_data(rpc_block)
+                    let primitive_block = N::Types::rpc_to_primitive_block(rpc_block);
+                    <N::Types as NodeTypes>::Payload::block_to_payload(
+                        SealedBlock::new_unhashed(primitive_block),
+                        extras.bal,
+                    )
                 })
                 .await?;
 
@@ -274,7 +280,13 @@ where
                     )
                 })?,
                 chain.id(),
-                N::Types::rpc_to_execution_data,
+                |rpc_block| {
+                    let primitive_block = N::Types::rpc_to_primitive_block(rpc_block);
+                    <N::Types as NodeTypes>::Payload::block_to_payload(
+                        SealedBlock::new_unhashed(primitive_block),
+                        None,
+                    )
+                },
             );
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),

@@ -107,7 +107,7 @@ grep Cached /proc/meminfo
 # Start reth
 # CPU layout: core 0 = OS/IRQs/reth-bench/aux, cores 1+ = reth node
 RETH_BENCH="$(which reth-bench)"
-ONLINE=$(nproc --all)
+ONLINE=$(getconf _NPROCESSORS_ONLN)
 MAX_RETH=$(( ONLINE - 1 ))
 if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
   MAX_RETH=$BENCH_CORES
@@ -157,7 +157,7 @@ fi
 # OTLP traces and logs export
 if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
   if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
-    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench --tracing-otlp.service-version="${LABEL}")
   fi
   if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
     RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
