@@ -416,13 +416,14 @@ where
 
         // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
         // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER &&
-            validated_block.get().is_err()
-        {
-            return Err(validated_block
-                .try_into_inner()
-                .expect("sole handle")
-                .expect_err("Err result checked"))
+        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+            // Call `.get()` to await the pre-execution checks and exit early if they fail.
+            if validated_block.get().is_err() {
+                return Err(validated_block
+                    .try_into_inner()
+                    .expect("sole handle")
+                    .expect_err("Err result checked"))
+            }
         }
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
