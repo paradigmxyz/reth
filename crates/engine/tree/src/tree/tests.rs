@@ -1109,7 +1109,7 @@ fn test_get_save_blocks_plan_with_state_masking_blocks() {
 }
 
 #[test]
-fn test_get_save_blocks_plan_persists_full_region_before_deferred_tail() {
+fn test_get_save_blocks_plan_limits_partial_persistence_to_threshold() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1127,16 +1127,39 @@ fn test_get_save_blocks_plan_persists_full_region_before_deferred_tail() {
 
     let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(
-        &plan,
-        &[(0..3, Some(14..16), false), (3..14, Some(14..16), true), (14..16, None, true)],
-    );
-    assert_eq!(plan.blocks.len(), 16);
+    assert_plan_steps(&plan, &[(0..3, Some(3..5), false), (3..5, None, true)]);
+    assert_eq!(plan.blocks.len(), 5);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (13..=28).collect::<Vec<_>>()
+        (13..=17).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[28].recovered_block().num_hash()));
+    assert_eq!(plan.last_block(), Some(blocks[17].recovered_block().num_hash()));
+}
+
+#[test]
+fn test_get_save_blocks_plan_state_masking_counts_towards_threshold() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..20).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[0].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[3].recovered_block().num_hash();
+    test_harness.tree.config =
+        TreeConfig::default().with_persistence_threshold(13).with_num_state_masking_blocks(10);
+
+    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+
+    assert_plan_steps(&plan, &[(0..3, Some(3..13), false), (3..13, None, true)]);
+    assert_eq!(plan.blocks.len(), 13);
+    assert_eq!(
+        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        (1..=13).collect::<Vec<_>>()
+    );
+    assert_eq!(plan.last_block(), Some(blocks[13].recovered_block().num_hash()));
 }
 
 #[test]
