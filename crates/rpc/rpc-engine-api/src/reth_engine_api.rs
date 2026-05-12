@@ -40,10 +40,10 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
         let payload = match input {
             RethNewPayloadInput::ExecutionData(data) => data,
-            RethNewPayloadInput::BlockRlp(rlp) => {
-                let block = Decodable::decode(&mut rlp.as_ref())
+            RethNewPayloadInput::BlockRlp { block: block_rlp, bal } => {
+                let block = Decodable::decode(&mut block_rlp.as_ref())
                     .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-                Payload::block_to_payload(SealedBlock::new_unhashed(block), None)
+                Payload::block_to_payload(SealedBlock::new_unhashed(block), bal)
             }
         };
 

@@ -1006,15 +1006,6 @@ jobs:
           echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
           echo "Metrics proxy started (PID $PROXY_PID)"
 
-      - name: Update status (running benchmarks)
-        if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ secrets.DEREK_PAT }}
-          script: |
-            const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Running benchmarks...'});
-
       # Extract txgen payloads once so they are reused across all benchmark
       # runs instead of re-fetching from the remote RPC four times.
       - name: Extract txgen payloads
@@ -1033,7 +1024,9 @@ jobs:
         env:
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-1,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: feature (1/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1050,7 +1043,9 @@ jobs:
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-1,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: baseline (1/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1068,7 +1063,9 @@ jobs:
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-2,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: baseline (2/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1086,7 +1083,9 @@ jobs:
         env:
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-2,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: feature (2/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1107,7 +1106,7 @@ jobs:
           LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 

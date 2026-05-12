@@ -225,10 +225,11 @@ pub(crate) fn block_to_new_payload(
     let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
 
     if let Some(rlp) = rlp {
+        let bal = bal.map(|bal| alloy_rlp::encode(bal).into());
         return Ok((
             None,
             serde_json::to_value((
-                RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),
+                RethNewPayloadInput::<ExecutionData>::BlockRlp { block: rlp, bal },
                 wait_for_persistence,
                 no_wait_for_caches.then_some(false),
             ))?,
