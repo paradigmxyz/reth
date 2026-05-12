@@ -759,6 +759,18 @@ where
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
 
+        // When skip_state_root is enabled, trust the proposer's state root from the block header
+        // and skip all trie computation. Only prewarming remains active.
+        if self.config.skip_state_root() {
+            debug!(target: "engine::tree::payload_validator", "Skipping state root computation — trusting proposer state root");
+            maybe_state_root = Some((
+                block.header().state_root(),
+                Arc::new(TrieUpdates::default()),
+                root_time.elapsed(),
+            ));
+        }
+
+        if maybe_state_root.is_none() {
         match strategy {
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
@@ -885,6 +897,7 @@ where
                 maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
             }
         }
+        } // end if maybe_state_root.is_none()
 
         // Determine the state root.
         // If the state root was computed in parallel, we use it.
@@ -1848,7 +1861,7 @@ where
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
         if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
-        } else if self.config.state_root_fallback() {
+        } else if self.config.skip_state_root() || self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask

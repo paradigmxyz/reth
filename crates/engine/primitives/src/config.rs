@@ -194,6 +194,10 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
+    /// When enabled, state root computation is skipped during engine validation and the
+    /// proposer's state root from the block header is trusted. Only prewarming remains active.
+    /// This is intended for benchmarking execution performance in isolation from trie work.
+    skip_state_root: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -241,6 +245,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -318,6 +323,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -745,6 +751,17 @@ impl TreeConfig {
     /// Setter for whether to disable BAL state prefetching during prewarm.
     pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
         self.disable_bal_batch_io = disable_bal_batch_io;
+        self
+    }
+
+    /// Returns whether state root computation is skipped during engine validation.
+    pub const fn skip_state_root(&self) -> bool {
+        self.skip_state_root
+    }
+
+    /// Setter for skipping state root computation during engine validation.
+    pub const fn with_skip_state_root(mut self, skip_state_root: bool) -> Self {
+        self.skip_state_root = skip_state_root;
         self
     }
 
