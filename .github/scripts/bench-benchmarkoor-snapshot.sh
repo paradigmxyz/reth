@@ -59,7 +59,8 @@ source_exists() {
     return 0
   fi
   if [[ "$source" =~ ^https?:// ]]; then
-    curl -fsI --retry 2 --retry-delay 2 "$source" >/dev/null 2>&1
+    curl -fsI --retry 2 --retry-delay 2 "$source" >/dev/null 2>&1 ||
+      curl -fsSL --retry 2 --retry-delay 2 --range 0-0 "$source" -o /dev/null >/dev/null 2>&1
     return $?
   fi
   mc stat "$source" >/dev/null 2>&1
@@ -70,13 +71,27 @@ mc_alias_url() {
   mc alias export "$alias" 2>/dev/null | jq -r '.url // empty'
 }
 
+mc_object_http_url() {
+  local object="$1"
+  local alias rest alias_url
+
+  alias="${object%%/*}"
+  rest="${object#*/}"
+  alias_url="$(mc_alias_url "$alias" || true)"
+  if [ -z "$alias_url" ] || [ "$rest" = "$object" ]; then
+    return 1
+  fi
+
+  printf '%s/%s\n' "$(trim_slashes "$alias_url")" "$rest"
+}
+
 mc_manifest_base_url() {
   local manifest_object="$1"
   local alias rest alias_url
 
   alias="${manifest_object%%/*}"
   rest="${manifest_object#*/}"
-  alias_url="$(mc_alias_url "$alias")"
+  alias_url="$(mc_alias_url "$alias" || true)"
   if [ -z "$alias_url" ] || [ "$rest" = "$manifest_object" ]; then
     return 1
   fi
@@ -87,7 +102,7 @@ mc_manifest_base_url() {
 resolve_manifest_object() {
   local source="$1"
   local root="${BENCHMARKOOR_SNAPSHOT_MC_ROOT:-minio}"
-  local candidate found
+  local candidate candidate_url found
 
   if [ -d "$source" ] && [ -f "$(trim_slashes "$source")/manifest.json" ]; then
     printf '%s\n' "$(trim_slashes "$source")/manifest.json"
@@ -111,10 +126,22 @@ resolve_manifest_object() {
     printf '%s\n' "$source"
     return 0
   fi
+  if [[ "$(basename "$source")" == "manifest.json" ]]; then
+    candidate_url="$(mc_object_http_url "$source" || true)"
+    if [ -n "$candidate_url" ] && source_exists "$candidate_url"; then
+      printf '%s\n' "$candidate_url"
+      return 0
+    fi
+  fi
 
   candidate="$(trim_slashes "$source")/manifest.json"
   if source_exists "$candidate"; then
     printf '%s\n' "$candidate"
+    return 0
+  fi
+  candidate_url="$(mc_object_http_url "$candidate" || true)"
+  if [ -n "$candidate_url" ] && source_exists "$candidate_url"; then
+    printf '%s\n' "$candidate_url"
     return 0
   fi
 
@@ -137,7 +164,7 @@ resolve_manifest_object() {
 log_manifest_lookup_diagnostics() {
   local source="$1"
   local root="${BENCHMARKOOR_SNAPSHOT_MC_ROOT:-minio}"
-  local trimmed candidate alias alias_url parent
+  local trimmed candidate candidate_url alias alias_url parent
 
   trimmed="$(trim_slashes "$source")"
   if [[ "$(basename "$trimmed")" == "manifest.json" ]]; then
@@ -150,12 +177,21 @@ log_manifest_lookup_diagnostics() {
   echo "BENCHMARKOOR_SNAPSHOT=${source}"
   echo "BENCHMARKOOR_SNAPSHOT_MC_ROOT=${root}"
   echo "Candidate manifest: ${candidate}"
+  candidate_url="$(mc_object_http_url "$candidate" || true)"
+  if [ -n "$candidate_url" ]; then
+    echo "Candidate manifest HTTP URL: ${candidate_url}"
+  fi
 
   if [[ "$source" =~ ^https?:// ]]; then
     echo "HTTP HEAD for candidate:"
     curl -fsI --retry 2 --retry-delay 2 "$candidate" || true
     echo "::endgroup::"
     return 0
+  fi
+
+  if [ -n "$candidate_url" ]; then
+    echo "HTTP HEAD for candidate manifest URL:"
+    curl -fsI --retry 2 --retry-delay 2 "$candidate_url" || true
   fi
 
   alias="${candidate%%/*}"
