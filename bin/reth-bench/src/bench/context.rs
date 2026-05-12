@@ -11,6 +11,7 @@ use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
+use futures::{stream, StreamExt, TryStreamExt};
 use reqwest::Url;
 use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use tracing::info;
@@ -244,15 +245,20 @@ async fn fetch_recent_block_hashes(
     latest_regular_block: u64,
 ) -> eyre::Result<Vec<(u64, B256)>> {
     const BLOCKHASH_HISTORY: u64 = 256;
+    const MAX_CONCURRENT_BLOCK_HASH_REQUESTS: usize = 5;
 
     let start = latest_regular_block.saturating_sub(BLOCKHASH_HISTORY - 1);
-    let mut hashes = Vec::with_capacity((latest_regular_block - start + 1) as usize);
-    for block_number in start..=latest_regular_block {
-        let Some(block) = provider.get_block_by_number(block_number.into()).await? else {
-            continue;
-        };
-        hashes.push((block_number, block.header.hash));
-    }
+    let hashes = stream::iter(start..=latest_regular_block)
+        .map(|block_number| async move {
+            provider
+                .get_block_by_number(block_number.into())
+                .await
+                .map(|block| block.map(|block| (block_number, block.header.hash)))
+        })
+        .buffered(MAX_CONCURRENT_BLOCK_HASH_REQUESTS)
+        .try_filter_map(|block_hash| async move { Ok(block_hash) })
+        .try_collect()
+        .await?;
 
     Ok(hashes)
 }
