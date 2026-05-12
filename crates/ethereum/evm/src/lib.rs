@@ -23,7 +23,9 @@ use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use core::{any::Any, convert::Infallible, fmt::Debug};
+#[cfg(feature = "jit")]
+use core::any::Any;
+use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
@@ -157,14 +159,14 @@ where
     }
 
     fn set_jit(&self, enabled: bool) {
-        #[cfg(feature = "std")]
+        #[cfg(feature = "jit")]
         if let Some(factory) =
             (self.evm_factory() as &dyn Any).downcast_ref::<factory::RethEvmFactory>()
         {
             factory.set_jit(enabled);
         }
 
-        #[cfg(not(feature = "std"))]
+        #[cfg(not(feature = "jit"))]
         let _ = enabled;
     }
 

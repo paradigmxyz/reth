@@ -1,4 +1,4 @@
-//! revmc JIT compiler integration for EVM execution (requires `std`).
+//! revmc JIT compiler integration for EVM execution (requires the `jit` feature).
 //!
 //! Re-exports types from `revmc::alloy_evm` and provides [`RethEvmFactory`], a newtype that
 //! implements [`Debug`].
@@ -11,12 +11,12 @@ use revm::{
     primitives::hardfork::SpecId,
     Inspector,
 };
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 use revmc::alloy_evm::JitEvmFactory;
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 pub use revmc::{
     runtime::{
         CompilationEvent, CompilationKind, JitBackend, RuntimeConfig, RuntimeStatsSnapshot,
@@ -25,9 +25,9 @@ pub use revmc::{
     CompileTimings,
 };
 
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 type Inner = JitEvmFactory;
-#[cfg(not(feature = "std"))]
+#[cfg(not(feature = "jit"))]
 type Inner = alloy_evm::EthEvmFactory;
 
 /// Reth EVM factory.
@@ -36,9 +36,9 @@ type Inner = alloy_evm::EthEvmFactory;
 #[derive(Debug)]
 pub struct RethEvmFactory {
     inner: Inner,
-    #[cfg(feature = "std")]
+    #[cfg(feature = "jit")]
     disabled: JitBackend,
-    #[cfg(feature = "std")]
+    #[cfg(feature = "jit")]
     jit: AtomicBool,
 }
 
@@ -46,9 +46,9 @@ impl Clone for RethEvmFactory {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            #[cfg(feature = "std")]
+            #[cfg(feature = "jit")]
             disabled: self.disabled.clone(),
-            #[cfg(feature = "std")]
+            #[cfg(feature = "jit")]
             jit: AtomicBool::new(self.jit.load(Ordering::Relaxed)),
         }
     }
@@ -57,18 +57,18 @@ impl Clone for RethEvmFactory {
 #[allow(clippy::derivable_impls)]
 impl Default for RethEvmFactory {
     fn default() -> Self {
-        #[cfg(feature = "std")]
+        #[cfg(feature = "jit")]
         {
             Self::new(JitBackend::disabled())
         }
-        #[cfg(not(feature = "std"))]
+        #[cfg(not(feature = "jit"))]
         {
             Self { inner: Default::default() }
         }
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 impl RethEvmFactory {
     /// Creates a new factory that owns the backend.
     pub fn new(backend: JitBackend) -> Self {
@@ -107,7 +107,7 @@ impl EvmFactory for RethEvmFactory {
     type Precompiles = <Inner as EvmFactory>::Precompiles;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        #[cfg(feature = "std")]
+        #[cfg(feature = "jit")]
         {
             if self.jit.load(Ordering::Relaxed) {
                 self.inner.create_evm(db, input)
@@ -115,7 +115,7 @@ impl EvmFactory for RethEvmFactory {
                 JitEvmFactory::new(self.disabled.clone()).create_evm(db, input)
             }
         }
-        #[cfg(not(feature = "std"))]
+        #[cfg(not(feature = "jit"))]
         {
             self.inner.create_evm(db, input)
         }
@@ -127,7 +127,7 @@ impl EvmFactory for RethEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        #[cfg(feature = "std")]
+        #[cfg(feature = "jit")]
         {
             if self.jit.load(Ordering::Relaxed) {
                 self.inner.create_evm_with_inspector(db, input, inspector)
@@ -136,7 +136,7 @@ impl EvmFactory for RethEvmFactory {
                     .create_evm_with_inspector(db, input, inspector)
             }
         }
-        #[cfg(not(feature = "std"))]
+        #[cfg(not(feature = "jit"))]
         {
             self.inner.create_evm_with_inspector(db, input, inspector)
         }
@@ -144,7 +144,7 @@ impl EvmFactory for RethEvmFactory {
 }
 
 /// Prometheus metrics for revmc JIT runtime stats.
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 #[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "revmc.jit")]
 pub struct RevmcMetrics {
@@ -188,7 +188,7 @@ pub struct RevmcMetrics {
     pub jit_codegen_duration: metrics::Histogram,
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "jit")]
 impl RevmcMetrics {
     /// Records a [`RuntimeStatsSnapshot`] into the metrics.
     pub fn record(&self, stats: &RuntimeStatsSnapshot) {
