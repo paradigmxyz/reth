@@ -185,15 +185,14 @@ pub struct TreeConfig {
     /// with block building on latency-sensitive chains.
     suppress_persistence_during_build: bool,
     /// Whether to disable BAL (Block Access List, EIP-7928) based parallel execution.
-    /// When disabled, falls back to transaction-based prewarming even when a BAL is available.
+    /// When disabled, uses the sequential execution path even when a BAL is available.
     disable_bal_parallel_execution: bool,
     /// Whether to disable BAL-driven parallel state root computation.
-    /// When disabled, the BAL hashed post state is not sent to the multiproof task for
-    /// early parallel state root computation.
+    /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
-    /// Whether to disable BAL (Block Access List) batched IO during prewarming.
-    /// When disabled, falls back to individual per-slot storage reads instead of
-    /// batched cursor reads via `storage_range`.
+    /// Whether to disable BAL (Block Access List) storage prefetch IO during prewarming.
+    /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
+    /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
@@ -738,12 +737,12 @@ impl TreeConfig {
         self
     }
 
-    /// Returns whether BAL batched IO is disabled.
+    /// Returns whether BAL state prefetching during prewarm is disabled.
     pub const fn disable_bal_batch_io(&self) -> bool {
         self.disable_bal_batch_io
     }
 
-    /// Setter for whether to disable BAL batched IO.
+    /// Setter for whether to disable BAL state prefetching during prewarm.
     pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
         self.disable_bal_batch_io = disable_bal_batch_io;
         self

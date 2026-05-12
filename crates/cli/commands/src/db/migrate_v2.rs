@@ -5,6 +5,7 @@
 //! state), compacts MDBX, then runs the pipeline to rebuild them.
 
 use crate::common::CliNodeTypes;
+use alloy_primitives::Address;
 use clap::Parser;
 use reth_db::{
     mdbx::{self, ffi},
@@ -132,8 +133,12 @@ impl Command {
             .and_then(|cp| cp.block_number)
             .map_or(0, |b| b + 1);
 
-        let mut writer =
-            sf_provider.get_writer(first_block, StaticFileSegment::AccountChangeSets)?;
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+        if first_block > 0 {
+            writer.ensure_at_block(first_block - 1)?;
+        }
 
         let mut count = 0u64;
         let mut walker = cursor.walk(Some(first_block))?.peekable();
@@ -174,11 +179,15 @@ impl Command {
             .and_then(|cp| cp.block_number)
             .map_or(0, |b| b + 1);
 
-        let mut writer =
-            sf_provider.get_writer(first_block, StaticFileSegment::StorageChangeSets)?;
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
+        if first_block > 0 {
+            writer.ensure_at_block(first_block - 1)?;
+        }
 
         let mut count = 0u64;
-        let mut walker = cursor.walk(Some(Default::default()))?.peekable();
+        let mut walker = cursor.walk(Some((first_block, Address::ZERO).into()))?.peekable();
 
         for block in first_block..=tip {
             let mut entries = Vec::new();
@@ -238,6 +247,18 @@ impl Command {
             .map_or(0, |b| b + 1);
         let first_block = prune_start.max(existing.map_or(0, |b| b + 1));
 
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        if first_block > 0 {
+            let mut writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;
+            writer.ensure_at_block(first_block - 1)?;
+            writer.commit()?;
+        }
+
+        let before = sf_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map_or(0, |tx| tx + 1);
+
         let block_range = first_block..=tip;
 
         let segment = reth_static_file::segments::Receipts;
@@ -245,7 +266,11 @@ impl Command {
 
         sf_provider.commit()?;
 
-        info!(target: "reth::cli", "Receipts migrated");
+        let after = sf_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map_or(0, |tx| tx + 1);
+        let count = after - before;
+        info!(target: "reth::cli", count, "Receipts migrated");
         Ok(())
     }
 

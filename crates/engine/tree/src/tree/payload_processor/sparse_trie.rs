@@ -896,6 +896,7 @@ mod tests {
     use reth_provider::{
         providers::{OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory,
+        ChainSpecProvider,
     };
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
@@ -984,9 +985,13 @@ mod tests {
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayBuilder::new(ChangesetCache::new()),
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
         );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);

@@ -18,7 +18,8 @@
 #   --tracy-filter F Tracy tracing filter (default: debug)
 #   --no-tune       Skip system tuning (useful on dev machines / macOS)
 #
-# Requires: the reth repo at RETH_REPO (default: ~/reth)
+# Requires: the reth repo at RETH_REPO (default: ~/reth) and
+# BENCH_SNAPSHOT_MANIFEST_URL pointing at the benchmark snapshot manifest.
 #
 # Dependencies (install before first run):
 #   schelk, cpupower, taskset, stdbuf, python3, curl,
@@ -198,7 +199,7 @@ export BENCH_TRACY_FILTER="$TRACY_FILTER"
 export BENCH_WORK_DIR
 export SCHELK_MOUNT="${SCHELK_MOUNT:-/reth-bench}"
 export BENCH_RPC_URL="${BENCH_RPC_URL:-https://ethereum.reth.rs/rpc}"
-export BENCH_METRICS_ADDR="127.0.0.1:9100"
+export BENCH_METRICS_ADDR="127.0.0.1:9001"
 
 # ── Step 1: Resolve refs to full SHAs ────────────────────────────────
 echo "▸ Resolving git refs..."
@@ -240,14 +241,7 @@ echo "  Baseline src : $BASELINE_SRC"
 echo "  Feature src  : $FEATURE_SRC"
 echo
 
-# ── Step 3: Validate local snapshot ──────────────────────────────────
-echo "▸ Validating local snapshot..."
-cd "$RETH_REPO"
-"${SCRIPTS_DIR}/bench-reth-snapshot.sh"
-echo "  Snapshot is ready."
-echo
-
-# ── Step 4: Build binaries in parallel ───────────────────────────────
+# ── Step 3: Build binaries in parallel ───────────────────────────────
 echo "▸ Building binaries (parallel)..."
 cd "$RETH_REPO"
 
@@ -267,6 +261,12 @@ if [ $FAIL -ne 0 ]; then
   exit 1
 fi
 echo "  Binaries built successfully."
+echo
+
+# ── Step 4: Sync snapshot ────────────────────────────────────────────
+echo "▸ Syncing snapshot..."
+BENCH_RETH_BINARY="${FEATURE_SRC}/target/profiling/reth" "${SCRIPTS_DIR}/bench-reth-snapshot.sh"
+echo "  Snapshot is ready."
 echo
 
 # ── Step 5: System tuning (optional) ────────────────────────────────
@@ -312,7 +312,14 @@ if [ "$TUNE" = "true" ]; then
   done
 
   # Stop noisy background services
-  sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+  sudo systemctl stop \
+    irqbalance cron atd unattended-upgrades snapd \
+    prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+    prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+    prometheus-node-exporter-ipmitool-sensor.timer prometheus-node-exporter-ipmitool-sensor.service \
+    sysstat-collect.timer sysstat-collect.service \
+    sysstat-summary.timer sysstat-summary.service \
+    2>/dev/null || true
 
   TUNING_APPLIED=true
 
@@ -399,7 +406,7 @@ BASELINE_BIN="${BASELINE_SRC}/target/profiling/reth"
 FEATURE_BIN="${FEATURE_SRC}/target/profiling/reth"
 
 # Start metrics proxy (reth → label injection → Prometheus)
-LABELS_FILE="/tmp/bench-metrics-labels.json"
+LABELS_FILE="$(mktemp "${TMPDIR:-/tmp}/bench-metrics-labels.XXXXXX")"
 echo '{}' > "$LABELS_FILE"
 METRICS_SUBNET="${METRICS_SUBNET:-10.10.0.0/24}"
 METRICS_PORT="${METRICS_PORT:-9090}"
@@ -452,7 +459,7 @@ run_bench "baseline-2" "$BASELINE_BIN" "$BENCH_WORK_DIR/baseline-2"
 
 # ── Compute Grafana URL ──────────────────────────────────────────────
 GRAFANA_BASE_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr"
-GRAFANA_DATASOURCE="ef57fux92e9z4e"
+GRAFANA_DATASOURCE="efk1hcn87dnnkd"
 LAST_RUN_DURATION=$(( $(date +%s) - LAST_RUN_START ))
 FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
 TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
