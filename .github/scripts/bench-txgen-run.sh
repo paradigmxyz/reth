@@ -94,7 +94,7 @@ echo "=== Cache state after drop ==="
 free -h
 grep Cached /proc/meminfo
 
-ONLINE=$(nproc)
+ONLINE=$(getconf _NPROCESSORS_ONLN)
 MAX_RETH=$(( ONLINE - 1 ))
 if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
   MAX_RETH=$BENCH_CORES
