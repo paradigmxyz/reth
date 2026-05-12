@@ -233,7 +233,6 @@ async fn derive_big_blocks_initial_state(
 
     let initial_state = BigBlocksInitialState {
         prior_block_hashes: fetch_recent_block_hashes(source_provider, last_regular_block).await?,
-        parent_hash: local_head_hash,
         next_synthetic_block_number: local_head_number + 1,
     };
 

@@ -10,7 +10,6 @@ use crate::{
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
-        BigBlockPayload,
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
@@ -33,7 +32,7 @@ use eyre::{bail, ensure, Context, OptionExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
-use reth_node_api::{EngineApiMessageVersion, ExecutionPayload};
+use reth_node_api::{BigBlockData, EngineApiMessageVersion, ExecutionPayload};
 use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use reth_rpc_api::{RethNewPayloadInput, TestingBuildBlockRequestV1};
 use std::{
@@ -689,7 +688,7 @@ enum Payload {
     /// A regular block payload.
     Block(AnyRpcBlock, Option<Bytes>, Option<BlockAccessList>, ForkchoiceState),
     /// A big block payload.
-    BigBlock(BigBlockPayload),
+    BigBlock(BigBlockData<ExecutionData>),
 }
 
 impl Payload {
@@ -709,15 +708,13 @@ impl Payload {
                 bal,
             ),
             Self::BigBlock(big_block) => {
-                let wait_for_persistence =
-                    wait_for_persistence.rpc_value(big_block.execution_data.block_number());
+                let wait_for_persistence = wait_for_persistence.rpc_value(big_block.block_number());
                 Ok((
                     None,
                     serde_json::to_value((
-                        RethNewPayloadInput::ExecutionData(big_block.execution_data),
+                        RethNewPayloadInput::ExecutionData(big_block),
                         wait_for_persistence,
                         no_wait_for_caches.then_some(false),
-                        Some(big_block.big_block_data),
                     ))?,
                 ))
             }
@@ -727,35 +724,35 @@ impl Payload {
     fn gas_used(&self) -> u64 {
         match self {
             Self::Block(block, _, _, _) => block.header.gas_used,
-            Self::BigBlock(big_block) => big_block.execution_data.gas_used(),
+            Self::BigBlock(big_block) => big_block.gas_used(),
         }
     }
 
     fn gas_limit(&self) -> u64 {
         match self {
             Self::Block(block, _, _, _) => block.header.gas_limit,
-            Self::BigBlock(big_block) => big_block.execution_data.gas_limit(),
+            Self::BigBlock(big_block) => big_block.gas_limit(),
         }
     }
 
     fn block_number(&self) -> u64 {
         match self {
             Self::Block(block, _, _, _) => block.header.number,
-            Self::BigBlock(big_block) => big_block.execution_data.block_number(),
+            Self::BigBlock(big_block) => big_block.block_number(),
         }
     }
 
     fn parent_hash(&self) -> B256 {
         match self {
             Self::Block(block, _, _, _) => block.header.parent_hash,
-            Self::BigBlock(big_block) => big_block.execution_data.parent_hash(),
+            Self::BigBlock(big_block) => big_block.parent_hash(),
         }
     }
 
     fn transaction_count(&self) -> usize {
         match self {
             Self::Block(block, _, _, _) => block.transactions.len(),
-            Self::BigBlock(big_block) => big_block.execution_data.transaction_count(),
+            Self::BigBlock(big_block) => big_block.transaction_count(),
         }
     }
 
@@ -766,13 +763,13 @@ impl Payload {
         }
     }
 
-    const fn forkchoice_state(&self) -> ForkchoiceState {
+    fn forkchoice_state(&self) -> ForkchoiceState {
         match self {
             Self::Block(_, _, _, forkchoice) => *forkchoice,
             Self::BigBlock(big_block) => ForkchoiceState {
-                head_block_hash: big_block.execution_data.block_hash(),
-                safe_block_hash: big_block.execution_data.block_hash(),
-                finalized_block_hash: big_block.execution_data.block_hash(),
+                head_block_hash: big_block.block_hash(),
+                safe_block_hash: big_block.block_hash(),
+                finalized_block_hash: big_block.block_hash(),
             },
         }
     }
