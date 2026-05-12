@@ -33,6 +33,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives_traits::SealedBlock;
 use reth_provider::EthStorage;
+use revm_primitives::Bytes;
 use tracing::info;
 
 #[derive(Debug, Clone, Default)]
@@ -47,6 +48,7 @@ impl PayloadTypes for BbPayloadTypes {
         _block: SealedBlock<
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
+        _bal: Option<Bytes>,
     ) -> Self::ExecutionData {
         unreachable!()
     }

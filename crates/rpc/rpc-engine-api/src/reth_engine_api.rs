@@ -43,7 +43,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
             RethNewPayloadInput::BlockRlp(rlp) => {
                 let block = Decodable::decode(&mut rlp.as_ref())
                     .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-                Payload::block_to_payload(SealedBlock::new_unhashed(block))
+                Payload::block_to_payload(SealedBlock::new_unhashed(block), None)
             }
         };
 
