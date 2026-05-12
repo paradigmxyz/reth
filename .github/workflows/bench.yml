@@ -886,6 +886,32 @@ jobs:
           FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
           prepare_source_dir ../reth-feature "$FEATURE_REF"
 
+      - name: Reset runner CPU affinity
+        run: |
+          FULL_CPUS=$(cat /sys/fs/cgroup/cpuset.cpus.effective 2>/dev/null || true)
+          if [ -z "$FULL_CPUS" ]; then
+            FULL_CPUS="0-$(( $(nproc --all) - 1 ))"
+          fi
+
+          sudo systemctl set-property --runtime system.slice AllowedCPUs= 2>/dev/null || true
+          sudo systemctl set-property --runtime user.slice AllowedCPUs= 2>/dev/null || true
+          sudo systemctl set-property --runtime machine.slice AllowedCPUs= 2>/dev/null || true
+
+          for slice in system.slice user.slice machine.slice; do
+            if [ -d "/sys/fs/cgroup/${slice}" ]; then
+              cpuset="/sys/fs/cgroup/${slice}/cpuset.cpus"
+              current_cpuset=$(cat "$cpuset" 2>/dev/null || true)
+              if [ -n "$current_cpuset" ] && [ "$current_cpuset" != "$FULL_CPUS" ]; then
+                echo "$FULL_CPUS" | sudo tee "$cpuset" >/dev/null 2>&1 || true
+              fi
+              find "/sys/fs/cgroup/${slice}" -name cgroup.procs -print0 2>/dev/null | while IFS= read -r -d '' procs; do
+                while IFS= read -r pid; do
+                  [ -n "$pid" ] && sudo taskset -pc "$FULL_CPUS" "$pid" >/dev/null 2>&1 || true
+                done < "$procs"
+              done
+            fi
+          done
+
       - name: Build binaries
         id: build
         env:
