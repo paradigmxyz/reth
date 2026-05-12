@@ -258,7 +258,7 @@ jobs:
               git -C "$replay_path" checkout --force origin/main
             fi
           else
-            replay_path="$BENCH_WORK_DIR/benchmarkoor-replay"
+            replay_path="${RUNNER_TEMP:-/tmp}/benchmarkoor-replay"
             rm -rf "$replay_path"
 
             if [ -n "${BENCHMARKOOR_REPLAY_DEPLOY_KEY:-}" ]; then
