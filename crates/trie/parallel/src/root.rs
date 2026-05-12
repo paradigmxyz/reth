@@ -16,7 +16,7 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::BTreeMap, sync::mpsc};
+use std::{collections::HashMap, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 
@@ -91,7 +91,7 @@ where
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
-        let mut storage_roots = BTreeMap::new();
+        let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -145,16 +145,6 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    // Drop receivers for accounts the walker has already passed: their results
-                    // are no longer needed and holding the receivers would let the corresponding
-                    // workers' completion sit in memory until end-of-walk.
-                    while let Some((storage_hashed_address, _)) = storage_roots.first_key_value() {
-                        if *storage_hashed_address >= hashed_address {
-                            break;
-                        }
-                        storage_roots.pop_first();
-                    }
-
                     let storage_root_result = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
