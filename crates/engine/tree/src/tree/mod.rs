@@ -2584,9 +2584,18 @@ where
                 Ok(None) => {
                     // ensure the finalized block is known (not the zero hash)
                     if !state.finalized_block_hash.is_zero() {
-                        // we don't have the block yet and the distance exceeds the allowed
-                        // threshold
-                        return Some(state.finalized_block_hash)
+                        // On OP Stack the finalized hash frequently lags behind the actual
+                        // chain tip because the CL finalizes in large batches.  Using an
+                        // outdated finalized hash as the backfill target would cause the
+                        // pipeline to sync to a stale block.  Reorgs are extremely rare on
+                        // OP Stack and are a non-issue in practice, so we skip targeting
+                        // the finalized hash and fall through to the optimistic
+                        // (head-based) target below.
+                        if !self.engine_kind.is_opstack() {
+                            // we don't have the block yet and the distance exceeds the
+                            // allowed threshold
+                            return Some(state.finalized_block_hash)
+                        }
                     }
 
                     // OPTIMISTIC SYNCING
