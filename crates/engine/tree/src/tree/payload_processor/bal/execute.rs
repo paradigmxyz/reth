@@ -26,7 +26,7 @@ use alloy_evm::{
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
-use reth_primitives_traits::ReceiptTy;
+use reth_primitives_traits::{Receipt, ReceiptTy};
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
@@ -37,7 +37,7 @@ use revm::{
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
-use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
+use crate::tree::payload_processor::receipt_root_task::IndexedEncodedReceipt;
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
@@ -50,7 +50,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
-    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    receipt_tx: Sender<IndexedEncodedReceipt>,
 ) -> Result<(BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>), BalExecutionError>
 where
     Evm: ConfigureEvm + 'static,
@@ -58,7 +58,7 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'a,
-    ReceiptTy<Evm::Primitives>: Clone,
+    ReceiptTy<Evm::Primitives>: Receipt,
 {
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
@@ -89,7 +89,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
-    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    receipt_tx: Sender<IndexedEncodedReceipt>,
     worker_count: usize,
 ) -> Result<(BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>), BalExecutionError>
 where
@@ -98,7 +98,7 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
-    ReceiptTy<Evm::Primitives>: Clone,
+    ReceiptTy<Evm::Primitives>: Receipt,
 {
     let bal = input_bal.as_bal();
     let input_bal_revm: Arc<RevmBal> = Arc::new(
@@ -159,7 +159,7 @@ where
                 last_sent_len = current_len;
                 if let Some(receipt) = canonical_executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    let _ = receipt_tx.send(IndexedEncodedReceipt::from_receipt(tx_index, receipt));
                 }
             }
         }

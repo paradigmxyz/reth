@@ -56,7 +56,9 @@ use alloy_primitives::{map::B256Set, B256};
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
-use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use crate::tree::payload_processor::receipt_root_task::{
+    IndexedEncodedReceipt, ReceiptRootTaskHandle,
+};
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
 };
@@ -107,8 +109,7 @@ pub use crate::tree::types::ValidationOutcome;
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
-type ReceiptRootSender<N> =
-    crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
+type ReceiptRootSender = crossbeam_channel::Sender<IndexedEncodedReceipt>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
 
 /// Context providing access to tree state during validation.
@@ -1150,7 +1151,7 @@ where
     fn spawn_receipt_root_task(
         &self,
         receipts_len: usize,
-    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+    ) -> (ReceiptRootSender, ReceiptRootReceiver) {
         // Unbounded channel is used since tx count bounds capacity anyway.
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -1176,7 +1177,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: &crossbeam_channel::Sender<IndexedEncodedReceipt>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
@@ -1241,7 +1242,7 @@ where
                 // Send the latest receipt to the background task for incremental root computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    let _ = receipt_tx.send(IndexedEncodedReceipt::from_receipt(tx_index, receipt));
                 }
             }
             // Bump BAL index after each transaction (EIP-7928)

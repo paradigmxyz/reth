@@ -14,20 +14,32 @@ use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 use tracing::debug_span;
 
-/// Receipt with index, ready to be sent to the background task for encoding and trie building.
+/// Encoded receipt with index, ready to be sent to the background task for trie building.
 #[derive(Debug, Clone)]
-pub struct IndexedReceipt<R> {
+pub struct IndexedEncodedReceipt {
     /// The transaction index within the block.
     pub index: usize,
-    /// The receipt.
-    pub receipt: R,
+    /// EIP-2718 encoded receipt bytes.
+    pub encoded: Vec<u8>,
+    /// Receipt logs bloom.
+    pub bloom: Bloom,
 }
 
-impl<R> IndexedReceipt<R> {
-    /// Creates a new indexed receipt.
+impl IndexedEncodedReceipt {
+    /// Creates a new indexed encoded receipt.
     #[inline]
-    pub const fn new(index: usize, receipt: R) -> Self {
-        Self { index, receipt }
+    pub const fn new(index: usize, encoded: Vec<u8>, bloom: Bloom) -> Self {
+        Self { index, encoded, bloom }
+    }
+
+    /// Encodes a receipt at the callsite so the receipt-root worker does not need to receive an
+    /// owned cloned receipt.
+    #[inline]
+    pub fn from_receipt<R: Receipt>(index: usize, receipt: &R) -> Self {
+        let receipt_with_bloom = receipt.with_bloom_ref();
+        let mut encoded = Vec::new();
+        receipt_with_bloom.encode_2718(&mut encoded);
+        Self { index, encoded, bloom: *receipt_with_bloom.bloom_ref() }
     }
 }
 
@@ -36,17 +48,17 @@ impl<R> IndexedReceipt<R> {
 /// This struct holds the channels needed to receive receipts and send the result.
 /// Use [`Self::run`] to execute the computation (typically in a spawned blocking task).
 #[derive(Debug)]
-pub struct ReceiptRootTaskHandle<R> {
+pub struct ReceiptRootTaskHandle {
     /// Receiver for indexed receipts.
-    receipt_rx: Receiver<IndexedReceipt<R>>,
+    receipt_rx: Receiver<IndexedEncodedReceipt>,
     /// Sender for the computed result.
     result_tx: oneshot::Sender<(B256, Bloom)>,
 }
 
-impl<R: Receipt> ReceiptRootTaskHandle<R> {
+impl ReceiptRootTaskHandle {
     /// Creates a new handle from the receipt receiver and result sender channels.
     pub const fn new(
-        receipt_rx: Receiver<IndexedReceipt<R>>,
+        receipt_rx: Receiver<IndexedEncodedReceipt>,
         result_tx: oneshot::Sender<(B256, Bloom)>,
     ) -> Self {
         Self { receipt_rx, result_tx }
@@ -75,17 +87,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 
         let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
         let mut aggregated_bloom = Bloom::ZERO;
-        let mut encode_buf = Vec::new();
         let mut received_count = 0usize;
 
         for indexed_receipt in self.receipt_rx {
-            let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
-
-            encode_buf.clear();
-            receipt_with_bloom.encode_2718(&mut encode_buf);
-
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            match builder.push(indexed_receipt.index, &encode_buf) {
+            aggregated_bloom |= indexed_receipt.bloom;
+            match builder.push(indexed_receipt.index, &indexed_receipt.encoded) {
                 Ok(()) => {
                     received_count += 1;
                 }
@@ -129,7 +135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_receipt_root_task_empty() {
-        let (_tx, rx) = bounded::<IndexedReceipt<Receipt>>(1);
+        let (_tx, rx) = bounded::<IndexedEncodedReceipt>(1);
         let (result_tx, result_rx) = oneshot::channel();
         drop(_tx);
 
@@ -154,8 +160,8 @@ mod tests {
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
         let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
 
-        for (i, receipt) in receipts.clone().into_iter().enumerate() {
-            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        for (i, receipt) in receipts.iter().enumerate() {
+            tx.send(IndexedEncodedReceipt::from_receipt(i, receipt)).unwrap();
         }
         drop(tx);
 
@@ -180,8 +186,8 @@ mod tests {
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
         let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
 
-        for (i, receipt) in receipts.into_iter().enumerate() {
-            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        for (i, receipt) in receipts.iter().enumerate() {
+            tx.send(IndexedEncodedReceipt::from_receipt(i, receipt)).unwrap();
         }
         drop(tx);
 
@@ -240,8 +246,8 @@ mod tests {
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
         let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
 
-        for (i, receipt) in receipts.into_iter().enumerate() {
-            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        for (i, receipt) in receipts.iter().enumerate() {
+            tx.send(IndexedEncodedReceipt::from_receipt(i, receipt)).unwrap();
         }
         drop(tx);
 
@@ -268,8 +274,8 @@ mod tests {
         let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
 
         // Send in reverse order to test out-of-order handling
-        for (i, receipt) in receipts.into_iter().enumerate().rev() {
-            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        for (i, receipt) in receipts.iter().enumerate().rev() {
+            tx.send(IndexedEncodedReceipt::from_receipt(i, receipt)).unwrap();
         }
         drop(tx);
 
