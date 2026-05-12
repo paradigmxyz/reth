@@ -27,6 +27,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 
 auto_impl.workspace = true
 derive_more.workspace = true

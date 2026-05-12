@@ -8,7 +8,7 @@ use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use revm::database::State;
-use revm_state::bal::Bal as RevmBal;
+use revm_state::bal::{Bal as RevmBal, BlockAccessIndex};
 use std::sync::Arc;
 
 pub(super) struct BalWorkerOutput<R> {
@@ -64,7 +64,10 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let signer = *tx.signer();
                 let tx_gas_limit = tx.tx().gas_limit();
 
-                executor.evm_mut().db_mut().set_bal_index(index as u64 + 1);
+                executor
+                    .evm_mut()
+                    .db_mut()
+                    .set_bal_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(BalExecutionError::Evm)?;

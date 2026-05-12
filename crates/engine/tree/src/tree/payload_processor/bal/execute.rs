@@ -34,8 +34,23 @@ use revm::{
     database::{states::bundle_state::BundleRetention, State},
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
-use revm_state::bal::Bal as RevmBal;
+use revm_state::bal::{alloy::AlloyBal as RevmAlloyBal, Bal as RevmBal};
 use std::sync::Arc;
+
+/// Re-encode reth's 0.3 [`AlloyBal`] as revm's 0.4 [`RevmAlloyBal`] via RLP.
+/// The wire format is identical across versions.
+fn alloy_bal_v3_to_v4(bal: &AlloyBal) -> Result<RevmAlloyBal, alloy_rlp::Error> {
+    let mut buf = Vec::new();
+    alloy_rlp::Encodable::encode(bal, &mut buf);
+    <RevmAlloyBal as alloy_rlp::Decodable>::decode(&mut buf.as_slice())
+}
+
+/// Re-encode revm's 0.4 [`RevmAlloyBal`] as reth's 0.3 [`AlloyBal`] via RLP.
+fn alloy_bal_v4_to_v3(bal: &RevmAlloyBal) -> Result<AlloyBal, alloy_rlp::Error> {
+    let mut buf = Vec::new();
+    alloy_rlp::Encodable::encode(bal, &mut buf);
+    <AlloyBal as alloy_rlp::Decodable>::decode(&mut buf.as_slice())
+}
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
@@ -101,8 +116,10 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
+    let bal_v4 = alloy_bal_v3_to_v4(bal)
+        .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?;
     let input_bal_revm: Arc<RevmBal> = Arc::new(
-        RevmBal::try_from(Vec::<_>::from(bal.clone()))
+        RevmBal::try_from(bal_v4)
             .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
     );
 
@@ -213,9 +230,11 @@ pub(crate) fn validate_bal<DB>(
 where
     DB: Database,
 {
-    let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    let composed_v4 = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    let composed_alloy = alloy_bal_v4_to_v3(&composed_v4)
+        .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?;
     let input_bal_entries = input_bal.as_bal();
-    if composed_alloy == input_bal_entries.as_slice() {
+    if composed_alloy.as_slice() == input_bal_entries.as_slice() {
         return Ok(());
     }
     let rebuilt = compute_block_access_list_hash(&composed_alloy);

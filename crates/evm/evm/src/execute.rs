@@ -26,8 +26,17 @@ pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
-    state::bal::Bal,
+    state::bal::{alloy::AlloyBal, Bal},
 };
+
+/// Convert revm's [`AlloyBal`] (alloy_eip7928 0.4) into reth's [`BlockAccessList`]
+/// (alloy_eip7928 0.3) by round-tripping through RLP. The wire format is identical
+/// across versions; only the Rust types differ.
+fn alloy_bal_to_block_access_list(bal: AlloyBal) -> Option<BlockAccessList> {
+    let mut buf = Vec::new();
+    alloy_rlp::Encodable::encode(&bal, &mut buf);
+    <BlockAccessList as alloy_rlp::Decodable>::decode(&mut buf.as_slice()).ok()
+}
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -504,7 +513,7 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        let block_access_list = db.take_built_alloy_bal();
+        let block_access_list = db.take_built_alloy_bal().and_then(alloy_bal_to_block_access_list);
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
@@ -648,7 +657,7 @@ where
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
-        self.db.take_built_alloy_bal()
+        self.db.take_built_alloy_bal().and_then(alloy_bal_to_block_access_list)
     }
 }
 

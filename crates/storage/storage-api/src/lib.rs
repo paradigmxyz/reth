@@ -11,6 +11,10 @@
 
 extern crate alloc;
 
+// Pulled in to activate the `rlp` feature on alloy-eip7928 0.4, the version used by
+// revm-state. The crate is not referenced directly from this file.
+use alloy_eip7928 as _;
+
 // Re-export used error types.
 pub use reth_storage_errors as errors;
 mod bal;
