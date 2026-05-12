@@ -95,7 +95,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
-  BENCH_RUNNERS: 2
+  BENCH_RUNNERS: 4
 
 name: bench
 
