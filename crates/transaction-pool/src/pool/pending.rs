@@ -405,7 +405,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // keep track of transactions to remove and how many have been removed so far
         let original_length = self.len();
-        let mut removed = Vec::new();
+        let mut removed = Vec::with_capacity(limit.tx_excess(original_length).unwrap_or(1));
         let mut total_removed = 0;
 
         // track total `size` of transactions to remove
@@ -423,38 +423,77 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // we can reuse the temp array
             removed.clear();
 
-            // we prefer removing transactions with lower ordering
-            let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
-            worst_transactions.sort_unstable();
+            let should_return = {
+                // we prefer removing transactions with lower ordering
+                let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+                let mut processed = 0;
+                let mut should_return = false;
 
-            // loop through the highest nonces set, removing transactions until we reach the limit
-            for tx in worst_transactions {
-                // return early if the pool is under limits
-                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
-                    non_local_senders == 0
-                {
-                    // need to remove remaining transactions before exiting
-                    for id in &removed {
-                        if let Some(tx) = self.remove_transaction(id) {
-                            end_removed.push(tx);
+                // loop through the highest nonces set, removing transactions until we reach the
+                // limit
+                while processed < worst_transactions.len() {
+                    // return early if the pool is under limits
+                    if !limit
+                        .is_exceeded(original_length - total_removed, original_size - total_size) ||
+                        non_local_senders == 0
+                    {
+                        should_return = true;
+                        break
+                    }
+
+                    let remaining = worst_transactions.len() - processed;
+                    let tx_excess =
+                        limit.tx_excess(original_length - total_removed).unwrap_or_default();
+                    // Only the next `tx_excess` worst candidates can affect count-based
+                    // truncation. If only the size limit is exceeded, fall back to sorting the
+                    // remaining candidates because the number of removals depends on tx sizes.
+                    let chunk_len =
+                        if tx_excess == 0 { remaining } else { tx_excess.min(remaining) };
+                    let end = processed + chunk_len;
+
+                    if chunk_len == remaining {
+                        worst_transactions[processed..].sort_unstable();
+                    } else {
+                        worst_transactions[processed..].select_nth_unstable(chunk_len - 1);
+                        worst_transactions[processed..end].sort_unstable();
+                    }
+
+                    for tx in &worst_transactions[processed..end] {
+                        // return early if the pool is under limits
+                        if !limit.is_exceeded(
+                            original_length - total_removed,
+                            original_size - total_size,
+                        ) || non_local_senders == 0
+                        {
+                            should_return = true;
+                            break
                         }
+
+                        if !remove_locals && tx.transaction.is_local() {
+                            let sender_id = tx.transaction.sender_id();
+                            if local_senders.insert(sender_id) {
+                                non_local_senders -= 1;
+                            }
+                            continue
+                        }
+
+                        total_size += tx.transaction.size();
+                        total_removed += 1;
+                        removed.push(*tx.transaction.id());
                     }
 
-                    return
-                }
-
-                if !remove_locals && tx.transaction.is_local() {
-                    let sender_id = tx.transaction.sender_id();
-                    if local_senders.insert(sender_id) {
-                        non_local_senders -= 1;
+                    if should_return {
+                        break
                     }
-                    continue
+
+                    processed = end;
                 }
 
-                total_size += tx.transaction.size();
-                total_removed += 1;
-                removed.push(*tx.transaction.id());
-            }
+                should_return ||
+                    !limit
+                        .is_exceeded(original_length - total_removed, original_size - total_size) ||
+                    non_local_senders == 0
+            };
 
             // remove the transactions from this iteration
             for id in &removed {
@@ -465,7 +504,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
-            if !self.exceeds(limit) || non_local_senders == 0 {
+            if should_return || !self.exceeds(limit) {
                 return
             }
         }
@@ -881,6 +920,37 @@ mod tests {
         let pending =
             pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
+    }
+
+    #[test]
+    fn truncate_reorders_current_highest_each_round() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        let a = address!("0x000000000000000000000000000000000000000a");
+        let b = address!("0x000000000000000000000000000000000000000b");
+
+        let a0 = MockTransaction::eip1559().with_sender(a).with_nonce(0).with_gas_price(100);
+        let a1 = a0.next().with_gas_price(1);
+        let b0 = MockTransaction::eip1559().with_sender(b).with_nonce(0).with_gas_price(0);
+        let b1 = b0.next().with_gas_price(2);
+
+        for tx in [a0.clone(), a1.clone(), b0.clone(), b1.clone()] {
+            pool.add_transaction(f.validated_arc(tx), 0);
+        }
+
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+
+        assert_eq!(removed.len(), 3);
+        assert_eq!(pool.len(), 1);
+        assert_eq!(
+            pool.all().map(|tx| (tx.sender(), tx.nonce())).collect::<Vec<_>>(),
+            vec![(a, 0)]
+        );
+
+        let removed =
+            removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        assert_eq!(removed, HashSet::from([(a, 1), (b, 1), (b, 0)]));
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12340>
