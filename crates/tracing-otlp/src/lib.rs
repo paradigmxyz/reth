@@ -38,7 +38,8 @@ where
 {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = build_resource(otlp_config.service_name.clone());
+    let resource =
+        build_resource(otlp_config.service_name.clone(), otlp_config.service_version.as_deref());
 
     let span_builder = SpanExporter::builder();
 
@@ -85,7 +86,8 @@ pub fn log_layer(
     use opentelemetry_otlp::LogExporter;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
-    let resource = build_resource(otlp_config.service_name.clone());
+    let resource =
+        build_resource(otlp_config.service_name.clone(), otlp_config.service_version.as_deref());
 
     let log_builder = LogExporter::builder();
 
@@ -111,6 +113,8 @@ pub fn log_layer(
 pub struct OtlpConfig {
     /// Service name for trace identification
     service_name: String,
+    /// Optional service version override. Falls back to `CARGO_PKG_VERSION` if `None`.
+    service_version: Option<String>,
     /// Otlp endpoint URL
     endpoint: Url,
     /// Transport protocol, HTTP or gRPC
@@ -135,7 +139,19 @@ impl OtlpConfig {
             );
         }
 
-        Ok(Self { service_name: service_name.into(), endpoint, protocol, sample_ratio })
+        Ok(Self {
+            service_name: service_name.into(),
+            service_version: None,
+            endpoint,
+            protocol,
+            sample_ratio,
+        })
+    }
+
+    /// Sets the service version for OTLP resource identification.
+    pub fn with_service_version(mut self, version: impl Into<String>) -> Self {
+        self.service_version = Some(version.into());
+        self
     }
 
     /// Returns the service name.
@@ -164,6 +180,8 @@ impl OtlpConfig {
 pub struct OtlpLogsConfig {
     /// Service name for log identification
     service_name: String,
+    /// Optional service version override. Falls back to `CARGO_PKG_VERSION` if `None`.
+    service_version: Option<String>,
     /// Otlp endpoint URL
     endpoint: Url,
     /// Transport protocol, HTTP or gRPC
@@ -177,7 +195,13 @@ impl OtlpLogsConfig {
         endpoint: Url,
         protocol: OtlpProtocol,
     ) -> eyre::Result<Self> {
-        Ok(Self { service_name: service_name.into(), endpoint, protocol })
+        Ok(Self { service_name: service_name.into(), service_version: None, endpoint, protocol })
+    }
+
+    /// Sets the service version for OTLP resource identification.
+    pub fn with_service_version(mut self, version: impl Into<String>) -> Self {
+        self.service_version = Some(version.into());
+        self
     }
 
     /// Returns the service name.
@@ -197,10 +221,14 @@ impl OtlpLogsConfig {
 }
 
 // Builds OTLP resource with service information.
-fn build_resource(service_name: impl Into<Value>) -> Resource {
+fn build_resource(
+    service_name: impl Into<Value>,
+    service_version: Option<&str>,
+) -> Resource {
+    let version = service_version.unwrap_or(env!("CARGO_PKG_VERSION"));
     Resource::builder()
         .with_service_name(service_name)
-        .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))], SCHEMA_URL)
+        .with_schema_url([KeyValue::new(SERVICE_VERSION, version.to_string())], SCHEMA_URL)
         .build()
 }
 
