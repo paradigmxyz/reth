@@ -28,6 +28,11 @@ on:
         required: false
         default: "main"
         type: string
+      download_ref:
+        description: "Reth git ref used only for snapshot download"
+        required: false
+        default: "pull/24027/head"
+        type: string
       suite:
         description: "benchmarkoor-replay suite"
         required: false
@@ -313,12 +318,18 @@ jobs:
           INPUT_PR: ${{ inputs.pr || '' }}
           INPUT_FEATURE: ${{ inputs.feature || '' }}
           INPUT_BASELINE: ${{ inputs.baseline || 'main' }}
+          INPUT_DOWNLOAD: ${{ inputs.download_ref || 'pull/24027/head' }}
         run: |
           set -euo pipefail
           git fetch origin main --quiet
 
           resolve_ref() {
             local ref="$1"
+            if [[ "$ref" =~ ^pull/[0-9]+/(head|merge)$ ]]; then
+              git fetch origin "$ref" --quiet
+              git rev-parse --verify "FETCH_HEAD^{commit}"
+              return 0
+            fi
             git fetch origin "$ref" --quiet 2>/dev/null || true
             if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
               git rev-parse --verify "${ref}^{commit}"
@@ -341,12 +352,16 @@ jobs:
 
           BASELINE_NAME="${INPUT_BASELINE:-main}"
           BASELINE_REF="$(resolve_ref "$BASELINE_NAME")"
+          DOWNLOAD_NAME="${INPUT_DOWNLOAD:-pull/24027/head}"
+          DOWNLOAD_REF="$(resolve_ref "$DOWNLOAD_NAME")"
 
           {
             printf 'feature-ref=%s\n' "$FEATURE_REF"
             printf 'feature-name=%s\n' "$FEATURE_NAME"
             printf 'baseline-ref=%s\n' "$BASELINE_REF"
             printf 'baseline-name=%s\n' "$BASELINE_NAME"
+            printf 'download-ref=%s\n' "$DOWNLOAD_REF"
+            printf 'download-name=%s\n' "$DOWNLOAD_NAME"
           } >> "$GITHUB_OUTPUT"
 
       - name: Prepare source dirs
@@ -355,13 +370,18 @@ jobs:
           prepare_source_dir() {
             local dir="$1"
             local ref="$2"
+            local fetch_ref="${3:-}"
 
             if [ -d "$dir" ]; then
               git -C "$dir" reset --hard HEAD
               git -C "$dir" clean -fdx
-              git -C "$dir" fetch origin "$ref" || true
             else
               git clone . "$dir"
+            fi
+            if [ -n "$fetch_ref" ]; then
+              git -C "$dir" fetch origin "$fetch_ref" --quiet || true
+            else
+              git -C "$dir" fetch origin "$ref" --quiet || true
             fi
 
             git -C "$dir" checkout --force "$ref"
@@ -370,6 +390,7 @@ jobs:
 
           prepare_source_dir ../reth-baseline "${{ steps.refs.outputs.baseline-ref }}"
           prepare_source_dir ../reth-feature "${{ steps.refs.outputs.feature-ref }}"
+          prepare_source_dir ../reth-download "${{ steps.refs.outputs.download-ref }}" "${{ steps.refs.outputs.download-name }}"
 
       - name: Build binaries
         id: build
@@ -383,15 +404,19 @@ jobs:
           set -euo pipefail
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
+          DOWNLOAD_DIR="$(cd ../reth-download && pwd)"
 
           .github/scripts/bench-reth-build.sh baseline "$BASELINE_DIR" "${{ steps.refs.outputs.baseline-ref }}" &
           PID_BASELINE=$!
           .github/scripts/bench-reth-build.sh feature "$FEATURE_DIR" "${{ steps.refs.outputs.feature-ref }}" &
           PID_FEATURE=$!
+          .github/scripts/bench-reth-build.sh baseline "$DOWNLOAD_DIR" "${{ steps.refs.outputs.download-ref }}" &
+          PID_DOWNLOAD=$!
 
           FAIL=0
           wait $PID_BASELINE || FAIL=1
           wait $PID_FEATURE || FAIL=1
+          wait $PID_DOWNLOAD || FAIL=1
           if [ $FAIL -ne 0 ]; then
             echo "::error::One or more build tasks failed"
             exit 1
@@ -494,7 +519,10 @@ jobs:
         id: snapshot
         run: |
           set -euo pipefail
-          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/reth" \
+          DOWNLOAD_RETH_BINARY="$(pwd)/../reth-download/target/profiling/reth"
+          echo "Using download reth from ${{ steps.refs.outputs.download-name }} (${{ steps.refs.outputs.download-ref }})"
+          "$DOWNLOAD_RETH_BINARY" --version
+          BENCH_RETH_BINARY="$DOWNLOAD_RETH_BINARY" \
             .github/scripts/bench-benchmarkoor-snapshot.sh
 
       - name: System setup
