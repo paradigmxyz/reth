@@ -179,7 +179,8 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: HashMap<AddressStorageKey, Vec<u64>> =
+        HashMap::with_capacity(DEFAULT_CACHE_THRESHOLD as usize);
 
     let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
         let last = indices.last().expect("qed");
