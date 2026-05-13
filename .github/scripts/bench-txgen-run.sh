@@ -19,6 +19,28 @@ set -euxo pipefail
 LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
+
+# Resolve git SHA for this run label
+GIT_SHA=""
+case "$LABEL" in
+  baseline*) GIT_SHA="${BASELINE_REF:-}" ;;
+  feature*)  GIT_SHA="${FEATURE_REF:-}" ;;
+esac
+
+# Resolve git-ref: tag if tagged, otherwise branch name, otherwise raw SHA
+GIT_REF="$GIT_SHA"
+if [ -n "$GIT_SHA" ]; then
+  TAG_NAME=$(git tag --points-at "$GIT_SHA" 2>/dev/null | head -1)
+  if [ -n "$TAG_NAME" ]; then
+    GIT_REF="$TAG_NAME"
+  else
+    BRANCH_NAME=$(git branch -r --points-at "$GIT_SHA" 2>/dev/null | sed 's|^ *origin/||' | head -1)
+    if [ -n "$BRANCH_NAME" ]; then
+      GIT_REF="$BRANCH_NAME"
+    fi
+  fi
+fi
+
 DATADIR_NAME="datadir"
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 if [ "$BIG_BLOCKS" = "true" ]; then
@@ -366,6 +388,10 @@ if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
   )
 fi
 
+CLICKHOUSE_REPORT=()
+if [ -n "${CLICKHOUSE_URL:-}" ]; then
+  CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
+fi
 
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
 $BENCH_NICE "$TXGEN_BENCH" send-blocks \
@@ -375,7 +401,12 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   "${TXGEN_SEND_ARGS[@]}" \
   "${TXGEN_METRICS_ARGS[@]}" \
   --wait-for-persistence never \
-  --report json:"$OUTPUT_DIR/report.json" 2>&1 | sed -u "s/^/[bench] /"
+  --report json:"$OUTPUT_DIR/report.json" \
+  "${CLICKHOUSE_REPORT[@]}" \
+  -m "git-sha=$GIT_SHA" \
+  -m "git-ref=$GIT_REF" \
+  -m "platform=ethereum" \
+  -m "scenario=replay" 2>&1 | sed -u "s/^/[bench] /"
 
 if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"

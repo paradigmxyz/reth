@@ -319,6 +319,9 @@ jobs:
       BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
+      CLICKHOUSE_URL: ${{ secrets.CLICKHOUSE_URL }}
+      CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+      CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
