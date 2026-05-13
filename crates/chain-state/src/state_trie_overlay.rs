@@ -45,11 +45,15 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         inner.blocks.entry(hash).or_insert(block);
     }
 
-    /// Removes a block from the live block graph and prunes cached overlays that can no longer be
+    /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
     /// built from the remaining blocks.
-    pub fn remove_block(&self, hash: B256) {
+    pub fn remove_blocks(&self, hashes: impl IntoIterator<Item = B256>) {
         let mut inner = self.inner.write();
-        if inner.blocks.remove(&hash).is_some() {
+        let mut removed = false;
+        for hash in hashes {
+            removed |= inner.blocks.remove(&hash).is_some();
+        }
+        if removed {
             inner.prune_overlays();
         }
     }
@@ -336,15 +340,18 @@ mod tests {
         let original_anchor = blocks[0].recovered_block().parent_hash();
         manager.overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor).unwrap();
 
-        manager.remove_block(blocks[0].recovered_block().hash());
+        manager.remove_blocks([
+            blocks[0].recovered_block().hash(),
+            blocks[1].recovered_block().hash(),
+        ]);
 
-        let anchor_hash = blocks[0].recovered_block().hash();
+        let anchor_hash = blocks[1].recovered_block().hash();
         assert!(manager
             .overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
             .is_err());
 
         let (_, state) =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
-        assert_eq!(state.accounts.len(), 2);
+        assert_eq!(state.accounts.len(), 1);
     }
 }

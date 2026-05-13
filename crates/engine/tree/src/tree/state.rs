@@ -123,7 +123,6 @@ impl<N: NodePrimitives> TreeState<N> {
     /// The removed block and the block hashes of its children.
     fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, B256Set)> {
         let executed = self.blocks_by_hash.remove(&hash)?;
-        self.state_trie_overlays.remove_block(hash);
 
         // Remove this block from collection of children of its parent block.
         let parent_entry = self.parent_to_child.entry(executed.recovered_block().parent_hash());
@@ -175,7 +174,12 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes canonical blocks below the upper bound, only if the last persisted hash is
     /// part of the canonical chain.
-    pub fn remove_canonical_until(&mut self, upper_bound: BlockNumber, last_persisted_hash: B256) {
+    fn remove_canonical_until(
+        &mut self,
+        upper_bound: BlockNumber,
+        last_persisted_hash: B256,
+        removed_hashes: &mut Vec<B256>,
+    ) {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
 
         // If the last persisted hash is not canonical, then we don't want to remove any canonical
@@ -190,9 +194,12 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
             current_block = executed.recovered_block().parent_hash();
             if executed.recovered_block().number() <= upper_bound {
+                let hash = executed.recovered_block().hash();
                 let num_hash = executed.recovered_block().num_hash();
                 debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
-                self.remove_by_hash(executed.recovered_block().hash());
+                if self.remove_by_hash(hash).is_some() {
+                    removed_hashes.push(hash);
+                }
             }
         }
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
@@ -200,7 +207,11 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
     /// sidechains that fork from below the finalized block.
-    pub fn prune_finalized_sidechains(&mut self, finalized_num_hash: BlockNumHash) {
+    fn prune_finalized_sidechains(
+        &mut self,
+        finalized_num_hash: BlockNumHash,
+        removed_hashes: &mut Vec<B256>,
+    ) {
         let BlockNumHash { number: finalized_num, hash: finalized_hash } = finalized_num_hash;
 
         // We remove disconnected sidechains in three steps:
@@ -219,6 +230,7 @@ impl<N: NodePrimitives> TreeState<N> {
         for hash in blocks_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
+                removed_hashes.push(hash);
             }
         }
 
@@ -245,6 +257,7 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(block) = blocks_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
+                removed_hashes.push(block);
                 blocks_to_remove.extend(children);
             }
         }
@@ -285,12 +298,17 @@ impl<N: NodePrimitives> TreeState<N> {
         // * remove all canonical blocks below the upper bound
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
-        self.remove_canonical_until(upper_bound.number, last_persisted_hash);
+        let mut removed_hashes = Vec::new();
+        self.remove_canonical_until(upper_bound.number, last_persisted_hash, &mut removed_hashes);
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
         if let Some(finalized_num_hash) = finalized_num_hash {
-            self.prune_finalized_sidechains(finalized_num_hash);
+            self.prune_finalized_sidechains(finalized_num_hash, &mut removed_hashes);
+        }
+
+        if !removed_hashes.is_empty() {
+            self.state_trie_overlays.remove_blocks(removed_hashes);
         }
     }
 
