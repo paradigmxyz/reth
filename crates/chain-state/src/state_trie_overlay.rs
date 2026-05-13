@@ -65,6 +65,16 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         inner.overlay_for_parent(self.clone(), parent_hash)
     }
 
+    /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
+    pub fn overlay_for_parent_at(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+        let input = self.get_overlay(parent_hash, anchor_hash)?;
+        Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
+    }
+
     fn get_overlay(
         &self,
         tip_hash: B256,
@@ -104,11 +114,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let input = Arc::new(compute_overlay(compute.0, compute.1, anchor_hash));
         let mut inner = self.inner.write();
         Ok(inner.overlays.entry(key).or_insert_with(|| Arc::clone(&input)).clone())
-    }
-
-    fn has_anchor_hash(&self, tip_hash: B256, anchor_hash: B256) -> bool {
-        let inner = self.inner.read();
-        StateTrieOverlayManagerInner::<N>::has_anchor_hash(&inner.blocks, tip_hash, anchor_hash)
     }
 }
 
@@ -227,13 +232,6 @@ impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlay<N> {
 }
 
 impl<N: NodePrimitives> StateTrieOverlay<N> {
-    /// Returns true if this overlay can be re-anchored to `hash`.
-    ///
-    /// This is true for the parent hash of any block in the current in-memory segment.
-    pub fn has_anchor_hash(&self, hash: B256) -> bool {
-        self.manager.has_anchor_hash(self.tip_hash, hash)
-    }
-
     /// Returns the overlay as `(trie updates, hashed state)` for the requested anchor.
     pub fn as_overlay(
         &self,
@@ -391,6 +389,9 @@ mod tests {
 
         let full = overlay.get(anchor_hash).unwrap();
         assert_eq!(full.state.accounts.len(), 3);
+        let (_, state) =
+            manager.overlay_for_parent_at(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        assert_eq!(state.accounts.len(), 3);
 
         let short_anchor = blocks[1].recovered_block().hash();
         let short = overlay.get(short_anchor).unwrap();
@@ -416,7 +417,7 @@ mod tests {
             manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
 
         assert_eq!(anchor_hash, blocks[0].recovered_block().hash());
-        assert!(!overlay.has_anchor_hash(original_anchor));
+        assert!(overlay.get(original_anchor).is_err());
 
         let full = overlay.get(anchor_hash).unwrap();
         assert_eq!(full.state.accounts.len(), 2);

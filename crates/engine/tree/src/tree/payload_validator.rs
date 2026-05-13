@@ -1686,10 +1686,8 @@ where
         state: &EngineApiTreeState<N>,
         changeset_cache: ChangesetCache,
     ) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, changeset_cache).with_state_trie_overlay_manager(
-            parent_hash,
-            state.tree_state.state_trie_overlays.clone(),
-        )
+        OverlayBuilder::new(parent_hash, changeset_cache)
+            .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.

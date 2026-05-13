@@ -73,8 +73,6 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     },
     /// Manager-backed overlay for in-memory state, with optional immediate overlay data.
     Managed {
-        /// Parent hash requested by the caller.
-        parent_hash: B256,
         /// Manager used to resolve in-memory parent state if the parent is not persisted.
         manager: StateTrieOverlayManager<N>,
         /// Hashed state overlay.
@@ -88,8 +86,8 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
 /// reverts. It is intentionally independent from any provider factory or overlay cache.
 #[derive(Debug, Clone)]
 pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
-    /// Anchor hash to revert the DB state to before applying overlays.
-    anchor_hash: B256,
+    /// Parent hash requested by the caller.
+    parent_hash: B256,
     /// Optional overlay source.
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
@@ -100,9 +98,9 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Create a new overlay builder.
-    pub fn new(anchor_hash: B256, changeset_cache: ChangesetCache) -> Self {
+    pub fn new(parent_hash: B256, changeset_cache: ChangesetCache) -> Self {
         Self {
-            anchor_hash,
+            parent_hash,
             overlay_source: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
@@ -120,11 +118,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Set the state trie overlay manager used to resolve in-memory parent state.
     pub fn with_state_trie_overlay_manager(
         mut self,
-        parent_hash: B256,
         state_trie_overlay_manager: StateTrieOverlayManager<N>,
     ) -> Self {
         self.overlay_source = Some(OverlaySource::Managed {
-            parent_hash,
             manager: state_trie_overlay_manager,
             state: Arc::new(HashedPostStateSorted::default()),
         });
@@ -170,59 +166,22 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Resolves the anchor hash to use for the configured overlay source.
-    fn resolve_anchor_hash<Provider>(
-        &self,
-        provider: &Provider,
-        db_tip_block: BlockNumHash,
-    ) -> ProviderResult<B256>
-    where
-        Provider: BlockNumReader,
-    {
-        let Some(OverlaySource::Managed { parent_hash, manager, .. }) = &self.overlay_source else {
-            return Ok(self.anchor_hash)
-        };
-
-        if provider
-            .convert_hash_or_number((*parent_hash).into())?
-            .is_some_and(|parent_number| parent_number <= db_tip_block.number)
-        {
-            debug!(
-                target: "providers::state::overlay",
-                %parent_hash,
-                "Parent found in persisted DB state, no state trie overlay needed"
-            );
-            return Ok(*parent_hash)
-        }
-
-        let (_, anchor_hash) =
-            manager.overlay_for_parent(*parent_hash).map_err(ProviderError::other)?;
-        debug!(
-            target: "providers::state::overlay",
-            %parent_hash,
-            %anchor_hash,
-            "Using managed state trie overlay"
-        );
-
-        Ok(anchor_hash)
-    }
-
     /// Resolves the effective overlay (trie updates, hashed state).
     fn resolve_overlays(
         &self,
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
-            Some(OverlaySource::Managed { parent_hash, manager, state }) => {
-                let (trie, mut overlay_state) = if anchor_hash == *parent_hash {
+            Some(OverlaySource::Managed { manager, state }) => {
+                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
                     (
                         Arc::new(TrieUpdatesSorted::default()),
                         Arc::new(HashedPostStateSorted::default()),
                     )
                 } else {
-                    let (state_trie_overlay, _) =
-                        manager.overlay_for_parent(*parent_hash).map_err(ProviderError::other)?;
-                    state_trie_overlay.as_overlay(anchor_hash).map_err(ProviderError::other)?
+                    manager
+                        .overlay_for_parent_at(self.parent_hash, anchor_hash)
+                        .map_err(ProviderError::other)?
                 };
 
                 if overlay_state.is_empty() {
@@ -234,10 +193,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Ok((trie, overlay_state))
             }
             Some(OverlaySource::Immediate { trie, state }) => {
-                if anchor_hash != self.anchor_hash {
+                if anchor_hash != self.parent_hash {
                     return Err(ProviderError::other(std::io::Error::other(format!(
-                        "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured anchor ({})",
-                        self.anchor_hash
+                        "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
+                        self.parent_hash
                     ))))
                 }
                 Ok((Arc::clone(trie), Arc::clone(state)))
@@ -302,19 +261,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             return Ok(None)
         }
 
-        // If the DB tip has moved forward into the managed overlay then we still don't need to
-        // revert; the overlay will generate a new in-memory view using only the relevant
-        // blocks data.
-        if let Some(OverlaySource::Managed { parent_hash, manager, .. }) = &self.overlay_source &&
-            anchor_hash != *parent_hash
-        {
-            let (state_trie_overlay, _) =
-                manager.overlay_for_parent(*parent_hash).map_err(ProviderError::other)?;
-            if state_trie_overlay.has_anchor_hash(db_tip_block.hash) {
-                return Ok(None)
-            }
-        }
-
         let anchor_number = self.get_block_number(provider, anchor_hash)?;
 
         // Check account history prune checkpoint to determine the lower bound of available data.
@@ -344,13 +290,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         level = "debug",
         target = "providers::state::overlay",
         skip_all,
-        fields(?db_tip_block, anchor_hash = ?self.anchor_hash)
+        fields(?db_tip_block, parent_hash = ?self.parent_hash)
     )]
     fn calculate_overlay<Provider>(
         &self,
         provider: &Provider,
         db_tip_block: BlockNumHash,
-        anchor_hash: B256,
     ) -> ProviderResult<Overlay>
     where
         Provider: ChangeSetReader
@@ -368,6 +313,18 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let retrieve_hashed_state_reverts_duration;
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
+        let anchor_hash = if matches!(&self.overlay_source, Some(OverlaySource::Managed { .. })) {
+            let parent_is_persisted = provider
+                .convert_hash_or_number(self.parent_hash.into())?
+                .is_some_and(|parent_number| parent_number <= db_tip_block.number);
+            if parent_is_persisted {
+                self.parent_hash
+            } else {
+                db_tip_block.hash
+            }
+        } else {
+            self.parent_hash
+        };
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
         let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
@@ -440,8 +397,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             (trie_updates, hashed_state_updates)
         } else {
-            // If no reverts are needed then we can assume that the db tip is the anchor hash or
-            // overlaps with the managed overlay. Use overlays directly.
+            // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
             let (trie_updates, hashed_state) = self.resolve_overlays(db_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
@@ -478,8 +434,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + StorageSettingsCache,
     {
         let db_tip_block = self.get_db_tip_block(provider)?;
-        let anchor_hash = self.resolve_anchor_hash(provider, db_tip_block)?;
-        self.calculate_overlay(provider, db_tip_block, anchor_hash)
+        self.calculate_overlay(provider, db_tip_block)
     }
 }
 
@@ -706,75 +661,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::ChainInfo;
     use reth_primitives_traits::Account;
-    use reth_storage_api::BlockHashReader;
     use reth_trie::HashedPostState;
-    use std::collections::HashMap;
-
-    #[derive(Default)]
-    struct TestBlockProvider {
-        tip: BlockNumHash,
-        numbers: HashMap<B256, BlockNumber>,
-        hashes: HashMap<BlockNumber, B256>,
-    }
-
-    impl TestBlockProvider {
-        fn new(tip: BlockNumHash) -> Self {
-            Self { tip, ..Default::default() }
-        }
-
-        fn with_block(mut self, hash: B256, number: BlockNumber) -> Self {
-            self.numbers.insert(hash, number);
-            self.hashes.insert(number, hash);
-            self
-        }
-    }
-
-    impl BlockHashReader for TestBlockProvider {
-        fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
-            Ok(self.hashes.get(&number).copied())
-        }
-
-        fn canonical_hashes_range(
-            &self,
-            start: BlockNumber,
-            end: BlockNumber,
-        ) -> ProviderResult<Vec<B256>> {
-            Ok((start..end).filter_map(|number| self.hashes.get(&number).copied()).collect())
-        }
-    }
-
-    impl BlockNumReader for TestBlockProvider {
-        fn chain_info(&self) -> ProviderResult<ChainInfo> {
-            Ok(ChainInfo { best_hash: self.tip.hash, best_number: self.tip.number })
-        }
-
-        fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-            Ok(self.tip.number)
-        }
-
-        fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-            Ok(self.tip.number)
-        }
-
-        fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-            Ok(self.numbers.get(&hash).copied())
-        }
-    }
 
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
         let parent_hash = B256::with_last_byte(1);
-        let db_tip = BlockNumHash::new(10, B256::with_last_byte(2));
-        let provider = TestBlockProvider::new(db_tip).with_block(parent_hash, 9);
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(parent_hash, StateTrieOverlayManager::default());
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
 
-        let anchor_hash = builder.resolve_anchor_hash(&provider, db_tip).unwrap();
-
-        assert_eq!(anchor_hash, parent_hash);
-        let (trie, state) = builder.resolve_overlays(anchor_hash).unwrap();
+        let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
         assert!(trie.is_empty());
         assert!(state.is_empty());
     }
@@ -782,14 +678,13 @@ mod tests {
     #[test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
         let parent_hash = B256::with_last_byte(1);
-        let db_tip = BlockNumHash::new(10, B256::with_last_byte(2));
-        let provider = TestBlockProvider::new(db_tip).with_block(parent_hash, 11);
+        let anchor_hash = B256::with_last_byte(2);
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(parent_hash, StateTrieOverlayManager::default());
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
 
-        let err = builder.resolve_anchor_hash(&provider, db_tip).unwrap_err();
+        let err = builder.resolve_overlays(anchor_hash).unwrap_err();
 
-        assert!(err.to_string().contains("not tracked by the manager"));
+        assert!(err.to_string().contains("cannot be anchored"));
     }
 
     #[test]
@@ -799,15 +694,12 @@ mod tests {
             .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
             .into_sorted();
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(parent_hash, StateTrieOverlayManager::default())
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default())
             .with_extended_hashed_state_overlay(hashed_state);
 
-        let Some(OverlaySource::Managed { parent_hash: managed_parent_hash, state, .. }) =
-            builder.overlay_source
-        else {
+        let Some(OverlaySource::Managed { state, .. }) = builder.overlay_source else {
             panic!("expected managed overlay source")
         };
-        assert_eq!(managed_parent_hash, parent_hash);
         assert_eq!(state.total_len(), 1);
     }
 }
