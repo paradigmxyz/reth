@@ -180,7 +180,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     )
                 } else {
                     manager
-                        .overlay_for_parent_at(self.parent_hash, anchor_hash)
+                        .overlay_for_parent(self.parent_hash, anchor_hash)
                         .map_err(ProviderError::other)?
                 };
 
@@ -206,20 +206,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Arc::new(HashedPostStateSorted::default()),
             )),
         }
-    }
-
-    /// Returns the block number for `anchor_hash`.
-    fn get_block_number<Provider>(
-        &self,
-        provider: &Provider,
-        anchor_hash: B256,
-    ) -> ProviderResult<BlockNumber>
-    where
-        Provider: BlockNumReader,
-    {
-        provider
-            .convert_hash_or_number(anchor_hash.into())?
-            .ok_or(ProviderError::BlockHashNotFound(anchor_hash))
     }
 
     /// Returns the block which is at the tip of the DB, i.e. the block which the state tables of
@@ -261,7 +247,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             return Ok(None)
         }
 
-        let anchor_number = self.get_block_number(provider, anchor_hash)?;
+        let anchor_number = provider
+            .convert_hash_or_number(anchor_hash.into())?
+            .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
 
         // Check account history prune checkpoint to determine the lower bound of available data.
         // The prune checkpoint's block_number is the highest pruned block, so data is available

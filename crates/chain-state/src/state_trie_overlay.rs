@@ -15,8 +15,7 @@ use tracing::trace;
 /// Manages flattened state trie overlays for in-memory blocks.
 ///
 /// The manager owns the in-memory block graph and a cache of flattened state trie overlays keyed by
-/// `(anchor_hash, tip_hash)`. [`StateTrieOverlay`] handles are cheap references back into this
-/// manager, so payload validation can pass them around without cloning block segments.
+/// `(anchor_hash, tip_hash)`.
 #[derive(Clone)]
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     inner: Arc<RwLock<StateTrieOverlayManagerInner<N>>>,
@@ -55,18 +54,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
-    /// Returns an overlay for the requested in-memory parent hash and the persisted anchor hash it
-    /// sits on.
-    pub fn overlay_for_parent(
-        &self,
-        parent_hash: B256,
-    ) -> Result<(StateTrieOverlay<N>, B256), StateTrieOverlayError> {
-        let inner = self.inner.read();
-        inner.overlay_for_parent(self.clone(), parent_hash)
-    }
-
     /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
-    pub fn overlay_for_parent_at(
+    pub fn overlay_for_parent(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
@@ -93,7 +82,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
             let blocks = inner
                 .blocks_to_anchor(tip_hash, anchor_hash)
-                .ok_or(StateTrieOverlayError { tip_hash, anchor_hash: Some(anchor_hash) })?;
+                .ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
             let parent_input = blocks.first().and_then(|block| {
                 if block.recovered_block().parent_hash() == anchor_hash {
                     return None
@@ -123,21 +112,16 @@ pub struct StateTrieOverlayError {
     /// Requested in-memory tip hash.
     tip_hash: B256,
     /// Requested anchor hash.
-    anchor_hash: Option<B256>,
+    anchor_hash: B256,
 }
 
 impl fmt::Display for StateTrieOverlayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.anchor_hash {
-            Some(anchor_hash) => write!(
-                f,
-                "state trie overlay for tip {} cannot be anchored to {} with current blocks",
-                self.tip_hash, anchor_hash
-            ),
-            None => {
-                write!(f, "state trie overlay tip {} is not tracked by the manager", self.tip_hash)
-            }
-        }
+        write!(
+            f,
+            "state trie overlay for tip {} cannot be anchored to {} with current blocks",
+            self.tip_hash, self.anchor_hash
+        )
     }
 }
 
@@ -150,31 +134,6 @@ struct StateTrieOverlayManagerInner<N: NodePrimitives = EthPrimitives> {
 }
 
 impl<N: NodePrimitives> StateTrieOverlayManagerInner<N> {
-    fn overlay_for_parent(
-        &self,
-        manager: StateTrieOverlayManager<N>,
-        parent_hash: B256,
-    ) -> Result<(StateTrieOverlay<N>, B256), StateTrieOverlayError> {
-        let anchor_hash = self
-            .anchor_for_tip(parent_hash)
-            .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash: None })?;
-        Ok((StateTrieOverlay { manager, tip_hash: parent_hash }, anchor_hash))
-    }
-
-    fn anchor_for_tip(&self, tip_hash: B256) -> Option<B256> {
-        let mut hash = tip_hash;
-
-        loop {
-            let block = self.blocks.get(&hash)?;
-
-            let parent_hash = block.recovered_block().parent_hash();
-            if !self.blocks.contains_key(&parent_hash) {
-                return Some(parent_hash)
-            }
-            hash = parent_hash;
-        }
-    }
-
     fn blocks_to_anchor(&self, tip_hash: B256, anchor_hash: B256) -> Option<Vec<ExecutedBlock<N>>> {
         let mut hash = tip_hash;
         let mut blocks = Vec::new();
@@ -212,38 +171,6 @@ impl<N: NodePrimitives> StateTrieOverlayManagerInner<N> {
     fn prune_overlays(&mut self) {
         let blocks = &self.blocks;
         self.overlays.retain(|key, _| Self::has_anchor_hash(blocks, key.tip_hash, key.anchor_hash));
-    }
-}
-
-/// Flattened state trie overlay for one in-memory parent block.
-///
-/// This is a lightweight manager-backed handle. It does not own the block segment it represents;
-/// the manager owns the in-memory blocks and cached flattened state trie overlays.
-#[derive(Clone)]
-pub struct StateTrieOverlay<N: NodePrimitives = EthPrimitives> {
-    manager: StateTrieOverlayManager<N>,
-    tip_hash: B256,
-}
-
-impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlay<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StateTrieOverlay").field("head_hash", &self.tip_hash).finish()
-    }
-}
-
-impl<N: NodePrimitives> StateTrieOverlay<N> {
-    /// Returns the overlay as `(trie updates, hashed state)` for the requested anchor.
-    pub fn as_overlay(
-        &self,
-        anchor_hash: B256,
-    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
-        let input = self.get(anchor_hash)?;
-        Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
-    }
-
-    /// Returns the flattened trie input for the requested anchor.
-    fn get(&self, anchor_hash: B256) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
-        self.manager.get_overlay(self.tip_hash, anchor_hash)
     }
 }
 
@@ -367,11 +294,12 @@ mod tests {
     fn errors_for_unknown_parent() {
         let manager = StateTrieOverlayManager::<EthPrimitives>::default();
         let parent = B256::random();
+        let anchor = B256::random();
 
-        let err = manager.overlay_for_parent(parent).unwrap_err();
+        let err = manager.overlay_for_parent(parent, anchor).unwrap_err();
 
         assert_eq!(err.tip_hash, parent);
-        assert_eq!(err.anchor_hash, None);
+        assert_eq!(err.anchor_hash, anchor);
     }
 
     #[test]
@@ -382,21 +310,19 @@ mod tests {
             manager.insert_block(block.clone());
         }
 
-        let (overlay, anchor_hash) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
 
-        assert_eq!(anchor_hash, blocks[0].recovered_block().parent_hash());
-
-        let full = overlay.get(anchor_hash).unwrap();
-        assert_eq!(full.state.accounts.len(), 3);
         let (_, state) =
-            manager.overlay_for_parent_at(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
         assert_eq!(state.accounts.len(), 3);
 
         let short_anchor = blocks[1].recovered_block().hash();
-        let short = overlay.get(short_anchor).unwrap();
-        assert_eq!(short.state.accounts.len(), 1);
-        assert!(Arc::ptr_eq(&short, &overlay.get(short_anchor).unwrap()));
+        let (_, short) =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+        assert_eq!(short.accounts.len(), 1);
+        let (_, cached_short) =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+        assert!(Arc::ptr_eq(&short, &cached_short));
     }
 
     #[test]
@@ -407,46 +333,18 @@ mod tests {
             manager.insert_block(block.clone());
         }
 
-        let (overlay, original_anchor) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
-        overlay.get(original_anchor).unwrap();
+        let original_anchor = blocks[0].recovered_block().parent_hash();
+        manager.overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor).unwrap();
 
         manager.remove_block(blocks[0].recovered_block().hash());
 
-        let (overlay, anchor_hash) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
+        let anchor_hash = blocks[0].recovered_block().hash();
+        assert!(manager
+            .overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
+            .is_err());
 
-        assert_eq!(anchor_hash, blocks[0].recovered_block().hash());
-        assert!(overlay.get(original_anchor).is_err());
-
-        let full = overlay.get(anchor_hash).unwrap();
-        assert_eq!(full.state.accounts.len(), 2);
-    }
-
-    #[test]
-    fn existing_overlay_handle_errors_after_pruning_before_resolution() {
-        let manager = StateTrieOverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-
-        let (overlay, anchor_hash) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
-
-        for block in &blocks {
-            manager.remove_block(block.recovered_block().hash());
-        }
-
-        assert!(manager.overlay_for_parent(blocks[2].recovered_block().hash()).is_err());
-
-        let err = overlay.get(anchor_hash).unwrap_err();
-        assert_eq!(err.tip_hash, blocks[2].recovered_block().hash());
-        assert_eq!(err.anchor_hash, Some(anchor_hash));
-
-        drop(overlay);
-        let inner = manager.inner.read();
-        assert!(inner.blocks.is_empty());
-        assert!(inner.overlays.is_empty());
+        let (_, state) =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        assert_eq!(state.accounts.len(), 2);
     }
 }
