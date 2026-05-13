@@ -392,7 +392,7 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
 
     /// Replaces the entry at the current cursor position.
     /// **Mock behavior**: Always succeeds without modifying any data.
-    fn put_current(
+    fn replace_current(
         &mut self,
         _key: <T as Table>::Key,
         _value: &<T as Table>::Value,

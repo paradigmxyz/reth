@@ -299,20 +299,15 @@ where
                 .is_some_and(|e| *e.nibbles() == nibbles);
 
             match (existing, maybe_updated) {
-                // Update in place: same nibbles (subkey), only payload changes. `put_current`
-                // avoids the dup-sub-tree rebalance that delete + upsert would cause.
-                (true, Some(node)) => self.cursor.put_current(
+                (true, Some(node)) => self.cursor.replace_current(
                     self.hashed_address,
                     &A::StorageValue::new(nibbles, node.clone()),
                 )?,
-                // Pure delete (node removed from trie).
                 (true, None) => self.cursor.delete_current()?,
-                // Pure insert (new node).
                 (false, Some(node)) => self.cursor.upsert(
                     self.hashed_address,
                     &A::StorageValue::new(nibbles, node.clone()),
                 )?,
-                // Nothing to do: wanted to delete an entry that doesn't exist.
                 (false, None) => {}
             }
         }
