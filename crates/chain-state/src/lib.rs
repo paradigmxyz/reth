@@ -17,8 +17,8 @@ pub use in_memory::*;
 mod deferred_trie;
 pub use deferred_trie::*;
 
-mod lazy_overlay;
-pub use lazy_overlay::*;
+mod trie_overlay;
+pub use trie_overlay::*;
 
 mod noop;
 

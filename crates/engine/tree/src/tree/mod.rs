@@ -1505,23 +1505,23 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        // Invalidate cached overlay since the anchor has changed
-        self.state.tree_state.invalidate_cached_overlay();
-
         self.on_new_persisted_block()?;
 
-        // Re-prepare overlay for the current canonical head with the new anchor.
-        // Spawn a background task to trigger computation so it's ready when the next payload
-        // arrives.
-        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
-            self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = prepared.overlay.get(prepared.anchor_hash);
-            });
-        }
+        self.prepare_trie_overlay(self.state.tree_state.canonical_block_hash());
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
+    }
+
+    /// Prepares the trie overlay for `parent_hash` in the background.
+    fn prepare_trie_overlay(&self, parent_hash: B256) {
+        let (overlay, anchor_hash) = self.state.tree_state.trie_overlay(parent_hash);
+        if let Some(overlay) = overlay {
+            self.runtime.spawn_blocking_named("prepare-overlay", move || {
+                let _ = overlay.get(anchor_hash);
+            });
+        }
     }
 
     /// Handles a message from the engine.
@@ -1586,6 +1586,7 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
+                        self.prepare_trie_overlay(block.recovered_block().hash());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -3022,6 +3023,7 @@ where
         }
 
         self.state.tree_state.insert_executed(executed.clone());
+        self.prepare_trie_overlay(executed.recovered_block().hash());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
