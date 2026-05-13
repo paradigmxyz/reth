@@ -356,7 +356,7 @@ impl Command {
                 let mut senders_writer =
                     static_file_provider.latest_writer(StaticFileSegment::TransactionSenders)?;
                 senders_writer.ensure_at_block(first_indices_entry - 1)?;
-                static_file_provider.commit()?;
+                senders_writer.commit()?;
 
                 warn!(
                     target: "reth::cli",
