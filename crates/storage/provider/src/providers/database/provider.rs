@@ -2707,15 +2707,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
+                let existing = hashed_storage_cursor
+                    .seek_by_key_subkey(*hashed_address, entry.key)?
+                    .is_some_and(|db_entry| db_entry.key == entry.key);
 
                 if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    if existing {
+                        hashed_storage_cursor.replace_current(*hashed_address, &entry)?;
+                    } else {
+                        hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    }
+                } else if existing {
+                    hashed_storage_cursor.delete_current()?;
                 }
             }
         }
