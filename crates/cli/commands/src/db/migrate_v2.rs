@@ -29,7 +29,7 @@ use reth_prune_types::PruneSegment;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::StageCheckpointReader;
-use tracing::info;
+use tracing::{info, warn};
 
 /// `reth db migrate-v2` command
 #[derive(Debug, Parser)]
@@ -358,10 +358,9 @@ impl Command {
                 senders_writer.ensure_at_block(first_indices_entry - 1)?;
                 static_file_provider.commit()?;
 
-                info!(
+                warn!(
                     target: "reth::cli",
-                    first_indices_entry,
-                    "Initialized stages that depend on block body indices data with the first block that has a corresponding block body indices entry"
+                    "Missing block body indices data for first {first_indices_entry} blocks, initializing stages that depend on block body indices data with the first block that has a corresponding block body indices entry"
                 );
             }
         }
