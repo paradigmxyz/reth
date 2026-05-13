@@ -340,6 +340,11 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
+CLICKHOUSE_REPORT=()
+if [ -n "${CLICKHOUSE_URL:-}" ]; then
+  CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
+fi
+
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
 $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --engine http://127.0.0.1:8551 \
@@ -348,6 +353,7 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   "${TXGEN_SEND_ARGS[@]}" \
   --wait-for-persistence never \
   --report json:"$OUTPUT_DIR/report.json" \
+  "${CLICKHOUSE_REPORT[@]}" \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
   -m "platform=ethereum" \
