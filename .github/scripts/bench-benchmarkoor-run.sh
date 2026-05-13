@@ -117,37 +117,6 @@ write_prerun_head_marker() {
   echo "Recorded post-prerun head ${head_dec} (${block_hash}) in ${marker}"
 }
 
-wait_for_prerun_head() {
-  local marker
-  marker="$(prerun_head_file)"
-  [ -f "$marker" ] || return 0
-
-  local expected_number expected_number_hex expected_hash latest_hex latest_number actual_hash
-  expected_number="$(jq -er '.number' "$marker")"
-  expected_number_hex="$(jq -er '.number_hex' "$marker")"
-  expected_hash="$(jq -er '.hash' "$marker")"
-
-  for i in $(seq 1 60); do
-    latest_hex="$(rpc_call eth_blockNumber | jq -r '.result // empty' 2>/dev/null || true)"
-    if [ -z "$latest_hex" ]; then
-      sleep 1
-      continue
-    fi
-    latest_number=$(( 16#${latest_hex#0x} ))
-    actual_hash="$(rpc_call eth_getBlockByNumber "[\"${latest_hex}\",false]" \
-      | jq -r '.result.hash // empty' 2>/dev/null || true)"
-    if [ "$latest_number" -eq "$expected_number" ] && [ "$actual_hash" = "$expected_hash" ]; then
-      echo "Recovered post-prerun head ${expected_number_hex} (${expected_hash}) after ${i}s"
-      return 0
-    fi
-    sleep 1
-  done
-
-  echo "::error::Recovered datadir did not expose expected post-prerun latest head ${expected_number_hex} (${expected_hash})"
-  rpc_call eth_blockNumber || true
-  exit 1
-}
-
 reth_db_capture() {
   local binary="$1"
   shift
@@ -430,10 +399,8 @@ start_node() {
   local node_help
   node_help="$("$binary" node --help 2>/dev/null || true)"
 
-  local sync_state_idle=false
   if grep -qF -- '--debug.startup-sync-state-idle' <<< "$node_help"; then
     reth_args+=(--debug.startup-sync-state-idle)
-    sync_state_idle=true
   fi
 
   if [[ "$phase" == "prerun" || "$phase" == *-setup ]] &&
@@ -474,44 +441,6 @@ start_node() {
   if [ "$follow_log" = "true" ]; then
     stdbuf -oL tail -f "$CURRENT_LOG" | sed -u "s/^/[reth] /" &
     TAIL_PID=$!
-  fi
-
-  for i in $(seq 1 60); do
-    if curl -sf "$HTTP_URL" -X POST \
-      -H 'Content-Type: application/json' \
-      -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-      > /dev/null 2>&1; then
-      echo "reth (${label}/${phase}) RPC is up after ${i}s"
-      break
-    fi
-    if [ "$i" -eq 60 ]; then
-      echo "::error::reth (${label}/${phase}) failed to start within 60s"
-      cat "$CURRENT_LOG"
-      exit 1
-    fi
-    sleep 1
-  done
-
-  if [ "$sync_state_idle" = true ]; then
-    for i in $(seq 1 300); do
-      sync_result="$(curl -sf "$HTTP_URL" -X POST \
-        -H 'Content-Type: application/json' \
-        -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null || true)"
-      if [ -n "$sync_result" ] && jq -e '.result == false' <<< "$sync_result" > /dev/null 2>&1; then
-        echo "reth (${label}/${phase}) pipeline finished after ${i}s"
-        break
-      fi
-      if [ "$i" -eq 300 ]; then
-        echo "::error::reth (${label}/${phase}) pipeline did not finish within 300s"
-        cat "$CURRENT_LOG"
-        exit 1
-      fi
-      sleep 1
-    done
-  fi
-
-  if [[ "$phase" == *-setup ]]; then
-    wait_for_prerun_head
   fi
 }
 
