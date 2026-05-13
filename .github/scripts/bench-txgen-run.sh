@@ -18,6 +18,28 @@ set -euxo pipefail
 LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
+
+# Resolve git SHA for this run label
+GIT_SHA=""
+case "$LABEL" in
+  baseline*) GIT_SHA="${BASELINE_REF:-}" ;;
+  feature*)  GIT_SHA="${FEATURE_REF:-}" ;;
+esac
+
+# Resolve git-ref: tag if tagged, otherwise branch name, otherwise raw SHA
+GIT_REF="$GIT_SHA"
+if [ -n "$GIT_SHA" ]; then
+  TAG_NAME=$(git tag --points-at "$GIT_SHA" 2>/dev/null | head -1)
+  if [ -n "$TAG_NAME" ]; then
+    GIT_REF="$TAG_NAME"
+  else
+    BRANCH_NAME=$(git branch -r --points-at "$GIT_SHA" 2>/dev/null | sed 's|^ *origin/||' | head -1)
+    if [ -n "$BRANCH_NAME" ]; then
+      GIT_REF="$BRANCH_NAME"
+    fi
+  fi
+fi
+
 DATADIR_NAME="datadir"
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 if [ "$BIG_BLOCKS" = "true" ]; then
@@ -325,6 +347,10 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
   --wait-for-persistence never \
-  --report json:"$OUTPUT_DIR/report.json" 2>&1 | sed -u "s/^/[bench] /"
+  --report json:"$OUTPUT_DIR/report.json" \
+  -m "git-sha=$GIT_SHA" \
+  -m "git-ref=$GIT_REF" \
+  -m "platform=ethereum" \
+  -m "scenario=replay" 2>&1 | sed -u "s/^/[bench] /"
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
