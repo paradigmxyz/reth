@@ -227,7 +227,7 @@ suite_slug="$(
     sed -E 's/[^A-Za-z0-9_-]+/-/g; s/^-+//; s/-+$//'
 )"
 
-sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+sudo schelk recover -y --kill
 sudo schelk mount -y
 
 if ! manifest_object="$(resolve_manifest_object "$BENCHMARKOOR_SNAPSHOT")"; then

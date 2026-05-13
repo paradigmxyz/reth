@@ -42,6 +42,7 @@ ENGINE_PORT="8551"
 
 TAIL_PID=""
 CURRENT_LOG=""
+RESET_TIMINGS_FILE=""
 
 cleanup() {
   if [ -n "${TAIL_PID:-}" ]; then
@@ -70,6 +71,36 @@ elapsed_secs() {
   awk -v ns="$(( end_ns - start_ns ))" 'BEGIN { printf "%.6f", ns / 1000000000 }'
 }
 
+record_reset_timing() {
+  local step="$1"
+  local elapsed_secs="$2"
+  local status="${3:-0}"
+
+  if [ -n "${RESET_TIMINGS_FILE:-}" ]; then
+    echo "Reset timing: ${step}=${elapsed_secs}s status=${status}"
+    jq -nc \
+      --arg step "$step" \
+      --argjson elapsed_secs "$elapsed_secs" \
+      --argjson status "$status" \
+      '{step: $step, elapsed_secs: $elapsed_secs, status: $status}' >> "$RESET_TIMINGS_FILE"
+  fi
+}
+
+time_reset_step() {
+  local step="$1"
+  shift
+
+  local start_ns elapsed status
+  start_ns="$(now_ns)"
+  set +e
+  "$@"
+  status="$?"
+  set -e
+  elapsed="$(elapsed_secs "$start_ns")"
+  record_reset_timing "$step" "$elapsed" "$status"
+  return "$status"
+}
+
 reset_strategy() {
   case "${BENCH_RESET_STRATEGY:-schelk}" in
     unwind | schelk) printf '%s\n' "${BENCH_RESET_STRATEGY:-schelk}" ;;
@@ -91,10 +122,10 @@ ensure_jwt_secret() {
 }
 
 drop_caches() {
-  sync
-  sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-  free -h
-  grep Cached /proc/meminfo
+  time_reset_step "drop_caches.sync" sync
+  time_reset_step "drop_caches.write" sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+  time_reset_step "drop_caches.free" free -h
+  time_reset_step "drop_caches.meminfo" grep Cached /proc/meminfo
 }
 
 rpc_call() {
@@ -330,9 +361,9 @@ stop_node_required() {
 }
 
 recover_schelk() {
-  stop_node
-  sudo schelk recover -y --kill || sudo schelk full-recover -y || true
-  sudo schelk mount -y
+  time_reset_step "stop_node" stop_node
+  time_reset_step "schelk.recover" sudo schelk recover -y --kill
+  time_reset_step "schelk.mount" sudo schelk mount -y
   if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
     echo "::error::Failed to mount benchmark datadir at ${DATADIR}"
     ls -la "$SCHELK_MOUNT" || true
@@ -352,8 +383,8 @@ reset_to_prerun_state() {
       recover_schelk
       ;;
     unwind)
-      stop_node_required
-      unwind_to_prerun_head "$binary"
+      time_reset_step "stop_node" stop_node_required
+      time_reset_step "reth.unwind" unwind_to_prerun_head "$binary"
       drop_caches
       ;;
   esac
@@ -558,9 +589,11 @@ append_benchmarkoor_failure_result() {
   local run_type="$5"
   local strategy="$6"
   local reset_elapsed_secs="$7"
-  local wall_elapsed_secs="$8"
-  local benchmarkoor_status="$9"
-  local results="${10}"
+  local reset_timings_json="$8"
+  local reset_timing_steps_json="$9"
+  local wall_elapsed_secs="${10}"
+  local benchmarkoor_status="${11}"
+  local results="${12}"
 
   local status phase error_summary
   status="$(benchmarkoor_failure_status "$native_out")"
@@ -581,6 +614,8 @@ append_benchmarkoor_failure_result() {
     --arg phase "$phase" \
     --arg error_summary "$error_summary" \
     --argjson reset_elapsed_secs "$reset_elapsed_secs" \
+    --argjson reset_timings "$reset_timings_json" \
+    --argjson reset_timing_steps "$reset_timing_steps_json" \
     --argjson wall_elapsed_secs "$wall_elapsed_secs" \
     --argjson benchmarkoor_exit_code "$benchmarkoor_status" \
     '{
@@ -603,7 +638,9 @@ append_benchmarkoor_failure_result() {
       gas_per_second: null,
       testing_gas_per_sec: null,
       testing_gas_used: 0,
-      testing_elapsed: null
+      testing_elapsed: null,
+      reset_timings: $reset_timings,
+      reset_timing_steps: $reset_timing_steps
     }' >> "$results"
 }
 
@@ -680,13 +717,19 @@ while IFS= read -r test_entry; do
   test_slug="$(safe_name "$test_name")"
   log_path="${output_dir}/logs/$(safe_name "${label}-${test_slug}").log"
   native_out="${output_dir}/native-$(safe_name "$test_slug").jsonl"
+  reset_timings_file="${output_dir}/reset-timings-$(safe_name "${label}-${test_slug}").jsonl"
+  : > "$reset_timings_file"
   before_count="$(wc -l < "$results" | tr -d ' ')"
   test_start_ns="$(now_ns)"
   reset_start_ns="$(now_ns)"
 
   echo "=== ${label}: ${test_name} ==="
+  RESET_TIMINGS_FILE="$reset_timings_file"
   reset_to_prerun_state "$binary"
   reset_elapsed_secs="$(elapsed_secs "$reset_start_ns")"
+  reset_timing_steps_json="$(jq -sc '.' "$reset_timings_file")"
+  reset_timings_json="$(jq -sc 'map({(.step): .elapsed_secs}) | add // {}' "$reset_timings_file")"
+  RESET_TIMINGS_FILE=""
   start_node "$binary" "$label" "$output_dir" "${test_slug}-setup" "$log_path" false true
 
   restart_command="$(
@@ -721,6 +764,8 @@ while IFS= read -r test_entry; do
     --arg gas_bucket "$gas_bucket" \
     --arg reset_strategy "$strategy" \
     --argjson reset_elapsed_secs "$reset_elapsed_secs" \
+    --argjson reset_timings "$reset_timings_json" \
+    --argjson reset_timing_steps "$reset_timing_steps_json" \
     --argjson wall_elapsed_secs "$wall_elapsed_secs" \
     'inputs | fromjson? | select(.kind == "run_many_result") |
       . + {
@@ -731,6 +776,8 @@ while IFS= read -r test_entry; do
         gas_bucket: $gas_bucket,
         reset_strategy: $reset_strategy,
         reset_elapsed_secs: $reset_elapsed_secs,
+        reset_timings: $reset_timings,
+        reset_timing_steps: $reset_timing_steps,
         wall_elapsed_secs: $wall_elapsed_secs
       }' \
     "$native_out" >> "$results"
@@ -747,6 +794,8 @@ while IFS= read -r test_entry; do
       "$run_type" \
       "$strategy" \
       "$reset_elapsed_secs" \
+      "$reset_timings_json" \
+      "$reset_timing_steps_json" \
       "$wall_elapsed_secs" \
       "$benchmarkoor_status" \
       "$results"
@@ -761,6 +810,8 @@ while IFS= read -r test_entry; do
       "$run_type" \
       "$strategy" \
       "$reset_elapsed_secs" \
+      "$reset_timings_json" \
+      "$reset_timing_steps_json" \
       "$wall_elapsed_secs" \
       0 \
       "$results"

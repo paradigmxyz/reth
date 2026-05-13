@@ -67,6 +67,34 @@ def median(values: list[float]) -> float:
     return statistics.median(values) if values else 0.0
 
 
+def summarize_reset_timings(rows: list[dict]) -> dict[str, dict[str, dict[str, float]]]:
+    timing_values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        run_type = row.get("run_type")
+        timings = row.get("reset_timings")
+        if run_type not in ("baseline", "feature") or not isinstance(timings, dict):
+            continue
+        for step, value in timings.items():
+            try:
+                seconds = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(seconds):
+                timing_values[run_type][step].append(seconds)
+
+    summary = {}
+    for run_type, steps in timing_values.items():
+        summary[run_type] = {}
+        for step, values in sorted(steps.items()):
+            summary[run_type][step] = {
+                "count": len(values),
+                "total_seconds": sum(values),
+                "median_seconds": median(values),
+                "mean_seconds": sum(values) / len(values),
+            }
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", required=True, type=Path)
@@ -142,6 +170,7 @@ def main() -> None:
 
     failures = [row for row in normalized if row.get("status") != "ok"]
     benchmark_rows = [row for row in normalized if row.get("status") == "ok"]
+    reset_timing_summary = summarize_reset_timings(normalized)
 
     aggregate: dict[str, dict[str, float]] = {}
     for run_type in ("baseline", "feature"):
@@ -184,6 +213,7 @@ def main() -> None:
             "total_gas_per_second": total_change,
             "total_wall_time": wall_time_change,
         },
+        "reset_timing_summary": reset_timing_summary,
         "tests": tests,
         "failures": failures,
         "raw_results": normalized,
@@ -219,6 +249,38 @@ def main() -> None:
         "| Per-test geomean gas/sec | "
         f"n/a | n/a | {fmt_change(geomean_change)} |\n\n"
     )
+    if reset_timing_summary:
+        steps = sorted(
+            {
+                step
+                for run_type in reset_timing_summary.values()
+                for step in run_type.keys()
+            }
+        )
+        md.append("## Reset Timing\n\n")
+        md.append("| Step | Baseline total | Baseline median | Feature total | Feature median |\n")
+        md.append("|------|----------------|-----------------|---------------|----------------|\n")
+        for step in steps:
+            baseline_timing = reset_timing_summary.get("baseline", {}).get(step)
+            feature_timing = reset_timing_summary.get("feature", {}).get(step)
+            baseline_total = (
+                fmt_duration(baseline_timing["total_seconds"]) if baseline_timing else "n/a"
+            )
+            baseline_median = (
+                fmt_duration(baseline_timing["median_seconds"]) if baseline_timing else "n/a"
+            )
+            feature_total = (
+                fmt_duration(feature_timing["total_seconds"]) if feature_timing else "n/a"
+            )
+            feature_median = (
+                fmt_duration(feature_timing["median_seconds"]) if feature_timing else "n/a"
+            )
+            md.append(
+                f"| `{md_escape(step)}` | {baseline_total} | {baseline_median} | "
+                f"{feature_total} | {feature_median} |\n"
+            )
+        md.append("\n")
+
     md.append("| Test | Gas | Baseline | Feature | Change | Status |\n")
     md.append("|------|-----|----------|---------|--------|--------|\n")
     for item in tests:
