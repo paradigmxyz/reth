@@ -1,9 +1,9 @@
 # Runs benchmarkoor-replay fixtures against a PR/branch and compares them with main.
 #
-# Unlike the normal reth benchmark workflow, this promotes the schelk checkpoint
-# after benchmarkoor's gas-bump/funding prerun. Each selected test then recovers
-# to that checkpoint, runs setup outside the measured window, restarts Reth,
-# drops Linux page cache, and measures only the testing fixture replay.
+# Unlike the normal reth benchmark workflow, this prepares a post gas-bump/funding
+# baseline with benchmarkoor-replay. Each selected test then resets to that
+# baseline, runs setup outside the measured window, restarts Reth, drops Linux
+# page cache, and measures only the testing fixture replay.
 
 on:
   # Temporary test trigger for branch-only workflow validation.
@@ -57,11 +57,6 @@ on:
         description: "Snapshot manifest URL, MinIO manifest path, or MinIO prefix"
         required: false
         default: "minio/reth-snapshots/perfnet-24358000-full/"
-        type: string
-      snapshot_mc_root:
-        description: "MinIO root used when snapshot is only a prefix"
-        required: false
-        default: "minio"
         type: string
       fixture_url:
         description: "Fixture archive URL/path override (empty uses suite default)"
@@ -121,6 +116,14 @@ on:
         required: false
         default: "6"
         type: string
+      reset_strategy:
+        description: "Reset state between tests"
+        required: false
+        default: "unwind"
+        type: choice
+        options:
+          - "unwind"
+          - "schelk"
       baseline_args:
         description: "Extra CLI args for the baseline reth node"
         required: false
@@ -163,6 +166,7 @@ jobs:
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_CORES: ${{ inputs.cores || '6' }}
       BENCH_MEMORY_MAX: "32G"
+      BENCH_RESET_STRATEGY: ${{ inputs.reset_strategy || 'unwind' }}
       BENCH_BASELINE_ARGS: ${{ inputs.baseline_args || '' }}
       BENCH_FEATURE_ARGS: ${{ inputs.feature_args || '' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
@@ -172,7 +176,7 @@ jobs:
       BENCHMARKOOR_TEST_TYPE: ${{ inputs.test_type || 'stateful' }}
       BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root || '~/projects/benchmarkoor-tests/configs' }}
       BENCHMARKOOR_SNAPSHOT: ${{ inputs.snapshot || 'minio/reth-snapshots/perfnet-24358000-full/' }}
-      BENCHMARKOOR_SNAPSHOT_MC_ROOT: ${{ inputs.snapshot_mc_root || 'minio' }}
+      BENCHMARKOOR_SNAPSHOT_MC_ROOT: "minio"
       BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '~/projects/benchmarkoor-replay' }}
       BENCHMARKOOR_CACHE: ${{ github.workspace }}/bench-work/benchmarkoor-cache
     steps:

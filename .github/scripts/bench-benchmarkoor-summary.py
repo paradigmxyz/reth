@@ -21,6 +21,14 @@ def fmt_rate(value: float) -> str:
     return f"{value:.2f} gas/s"
 
 
+def fmt_duration(seconds: float) -> str:
+    if seconds >= 3600:
+        return f"{seconds / 3600:.2f} h"
+    if seconds >= 60:
+        return f"{seconds / 60:.2f} min"
+    return f"{seconds:.2f} s"
+
+
 def fmt_change(value: float | None) -> str:
     if value is None or not math.isfinite(value):
         return "n/a"
@@ -55,7 +63,9 @@ def main() -> None:
     normalized = []
     for row in rows:
         if "gas_per_second" not in row:
-            row["gas_per_second"] = row.get("gas_per_sec") or 0.0
+            row["gas_per_second"] = (
+                row.get("testing_gas_per_sec") or row.get("gas_per_sec") or 0.0
+            )
         if "gas" not in row:
             row["gas"] = row.get("testing_gas_used") or 0
         if "elapsed_ms" not in row:
@@ -96,9 +106,14 @@ def main() -> None:
         type_rows = [row for row in normalized if row["run_type"] == run_type]
         total_gas = sum(float(row["gas"]) for row in type_rows)
         total_seconds = sum(float(row["elapsed_ms"]) / 1000.0 for row in type_rows)
+        total_wall_seconds = sum(
+            float(row.get("wall_elapsed_secs") or row.get("total_elapsed_secs") or 0.0)
+            for row in type_rows
+        )
         aggregate[run_type] = {
             "total_gas": total_gas,
             "total_seconds": total_seconds,
+            "total_wall_seconds": total_wall_seconds,
             "gas_per_second": total_gas / total_seconds if total_seconds > 0 else 0.0,
         }
 
@@ -112,6 +127,11 @@ def main() -> None:
     feature_total = aggregate["feature"]["gas_per_second"]
     if baseline_total > 0 and feature_total > 0:
         total_change = feature_total / baseline_total - 1.0
+    baseline_wall_total = aggregate["baseline"]["total_wall_seconds"]
+    feature_wall_total = aggregate["feature"]["total_wall_seconds"]
+    wall_time_change = None
+    if baseline_wall_total > 0 and feature_wall_total > 0:
+        wall_time_change = feature_wall_total / baseline_wall_total - 1.0
 
     summary = {
         "baseline": {"name": args.baseline_name, "ref": args.baseline_ref},
@@ -120,6 +140,7 @@ def main() -> None:
         "changes": {
             "geomean_gas_per_second": geomean_change,
             "total_gas_per_second": total_change,
+            "total_wall_time": wall_time_change,
         },
         "tests": tests,
         "raw_results": normalized,
@@ -142,6 +163,12 @@ def main() -> None:
         "| Total measured gas/sec | "
         f"{fmt_rate(baseline_total)} | {fmt_rate(feature_total)} | {fmt_change(total_change)} |\n"
     )
+    if baseline_wall_total > 0 or feature_wall_total > 0:
+        md.append(
+            "| Cumulative wall time | "
+            f"{fmt_duration(baseline_wall_total)} | {fmt_duration(feature_wall_total)} | "
+            f"{fmt_change(wall_time_change)} |\n"
+        )
     md.append(
         "| Per-test geomean gas/sec | "
         f"n/a | n/a | {fmt_change(geomean_change)} |\n\n"

@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 #
-# Runs benchmarkoor-replay against a schelk-managed Reth datadir.
+# Runs benchmarkoor-replay against a Reth datadir mounted by schelk.
 #
 # Usage:
 #   bench-benchmarkoor-run.sh prepare <binary> <output-dir>
 #   bench-benchmarkoor-run.sh run <label> <binary> <output-dir> <tests-jsonl>
 #   bench-benchmarkoor-run.sh restart-node <binary> <label> <output-dir> <phase> <log>
 #
-# The prepare mode starts Reth on the imported snapshot, replays benchmarkoor's
-# gas-bump/funding prerun, and promotes that state as the schelk baseline.
+# The prepare mode starts Reth on the imported snapshot and replays benchmarkoor's
+# gas-bump/funding prerun. With BENCH_RESET_STRATEGY=schelk, it promotes that
+# state as the schelk baseline. With BENCH_RESET_STRATEGY=unwind, it leaves the
+# scratch volume mounted at the post-prerun head and later uses Reth unwind to
+# reset each test.
 #
-# The run mode recovers to that post-prerun baseline for each test, starts
-# Reth, then delegates the measured setup/testing split to benchmarkoor-replay's
-# native `run-many --mode setup-then-testing --json` mode. The restart-node mode
-# is invoked by benchmarkoor-replay between setup and measured testing.
+# The run mode resets to the post-prerun baseline for each test, starts Reth,
+# then delegates the measured setup/testing split to benchmarkoor-replay's native
+# `run-many --mode setup-then-testing --json` mode. The restart-node mode is
+# invoked by benchmarkoor-replay between setup and measured testing.
 set -euo pipefail
 
 MODE="${1:?mode is required}"
@@ -51,6 +54,27 @@ fi
 
 safe_name() {
   printf '%s' "$1" | sed -E 's/[^A-Za-z0-9_.-]+/-/g; s/^-+//; s/-+$//' | cut -c1-180
+}
+
+now_ns() {
+  date +%s%N
+}
+
+elapsed_secs() {
+  local start_ns="$1"
+  local end_ns
+  end_ns="$(now_ns)"
+  awk -v ns="$(( end_ns - start_ns ))" 'BEGIN { printf "%.6f", ns / 1000000000 }'
+}
+
+reset_strategy() {
+  case "${BENCH_RESET_STRATEGY:-unwind}" in
+    unwind | schelk) printf '%s\n' "${BENCH_RESET_STRATEGY:-unwind}" ;;
+    *)
+      echo "::error::BENCH_RESET_STRATEGY must be 'unwind' or 'schelk', got '${BENCH_RESET_STRATEGY}'"
+      exit 1
+      ;;
+  esac
 }
 
 drop_caches() {
@@ -98,21 +122,28 @@ wait_for_prerun_head() {
   marker="$(prerun_head_file)"
   [ -f "$marker" ] || return 0
 
-  local expected_number_hex expected_hash actual_hash
+  local expected_number expected_number_hex expected_hash latest_hex latest_number actual_hash
+  expected_number="$(jq -er '.number' "$marker")"
   expected_number_hex="$(jq -er '.number_hex' "$marker")"
   expected_hash="$(jq -er '.hash' "$marker")"
 
   for i in $(seq 1 60); do
-    actual_hash="$(rpc_call eth_getBlockByNumber "[\"${expected_number_hex}\",false]" \
+    latest_hex="$(rpc_call eth_blockNumber | jq -r '.result // empty' 2>/dev/null || true)"
+    if [ -z "$latest_hex" ]; then
+      sleep 1
+      continue
+    fi
+    latest_number=$(( 16#${latest_hex#0x} ))
+    actual_hash="$(rpc_call eth_getBlockByNumber "[\"${latest_hex}\",false]" \
       | jq -r '.result.hash // empty' 2>/dev/null || true)"
-    if [ "$actual_hash" = "$expected_hash" ]; then
+    if [ "$latest_number" -eq "$expected_number" ] && [ "$actual_hash" = "$expected_hash" ]; then
       echo "Recovered post-prerun head ${expected_number_hex} (${expected_hash}) after ${i}s"
       return 0
     fi
     sleep 1
   done
 
-  echo "::error::Recovered datadir did not expose expected post-prerun head ${expected_number_hex} (${expected_hash})"
+  echo "::error::Recovered datadir did not expose expected post-prerun latest head ${expected_number_hex} (${expected_hash})"
   rpc_call eth_blockNumber || true
   exit 1
 }
@@ -127,7 +158,7 @@ reth_db_capture() {
   fi
   db_args+=(--datadir "$DATADIR" "$@")
 
-  "$binary" "${db_args[@]}" 2>&1
+  sudo "$binary" "${db_args[@]}" 2>&1
 }
 
 has_table_content() {
@@ -142,24 +173,60 @@ has_header_content() {
   }
 }
 
+parse_stage_checkpoint_block() {
+  sed -nE 's/.*block_number: ([0-9]+).*/\1/p' | head -n 1
+}
+
+output_has_expected_hash() {
+  local output="$1"
+  local expected_hash="$2"
+  has_table_content "$output" && grep -qi "${expected_hash#0x}" <<< "$output"
+}
+
+finish_stage_matches() {
+  local binary="$1"
+  local expected_number="$2"
+  local finish finish_number
+  finish="$(reth_db_capture "$binary" stage-checkpoints get --stage finish || true)"
+  finish_number="$(parse_stage_checkpoint_block <<< "$finish")"
+  [ -n "$finish_number" ] && [ "$finish_number" -eq "$expected_number" ]
+}
+
 persisted_prerun_head_present() {
   local binary="$1"
   local expected_number="$2"
   local expected_hash="$3"
   local canonical header
 
-  canonical="$(reth_db_capture "$binary" get mdbx CanonicalHeaders "$expected_number" || true)"
-  if ! has_table_content "$canonical" || ! grep -qi "${expected_hash#0x}" <<< "$canonical"; then
-    return 1
-  fi
-
   header="$(reth_db_capture "$binary" get static-file headers "$expected_number" || true)"
-  if has_header_content "$header"; then
-    return 0
+  if has_header_content "$header" && output_has_expected_hash "$header" "$expected_hash"; then
+    finish_stage_matches "$binary" "$expected_number"
+    return $?
   fi
 
-  header="$(reth_db_capture "$binary" get mdbx Headers "$expected_number" || true)"
-  has_header_content "$header"
+  canonical="$(reth_db_capture "$binary" get mdbx CanonicalHeaders "$expected_number" || true)"
+  if output_has_expected_hash "$canonical" "$expected_hash"; then
+    header="$(reth_db_capture "$binary" get mdbx Headers "$expected_number" || true)"
+    if has_header_content "$header"; then
+      finish_stage_matches "$binary" "$expected_number"
+      return $?
+    fi
+  fi
+
+  return 1
+}
+
+print_prerun_persistence_diagnostics() {
+  local binary="$1"
+  local expected_number="$2"
+  echo "Static-file header:"
+  reth_db_capture "$binary" get static-file headers "$expected_number" || true
+  echo "Finish stage checkpoint:"
+  reth_db_capture "$binary" stage-checkpoints get --stage finish || true
+  echo "CanonicalHeaders:"
+  reth_db_capture "$binary" get mdbx CanonicalHeaders "$expected_number" || true
+  echo "MDBX header:"
+  reth_db_capture "$binary" get mdbx Headers "$expected_number" || true
 }
 
 wait_for_persisted_prerun_head() {
@@ -175,25 +242,66 @@ wait_for_persisted_prerun_head() {
 
   for i in $(seq 1 120); do
     if persisted_prerun_head_present "$binary" "$expected_number" "$expected_hash"; then
-      echo "Post-prerun head ${expected_number} (${expected_hash}) is persisted after ${i}s"
+      echo "Post-prerun head ${expected_number} (${expected_hash}) is persisted and committed after ${i}s"
       return 0
     fi
     sleep 1
   done
 
   if [ "$required" != "true" ]; then
-    echo "Post-prerun head ${expected_number} (${expected_hash}) was not confirmed in on-disk Reth tables after 120s"
+    echo "Post-prerun head ${expected_number} (${expected_hash}) was not confirmed by static files and Finish checkpoint after 120s"
     return 1
   fi
 
-  echo "::error::Post-prerun head ${expected_number} (${expected_hash}) was not found in on-disk Reth tables"
-  echo "CanonicalHeaders:"
-  reth_db_capture "$binary" get mdbx CanonicalHeaders "$expected_number" || true
-  echo "Static-file header:"
-  reth_db_capture "$binary" get static-file headers "$expected_number" || true
-  echo "MDBX header:"
-  reth_db_capture "$binary" get mdbx Headers "$expected_number" || true
+  echo "::error::Post-prerun head ${expected_number} (${expected_hash}) was not confirmed by static files and Finish checkpoint"
+  print_prerun_persistence_diagnostics "$binary" "$expected_number"
   exit 1
+}
+
+reth_stage_unwind() {
+  local binary="$1"
+  local target="$2"
+
+  local -a unwind_args=(stage unwind)
+  if [ -f "$DATADIR/genesis.json" ]; then
+    unwind_args+=(--chain "$DATADIR/genesis.json")
+  fi
+  unwind_args+=(--datadir "$DATADIR" to-block "$target")
+
+  sudo "$binary" "${unwind_args[@]}"
+}
+
+unwind_to_prerun_head() {
+  local binary="$1"
+  local marker
+  marker="$(prerun_head_file)"
+  if [ ! -f "$marker" ]; then
+    echo "::error::Missing post-prerun head marker at ${marker}; cannot use unwind reset strategy"
+    exit 1
+  fi
+
+  local expected_number expected_hash start elapsed finish finish_number
+  expected_number="$(jq -er '.number' "$marker")"
+  expected_hash="$(jq -er '.hash' "$marker")"
+
+  start="$(now_ns)"
+  echo "Unwinding Reth datadir to post-prerun head ${expected_number} (${expected_hash})"
+  reth_stage_unwind "$binary" "$expected_number"
+  elapsed="$(elapsed_secs "$start")"
+
+  finish="$(reth_db_capture "$binary" stage-checkpoints get --stage finish || true)"
+  finish_number="$(parse_stage_checkpoint_block <<< "$finish")"
+  if [ "$finish_number" != "$expected_number" ]; then
+    echo "::error::Finish stage checkpoint is ${finish_number:-unknown}, expected ${expected_number} after unwind"
+    echo "$finish"
+    exit 1
+  fi
+  if ! persisted_prerun_head_present "$binary" "$expected_number" "$expected_hash"; then
+    echo "::error::Post-prerun head ${expected_number} (${expected_hash}) was not present after unwind"
+    print_prerun_persistence_diagnostics "$binary" "$expected_number"
+    exit 1
+  fi
+  echo "Unwind reset completed in ${elapsed}s"
 }
 
 stop_node() {
@@ -202,6 +310,22 @@ stop_node() {
     TAIL_PID=""
   fi
   sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
+  sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
+}
+
+stop_node_required() {
+  if [ -n "${TAIL_PID:-}" ]; then
+    kill "$TAIL_PID" 2>/dev/null || true
+    TAIL_PID=""
+  fi
+
+  if sudo systemctl list-units --all --full --no-legend "$RETH_SCOPE" | grep -q "$RETH_SCOPE"; then
+    if ! sudo systemctl stop "$RETH_SCOPE"; then
+      echo "::error::Failed to stop reth systemd scope ${RETH_SCOPE}"
+      sudo systemctl status "$RETH_SCOPE" --no-pager || true
+      exit 1
+    fi
+  fi
   sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
 }
 
@@ -216,6 +340,39 @@ recover_schelk() {
     exit 1
   fi
   drop_caches
+}
+
+reset_to_prerun_state() {
+  local binary="$1"
+  local strategy
+  strategy="$(reset_strategy)"
+
+  case "$strategy" in
+    schelk)
+      recover_schelk
+      ;;
+    unwind)
+      stop_node_required
+      unwind_to_prerun_head "$binary"
+      drop_caches
+      ;;
+  esac
+}
+
+finalize_run_state() {
+  local binary="$1"
+  local strategy
+  strategy="$(reset_strategy)"
+
+  case "$strategy" in
+    schelk)
+      sudo schelk recover -y --kill || true
+      ;;
+    unwind)
+      stop_node_required
+      unwind_to_prerun_head "$binary"
+      ;;
+  esac
 }
 
 start_node() {
@@ -388,6 +545,8 @@ run_benchmarkoor() {
     "BENCHMARKOOR_CACHE=$BENCHMARKOOR_CACHE" \
     "BENCH_CORES=${BENCH_CORES:-6}" \
     "BENCH_MEMORY_MAX=${BENCH_MEMORY_MAX:-32G}" \
+    "BENCH_RESET_STRATEGY=${BENCH_RESET_STRATEGY:-unwind}" \
+    "BENCH_PRERUN_HEAD_FILE=${BENCH_PRERUN_HEAD_FILE:-}" \
     "BENCH_BASELINE_ARGS=${BENCH_BASELINE_ARGS:-}" \
     "BENCH_FEATURE_ARGS=${BENCH_FEATURE_ARGS:-}" \
     "BENCH_METRICS_ADDR=${BENCH_METRICS_ADDR:-}" \
@@ -412,6 +571,7 @@ if [ "$MODE" = "prepare" ]; then
   binary="${1:?binary is required}"
   output_dir="${2:?output directory is required}"
   mkdir -p "$output_dir"
+  strategy="$(reset_strategy)"
 
   recover_schelk
   start_node "$binary" "prepare" "$output_dir" "prerun"
@@ -426,14 +586,16 @@ SH
   mapfile -d '' common < <(benchmarkoor_common_args "$binary" "$sudo_schelk")
   run_benchmarkoor "${common[@]}" baseline prepare --no-mount
   write_prerun_head_marker
-  wait_for_persisted_prerun_head "$binary" false ||
-    echo "Post-prerun head was not confirmed before shutdown; checking again after graceful stop"
 
-  stop_node
+  stop_node_required
   wait_for_persisted_prerun_head "$binary" true
-  sudo schelk promote -y
+  if [ "$strategy" = "schelk" ]; then
+    sudo schelk promote -y
+    echo "Promoted schelk baseline after benchmarkoor gas-bump/funding"
+  else
+    echo "Prepared unwind baseline after benchmarkoor gas-bump/funding"
+  fi
   sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-  echo "Promoted schelk baseline after benchmarkoor gas-bump/funding"
   exit 0
 fi
 
@@ -450,6 +612,7 @@ results="${output_dir}/results.jsonl"
 mkdir -p "$output_dir/logs"
 : > "$results"
 
+strategy="$(reset_strategy)"
 mapfile -d '' common < <(benchmarkoor_common_args "$binary" "schelk")
 run_type="feature"
 if [[ "$label" == baseline* ]]; then
@@ -464,9 +627,12 @@ while IFS= read -r test_entry; do
   log_path="${output_dir}/logs/$(safe_name "${label}-${test_slug}").log"
   native_out="${output_dir}/native-$(safe_name "$test_slug").jsonl"
   before_count="$(wc -l < "$results" | tr -d ' ')"
+  test_start_ns="$(now_ns)"
+  reset_start_ns="$(now_ns)"
 
   echo "=== ${label}: ${test_name} ==="
-  recover_schelk
+  reset_to_prerun_state "$binary"
+  reset_elapsed_secs="$(elapsed_secs "$reset_start_ns")"
   start_node "$binary" "$label" "$output_dir" "${test_slug}-setup" "$log_path" false true
 
   restart_command="$(
@@ -483,12 +649,25 @@ while IFS= read -r test_entry; do
     --restart-node-command "$restart_command" \
     --json 2>&1 | tee "$native_out"
 
+  wall_elapsed_secs="$(elapsed_secs "$test_start_ns")"
+  echo "=== ${label}: ${test_name} completed in ${wall_elapsed_secs}s (reset=${reset_elapsed_secs}s, strategy=${strategy}) ==="
+
   jq -Rnc \
     --arg label "$label" \
     --arg run_type "$run_type" \
     --arg gas_bucket "$gas_bucket" \
+    --arg reset_strategy "$strategy" \
+    --argjson reset_elapsed_secs "$reset_elapsed_secs" \
+    --argjson wall_elapsed_secs "$wall_elapsed_secs" \
     'inputs | fromjson? | select(.kind == "run_many_result") |
-      . + {label: $label, run_type: $run_type, gas_bucket: $gas_bucket}' \
+      . + {
+        label: $label,
+        run_type: $run_type,
+        gas_bucket: $gas_bucket,
+        reset_strategy: $reset_strategy,
+        reset_elapsed_secs: $reset_elapsed_secs,
+        wall_elapsed_secs: $wall_elapsed_secs
+      }' \
     "$native_out" >> "$results"
 
   after_count="$(wc -l < "$results" | tr -d ' ')"
@@ -498,5 +677,5 @@ while IFS= read -r test_entry; do
   fi
 done < "$tests_jsonl"
 
-sudo schelk recover -y --kill || true
+finalize_run_state "$binary"
 echo "results=${results}"
