@@ -309,7 +309,7 @@ pub enum PendingSessionEvent<N: NetworkPrimitives> {
         client_id: String,
         /// The TCP listening port the peer announced in its `Hello` message, if non-zero.
         ///
-        /// See [`ActiveSessionHandle::peer_listen_port`] for context.
+        /// See `ActiveSessionHandle::peer_listen_port` for context.
         peer_listen_port: Option<u16>,
     },
     /// Handshake unsuccessful, session was disconnected.
