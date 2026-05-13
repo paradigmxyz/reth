@@ -24,7 +24,6 @@ import random
 import sys
 
 GIGAGAS = 1_000_000_000
-T_CRITICAL = 1.96  # two-tailed 95% confidence
 BOOTSTRAP_ITERATIONS = 10_000
 
 
@@ -196,6 +195,41 @@ def _paired_data(
     return pairs, lat_diffs_ms, mgas_diffs, total_lat_diffs_ms, persist_diffs_ms
 
 
+def _bootstrap_ci(rng: random.Random, diffs: list[float], n_iter: int = BOOTSTRAP_ITERATIONS) -> float:
+    """Compute 95% bootstrap CI half-width for the mean of *diffs*."""
+    if len(diffs) < 2:
+        return 0.0
+    n = len(diffs)
+    boot_means = sorted(
+        sum(rng.choices(diffs, k=n)) / n for _ in range(n_iter)
+    )
+    lo = int(n_iter * 0.025)
+    hi = int(n_iter * 0.975)
+    return (boot_means[hi] - boot_means[lo]) / 2
+
+
+def _bootstrap_percentile_ci(
+    rng: random.Random,
+    pairs: list[tuple[float, float]],
+    pct: int,
+    n_iter: int = BOOTSTRAP_ITERATIONS,
+) -> float:
+    """Compute 95% bootstrap CI half-width for a difference-of-percentiles."""
+    if len(pairs) < 2:
+        return 0.0
+    n = len(pairs)
+    boot_diffs = []
+    for _ in range(n_iter):
+        sample = rng.choices(pairs, k=n)
+        b_sorted = sorted(p[0] for p in sample)
+        f_sorted = sorted(p[1] for p in sample)
+        boot_diffs.append(percentile(f_sorted, pct) - percentile(b_sorted, pct))
+    boot_diffs.sort()
+    lo = int(n_iter * 0.025)
+    hi = int(n_iter * 0.975)
+    return (boot_diffs[hi] - boot_diffs[lo]) / 2
+
+
 def compute_paired_stats(
     baseline_runs: list[list[dict]],
     feature_runs: list[list[dict]],
@@ -203,7 +237,7 @@ def compute_paired_stats(
     """Compute paired statistics between baseline and feature runs.
 
     Each pair (baseline_runs[i], feature_runs[i]) produces per-block diffs.
-    All diffs are pooled for the final CI.
+    All diffs are pooled and CIs are computed via bootstrap resampling.
     """
     all_pairs = []
     all_lat_diffs = []
@@ -225,57 +259,38 @@ def compute_paired_stats(
 
     n = len(all_lat_diffs)
     mean_diff = sum(all_lat_diffs) / n
-    std_diff = stddev(all_lat_diffs, mean_diff)
-    se = std_diff / math.sqrt(n) if n > 0 else 0.0
-    ci = T_CRITICAL * se
 
-    # Bootstrap CI on difference-of-percentiles (resample paired blocks)
+    rng = random.Random(42)
+
+    # Bootstrap CI for all metrics (unified approach)
+    ci = _bootstrap_ci(rng, all_lat_diffs)
+    mgas_ci = _bootstrap_ci(rng, all_mgas_diffs) if all_mgas_diffs else 0.0
+    wall_clock_ci_ms = _bootstrap_ci(rng, all_total_lat_diffs) if all_total_lat_diffs else 0.0
+    persist_ci_ms = _bootstrap_ci(rng, all_persist_diffs) if all_persist_diffs else 0.0
+
+    # Bootstrap CI for percentile diffs
     base_lats = sorted([p[0] for p in all_pairs])
     feature_lats = sorted([p[1] for p in all_pairs])
     p50_diff = percentile(feature_lats, 50) - percentile(base_lats, 50)
     p90_diff = percentile(feature_lats, 90) - percentile(base_lats, 90)
     p99_diff = percentile(feature_lats, 99) - percentile(base_lats, 99)
 
-    rng = random.Random(42)
-    p50_boot, p90_boot, p99_boot = [], [], []
-    for _ in range(BOOTSTRAP_ITERATIONS):
-        sample = rng.choices(all_pairs, k=n)
-        b_sorted = sorted(p[0] for p in sample)
-        f_sorted = sorted(p[1] for p in sample)
-        p50_boot.append(percentile(f_sorted, 50) - percentile(b_sorted, 50))
-        p90_boot.append(percentile(f_sorted, 90) - percentile(b_sorted, 90))
-        p99_boot.append(percentile(f_sorted, 99) - percentile(b_sorted, 99))
-    p50_boot.sort()
-    p90_boot.sort()
-    p99_boot.sort()
-    lo = int(BOOTSTRAP_ITERATIONS * 0.025)
-    hi = int(BOOTSTRAP_ITERATIONS * 0.975)
+    p50_ci = _bootstrap_percentile_ci(rng, all_pairs, 50)
+    p90_ci = _bootstrap_percentile_ci(rng, all_pairs, 90)
+    p99_ci = _bootstrap_percentile_ci(rng, all_pairs, 99)
 
     mean_mgas_diff = sum(all_mgas_diffs) / len(all_mgas_diffs) if all_mgas_diffs else 0.0
-    std_mgas_diff = stddev(all_mgas_diffs, mean_mgas_diff) if len(all_mgas_diffs) > 1 else 0.0
-    mgas_se = std_mgas_diff / math.sqrt(len(all_mgas_diffs)) if all_mgas_diffs else 0.0
-    mgas_ci = T_CRITICAL * mgas_se
-
-    mean_total_diff = sum(all_total_lat_diffs) / len(all_total_lat_diffs) if all_total_lat_diffs else 0.0
-    std_total_diff = stddev(all_total_lat_diffs, mean_total_diff) if len(all_total_lat_diffs) > 1 else 0.0
-    total_se = std_total_diff / math.sqrt(len(all_total_lat_diffs)) if all_total_lat_diffs else 0.0
-    wall_clock_ci_ms = T_CRITICAL * total_se
-
-    mean_persist_diff = sum(all_persist_diffs) / len(all_persist_diffs) if all_persist_diffs else 0.0
-    std_persist_diff = stddev(all_persist_diffs, mean_persist_diff) if len(all_persist_diffs) > 1 else 0.0
-    persist_se = std_persist_diff / math.sqrt(len(all_persist_diffs)) if all_persist_diffs else 0.0
-    persist_ci_ms = T_CRITICAL * persist_se
 
     return {
         "n": n,
         "mean_diff_ms": mean_diff,
         "ci_ms": ci,
         "p50_diff_ms": p50_diff,
-        "p50_ci_ms": (p50_boot[hi] - p50_boot[lo]) / 2,
+        "p50_ci_ms": p50_ci,
         "p90_diff_ms": p90_diff,
-        "p90_ci_ms": (p90_boot[hi] - p90_boot[lo]) / 2,
+        "p90_ci_ms": p90_ci,
         "p99_diff_ms": p99_diff,
-        "p99_ci_ms": (p99_boot[hi] - p99_boot[lo]) / 2,
+        "p99_ci_ms": p99_ci,
         "mean_mgas_diff": mean_mgas_diff,
         "mgas_ci": mgas_ci,
         "wall_clock_ci_ms": wall_clock_ci_ms,
