@@ -1,8 +1,8 @@
-//! Flattened trie overlays for in-memory blocks.
+//! Flattened state trie overlays for in-memory blocks.
 //!
-//! Payload validation needs a view of the trie as of an in-memory parent block even when that
-//! parent has not been persisted yet. [`TrieOverlayManager`] tracks those in-memory blocks and
-//! builds reusable flattened overlays on demand.
+//! Payload validation needs a view of the state trie as of an in-memory parent block even when that
+//! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
+//! builds reusable flattened state trie overlays on demand.
 
 use crate::{EthPrimitives, ExecutedBlock};
 use alloy_primitives::{
@@ -15,34 +15,34 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use std::{collections::HashMap, sync::Arc};
 use tracing::trace;
 
-/// Manages flattened trie overlays for in-memory blocks.
+/// Manages flattened state trie overlays for in-memory blocks.
 ///
-/// The manager owns the in-memory block graph and a cache of flattened overlays keyed by
-/// `(anchor_hash, tip_hash)`. [`TrieOverlay`] handles are cheap references back into this manager,
-/// so payload validation can pass them around without cloning block segments.
+/// The manager owns the in-memory block graph and a cache of flattened state trie overlays keyed by
+/// `(anchor_hash, tip_hash)`. [`StateTrieOverlay`] handles are cheap references back into this
+/// manager, so payload validation can pass them around without cloning block segments.
 #[derive(Clone)]
-pub struct TrieOverlayManager<N: NodePrimitives = EthPrimitives> {
-    inner: Arc<RwLock<TrieOverlayManagerInner<N>>>,
+pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
+    inner: Arc<RwLock<StateTrieOverlayManagerInner<N>>>,
 }
 
-impl<N: NodePrimitives> Default for TrieOverlayManager<N> {
+impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
     fn default() -> Self {
         Self { inner: Default::default() }
     }
 }
 
-impl<N: NodePrimitives> std::fmt::Debug for TrieOverlayManager<N> {
+impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlayManager<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let inner = self.inner.read();
-        f.debug_struct("TrieOverlayManager")
+        f.debug_struct("StateTrieOverlayManager")
             .field("blocks", &inner.blocks.len())
             .field("overlays", &inner.overlays.len())
             .finish()
     }
 }
 
-impl<N: NodePrimitives> TrieOverlayManager<N> {
-    /// Inserts an executed in-memory block into the overlay manager.
+impl<N: NodePrimitives> StateTrieOverlayManager<N> {
+    /// Inserts an executed in-memory block into the state trie overlay manager.
     pub fn insert_block(&self, block: ExecutedBlock<N>) {
         let hash = block.recovered_block().hash();
         let mut inner = self.inner.write();
@@ -59,7 +59,7 @@ impl<N: NodePrimitives> TrieOverlayManager<N> {
 
     /// Removes a block from the live block graph.
     ///
-    /// Leased blocks are kept until all overlay handles that reference them are dropped.
+    /// Leased blocks are kept until all state trie overlay handles that reference them are dropped.
     pub fn remove_block(&self, hash: B256) {
         let mut inner = self.inner.write();
         if let Some(entry) = inner.blocks.get_mut(&hash) {
@@ -84,7 +84,7 @@ impl<N: NodePrimitives> TrieOverlayManager<N> {
     ///
     /// If the parent is not in memory, no overlay is required and the parent itself is returned as
     /// the anchor.
-    pub fn overlay_for_parent(&self, parent_hash: B256) -> TrieOverlayTarget<N> {
+    pub fn overlay_for_parent(&self, parent_hash: B256) -> StateTrieOverlayTarget<N> {
         let mut inner = self.inner.write();
         inner.overlay_for_parent(self.clone(), parent_hash)
     }
@@ -102,7 +102,7 @@ impl<N: NodePrimitives> TrieOverlayManager<N> {
             }
 
             let blocks = inner.blocks_to_anchor(tip_hash, anchor_hash).unwrap_or_else(|| {
-                panic!("TrieOverlay for head {tip_hash} cannot be anchored to {anchor_hash}")
+                panic!("StateTrieOverlay for head {tip_hash} cannot be anchored to {anchor_hash}")
             });
             let parent_input = blocks.first().and_then(|block| {
                 if block.recovered_block().parent_hash() == anchor_hash {
@@ -129,38 +129,38 @@ impl<N: NodePrimitives> TrieOverlayManager<N> {
 
 /// Overlay information for a payload parent.
 #[derive(Clone, Debug)]
-pub struct TrieOverlayTarget<N: NodePrimitives = EthPrimitives> {
+pub struct StateTrieOverlayTarget<N: NodePrimitives = EthPrimitives> {
     /// The persisted ancestor this overlay is based on.
     pub anchor_hash: B256,
     /// The in-memory overlay, if the requested parent has unpersisted ancestors.
-    pub overlay: Option<TrieOverlay<N>>,
+    pub overlay: Option<StateTrieOverlay<N>>,
 }
 
 #[derive(Default)]
-struct TrieOverlayManagerInner<N: NodePrimitives = EthPrimitives> {
+struct StateTrieOverlayManagerInner<N: NodePrimitives = EthPrimitives> {
     blocks: B256Map<ManagedBlock<N>>,
     overlays: HashMap<OverlayCacheKey, Arc<TrieInputSorted>>,
 }
 
-impl<N: NodePrimitives> TrieOverlayManagerInner<N> {
+impl<N: NodePrimitives> StateTrieOverlayManagerInner<N> {
     fn overlay_for_parent(
         &mut self,
-        manager: TrieOverlayManager<N>,
+        manager: StateTrieOverlayManager<N>,
         parent_hash: B256,
-    ) -> TrieOverlayTarget<N> {
+    ) -> StateTrieOverlayTarget<N> {
         match self.retain_live_segment(parent_hash) {
             Some(segment) => {
                 let num_blocks = segment.block_hashes.len();
                 let anchor_hash = segment.anchor_hash;
-                let lease = Arc::new(TrieOverlayLease {
+                let lease = Arc::new(StateTrieOverlayLease {
                     inner: Arc::clone(&manager.inner),
                     block_hashes: segment.block_hashes,
                     valid_anchors: segment.valid_anchors,
                 });
 
-                TrieOverlayTarget {
+                StateTrieOverlayTarget {
                     anchor_hash,
-                    overlay: Some(TrieOverlay {
+                    overlay: Some(StateTrieOverlay {
                         manager,
                         tip_hash: parent_hash,
                         anchor_hash,
@@ -169,7 +169,7 @@ impl<N: NodePrimitives> TrieOverlayManagerInner<N> {
                     }),
                 }
             }
-            None => TrieOverlayTarget { anchor_hash: parent_hash, overlay: None },
+            None => StateTrieOverlayTarget { anchor_hash: parent_hash, overlay: None },
         }
     }
 
@@ -282,22 +282,22 @@ struct OverlaySegment {
     valid_anchors: B256Set,
 }
 
-/// Flattened trie overlay for one in-memory parent block.
+/// Flattened state trie overlay for one in-memory parent block.
 ///
 /// This is a lightweight manager-backed handle. It does not own the block segment it represents;
-/// the manager owns the in-memory blocks and cached flattened overlays.
+/// the manager owns the in-memory blocks and cached flattened state trie overlays.
 #[derive(Clone)]
-pub struct TrieOverlay<N: NodePrimitives = EthPrimitives> {
-    manager: TrieOverlayManager<N>,
+pub struct StateTrieOverlay<N: NodePrimitives = EthPrimitives> {
+    manager: StateTrieOverlayManager<N>,
     tip_hash: B256,
     anchor_hash: B256,
     num_blocks: usize,
-    lease: Arc<TrieOverlayLease<N>>,
+    lease: Arc<StateTrieOverlayLease<N>>,
 }
 
-impl<N: NodePrimitives> std::fmt::Debug for TrieOverlay<N> {
+impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlay<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TrieOverlay")
+        f.debug_struct("StateTrieOverlay")
             .field("head_hash", &self.head_hash())
             .field("anchor_hash", &self.anchor_hash())
             .field("num_blocks", &self.num_blocks())
@@ -305,7 +305,7 @@ impl<N: NodePrimitives> std::fmt::Debug for TrieOverlay<N> {
     }
 }
 
-impl<N: NodePrimitives> TrieOverlay<N> {
+impl<N: NodePrimitives> StateTrieOverlay<N> {
     /// Returns the hash of the in-memory block this overlay represents.
     pub const fn head_hash(&self) -> B256 {
         self.tip_hash
@@ -346,7 +346,7 @@ impl<N: NodePrimitives> TrieOverlay<N> {
     pub fn get(&self, anchor_hash: B256) -> Arc<TrieInputSorted> {
         assert!(
             self.has_anchor_hash(anchor_hash),
-            "TrieOverlay for head {} cannot be anchored to {anchor_hash}",
+            "StateTrieOverlay for head {} cannot be anchored to {anchor_hash}",
             self.head_hash()
         );
 
@@ -354,13 +354,13 @@ impl<N: NodePrimitives> TrieOverlay<N> {
     }
 }
 
-struct TrieOverlayLease<N: NodePrimitives = EthPrimitives> {
-    inner: Arc<RwLock<TrieOverlayManagerInner<N>>>,
+struct StateTrieOverlayLease<N: NodePrimitives = EthPrimitives> {
+    inner: Arc<RwLock<StateTrieOverlayManagerInner<N>>>,
     block_hashes: Vec<B256>,
     valid_anchors: B256Set,
 }
 
-impl<N: NodePrimitives> Drop for TrieOverlayLease<N> {
+impl<N: NodePrimitives> Drop for StateTrieOverlayLease<N> {
     fn drop(&mut self) {
         let mut inner = self.inner.write();
         for hash in &self.block_hashes {
@@ -389,10 +389,10 @@ impl<N: NodePrimitives> OverlayCompute<N> {
     fn compute(self, anchor_hash: B256) -> TrieInputSorted {
         let Some(parent_input) = self.parent_input else {
             trace!(
-                target: "chain_state::trie_overlay",
+                target: "chain_state::state_trie_overlay",
                 %anchor_hash,
                 blocks = self.blocks.len(),
-                "building trie overlay from blocks"
+                "building state trie overlay from blocks"
             );
             let trie_data = self.blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
@@ -411,10 +411,10 @@ impl<N: NodePrimitives> OverlayCompute<N> {
         let trie_data = block.trie_data();
 
         trace!(
-            target: "chain_state::trie_overlay",
+            target: "chain_state::state_trie_overlay",
             %anchor_hash,
             head = %block.recovered_block().hash(),
-            "extending cached parent trie overlay"
+            "extending cached parent state trie overlay"
         );
 
         let mut overlay = parent_input.as_ref().clone();
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn returns_no_overlay_for_persisted_parent() {
-        let manager = TrieOverlayManager::<EthPrimitives>::default();
+        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
         let parent = B256::random();
 
         let target = manager.overlay_for_parent(parent);
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
-        let manager = TrieOverlayManager::default();
+        let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn prunes_cached_overlays_after_removing_blocks() {
-        let manager = TrieOverlayManager::default();
+        let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn existing_overlay_handle_survives_pruning_before_resolution() {
-        let manager = TrieOverlayManager::default();
+        let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());

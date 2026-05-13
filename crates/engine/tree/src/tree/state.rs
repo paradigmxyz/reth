@@ -6,7 +6,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock, TrieOverlay, TrieOverlayManager};
+use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlay, StateTrieOverlayManager};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -38,8 +38,8 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
-    /// Flattened trie overlays for in-memory blocks.
-    pub(crate) trie_overlays: TrieOverlayManager<N>,
+    /// Flattened state trie overlays for in-memory blocks.
+    pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -51,7 +51,7 @@ impl<N: NodePrimitives> TreeState<N> {
             current_canonical_head,
             parent_to_child: B256Map::default(),
             engine_kind,
-            trie_overlays: TrieOverlayManager::default(),
+            state_trie_overlays: StateTrieOverlayManager::default(),
         }
     }
 
@@ -97,9 +97,12 @@ impl<N: NodePrimitives> TreeState<N> {
         Some((parent_hash, blocks))
     }
 
-    /// Returns the trie overlay for a payload parent and its persisted anchor hash.
-    pub(crate) fn trie_overlay(&self, parent_hash: B256) -> (Option<TrieOverlay<N>>, B256) {
-        let target = self.trie_overlays.overlay_for_parent(parent_hash);
+    /// Returns the state trie overlay for a payload parent and its persisted anchor hash.
+    pub(crate) fn state_trie_overlay(
+        &self,
+        parent_hash: B256,
+    ) -> (Option<StateTrieOverlay<N>>, B256) {
+        let target = self.state_trie_overlays.overlay_for_parent(parent_hash);
         (target.overlay, target.anchor_hash)
     }
 
@@ -119,7 +122,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_number.entry(block_number).or_default().push(executed);
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.trie_overlays.insert_block(overlay_block);
+        self.state_trie_overlays.insert_block(overlay_block);
     }
 
     /// Remove single executed block by its hash.
@@ -129,7 +132,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// The removed block and the block hashes of its children.
     fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, B256Set)> {
         let executed = self.blocks_by_hash.remove(&hash)?;
-        self.trie_overlays.remove_block(hash);
+        self.state_trie_overlays.remove_block(hash);
 
         // Remove this block from collection of children of its parent block.
         let parent_entry = self.parent_to_child.entry(executed.recovered_block().parent_hash());

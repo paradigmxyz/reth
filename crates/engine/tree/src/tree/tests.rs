@@ -20,7 +20,7 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, TrieOverlayManager,
+    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
@@ -265,9 +265,9 @@ impl TestHarness {
             parent_hash = hash;
         }
 
-        let trie_overlays = TrieOverlayManager::default();
+        let state_trie_overlays = StateTrieOverlayManager::default();
         for block in &blocks {
-            trie_overlays.insert_block(block.clone());
+            state_trie_overlays.insert_block(block.clone());
         }
 
         self.tree.state.tree_state = TreeState {
@@ -276,7 +276,7 @@ impl TestHarness {
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
-            trie_overlays,
+            state_trie_overlays,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();

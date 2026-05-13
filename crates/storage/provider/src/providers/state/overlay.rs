@@ -1,7 +1,7 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
-use reth_chain_state::{EthPrimitives, TrieOverlay};
+use reth_chain_state::{EthPrimitives, StateTrieOverlay};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
@@ -72,7 +72,7 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
         state: Arc<HashedPostStateSorted>,
     },
     /// Managed overlay computed on first access.
-    Managed(TrieOverlay<N>),
+    Managed(StateTrieOverlay<N>),
 }
 
 /// Builder for calculating trie and hashed-state overlays.
@@ -106,31 +106,34 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// This overlay will be applied on top of any reverts applied via `anchor_hash`.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
-        if let Some(OverlaySource::Managed(trie_overlay)) = source.as_ref() {
-            self.assert_trie_overlay_anchor(trie_overlay);
+        if let Some(OverlaySource::Managed(state_trie_overlay)) = source.as_ref() {
+            self.assert_state_trie_overlay_anchor(state_trie_overlay);
         }
         self.overlay_source = source;
         self
     }
 
-    fn assert_trie_overlay_anchor(&self, trie_overlay: &TrieOverlay<N>) {
-        let trie_overlay_anchor = trie_overlay.anchor_hash();
+    fn assert_state_trie_overlay_anchor(&self, state_trie_overlay: &StateTrieOverlay<N>) {
+        let state_trie_overlay_anchor = state_trie_overlay.anchor_hash();
         assert!(
-            trie_overlay_anchor == self.anchor_hash,
-            "TrieOverlay's anchor ({}) != OverlayBuilder's anchor ({})",
-            trie_overlay_anchor,
+            state_trie_overlay_anchor == self.anchor_hash,
+            "StateTrieOverlay's anchor ({}) != OverlayBuilder's anchor ({})",
+            state_trie_overlay_anchor,
             self.anchor_hash,
         );
     }
 
-    /// Set a trie overlay that will be computed on first access.
+    /// Set a state trie overlay that will be computed on first access.
     ///
-    /// Panics if the [`TrieOverlay`]'s anchor hash does not match [`Self`]'s `anchor_hash`.
-    pub fn with_trie_overlay(mut self, trie_overlay: Option<TrieOverlay<N>>) -> Self {
-        if let Some(trie_overlay) = trie_overlay.as_ref() {
-            self.assert_trie_overlay_anchor(trie_overlay);
+    /// Panics if the [`StateTrieOverlay`]'s anchor hash does not match [`Self`]'s `anchor_hash`.
+    pub fn with_state_trie_overlay(
+        mut self,
+        state_trie_overlay: Option<StateTrieOverlay<N>>,
+    ) -> Self {
+        if let Some(state_trie_overlay) = state_trie_overlay.as_ref() {
+            self.assert_state_trie_overlay_anchor(state_trie_overlay);
         }
-        self.overlay_source = trie_overlay.map(OverlaySource::Managed);
+        self.overlay_source = state_trie_overlay.map(OverlaySource::Managed);
         self
     }
 
@@ -182,7 +185,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
-            Some(OverlaySource::Managed(trie_overlay)) => Ok(trie_overlay.as_overlay(anchor_hash)),
+            Some(OverlaySource::Managed(state_trie_overlay)) => {
+                Ok(state_trie_overlay.as_overlay(anchor_hash))
+            }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.anchor_hash {
                     return Err(ProviderError::other(std::io::Error::other(format!(
@@ -250,8 +255,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         // If the DB tip has moved forward into the managed overlay then we still don't need to
         // revert; the overlay will generate a new in-memory view using only the relevant
         // blocks data.
-        if let Some(OverlaySource::Managed(trie_overlay)) = &self.overlay_source &&
-            trie_overlay.has_anchor_hash(db_tip_block.hash)
+        if let Some(OverlaySource::Managed(state_trie_overlay)) = &self.overlay_source &&
+            state_trie_overlay.has_anchor_hash(db_tip_block.hash)
         {
             return Ok(None)
         }
@@ -443,9 +448,12 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         Self { factory, overlay_builder, overlay_cache: Default::default() }
     }
 
-    /// Set a trie overlay that will be computed on first access.
-    pub fn with_trie_overlay(mut self, trie_overlay: Option<TrieOverlay<N>>) -> Self {
-        self.overlay_builder = self.overlay_builder.with_trie_overlay(trie_overlay);
+    /// Set a state trie overlay that will be computed on first access.
+    pub fn with_state_trie_overlay(
+        mut self,
+        state_trie_overlay: Option<StateTrieOverlay<N>>,
+    ) -> Self {
+        self.overlay_builder = self.overlay_builder.with_state_trie_overlay(state_trie_overlay);
         self.overlay_cache = Default::default();
         self
     }

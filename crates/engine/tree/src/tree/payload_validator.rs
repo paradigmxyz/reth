@@ -59,7 +59,7 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
-    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, TrieOverlay,
+    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, StateTrieOverlay,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -477,13 +477,14 @@ where
 
         // Fetch the managed parent overlay without computing it. Trie data is flattened on first
         // access or by the background prepare task after insertion.
-        let (trie_overlay, anchor_hash) = Self::get_parent_trie_overlay(parent_hash, ctx.state());
+        let (state_trie_overlay, anchor_hash) =
+            Self::get_parent_state_trie_overlay(parent_hash, ctx.state());
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
         let provider_factory = self.provider.clone();
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-            .with_trie_overlay(trie_overlay);
+            .with_state_trie_overlay(state_trie_overlay);
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
@@ -1682,29 +1683,29 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Returns the managed trie overlay for the parent block without blocking.
+    /// Returns the managed state trie overlay for the parent block without blocking.
     ///
     /// Returns an overlay that will compute the trie input on first access, and the anchor
     /// block hash (the highest persisted ancestor). This allows execution to start immediately
     /// while the trie input computation is deferred until the overlay is actually needed.
     ///
     /// If parent is on disk (no in-memory blocks), returns `None` for the overlay.
-    fn get_parent_trie_overlay(
+    fn get_parent_state_trie_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> (Option<TrieOverlay<N>>, B256) {
-        let (overlay, anchor_hash) = state.tree_state.trie_overlay(parent_hash);
+    ) -> (Option<StateTrieOverlay<N>>, B256) {
+        let (overlay, anchor_hash) = state.tree_state.state_trie_overlay(parent_hash);
 
         if overlay.is_none() {
             debug!(
                 target: "engine::tree::payload_validator",
                 %parent_hash,
-                "Parent found on disk, no trie overlay needed"
+                "Parent found on disk, no state trie overlay needed"
             );
             return (None, anchor_hash)
         }
 
-        debug!(target: "engine::tree::payload_validator", %parent_hash, %anchor_hash, "Using managed trie overlay");
+        debug!(target: "engine::tree::payload_validator", %parent_hash, %anchor_hash, "Using managed state trie overlay");
 
         (overlay, anchor_hash)
     }
@@ -2106,12 +2107,12 @@ where
             &block.execution_output.state,
         );
 
-        let (trie_overlay, anchor_hash) =
-            Self::get_parent_trie_overlay(block.recovered_block.parent_hash(), state);
+        let (state_trie_overlay, anchor_hash) =
+            Self::get_parent_state_trie_overlay(block.recovered_block.parent_hash(), state);
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-                .with_trie_overlay(trie_overlay),
+                .with_state_trie_overlay(state_trie_overlay),
         );
         let changeset_provider = overlay_factory.database_provider_ro()?;
 
@@ -2134,11 +2135,12 @@ where
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
-        let (trie_overlay, anchor_hash) = Self::get_parent_trie_overlay(parent_hash, state);
+        let (state_trie_overlay, anchor_hash) =
+            Self::get_parent_state_trie_overlay(parent_hash, state);
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-                .with_trie_overlay(trie_overlay),
+                .with_state_trie_overlay(state_trie_overlay),
         );
 
         Some(self.payload_processor.spawn_state_root(

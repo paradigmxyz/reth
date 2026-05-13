@@ -23,7 +23,7 @@ pub struct DeferredTrieData {
 /// Sorted trie data computed for one executed block.
 ///
 /// Cumulative overlays are intentionally managed by
-/// [`TrieOverlayManager`](crate::TrieOverlayManager), not by each block.
+/// [`StateTrieOverlayManager`](crate::StateTrieOverlayManager), not by each block.
 #[derive(Clone, Debug, Default)]
 pub struct ComputedTrieData {
     /// Sorted hashed post-state produced by execution.
