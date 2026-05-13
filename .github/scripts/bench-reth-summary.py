@@ -230,29 +230,72 @@ def _bootstrap_percentile_ci(
     return (boot_diffs[hi] - boot_diffs[lo]) / 2
 
 
+def _cross_pair_directions(
+    baseline_runs: list[list[dict]],
+    feature_runs: list[list[dict]],
+) -> dict[str, bool]:
+    """Check if the direction of change agrees across all cross-pairings.
+
+    With ABBA runs [B1, B2] and [F1, F2], generates all 4 pairings:
+    (B1,F1), (B2,F2), (B1,F2), (B2,F1). For each metric, returns True
+    only if the mean diff has the same sign across all pairings.
+
+    With a single run pair, always returns True (no cross-check possible).
+    """
+    if len(baseline_runs) < 2 or len(feature_runs) < 2:
+        return {
+            "lat": True, "mgas": True, "total_lat": True, "persist": True,
+        }
+
+    cross_pairs = []
+    for b in baseline_runs:
+        for f in feature_runs:
+            cross_pairs.append(_paired_data(b, f))
+
+    def _signs_agree(diffs_per_pair: list[list[float]]) -> bool:
+        means = []
+        for diffs in diffs_per_pair:
+            if diffs:
+                means.append(sum(diffs) / len(diffs))
+        if len(means) < 2:
+            return True
+        return all(m > 0 for m in means) or all(m < 0 for m in means) or all(m == 0 for m in means)
+
+    return {
+        "lat": _signs_agree([cp[1] for cp in cross_pairs]),
+        "mgas": _signs_agree([cp[2] for cp in cross_pairs]),
+        "total_lat": _signs_agree([cp[3] for cp in cross_pairs]),
+        "persist": _signs_agree([cp[4] for cp in cross_pairs]),
+    }
+
+
 def compute_paired_stats(
     baseline_runs: list[list[dict]],
     feature_runs: list[list[dict]],
 ) -> dict:
     """Compute paired statistics between baseline and feature runs.
 
-    Each pair (baseline_runs[i], feature_runs[i]) produces per-block diffs.
-    All diffs are pooled and CIs are computed via bootstrap resampling.
+    Uses all cross-pairings (B1-F1, B2-F2, B1-F2, B2-F1) for pooled
+    diffs and CIs. Also checks that the direction of change agrees
+    across all pairings — if any pairing disagrees, the metric is
+    flagged for downgrade to neutral.
     """
+    # Generate all cross-pairings for pooled stats
     all_pairs = []
     all_lat_diffs = []
     all_mgas_diffs = []
     all_total_lat_diffs = []
     all_persist_diffs = []
     blocks_per_pair = []
-    for baseline, feature in zip(baseline_runs, feature_runs):
-        pairs, lat_diffs, mgas_diffs, total_lat_diffs, persist_diffs = _paired_data(baseline, feature)
-        all_pairs.extend(pairs)
-        all_lat_diffs.extend(lat_diffs)
-        all_mgas_diffs.extend(mgas_diffs)
-        all_total_lat_diffs.extend(total_lat_diffs)
-        all_persist_diffs.extend(persist_diffs)
-        blocks_per_pair.append(len(pairs))
+    for baseline in baseline_runs:
+        for feature in feature_runs:
+            pairs, lat_diffs, mgas_diffs, total_lat_diffs, persist_diffs = _paired_data(baseline, feature)
+            all_pairs.extend(pairs)
+            all_lat_diffs.extend(lat_diffs)
+            all_mgas_diffs.extend(mgas_diffs)
+            all_total_lat_diffs.extend(total_lat_diffs)
+            all_persist_diffs.extend(persist_diffs)
+            blocks_per_pair.append(len(pairs))
 
     if not all_lat_diffs:
         return {}
@@ -281,6 +324,9 @@ def compute_paired_stats(
 
     mean_mgas_diff = sum(all_mgas_diffs) / len(all_mgas_diffs) if all_mgas_diffs else 0.0
 
+    # Cross-pair direction agreement
+    directions = _cross_pair_directions(baseline_runs, feature_runs)
+
     return {
         "n": n,
         "mean_diff_ms": mean_diff,
@@ -296,6 +342,7 @@ def compute_paired_stats(
         "wall_clock_ci_ms": wall_clock_ci_ms,
         "persist_ci_ms": persist_ci_ms,
         "blocks": max(blocks_per_pair),
+        "directions_agree": directions,
     }
 
 
@@ -335,9 +382,14 @@ def display_bal_mode(bal_mode: str | None) -> str | None:
     return bal_mode
 
 
-def significance(pct: float, ci_pct: float, lower_is_better: bool) -> str:
-    """Return significance label: 'good', 'bad', or 'neutral'."""
-    significant = abs(pct) > ci_pct
+def significance(pct: float, ci_pct: float, lower_is_better: bool, directions_agree: bool = True) -> str:
+    """Return significance label: 'good', 'bad', or 'neutral'.
+
+    A result is only significant if:
+    1. The CI doesn't cross zero (|pct| > ci_pct), AND
+    2. All cross-pairings agree on direction (directions_agree=True).
+    """
+    significant = abs(pct) > ci_pct and directions_agree
     if not significant:
         return "neutral"
     elif (pct < 0) == lower_is_better:
@@ -346,14 +398,16 @@ def significance(pct: float, ci_pct: float, lower_is_better: bool) -> str:
         return "bad"
 
 
-def change_str(pct: float, ci_pct: float, lower_is_better: bool) -> str:
+def change_str(pct: float, ci_pct: float, lower_is_better: bool, directions_agree: bool = True) -> str:
     """Format change% with paired CI significance.
 
-    Significant if the CI doesn't cross zero (i.e. |pct| > ci_pct).
+    Significant if the CI doesn't cross zero (i.e. |pct| > ci_pct)
+    AND all cross-pairings agree on direction.
     """
-    sig = significance(pct, ci_pct, lower_is_better)
+    sig = significance(pct, ci_pct, lower_is_better, directions_agree)
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
-    return f"{pct:+.2f}% {emoji} (±{ci_pct:.2f}%)"
+    qualifier = "" if directions_agree else " ↕"
+    return f"{pct:+.2f}% {emoji}{qualifier} (±{ci_pct:.2f}%)"
 
 
 def compute_changes(
@@ -366,23 +420,26 @@ def compute_changes(
     def ci_pct(ci_ms: float, base_ms: float) -> float:
         return ci_ms / base_ms * 100.0 if base_ms > 0 else 0.0
 
+    dirs = paired_stats.get("directions_agree", {})
+
     metrics = [
-        ("mean", "mean_ms", "ci_ms", "mean_ms", True),
-        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True),
-        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True),
-        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
-        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
-        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True),
-        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True),
+        ("mean", "mean_ms", "ci_ms", "mean_ms", True, dirs.get("lat", True)),
+        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True, dirs.get("lat", True)),
+        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True, dirs.get("lat", True)),
+        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True, dirs.get("lat", True)),
+        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False, dirs.get("mgas", True)),
+        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True, dirs.get("total_lat", True)),
+        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True, dirs.get("persist", True)),
     ]
     changes = {}
-    for name, stat_key, ci_key, base_key, lower_is_better in metrics:
+    for name, stat_key, ci_key, base_key, lower_is_better, dir_agree in metrics:
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
         c = ci_pct(paired_stats[ci_key], baseline_stats[base_key])
         changes[name] = {
             "pct": round(p, 4),
             "ci_pct": round(c, 4),
-            "sig": significance(p, c, lower_is_better),
+            "sig": significance(p, c, lower_is_better, dir_agree),
+            "directions_agree": dir_agree,
         }
     return changes
 
@@ -430,6 +487,12 @@ def generate_comparison_table(
     wall_ci_pct = paired["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
     persist_ci_pct = paired["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
 
+    dirs = paired.get("directions_agree", {})
+    lat_agree = dirs.get("lat", True)
+    mgas_agree = dirs.get("mgas", True)
+    total_agree = dirs.get("total_lat", True)
+    persist_agree = dirs.get("persist", True)
+
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
     feature_label = f"[`{feature_name}`]({base_url}/{feature_sha})"
@@ -437,14 +500,14 @@ def generate_comparison_table(
     lines = [
         f"| Metric | {baseline_label} | {feature_label} | Change |",
         "|--------|------|--------|--------|",
-        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, lat_ci_pct, lower_is_better=True)} |",
+        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, lat_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
         f"| StdDev | {fmt_ms(run1['stddev_ms'])} | {fmt_ms(run2['stddev_ms'])} | |",
-        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True)} |",
-        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True)} |",
-        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False)} |",
-        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True)} |",
-        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, lower_is_better=True)} |",
+        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False, directions_agree=mgas_agree)} |",
+        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True, directions_agree=total_agree)} |",
+        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, lower_is_better=True, directions_agree=persist_agree)} |",
         "",
     ]
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
