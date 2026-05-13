@@ -5,10 +5,11 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
+use alloy_primitives::Bloom;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{logs_bloom, Receipt, SignedTransaction};
+use reth_primitives_traits::{Receipt, SignedTransaction};
 use revm::context::Block as _;
 
 /// Block builder for Ethereum.
@@ -54,10 +55,11 @@ where
         let timestamp = evm_env.block_env.timestamp().saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root(
-            &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
-        );
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
+        let receipts_with_bloom = receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>();
+        let receipts_root = calculate_receipt_root(&receipts_with_bloom);
+        let logs_bloom = receipts_with_bloom
+            .iter()
+            .fold(Bloom::ZERO, |bloom, receipt| bloom | receipt.bloom_ref());
 
         let withdrawals = self
             .chain_spec
