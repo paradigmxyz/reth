@@ -33,6 +33,7 @@ shift
 
 SCRIPT_PATH="$(readlink -f "$0")"
 DATADIR="${SCHELK_MOUNT}/datadir"
+JWT_SECRET="${DATADIR}/jwt.hex"
 RETH_SCOPE="${RETH_SCOPE:-reth-benchmarkoor.scope}"
 ENGINE_URL="${BENCHMARKOOR_ENGINE_URL:-http://127.0.0.1:8551}"
 HTTP_URL="http://127.0.0.1:8545"
@@ -68,13 +69,23 @@ elapsed_secs() {
 }
 
 reset_strategy() {
-  case "${BENCH_RESET_STRATEGY:-unwind}" in
-    unwind | schelk) printf '%s\n' "${BENCH_RESET_STRATEGY:-unwind}" ;;
+  case "${BENCH_RESET_STRATEGY:-schelk}" in
+    unwind | schelk) printf '%s\n' "${BENCH_RESET_STRATEGY:-schelk}" ;;
     *)
       echo "::error::BENCH_RESET_STRATEGY must be 'unwind' or 'schelk', got '${BENCH_RESET_STRATEGY}'"
       exit 1
       ;;
   esac
+}
+
+ensure_jwt_secret() {
+  sudo mkdir -p "$DATADIR"
+  if ! sudo test -s "$JWT_SECRET"; then
+    local secret
+    secret="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+    printf '%s\n' "$secret" | sudo tee "$JWT_SECRET" >/dev/null
+    sudo chmod 0600 "$JWT_SECRET"
+  fi
 }
 
 drop_caches() {
@@ -365,6 +376,7 @@ start_node() {
   fi
 
   stop_node
+  ensure_jwt_secret
 
   local online max_reth reth_cpus
   online="$(nproc --all)"
@@ -388,6 +400,7 @@ start_node() {
     --ws
     --ws.api all
     --authrpc.port 8551
+    --authrpc.jwtsecret "$JWT_SECRET"
     --disable-discovery
     --no-persist-peers
   )
@@ -455,7 +468,7 @@ benchmarkoor_common_args() {
     --metadata-root "$BENCHMARKOOR_METADATA_ROOT" \
     --cache-dir "$BENCHMARKOOR_CACHE" \
     --engine-url "$ENGINE_URL" \
-    --jwt-secret "$DATADIR/jwt.hex" \
+    --jwt-secret "$JWT_SECRET" \
     --reth-bin "$binary" \
     --schelk-bin "$schelk_bin"
 }
@@ -474,7 +487,7 @@ run_benchmarkoor() {
     "BENCHMARKOOR_CACHE=$BENCHMARKOOR_CACHE" \
     "BENCH_CORES=${BENCH_CORES:-6}" \
     "BENCH_MEMORY_MAX=${BENCH_MEMORY_MAX:-32G}" \
-    "BENCH_RESET_STRATEGY=${BENCH_RESET_STRATEGY:-unwind}" \
+    "BENCH_RESET_STRATEGY=${BENCH_RESET_STRATEGY:-schelk}" \
     "BENCH_PRERUN_HEAD_FILE=${BENCH_PRERUN_HEAD_FILE:-}" \
     "BENCH_BASELINE_ARGS=${BENCH_BASELINE_ARGS:-}" \
     "BENCH_FEATURE_ARGS=${BENCH_FEATURE_ARGS:-}" \

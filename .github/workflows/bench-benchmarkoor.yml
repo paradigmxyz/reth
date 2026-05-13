@@ -119,11 +119,11 @@ on:
       reset_strategy:
         description: "Reset state between tests"
         required: false
-        default: "unwind"
+        default: "schelk"
         type: choice
         options:
-          - "unwind"
           - "schelk"
+          - "unwind"
       baseline_args:
         description: "Extra CLI args for the baseline reth node"
         required: false
@@ -166,7 +166,7 @@ jobs:
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_CORES: ${{ inputs.cores || '6' }}
       BENCH_MEMORY_MAX: "32G"
-      BENCH_RESET_STRATEGY: ${{ inputs.reset_strategy || 'unwind' }}
+      BENCH_RESET_STRATEGY: ${{ inputs.reset_strategy || 'schelk' }}
       BENCH_BASELINE_ARGS: ${{ inputs.baseline_args || '' }}
       BENCH_FEATURE_ARGS: ${{ inputs.feature_args || '' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
