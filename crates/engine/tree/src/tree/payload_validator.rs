@@ -1242,10 +1242,9 @@ where
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let overlay_factory = OverlayStateProviderFactory::new(
-            provider_factory,
-            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted()),
-        );
+        let overlay_builder =
+            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted())?;
+        let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
             .incremental_root_with_updates()
     }

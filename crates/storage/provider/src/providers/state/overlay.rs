@@ -155,14 +155,18 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// If no overlay exists, creates a new immediate overlay with the given state.
     /// If a lazy overlay exists, it is resolved first then extended.
-    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
+    pub fn with_extended_hashed_state_overlay(
+        mut self,
+        other: HashedPostStateSorted,
+    ) -> ProviderResult<Self> {
         match &mut self.overlay_source {
             Some(OverlaySource::Immediate { state, .. }) => {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
             }
             Some(OverlaySource::Managed(overlay)) => {
                 // Resolve managed overlay and convert to immediate with extension.
-                let (trie, mut state) = overlay.as_overlay(self.anchor_hash);
+                let (trie, mut state) =
+                    overlay.as_overlay(self.anchor_hash).map_err(ProviderError::other)?;
                 Arc::make_mut(&mut state).extend_ref_and_sort(&other);
                 self.overlay_source = Some(OverlaySource::Immediate { trie, state });
             }
@@ -173,7 +177,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 });
             }
         }
-        self
+        Ok(self)
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
@@ -186,7 +190,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
             Some(OverlaySource::Managed(state_trie_overlay)) => {
-                Ok(state_trie_overlay.as_overlay(anchor_hash))
+                state_trie_overlay.as_overlay(anchor_hash).map_err(ProviderError::other)
             }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.anchor_hash {
@@ -469,10 +473,13 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     }
 
     /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
-    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
-        self.overlay_builder = self.overlay_builder.with_extended_hashed_state_overlay(other);
+    pub fn with_extended_hashed_state_overlay(
+        mut self,
+        other: HashedPostStateSorted,
+    ) -> ProviderResult<Self> {
+        self.overlay_builder = self.overlay_builder.with_extended_hashed_state_overlay(other)?;
         self.overlay_cache = Default::default();
-        self
+        Ok(self)
     }
 
     /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
