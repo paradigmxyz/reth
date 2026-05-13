@@ -121,6 +121,9 @@ pub trait DbCursorRW<T: Table> {
     /// [`DbCursorRW::insert`].
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
+    /// Replace the value at the cursor's current position with `value`.
+    fn put_current(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
+
     /// Delete current value that cursor points to
     fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
