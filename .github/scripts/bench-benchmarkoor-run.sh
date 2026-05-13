@@ -557,6 +557,92 @@ shell_command() {
   printf '%q ' "$@"
 }
 
+benchmarkoor_failure_status() {
+  local native_out="$1"
+  if grep -q 'newPayload status is INVALID' "$native_out"; then
+    echo "invalid_newpayload"
+  else
+    echo "error"
+  fi
+}
+
+benchmarkoor_failure_phase() {
+  local native_out="$1"
+  if grep -q '/setup/' "$native_out"; then
+    echo "setup"
+  elif grep -q '/testing/' "$native_out"; then
+    echo "testing"
+  else
+    echo "unknown"
+  fi
+}
+
+benchmarkoor_error_summary() {
+  local native_out="$1"
+  { grep -E 'newPayload status is|JSON-RPC error|Error:|Caused by:' "$native_out" || true; } |
+    tail -n 12 |
+    sed -E 's/[[:space:]]+/ /g' |
+    paste -sd ' ' - |
+    cut -c1-1200
+}
+
+append_benchmarkoor_failure_result() {
+  local native_out="$1"
+  local test_name="$2"
+  local gas_bucket="$3"
+  local label="$4"
+  local run_type="$5"
+  local strategy="$6"
+  local reset_elapsed_secs="$7"
+  local wall_elapsed_secs="$8"
+  local benchmarkoor_status="$9"
+  local results="${10}"
+
+  local status phase error_summary
+  status="$(benchmarkoor_failure_status "$native_out")"
+  phase="$(benchmarkoor_failure_phase "$native_out")"
+  error_summary="$(benchmarkoor_error_summary "$native_out")"
+  if [ -z "$error_summary" ]; then
+    error_summary="benchmarkoor-replay exited with status ${benchmarkoor_status}"
+  fi
+
+  jq -nc \
+    --arg suite "$BENCHMARKOOR_SUITE" \
+    --arg test "$test_name" \
+    --arg label "$label" \
+    --arg run_type "$run_type" \
+    --arg gas_bucket "$gas_bucket" \
+    --arg reset_strategy "$strategy" \
+    --arg status "$status" \
+    --arg phase "$phase" \
+    --arg error_summary "$error_summary" \
+    --argjson reset_elapsed_secs "$reset_elapsed_secs" \
+    --argjson wall_elapsed_secs "$wall_elapsed_secs" \
+    --argjson benchmarkoor_exit_code "$benchmarkoor_status" \
+    '{
+      kind: "run_many_result",
+      status: $status,
+      suite: $suite,
+      test: $test,
+      label: $label,
+      run_type: $run_type,
+      gas_bucket: $gas_bucket,
+      reset_strategy: $reset_strategy,
+      reset_elapsed_secs: $reset_elapsed_secs,
+      wall_elapsed_secs: $wall_elapsed_secs,
+      benchmarkoor_exit_code: $benchmarkoor_exit_code,
+      invalid_newpayload: ($status == "invalid_newpayload"),
+      invalid_newpayload_phase: (if $status == "invalid_newpayload" then $phase else null end),
+      error_summary: $error_summary,
+      gas: 0,
+      elapsed_ms: 0,
+      gas_per_second: null,
+      testing_gas_per_sec: null,
+      testing_gas_used: 0,
+      testing_elapsed: null
+    }' >> "$results"
+}
+
 if [ "$MODE" = "restart-node" ]; then
   binary="${1:?binary is required}"
   label="${2:?label is required}"
@@ -639,6 +725,7 @@ while IFS= read -r test_entry; do
     shell_command "$SCRIPT_PATH" restart-node "$binary" "$label" "$output_dir" "${test_slug}-testing" "$log_path"
   )"
 
+  set +e
   run_benchmarkoor "${common[@]}" run-many \
     --exact "$test_name" \
     --limit 1 \
@@ -648,6 +735,14 @@ while IFS= read -r test_entry; do
     --drop-caches \
     --restart-node-command "$restart_command" \
     --json 2>&1 | tee "$native_out"
+  pipeline_status=("${PIPESTATUS[@]}")
+  set -e
+  benchmarkoor_status="${pipeline_status[0]}"
+  tee_status="${pipeline_status[1]}"
+  if [ "$tee_status" -ne 0 ]; then
+    echo "::error::tee failed while recording benchmarkoor output for ${test_name}"
+    exit 1
+  fi
 
   wall_elapsed_secs="$(elapsed_secs "$test_start_ns")"
   echo "=== ${label}: ${test_name} completed in ${wall_elapsed_secs}s (reset=${reset_elapsed_secs}s, strategy=${strategy}) ==="
@@ -661,6 +756,8 @@ while IFS= read -r test_entry; do
     --argjson wall_elapsed_secs "$wall_elapsed_secs" \
     'inputs | fromjson? | select(.kind == "run_many_result") |
       . + {
+        status: (.status // "ok"),
+        invalid_newpayload: (.invalid_newpayload // false),
         label: $label,
         run_type: $run_type,
         gas_bucket: $gas_bucket,
@@ -671,9 +768,33 @@ while IFS= read -r test_entry; do
     "$native_out" >> "$results"
 
   after_count="$(wc -l < "$results" | tr -d ' ')"
-  if [ "$after_count" -le "$before_count" ]; then
-    echo "::error::benchmarkoor-replay did not emit a run_many_result for ${test_name}"
-    exit 1
+  emitted_count=$(( after_count - before_count ))
+  if [ "$benchmarkoor_status" -ne 0 ]; then
+    echo "::warning::benchmarkoor-replay failed for ${test_name}; recording failure and continuing"
+    append_benchmarkoor_failure_result \
+      "$native_out" \
+      "$test_name" \
+      "$gas_bucket" \
+      "$label" \
+      "$run_type" \
+      "$strategy" \
+      "$reset_elapsed_secs" \
+      "$wall_elapsed_secs" \
+      "$benchmarkoor_status" \
+      "$results"
+  elif [ "$emitted_count" -le 0 ]; then
+    echo "::warning::benchmarkoor-replay did not emit a run_many_result for ${test_name}; recording failure and continuing"
+    append_benchmarkoor_failure_result \
+      "$native_out" \
+      "$test_name" \
+      "$gas_bucket" \
+      "$label" \
+      "$run_type" \
+      "$strategy" \
+      "$reset_elapsed_secs" \
+      "$wall_elapsed_secs" \
+      0 \
+      "$results"
   fi
 done < "$tests_jsonl"
 

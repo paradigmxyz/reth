@@ -36,6 +36,33 @@ def fmt_change(value: float | None) -> str:
     return f"{sign}{value * 100:.2f}%"
 
 
+def md_escape(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def status_label(rows: list[dict]) -> str:
+    if not rows:
+        return "missing"
+
+    labels = []
+    if any(row.get("status", "ok") == "ok" for row in rows):
+        labels.append("ok")
+
+    for row in rows:
+        status = row.get("status", "ok")
+        if status == "ok":
+            continue
+        if status == "invalid_newpayload":
+            phase = row.get("invalid_newpayload_phase") or "unknown"
+            label = f"INVALID newPayload ({phase})"
+        else:
+            label = status
+        if label not in labels:
+            labels.append(label)
+
+    return "; ".join(labels)
+
+
 def median(values: list[float]) -> float:
     return statistics.median(values) if values else 0.0
 
@@ -62,6 +89,8 @@ def main() -> None:
 
     normalized = []
     for row in rows:
+        row["status"] = row.get("status") or "ok"
+        row["invalid_newpayload"] = bool(row.get("invalid_newpayload", False))
         if "gas_per_second" not in row:
             row["gas_per_second"] = (
                 row.get("testing_gas_per_sec") or row.get("gas_per_sec") or 0.0
@@ -79,8 +108,16 @@ def main() -> None:
     tests = []
     ratios = []
     for test, groups in sorted(by_test.items()):
-        baseline_rates = [float(row["gas_per_second"]) for row in groups.get("baseline", [])]
-        feature_rates = [float(row["gas_per_second"]) for row in groups.get("feature", [])]
+        baseline_rates = [
+            float(row["gas_per_second"] or 0.0)
+            for row in groups.get("baseline", [])
+            if row.get("status") == "ok"
+        ]
+        feature_rates = [
+            float(row["gas_per_second"] or 0.0)
+            for row in groups.get("feature", [])
+            if row.get("status") == "ok"
+        ]
         baseline_rate = median(baseline_rates)
         feature_rate = median(feature_rates)
         change = None
@@ -98,14 +135,19 @@ def main() -> None:
                 "change": change,
                 "baseline_runs": len(baseline_rates),
                 "feature_runs": len(feature_rates),
+                "baseline_status": status_label(groups.get("baseline", [])),
+                "feature_status": status_label(groups.get("feature", [])),
             }
         )
 
+    failures = [row for row in normalized if row.get("status") != "ok"]
+    benchmark_rows = [row for row in normalized if row.get("status") == "ok"]
+
     aggregate: dict[str, dict[str, float]] = {}
     for run_type in ("baseline", "feature"):
-        type_rows = [row for row in normalized if row["run_type"] == run_type]
-        total_gas = sum(float(row["gas"]) for row in type_rows)
-        total_seconds = sum(float(row["elapsed_ms"]) / 1000.0 for row in type_rows)
+        type_rows = [row for row in benchmark_rows if row["run_type"] == run_type]
+        total_gas = sum(float(row["gas"] or 0.0) for row in type_rows)
+        total_seconds = sum(float(row["elapsed_ms"] or 0.0) / 1000.0 for row in type_rows)
         total_wall_seconds = sum(
             float(row.get("wall_elapsed_secs") or row.get("total_elapsed_secs") or 0.0)
             for row in type_rows
@@ -143,6 +185,7 @@ def main() -> None:
             "total_wall_time": wall_time_change,
         },
         "tests": tests,
+        "failures": failures,
         "raw_results": normalized,
     }
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +199,10 @@ def main() -> None:
     md.append(
         f"**Feature:** [`{args.feature_name}`]({commit_url}/{args.feature_ref}) ([diff]({diff_url}))\n"
     )
-    md.append(f"**Tests:** {len(tests)}\n\n")
+    md.append(f"**Tests:** {len(tests)}\n")
+    if failures:
+        md.append(f"**Recorded failures:** {len(failures)}\n")
+    md.append("\n")
     md.append("| Metric | Baseline | Feature | Change |\n")
     md.append("|--------|----------|---------|--------|\n")
     md.append(
@@ -173,15 +219,30 @@ def main() -> None:
         "| Per-test geomean gas/sec | "
         f"n/a | n/a | {fmt_change(geomean_change)} |\n\n"
     )
-    md.append("| Test | Gas | Baseline | Feature | Change |\n")
-    md.append("|------|-----|----------|---------|--------|\n")
+    md.append("| Test | Gas | Baseline | Feature | Change | Status |\n")
+    md.append("|------|-----|----------|---------|--------|--------|\n")
     for item in tests:
         md.append(
             f"| `{item['test']}` | {item['gas_bucket'] or 'n/a'} | "
             f"{fmt_rate(item['baseline_gas_per_second'])} | "
             f"{fmt_rate(item['feature_gas_per_second'])} | "
-            f"{fmt_change(item['change'])} |\n"
+            f"{fmt_change(item['change'])} | "
+            f"B: {md_escape(item['baseline_status'])}<br>F: {md_escape(item['feature_status'])} |\n"
         )
+
+    if failures:
+        md.append("\n## Recorded Failures\n\n")
+        md.append("| Run | Test | Status | Phase | Error |\n")
+        md.append("|-----|------|--------|-------|-------|\n")
+        for row in failures:
+            phase = row.get("invalid_newpayload_phase") or "unknown"
+            md.append(
+                f"| {md_escape(str(row.get('label', '')))} | "
+                f"`{md_escape(str(row.get('test', '')))}` | "
+                f"{md_escape(str(row.get('status', 'error')))} | "
+                f"{md_escape(str(phase))} | "
+                f"{md_escape(str(row.get('error_summary', '')))} |\n"
+            )
 
     args.output_markdown.write_text("".join(md))
 
