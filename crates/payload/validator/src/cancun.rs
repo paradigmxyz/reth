@@ -94,24 +94,22 @@ pub fn ensure_matching_blob_versioned_hashes<T: Transaction + Typed2718, H>(
     block_body: &BlockBody<T, H>,
     cancun_sidecar_fields: Option<&CancunPayloadFields>,
 ) -> Result<(), PayloadError> {
-    let num_blob_versioned_hashes = block_body.blob_versioned_hashes_iter().count();
     // Additional Cancun checks for blob transactions
     if let Some(versioned_hashes) = cancun_sidecar_fields.map(|fields| &fields.versioned_hashes) {
-        if num_blob_versioned_hashes != versioned_hashes.len() {
-            // Number of blob versioned hashes does not match
-            return Err(PayloadError::InvalidVersionedHashes)
-        }
-        // we can use `zip` safely here because we already compared their length
-        for (payload_versioned_hash, block_versioned_hash) in
-            versioned_hashes.iter().zip(block_body.blob_versioned_hashes_iter())
-        {
-            if payload_versioned_hash != block_versioned_hash {
-                return Err(PayloadError::InvalidVersionedHashes)
+        let mut payload_versioned_hashes = versioned_hashes.iter();
+        let mut block_versioned_hashes = block_body.blob_versioned_hashes_iter();
+
+        loop {
+            match (payload_versioned_hashes.next(), block_versioned_hashes.next()) {
+                (Some(payload_versioned_hash), Some(block_versioned_hash))
+                    if payload_versioned_hash == block_versioned_hash => {}
+                (None, None) => break,
+                _ => return Err(PayloadError::InvalidVersionedHashes),
             }
         }
     } else {
         // No Cancun fields, if block includes any blobs, this is an error
-        if num_blob_versioned_hashes > 0 {
+        if block_body.blob_versioned_hashes_iter().next().is_some() {
             return Err(PayloadError::InvalidVersionedHashes)
         }
     }
