@@ -102,8 +102,7 @@ impl<N: NodePrimitives> TreeState<N> {
         &self,
         parent_hash: B256,
     ) -> (Option<StateTrieOverlay<N>>, B256) {
-        let target = self.state_trie_overlays.overlay_for_parent(parent_hash);
-        (target.overlay, target.anchor_hash)
+        self.state_trie_overlays.overlay_for_parent(parent_hash)
     }
 
     /// Insert executed block into the state.

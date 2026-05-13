@@ -1519,7 +1519,7 @@ where
         let (overlay, anchor_hash) = self.state.tree_state.state_trie_overlay(parent_hash);
         if let Some(overlay) = overlay {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get(anchor_hash);
+                let _ = overlay.as_overlay(anchor_hash);
             });
         }
     }

@@ -106,33 +106,15 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// This overlay will be applied on top of any reverts applied via `anchor_hash`.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
-        if let Some(OverlaySource::Managed(state_trie_overlay)) = source.as_ref() {
-            self.assert_state_trie_overlay_anchor(state_trie_overlay);
-        }
         self.overlay_source = source;
         self
     }
 
-    fn assert_state_trie_overlay_anchor(&self, state_trie_overlay: &StateTrieOverlay<N>) {
-        let state_trie_overlay_anchor = state_trie_overlay.anchor_hash();
-        assert!(
-            state_trie_overlay_anchor == self.anchor_hash,
-            "StateTrieOverlay's anchor ({}) != OverlayBuilder's anchor ({})",
-            state_trie_overlay_anchor,
-            self.anchor_hash,
-        );
-    }
-
     /// Set a state trie overlay that will be computed on first access.
-    ///
-    /// Panics if the [`StateTrieOverlay`]'s anchor hash does not match [`Self`]'s `anchor_hash`.
     pub fn with_state_trie_overlay(
         mut self,
         state_trie_overlay: Option<StateTrieOverlay<N>>,
     ) -> Self {
-        if let Some(state_trie_overlay) = state_trie_overlay.as_ref() {
-            self.assert_state_trie_overlay_anchor(state_trie_overlay);
-        }
         self.overlay_source = state_trie_overlay.map(OverlaySource::Managed);
         self
     }
