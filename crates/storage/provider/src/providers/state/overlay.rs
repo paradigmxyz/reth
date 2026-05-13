@@ -61,9 +61,9 @@ pub(super) struct Overlay {
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
-/// Immediate overlay data for [`OverlayStateProviderFactory`].
+/// Source of overlay data for [`OverlayStateProviderFactory`].
 #[derive(Debug, Clone)]
-pub(super) enum OverlaySource {
+pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     /// Immediate overlay with already-computed data.
     Immediate {
         /// Trie updates overlay.
@@ -71,6 +71,29 @@ pub(super) enum OverlaySource {
         /// Hashed state overlay.
         state: Arc<HashedPostStateSorted>,
     },
+    /// Manager-backed overlay for in-memory state, with optional immediate overlay data.
+    Managed {
+        /// Manager used to resolve in-memory parent state if the target is not persisted.
+        manager: StateTrieOverlayManager<N>,
+        /// Trie updates overlay.
+        trie: Arc<TrieUpdatesSorted>,
+        /// Hashed state overlay.
+        state: Arc<HashedPostStateSorted>,
+    },
+}
+
+impl<N: NodePrimitives> OverlaySource<N> {
+    const fn immediate_overlay(&self) -> (&Arc<TrieUpdatesSorted>, &Arc<HashedPostStateSorted>) {
+        match self {
+            Self::Immediate { trie, state } | Self::Managed { trie, state, .. } => (trie, state),
+        }
+    }
+
+    fn into_immediate_overlay(self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
+        match self {
+            Self::Immediate { trie, state } | Self::Managed { trie, state, .. } => (trie, state),
+        }
+    }
 }
 
 /// Builder for calculating trie and hashed-state overlays.
@@ -81,10 +104,8 @@ pub(super) enum OverlaySource {
 pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Target state hash requested by the caller.
     target_hash: B256,
-    /// Optional immediate overlay source.
-    overlay_source: Option<OverlaySource>,
-    /// Manager used to resolve in-memory parent state if the anchor is not persisted.
-    state_trie_overlay_manager: Option<StateTrieOverlayManager<N>>,
+    /// Optional overlay source.
+    overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
@@ -97,7 +118,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Self {
             target_hash,
             overlay_source: None,
-            state_trie_overlay_manager: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
         }
@@ -106,7 +126,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Set the overlay source.
     ///
     /// This overlay will be applied on top of any reverts and managed overlay data.
-    pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
+    pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
         self.overlay_source = source;
         self
     }
@@ -116,7 +136,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         mut self,
         state_trie_overlay_manager: StateTrieOverlayManager<N>,
     ) -> Self {
-        self.state_trie_overlay_manager = Some(state_trie_overlay_manager);
+        let (trie, state) = self.overlay_source.take().map_or_else(
+            || (Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default())),
+            |source| source.into_immediate_overlay(),
+        );
+
+        self.overlay_source =
+            Some(OverlaySource::Managed { manager: state_trie_overlay_manager, trie, state });
         self
     }
 
@@ -126,10 +152,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     ) -> Self {
         if let Some(state) = hashed_state_overlay {
-            self.overlay_source = Some(OverlaySource::Immediate {
-                trie: Arc::new(TrieUpdatesSorted::default()),
-                state,
-            });
+            match &mut self.overlay_source {
+                Some(OverlaySource::Managed { state: managed_state, .. }) => {
+                    *managed_state = state;
+                }
+                _ => {
+                    self.overlay_source = Some(OverlaySource::Immediate {
+                        trie: Arc::new(TrieUpdatesSorted::default()),
+                        state,
+                    });
+                }
+            }
         }
         self
     }
@@ -139,7 +172,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// If no immediate overlay exists, creates one with the given state.
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
         match &mut self.overlay_source {
-            Some(OverlaySource::Immediate { state, .. }) => {
+            Some(OverlaySource::Immediate { state, .. } | OverlaySource::Managed { state, .. }) => {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
             }
             None => {
@@ -165,7 +198,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 (Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default()))
             };
 
-        if let Some(OverlaySource::Immediate { trie, state }) = &self.overlay_source {
+        if let Some(source) = &self.overlay_source {
+            let (trie, state) = source.immediate_overlay();
             if trie_updates.is_empty() {
                 trie_updates = Arc::clone(trie);
             } else if !trie.is_empty() {
@@ -201,7 +235,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             return Ok(ResolvedStateTrieOverlay { anchor_hash: self.target_hash, overlay: None })
         }
 
-        let Some(manager) = &self.state_trie_overlay_manager else {
+        let Some(OverlaySource::Managed { manager, .. }) = &self.overlay_source else {
             return Ok(ResolvedStateTrieOverlay { anchor_hash: self.target_hash, overlay: None })
         };
 
@@ -679,7 +713,9 @@ where
 mod tests {
     use super::*;
     use reth_chainspec::ChainInfo;
+    use reth_primitives_traits::Account;
     use reth_storage_api::BlockHashReader;
+    use reth_trie::HashedPostState;
     use std::collections::HashMap;
 
     #[derive(Default)]
@@ -758,5 +794,21 @@ mod tests {
         let err = builder.resolve_state_trie_overlay(&provider, db_tip).unwrap_err();
 
         assert!(err.to_string().contains("not tracked by the manager"));
+    }
+
+    #[test]
+    fn extending_hashed_state_keeps_managed_overlay_source() {
+        let target_hash = B256::with_last_byte(1);
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
+            .into_sorted();
+        let builder = OverlayBuilder::<EthPrimitives>::new(target_hash, ChangesetCache::default())
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default())
+            .with_extended_hashed_state_overlay(hashed_state);
+
+        let Some(OverlaySource::Managed { state, .. }) = builder.overlay_source else {
+            panic!("expected managed overlay source")
+        };
+        assert_eq!(state.total_len(), 1);
     }
 }
