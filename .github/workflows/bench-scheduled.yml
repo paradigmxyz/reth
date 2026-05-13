@@ -47,6 +47,16 @@ on:
           - nightly
           - hourly
           - release
+      blocks:
+        description: "Number of blocks to benchmark"
+        required: false
+        default: "2000"
+        type: string
+      warmup:
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
+        required: false
+        default: ""
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -76,6 +86,8 @@ jobs:
       nightly-created: ${{ steps.refs.outputs.nightly-created }}
       long-running: ${{ steps.refs.outputs.long-running }}
       release-tag: ${{ steps.refs.outputs.release-tag }}
+      blocks: ${{ steps.bench-config.outputs.blocks }}
+      warmup: ${{ steps.bench-config.outputs.warmup }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -103,6 +115,30 @@ jobs:
           fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "Detected mode: $MODE"
+
+      - name: Resolve benchmark config
+        id: bench-config
+        env:
+          INPUT_BLOCKS: ${{ inputs.blocks || '2000' }}
+          INPUT_WARMUP: ${{ inputs.warmup || '' }}
+        run: |
+          if ! [[ "$INPUT_BLOCKS" =~ ^[0-9]+$ ]]; then
+            echo "::error::blocks must be a non-negative integer"
+            exit 1
+          fi
+          if [ -n "$INPUT_WARMUP" ] && ! [[ "$INPUT_WARMUP" =~ ^[0-9]+$ ]]; then
+            echo "::error::warmup must be a non-negative integer"
+            exit 1
+          fi
+
+          if [ -z "$INPUT_WARMUP" ]; then
+            INPUT_WARMUP=$(( INPUT_BLOCKS / 4 ))
+          fi
+
+          {
+            echo "blocks=$INPUT_BLOCKS"
+            echo "warmup=$INPUT_WARMUP"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve refs
         id: refs
@@ -261,8 +297,8 @@ jobs:
       BENCH_PR: ""
       BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
       BENCH_ACTOR: "${{ needs.resolve-refs.outputs.mode }}-regression"
-      BENCH_BLOCKS: "2000"
-      BENCH_WARMUP_BLOCKS: "500"
+      BENCH_BLOCKS: ${{ needs.resolve-refs.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.resolve-refs.outputs.warmup }}
       BENCH_SAMPLY: "false"
       BENCH_CORES: "0"
       BENCH_BIG_BLOCKS: "false"
@@ -520,6 +556,17 @@ jobs:
           echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
           echo "Metrics proxy started (PID $PROXY_PID)"
 
+      # Extract txgen payloads once so they are reused across all benchmark
+      # runs instead of re-fetching from the remote RPC four times.
+      - name: Extract txgen payloads
+        if: env.BENCH_DRIVER == 'txgen'
+        run: |
+          PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
+          .github/scripts/bench-txgen-extract.sh \
+            "../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            "$PAYLOADS_DIR"
+          echo "TXGEN_PAYLOADS_DIR=${PAYLOADS_DIR}" >> "$GITHUB_ENV"
+
       # Interleaved run order (B-F-F-B) to reduce systematic bias
       - name: "Run benchmark: baseline (1/2)"
         id: run-baseline-1
@@ -580,7 +627,7 @@ jobs:
           LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 

@@ -32,9 +32,9 @@ on:
           - "feature"
           - "baseline"
       warmup:
-        description: "Number of warmup blocks"
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
         required: false
-        default: "200"
+        default: ""
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
@@ -95,7 +95,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
-  BENCH_RUNNERS: 2
+  BENCH_RUNNERS: 4
 
 name: bench
 
@@ -190,12 +190,13 @@ jobs:
               if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
               return null;
             };
+            const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
               blocks = '${{ github.event.inputs.blocks }}' || '500';
-              warmup = '${{ github.event.inputs.warmup }}' || '200';
-              if (warmup !== '200') explicitWarmup = true;
+              warmup = '${{ github.event.inputs.warmup }}' || '';
+              explicitWarmup = warmup !== '';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
@@ -240,7 +241,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -345,9 +346,16 @@ jobs:
               var featureNodeArgs = defaults['feature-args'];
             }
 
-            // Default warmup to 20 for big-blocks mode unless explicitly set
-            if (bigBlocks === 'true' && !explicitWarmup) {
-              warmup = '20';
+            if (!/^\d+$/.test(blocks)) {
+              core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
+              return;
+            }
+            if (explicitWarmup && !/^\d+$/.test(warmup)) {
+              core.setFailed(`Invalid warmup value: ${warmup} (must be a positive integer)`);
+              return;
+            }
+            if (!explicitWarmup) {
+              warmup = defaultWarmup(blocks);
             }
 
             if (!validBalModes.has(bal)) {
@@ -385,7 +393,6 @@ jobs:
             }
 
             const fallbackReasons = [];
-            if (bigBlocks === 'true') fallbackReasons.push('big-blocks');
             if (bal !== 'false') fallbackReasons.push('BAL');
             const driver = fallbackReasons.length ? 'reth-bench' : 'txgen';
             const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
@@ -488,7 +495,7 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = '${{ steps.args.outputs.driver }}' || (bigBlocks ? 'reth-bench' : 'txgen');
+            const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
@@ -535,7 +542,7 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = '${{ steps.args.outputs.driver }}' || (bigBlocks ? 'reth-bench' : 'txgen');
+            const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
@@ -624,7 +631,7 @@ jobs:
       BENCH_DRIVER_REASON: ${{ needs.reth-bench-ack.outputs.driver-reason }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
+      TXGEN_REV: 64826ac816380586e4856e2d1d2d20f4d4e66198
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
     steps:
@@ -694,7 +701,7 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = process.env.BENCH_DRIVER || (bigBlocks ? 'reth-bench' : 'txgen');
+            const driver = process.env.BENCH_DRIVER || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = process.env.BENCH_DRIVER_REASON || '';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
@@ -838,29 +845,6 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-ref', featureRef);
             core.setOutput('feature-name', featureName);
-
-      - name: Validate local big blocks
-        if: env.BENCH_BIG_BLOCKS == 'true'
-        id: big-blocks-check
-        run: |
-          set -euo pipefail
-          BIG_BLOCKS_DIR="$HOME/.reth-bench-big-blocks"
-          MANIFEST="$BIG_BLOCKS_DIR/manifest.json"
-          echo "BENCH_BIG_BLOCKS_DIR=${BIG_BLOCKS_DIR}" >> "$GITHUB_ENV"
-
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error::Missing local big-blocks manifest at $MANIFEST"
-            exit 1
-          fi
-
-          BASE_SNAPSHOT=$(jq -r '.base_snapshot // empty' "$MANIFEST")
-          if [ -z "$BASE_SNAPSHOT" ]; then
-            echo "::error::Big-blocks manifest missing base_snapshot field"
-            exit 1
-          fi
-
-          echo "Big-blocks base snapshot: $BASE_SNAPSHOT"
-          echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
 
       - name: Prepare source dirs
         run: |
@@ -1022,14 +1006,16 @@ jobs:
           echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
           echo "Metrics proxy started (PID $PROXY_PID)"
 
-      - name: Update status (running benchmarks)
-        if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ secrets.DEREK_PAT }}
-          script: |
-            const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Running benchmarks...'});
+      # Extract txgen payloads once so they are reused across all benchmark
+      # runs instead of re-fetching from the remote RPC four times.
+      - name: Extract txgen payloads
+        if: env.BENCH_DRIVER == 'txgen'
+        run: |
+          PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
+          .github/scripts/bench-txgen-extract.sh \
+            "../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            "$PAYLOADS_DIR"
+          echo "TXGEN_PAYLOADS_DIR=${PAYLOADS_DIR}" >> "$GITHUB_ENV"
 
       # Interleaved run order (F-B-B-F) to reduce systematic bias from
       # thermal drift and cache warming.
@@ -1038,7 +1024,9 @@ jobs:
         env:
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-1,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: feature (1/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1055,7 +1043,9 @@ jobs:
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-1,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: baseline (1/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1073,7 +1063,9 @@ jobs:
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-2,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: baseline (2/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1091,7 +1083,9 @@ jobs:
         env:
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
           OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-2,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
+          .github/scripts/bench-update-status.sh "Running benchmark: feature (2/2)..."
           LAST_RUN_START=$(date +%s)
           echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
           cat > "$BENCH_LABELS_FILE" <<LABELS
@@ -1112,7 +1106,7 @@ jobs:
           LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 
@@ -1440,9 +1434,7 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
@@ -1478,9 +1470,7 @@ jobs:
         with:
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],

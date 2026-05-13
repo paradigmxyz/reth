@@ -7893,6 +7893,7 @@ dependencies = [
 name = "reth-consensus-debug-client"
 version = "2.2.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips 2.0.4",
  "alloy-json-rpc",
  "alloy-primitives",
@@ -8347,6 +8348,8 @@ name = "reth-engine-util"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "eyre",
  "futures",
@@ -9082,7 +9085,6 @@ name = "reth-network-p2p"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
  "alloy-eips 2.0.4",
  "alloy-primitives",
  "auto_impl",
