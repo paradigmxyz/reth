@@ -711,6 +711,9 @@ where
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
 
+        // TEMPORARY: deliberate regression for bench CI validation (remove before merge)
+        std::thread::sleep(std::time::Duration::from_micros(500));
+
         // start timing for the new payload process
         let start = Instant::now();
 
