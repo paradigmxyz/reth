@@ -505,6 +505,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 status,
                 direction,
                 client_id,
+                peer_listen_port,
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -618,6 +619,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     client_version: Arc::clone(&client_version),
                     remote_addr,
                     local_addr,
+                    peer_listen_port,
                 };
 
                 self.active_sessions.insert(peer_id, handle);
@@ -1206,6 +1208,11 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         (multiplex_stream.into(), their_status)
     };
 
+    // The devp2p `Hello.listenPort` field is officially marked legacy in the RLPx spec, but
+    // most clients still send their actual listening port. For inbound peers this is the only
+    // in-band way to learn a dialable port, so we retain it when non-zero.
+    let peer_listen_port = (their_hello.port != 0).then_some(their_hello.port);
+
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
@@ -1216,5 +1223,6 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         conn,
         direction,
         client_id: their_hello.client_version,
+        peer_listen_port,
     }
 }
