@@ -1065,7 +1065,38 @@ fn dispatch_v2_storage_proofs(
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
-        B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
+        B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
+
+    if storage_targets.is_empty() {
+        return Ok(storage_proof_receivers);
+    }
+
+    if storage_targets.len() == 1 {
+        let (hashed_address, mut targets) = storage_targets
+            .into_iter()
+            .next()
+            .expect("storage_targets has exactly one entry");
+
+        if account_targets.iter().any(|target| target.key() == hashed_address) &&
+            let Some(first) = targets.first_mut()
+        {
+            *first = first.with_min_len(0);
+        }
+
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let input = StorageProofInput::new(hashed_address, targets);
+
+        storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .map_err(|_| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
+                ))
+            })?;
+        storage_proof_receivers.insert(hashed_address, result_rx);
+
+        return Ok(storage_proof_receivers);
+    }
 
     // Collect hashed addresses from account targets that need their storage roots computed
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
