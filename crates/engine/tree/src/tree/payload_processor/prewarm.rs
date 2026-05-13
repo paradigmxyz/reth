@@ -207,21 +207,23 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
+        if ctx.should_stop() {
+            return;
+        }
+
+        // Skip if main execution has already processed this transaction. Do this before touching
+        // the per-thread worker state so late prewarm jobs don't initialize or borrow an EVM that
+        // will not be used.
+        if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+            return;
+        }
+
         WorkerPool::with_worker_mut(|worker| {
             let Some(evm) =
                 worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
             else {
                 return;
             };
-
-            if ctx.should_stop() {
-                return;
-            }
-
-            // skip if main execution has already processed this transaction
-            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                return;
-            }
 
             let start = Instant::now();
 
