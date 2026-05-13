@@ -25,6 +25,9 @@ import sys
 
 GIGAGAS = 1_000_000_000
 BOOTSTRAP_ITERATIONS = 10_000
+# t-critical for between-pairing CI (df=3, 4 cross-pairings).
+# Set conservatively to reduce false positives from run-level bias.
+T_BETWEEN_PAIRINGS = 4.5
 
 
 def _opt_int(row: dict, key: str) -> int | None:
@@ -230,6 +233,22 @@ def _bootstrap_percentile_ci(
     return (boot_diffs[hi] - boot_diffs[lo]) / 2
 
 
+def _between_pairing_ci(pairing_means: list[float]) -> float:
+    """Compute CI half-width from the variance between pairing means.
+
+    This captures run-level bias (thermal drift, background load) that
+    per-block pooling cannot detect. Uses T_BETWEEN_PAIRINGS as the
+    t-critical value (conservative for df=3).
+    """
+    n = len(pairing_means)
+    if n < 2:
+        return 0.0
+    mean = sum(pairing_means) / n
+    sd = math.sqrt(sum((x - mean) ** 2 for x in pairing_means) / (n - 1))
+    se = sd / math.sqrt(n)
+    return T_BETWEEN_PAIRINGS * se
+
+
 def _cross_pair_directions(
     baseline_runs: list[list[dict]],
     feature_runs: list[list[dict]],
@@ -276,9 +295,11 @@ def compute_paired_stats(
     """Compute paired statistics between baseline and feature runs.
 
     Uses all cross-pairings (B1-F1, B2-F2, B1-F2, B2-F1) for pooled
-    diffs and CIs. Also checks that the direction of change agrees
-    across all pairings — if any pairing disagrees, the metric is
-    flagged for downgrade to neutral.
+    diffs and CIs. The final CI for each metric is the max of:
+    - Within-block bootstrap CI (captures per-block variance)
+    - Between-pairing CI (captures run-level bias)
+
+    Also checks that the direction of change agrees across all pairings.
     """
     # Generate all cross-pairings for pooled stats
     all_pairs = []
@@ -287,6 +308,11 @@ def compute_paired_stats(
     all_total_lat_diffs = []
     all_persist_diffs = []
     blocks_per_pair = []
+    # Per-pairing means for between-pairing CI
+    per_pairing_lat_means = []
+    per_pairing_mgas_means = []
+    per_pairing_total_lat_means = []
+    per_pairing_persist_means = []
     for baseline in baseline_runs:
         for feature in feature_runs:
             pairs, lat_diffs, mgas_diffs, total_lat_diffs, persist_diffs = _paired_data(baseline, feature)
@@ -296,6 +322,14 @@ def compute_paired_stats(
             all_total_lat_diffs.extend(total_lat_diffs)
             all_persist_diffs.extend(persist_diffs)
             blocks_per_pair.append(len(pairs))
+            if lat_diffs:
+                per_pairing_lat_means.append(sum(lat_diffs) / len(lat_diffs))
+            if mgas_diffs:
+                per_pairing_mgas_means.append(sum(mgas_diffs) / len(mgas_diffs))
+            if total_lat_diffs:
+                per_pairing_total_lat_means.append(sum(total_lat_diffs) / len(total_lat_diffs))
+            if persist_diffs:
+                per_pairing_persist_means.append(sum(persist_diffs) / len(persist_diffs))
 
     if not all_lat_diffs:
         return {}
@@ -305,11 +339,23 @@ def compute_paired_stats(
 
     rng = random.Random(42)
 
-    # Bootstrap CI for all metrics (unified approach)
-    ci = _bootstrap_ci(rng, all_lat_diffs)
-    mgas_ci = _bootstrap_ci(rng, all_mgas_diffs) if all_mgas_diffs else 0.0
-    wall_clock_ci_ms = _bootstrap_ci(rng, all_total_lat_diffs) if all_total_lat_diffs else 0.0
-    persist_ci_ms = _bootstrap_ci(rng, all_persist_diffs) if all_persist_diffs else 0.0
+    # Within-block bootstrap CI
+    ci_within = _bootstrap_ci(rng, all_lat_diffs)
+    mgas_ci_within = _bootstrap_ci(rng, all_mgas_diffs) if all_mgas_diffs else 0.0
+    wall_ci_within = _bootstrap_ci(rng, all_total_lat_diffs) if all_total_lat_diffs else 0.0
+    persist_ci_within = _bootstrap_ci(rng, all_persist_diffs) if all_persist_diffs else 0.0
+
+    # Between-pairing CI (run-level variance floor)
+    ci_between = _between_pairing_ci(per_pairing_lat_means)
+    mgas_ci_between = _between_pairing_ci(per_pairing_mgas_means)
+    wall_ci_between = _between_pairing_ci(per_pairing_total_lat_means)
+    persist_ci_between = _between_pairing_ci(per_pairing_persist_means)
+
+    # Final CI = max(within, between)
+    ci = max(ci_within, ci_between)
+    mgas_ci = max(mgas_ci_within, mgas_ci_between)
+    wall_clock_ci_ms = max(wall_ci_within, wall_ci_between)
+    persist_ci_ms = max(persist_ci_within, persist_ci_between)
 
     # Bootstrap CI for percentile diffs
     base_lats = sorted([p[0] for p in all_pairs])
@@ -318,9 +364,27 @@ def compute_paired_stats(
     p90_diff = percentile(feature_lats, 90) - percentile(base_lats, 90)
     p99_diff = percentile(feature_lats, 99) - percentile(base_lats, 99)
 
-    p50_ci = _bootstrap_percentile_ci(rng, all_pairs, 50)
-    p90_ci = _bootstrap_percentile_ci(rng, all_pairs, 90)
-    p99_ci = _bootstrap_percentile_ci(rng, all_pairs, 99)
+    p50_ci_within = _bootstrap_percentile_ci(rng, all_pairs, 50)
+    p90_ci_within = _bootstrap_percentile_ci(rng, all_pairs, 90)
+    p99_ci_within = _bootstrap_percentile_ci(rng, all_pairs, 99)
+
+    # Between-pairing CI for percentile diffs
+    per_pairing_p50_diffs = []
+    per_pairing_p90_diffs = []
+    per_pairing_p99_diffs = []
+    for baseline in baseline_runs:
+        for feature in feature_runs:
+            pairs_i, _, _, _, _ = _paired_data(baseline, feature)
+            if pairs_i:
+                b_sorted = sorted(p[0] for p in pairs_i)
+                f_sorted = sorted(p[1] for p in pairs_i)
+                per_pairing_p50_diffs.append(percentile(f_sorted, 50) - percentile(b_sorted, 50))
+                per_pairing_p90_diffs.append(percentile(f_sorted, 90) - percentile(b_sorted, 90))
+                per_pairing_p99_diffs.append(percentile(f_sorted, 99) - percentile(b_sorted, 99))
+
+    p50_ci = max(p50_ci_within, _between_pairing_ci(per_pairing_p50_diffs))
+    p90_ci = max(p90_ci_within, _between_pairing_ci(per_pairing_p90_diffs))
+    p99_ci = max(p99_ci_within, _between_pairing_ci(per_pairing_p99_diffs))
 
     mean_mgas_diff = sum(all_mgas_diffs) / len(all_mgas_diffs) if all_mgas_diffs else 0.0
 
@@ -423,7 +487,6 @@ def compute_changes(
     dirs = paired_stats.get("directions_agree", {})
 
     metrics = [
-        ("mean", "mean_ms", "ci_ms", "mean_ms", True, dirs.get("lat", True)),
         ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True, dirs.get("lat", True)),
         ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True, dirs.get("lat", True)),
         ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True, dirs.get("lat", True)),
@@ -466,7 +529,6 @@ def generate_comparison_table(
     def pct(base: float, feat: float) -> float:
         return (feat - base) / base * 100.0 if base > 0 else 0.0
 
-    mean_pct = pct(run1["mean_ms"], run2["mean_ms"])
     gas_pct = pct(run1["mean_mgas_s"], run2["mean_mgas_s"])
     wall_pct = pct(run1["wall_clock_s"], run2["wall_clock_s"])
 
@@ -481,8 +543,7 @@ def generate_comparison_table(
     p90_ci_pct = paired["p90_ci_ms"] / run1["p90_ms"] * 100.0 if run1["p90_ms"] > 0 else 0.0
     p99_ci_pct = paired["p99_ci_ms"] / run1["p99_ms"] * 100.0 if run1["p99_ms"] > 0 else 0.0
 
-    # CI as a percentage of baseline mean
-    lat_ci_pct = paired["ci_ms"] / run1["mean_ms"] * 100.0 if run1["mean_ms"] > 0 else 0.0
+    # CI as a percentage of baseline
     mgas_ci_pct = paired["mgas_ci"] / run1["mean_mgas_s"] * 100.0 if run1["mean_mgas_s"] > 0 else 0.0
     wall_ci_pct = paired["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
     persist_ci_pct = paired["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
@@ -500,8 +561,6 @@ def generate_comparison_table(
     lines = [
         f"| Metric | {baseline_label} | {feature_label} | Change |",
         "|--------|------|--------|--------|",
-        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, lat_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| StdDev | {fmt_ms(run1['stddev_ms'])} | {fmt_ms(run2['stddev_ms'])} | |",
         f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
         f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
         f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
