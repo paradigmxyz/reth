@@ -1208,6 +1208,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         (multiplex_stream.into(), their_status)
     };
 
+    // `port` field is effectively deprecated, so we treat 0 value as a missing port.
     let peer_listen_port = (their_hello.port != 0).then_some(their_hello.port);
 
     PendingSessionEvent::Established {
