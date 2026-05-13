@@ -18,25 +18,22 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use reth_engine_tree::tree::{
-    BasicEngineValidator, payload_validator::CustomStateRoot,
-};
+use reth_engine_tree::tree::{payload_validator::CustomStateRoot, BasicEngineValidator};
 use reth_ethereum::{
-    EthPrimitives,
     chainspec::ChainSpec,
     node::{
-        EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilder, EthereumNode,
         builder::{
-            NodeBuilder, NodeHandle, TreeConfig,
             rpc::{
                 BasicEngineApiBuilder, BasicEngineValidatorBuilder, ChangesetCache,
                 EngineValidatorBuilder, Identity, RpcAddOns,
             },
-            FullNodeComponents,
+            FullNodeComponents, NodeBuilder, NodeHandle, TreeConfig,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
+        EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilder, EthereumNode,
     },
     tasks::Runtime,
+    EthPrimitives,
 };
 use reth_trie::updates::TrieUpdates;
 
@@ -81,10 +78,7 @@ where
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> eyre::Result<Self::EngineValidator> {
-        let validator = self
-            .inner
-            .build_tree_validator(ctx, tree_config, changeset_cache)
-            .await?;
+        let validator = self.inner.build_tree_validator(ctx, tree_config, changeset_cache).await?;
         Ok(validator.with_custom_state_root(self.custom_state_root))
     }
 }
@@ -109,16 +103,16 @@ async fn main() -> eyre::Result<()> {
     // Build add-ons with our custom engine validator builder.
     let add_ons: EthereumAddOns<_, _, _, _, ZeroStateRootValidatorBuilder> =
         EthereumAddOns::new(RpcAddOns::new(
-        EthereumEthApiBuilder::<alloy_network::Ethereum>::default(),
-        EthereumEngineValidatorBuilder::default(),
-        BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
-        ZeroStateRootValidatorBuilder {
-            inner: BasicEngineValidatorBuilder::default(),
-            custom_state_root: zero_state_root,
-        },
-        Default::default(),
-        Identity::new(),
-    ));
+            EthereumEthApiBuilder::<alloy_network::Ethereum>::default(),
+            EthereumEngineValidatorBuilder::default(),
+            BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
+            ZeroStateRootValidatorBuilder {
+                inner: BasicEngineValidatorBuilder::default(),
+                custom_state_root: zero_state_root,
+            },
+            Default::default(),
+            Identity::new(),
+        ));
 
     let NodeHandle { node: _node, node_exit_future } = NodeBuilder::new(node_config)
         .testing_node(runtime)
