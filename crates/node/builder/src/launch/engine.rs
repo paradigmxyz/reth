@@ -3,8 +3,10 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
-    setup::build_networked_pipeline,
+    rpc::{
+        EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, NetworkedPipelineBuilder,
+        PipelineBuilderAddOn, RethRpcAddOns, RpcHandle,
+    },
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
@@ -76,7 +78,8 @@ impl EngineNodeLauncher {
         >,
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-            + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+            + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+            + PipelineBuilderAddOn<NodeAdapter<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
@@ -146,7 +149,7 @@ impl EngineNodeLauncher {
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        let pipeline = build_networked_pipeline(
+        let pipeline = add_ons.pipeline_builder().build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
             consensus.clone(),
@@ -438,6 +441,7 @@ where
     CB: NodeComponentsBuilder<T> + 'static,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + PipelineBuilderAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;

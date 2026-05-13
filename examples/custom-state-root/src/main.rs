@@ -25,7 +25,7 @@ use reth_ethereum::{
         builder::{
             rpc::{
                 BasicEngineApiBuilder, BasicEngineValidatorBuilder, ChangesetCache,
-                EngineValidatorBuilder, Identity, RpcAddOns,
+                DefaultPipelineBuilder, EngineValidatorBuilder, Identity, RpcAddOns,
             },
             FullNodeComponents, NodeBuilder, NodeHandle, TreeConfig,
         },
@@ -110,6 +110,7 @@ async fn main() -> eyre::Result<()> {
                 inner: BasicEngineValidatorBuilder::default(),
                 custom_state_root: zero_state_root,
             },
+            DefaultPipelineBuilder,
             Default::default(),
             Identity::new(),
         ));
