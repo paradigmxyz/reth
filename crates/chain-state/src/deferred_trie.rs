@@ -17,7 +17,7 @@ use tracing::{debug_span, instrument};
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
-    state: Arc<Mutex<DeferredState>>,
+    state: Arc<Mutex<DeferredTrieDataInner>>,
 }
 
 /// Sorted trie data computed for one executed block.
@@ -46,13 +46,18 @@ static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
 
 /// Internal state for deferred trie data.
-enum DeferredState {
+enum DeferredTrieDataInner {
     /// Data is not yet available; raw inputs stored for fallback computation.
     ///
     /// Wrapped in `Option` to allow taking ownership during computation.
     Pending(Option<PendingInputs>),
     /// Data has been computed and is ready.
-    Ready(ComputedTrieData),
+    Ready {
+        /// Sorted hashed post-state produced by execution.
+        hashed_state: Arc<HashedPostStateSorted>,
+        /// Sorted trie updates produced by state root computation.
+        trie_updates: Arc<TrieUpdatesSorted>,
+    },
 }
 
 /// Inputs kept while a deferred trie computation is pending.
@@ -68,10 +73,10 @@ impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.state.lock();
         match &*state {
-            DeferredState::Pending(_) => {
+            DeferredTrieDataInner::Pending(_) => {
                 f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
             }
-            DeferredState::Ready(_) => {
+            DeferredTrieDataInner::Ready { .. } => {
                 f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
             }
         }
@@ -82,7 +87,7 @@ impl DeferredTrieData {
     /// Create a new pending handle with fallback inputs for synchronous computation.
     pub fn pending(hashed_state: Arc<HashedPostState>, trie_updates: Arc<TrieUpdates>) -> Self {
         Self {
-            state: Arc::new(Mutex::new(DeferredState::Pending(Some(PendingInputs {
+            state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
                 hashed_state,
                 trie_updates,
             })))),
@@ -91,7 +96,13 @@ impl DeferredTrieData {
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
+        let ComputedTrieData { hashed_state, trie_updates } = bundle;
+        Self {
+            state: Arc::new(Mutex::new(DeferredTrieDataInner::Ready {
+                hashed_state,
+                trie_updates,
+            })),
+        }
     }
 
     /// Sorts block execution outputs.
@@ -133,16 +144,19 @@ impl DeferredTrieData {
     pub fn wait_cloned(&self) -> ComputedTrieData {
         let mut state = self.state.lock();
         match &mut *state {
-            DeferredState::Ready(bundle) => {
+            DeferredTrieDataInner::Ready { hashed_state, trie_updates } => {
                 DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                bundle.clone()
+                ComputedTrieData::new(Arc::clone(hashed_state), Arc::clone(trie_updates))
             }
-            DeferredState::Pending(maybe_inputs) => {
+            DeferredTrieDataInner::Pending(maybe_inputs) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
 
                 let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
                 let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
-                *state = DeferredState::Ready(computed.clone());
+                *state = DeferredTrieDataInner::Ready {
+                    hashed_state: Arc::clone(&computed.hashed_state),
+                    trie_updates: Arc::clone(&computed.trie_updates),
+                };
 
                 computed
             }
