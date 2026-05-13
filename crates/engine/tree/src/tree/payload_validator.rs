@@ -59,7 +59,7 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
-    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, StateTrieOverlay,
+    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -475,16 +475,14 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        // Fetch the managed parent overlay without computing it. Trie data is flattened on first
-        // access or by the background prepare task after insertion.
-        let (state_trie_overlay, anchor_hash) =
-            ensure_ok!(Self::get_parent_state_trie_overlay(parent_hash, ctx.state()));
-
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
         let provider_factory = self.provider.clone();
-        let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-            .with_state_trie_overlay(state_trie_overlay);
+        let overlay_builder = Self::overlay_builder_for_parent(
+            parent_hash,
+            ctx.state(),
+            self.changeset_cache.clone(),
+        );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
@@ -1243,7 +1241,7 @@ where
         // ParallelStateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         let overlay_builder =
-            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted())?;
+            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
             .incremental_root_with_updates()
@@ -1682,32 +1680,14 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Returns the managed state trie overlay for the parent block without blocking.
-    ///
-    /// Returns an overlay that will compute the trie input on first access, and the anchor
-    /// block hash (the highest persisted ancestor). This allows execution to start immediately
-    /// while the trie input computation is deferred until the overlay is actually needed.
-    ///
-    /// If parent is on disk (no in-memory blocks), returns `None` for the overlay.
-    fn get_parent_state_trie_overlay(
+    /// Returns an overlay builder configured for a payload parent.
+    fn overlay_builder_for_parent(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<(Option<StateTrieOverlay<N>>, B256)> {
-        let (overlay, anchor_hash) =
-            state.tree_state.state_trie_overlay(parent_hash).map_err(ProviderError::other)?;
-
-        if overlay.is_none() {
-            debug!(
-                target: "engine::tree::payload_validator",
-                %parent_hash,
-                "Parent found on disk, no state trie overlay needed"
-            );
-            return Ok((None, anchor_hash))
-        }
-
-        debug!(target: "engine::tree::payload_validator", %parent_hash, %anchor_hash, "Using managed state trie overlay");
-
-        Ok((overlay, anchor_hash))
+        changeset_cache: ChangesetCache,
+    ) -> OverlayBuilder<N> {
+        OverlayBuilder::new(parent_hash, changeset_cache)
+            .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -2107,12 +2087,13 @@ where
             &block.execution_output.state,
         );
 
-        let (state_trie_overlay, anchor_hash) =
-            Self::get_parent_state_trie_overlay(block.recovered_block.parent_hash(), state)?;
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-                .with_state_trie_overlay(state_trie_overlay),
+            Self::overlay_builder_for_parent(
+                block.recovered_block.parent_hash(),
+                state,
+                self.changeset_cache.clone(),
+            ),
         );
         let changeset_provider = overlay_factory.database_provider_ro()?;
 
@@ -2135,20 +2116,9 @@ where
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
-        let (state_trie_overlay, anchor_hash) = match Self::get_parent_state_trie_overlay(
-            parent_hash,
-            state,
-        ) {
-            Ok(overlay) => overlay,
-            Err(err) => {
-                debug!(target: "engine::tree::payload_validator", %err, "Could not prepare sparse trie handle");
-                return None
-            }
-        };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-                .with_state_trie_overlay(state_trie_overlay),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
         Some(self.payload_processor.spawn_state_root(
