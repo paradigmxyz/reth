@@ -634,7 +634,7 @@ where
                         debug_recorders,
                     }) => {
                         let elapsed = root_time.elapsed();
-                        info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
+                        debug!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
 
                         #[cfg(feature = "trie-debug")]
                         {
