@@ -55,11 +55,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
-    /// Returns an overlay for the requested parent hash and the persisted anchor hash it sits on.
-    ///
-    /// If the parent is not in memory, no overlay is required and the parent itself is returned as
-    /// the anchor.
-    pub fn overlay_for_parent(&self, parent_hash: B256) -> (Option<StateTrieOverlay<N>>, B256) {
+    /// Returns an overlay for the requested in-memory parent hash and the persisted anchor hash it
+    /// sits on.
+    pub fn overlay_for_parent(
+        &self,
+        parent_hash: B256,
+    ) -> Result<(StateTrieOverlay<N>, B256), StateTrieOverlayError> {
         let inner = self.inner.read();
         inner.overlay_for_parent(self.clone(), parent_hash)
     }
@@ -82,7 +83,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
             let blocks = inner
                 .blocks_to_anchor(tip_hash, anchor_hash)
-                .ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
+                .ok_or(StateTrieOverlayError { tip_hash, anchor_hash: Some(anchor_hash) })?;
             let parent_input = blocks.first().and_then(|block| {
                 if block.recovered_block().parent_hash() == anchor_hash {
                     return None
@@ -117,16 +118,21 @@ pub struct StateTrieOverlayError {
     /// Requested in-memory tip hash.
     tip_hash: B256,
     /// Requested anchor hash.
-    anchor_hash: B256,
+    anchor_hash: Option<B256>,
 }
 
 impl fmt::Display for StateTrieOverlayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "state trie overlay for tip {} cannot be anchored to {} with current blocks",
-            self.tip_hash, self.anchor_hash
-        )
+        match self.anchor_hash {
+            Some(anchor_hash) => write!(
+                f,
+                "state trie overlay for tip {} cannot be anchored to {} with current blocks",
+                self.tip_hash, anchor_hash
+            ),
+            None => {
+                write!(f, "state trie overlay tip {} is not tracked by the manager", self.tip_hash)
+            }
+        }
     }
 }
 
@@ -143,13 +149,11 @@ impl<N: NodePrimitives> StateTrieOverlayManagerInner<N> {
         &self,
         manager: StateTrieOverlayManager<N>,
         parent_hash: B256,
-    ) -> (Option<StateTrieOverlay<N>>, B256) {
-        match self.anchor_for_tip(parent_hash) {
-            Some(anchor_hash) => {
-                (Some(StateTrieOverlay { manager, tip_hash: parent_hash }), anchor_hash)
-            }
-            None => (None, parent_hash),
-        }
+    ) -> Result<(StateTrieOverlay<N>, B256), StateTrieOverlayError> {
+        let anchor_hash = self
+            .anchor_for_tip(parent_hash)
+            .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash: None })?;
+        Ok((StateTrieOverlay { manager, tip_hash: parent_hash }, anchor_hash))
     }
 
     fn anchor_for_tip(&self, tip_hash: B256) -> Option<B256> {
@@ -362,14 +366,14 @@ mod tests {
     }
 
     #[test]
-    fn returns_no_overlay_for_persisted_parent() {
+    fn errors_for_unknown_parent() {
         let manager = StateTrieOverlayManager::<EthPrimitives>::default();
         let parent = B256::random();
 
-        let (overlay, anchor_hash) = manager.overlay_for_parent(parent);
+        let err = manager.overlay_for_parent(parent).unwrap_err();
 
-        assert_eq!(anchor_hash, parent);
-        assert!(overlay.is_none());
+        assert_eq!(err.tip_hash, parent);
+        assert_eq!(err.anchor_hash, None);
     }
 
     #[test]
@@ -380,8 +384,8 @@ mod tests {
             manager.insert_block(block.clone());
         }
 
-        let (overlay, anchor_hash) = manager.overlay_for_parent(blocks[2].recovered_block().hash());
-        let overlay = overlay.expect("overlay exists");
+        let (overlay, anchor_hash) =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
 
         assert_eq!(anchor_hash, blocks[0].recovered_block().parent_hash());
 
@@ -403,14 +407,13 @@ mod tests {
         }
 
         let (overlay, original_anchor) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash());
-        let overlay = overlay.expect("overlay exists");
+            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
         overlay.get(original_anchor).unwrap();
 
         manager.remove_block(blocks[0].recovered_block().hash());
 
-        let (overlay, anchor_hash) = manager.overlay_for_parent(blocks[2].recovered_block().hash());
-        let overlay = overlay.expect("overlay exists");
+        let (overlay, anchor_hash) =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
 
         assert_eq!(anchor_hash, blocks[0].recovered_block().hash());
         assert!(!overlay.has_anchor_hash(original_anchor));
@@ -427,20 +430,18 @@ mod tests {
             manager.insert_block(block.clone());
         }
 
-        let (overlay, anchor_hash) = manager.overlay_for_parent(blocks[2].recovered_block().hash());
-        let overlay = overlay.expect("overlay exists");
+        let (overlay, anchor_hash) =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash()).unwrap();
 
         for block in &blocks {
             manager.remove_block(block.recovered_block().hash());
         }
 
-        let (overlay_after_prune, _) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash());
-        assert!(overlay_after_prune.is_none());
+        assert!(manager.overlay_for_parent(blocks[2].recovered_block().hash()).is_err());
 
         let err = overlay.get(anchor_hash).unwrap_err();
         assert_eq!(err.tip_hash, blocks[2].recovered_block().hash());
-        assert_eq!(err.anchor_hash, anchor_hash);
+        assert_eq!(err.anchor_hash, Some(anchor_hash));
 
         drop(overlay);
         let inner = manager.inner.read();

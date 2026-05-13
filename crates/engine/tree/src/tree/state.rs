@@ -6,7 +6,9 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlay, StateTrieOverlayManager};
+use reth_chain_state::{
+    EthPrimitives, ExecutedBlock, StateTrieOverlay, StateTrieOverlayError, StateTrieOverlayManager,
+};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -98,11 +100,20 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the state trie overlay for a payload parent and its persisted anchor hash.
+    ///
+    /// If the parent is not tracked in tree state, it is already persisted and no manager lookup is
+    /// needed.
     pub(crate) fn state_trie_overlay(
         &self,
         parent_hash: B256,
-    ) -> (Option<StateTrieOverlay<N>>, B256) {
-        self.state_trie_overlays.overlay_for_parent(parent_hash)
+    ) -> Result<(Option<StateTrieOverlay<N>>, B256), StateTrieOverlayError> {
+        if !self.blocks_by_hash.contains_key(&parent_hash) {
+            return Ok((None, parent_hash))
+        }
+
+        self.state_trie_overlays
+            .overlay_for_parent(parent_hash)
+            .map(|(overlay, anchor_hash)| (Some(overlay), anchor_hash))
     }
 
     /// Insert executed block into the state.

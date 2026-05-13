@@ -1516,7 +1516,13 @@ where
 
     /// Prepares the state trie overlay for `parent_hash` in the background.
     fn prepare_state_trie_overlay(&self, parent_hash: B256) {
-        let (overlay, anchor_hash) = self.state.tree_state.state_trie_overlay(parent_hash);
+        let (overlay, anchor_hash) = match self.state.tree_state.state_trie_overlay(parent_hash) {
+            Ok(overlay) => overlay,
+            Err(err) => {
+                debug!(target: "engine::tree", %err, "Could not prepare state trie overlay");
+                return
+            }
+        };
         if let Some(overlay) = overlay {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
                 let _ = overlay.as_overlay(anchor_hash);
