@@ -1108,8 +1108,6 @@ where
                 }
             }
 
-            let _orig_next_child_nibbles = next_child_nibbles;
-
             // Mask out any child nibbles whose ranges have already been fully processed.
             // This can happen when `calculate_key_range` finds no keys for a child's range,
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
@@ -1117,6 +1115,7 @@ where
             if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
                 uncalculated_lower_bound_ref.len() > self.branch_path.len()
             {
+                let orig_next_child_nibbles = next_child_nibbles;
                 let lower_nibble =
                     uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len());
                 // Clear all nibbles strictly below `lower_nibble` since they've been processed.
@@ -1125,7 +1124,7 @@ where
                 trace!(
                     target: TRACE_TARGET,
                     branch_path = ?self.branch_path,
-                    ?_orig_next_child_nibbles,
+                    ?orig_next_child_nibbles,
                     ?already_processed_mask,
                     ?next_child_nibbles,
                     "Unset already processed key nibbles from next_child_nibbles",
@@ -1135,11 +1134,12 @@ where
             {
                 // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
                 // lower is 0x7). All remaining children have been processed.
+                let orig_next_child_nibbles = next_child_nibbles;
                 next_child_nibbles = TrieMask::default();
                 trace!(
                     target: TRACE_TARGET,
                     branch_path = ?self.branch_path,
-                    ?_orig_next_child_nibbles,
+                    ?orig_next_child_nibbles,
                     ?next_child_nibbles,
                     "Unset all nibbles from next_child_nibbles due to branch_path being outside this subtrie",
                 );
