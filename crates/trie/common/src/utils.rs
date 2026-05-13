@@ -48,6 +48,16 @@ where
         return;
     }
 
+    // Fast path: the new range is entirely before the existing range. This avoids walking the
+    // two slices through the general merge path when sorted update batches are prepended.
+    if other.last().map(|(k, _)| k) < target.first().map(|(k, _)| k) {
+        let right = core::mem::take(target);
+        target.reserve(other.len() + right.len());
+        target.extend_from_slice(other);
+        target.extend(right);
+        return;
+    }
+
     // Move ownership of target to avoid cloning owned elements
     let left = core::mem::take(target);
     let mut out = Vec::with_capacity(left.len() + other.len());
