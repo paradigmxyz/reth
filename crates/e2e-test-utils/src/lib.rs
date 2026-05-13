@@ -7,7 +7,7 @@ use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, PipelineBuilderAddOn, RethRpcAddOns},
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
     FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypes, NodeTypesWithDBAdapter,
     PayloadTypes,
 };
@@ -160,8 +160,6 @@ where
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            > + PipelineBuilderAddOn<
-                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
             ChainSpec: From<ChainSpec> + Clone,
         >,
@@ -183,8 +181,6 @@ impl<T> NodeBuilderHelper for T where
             AddOns: RethRpcAddOns<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             > + EngineValidatorAddOn<
-                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            > + PipelineBuilderAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
             ChainSpec: From<ChainSpec> + Clone,
