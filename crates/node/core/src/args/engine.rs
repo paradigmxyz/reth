@@ -314,7 +314,17 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-backpressure-threshold", default_value_t = DefaultEngineValues::get_global().persistence_backpressure_threshold)]
     pub persistence_backpressure_threshold: u64,
 
-    /// Configure the target number of blocks to keep in memory.
+    /// Configure the target number of recent canonical blocks to keep in memory after a
+    /// persistence flush.
+    ///
+    /// When persistence is triggered (see `--engine.persistence-threshold`), the engine flushes
+    /// canonical blocks to disk up to `canonical_head - memory_block_buffer_target`. The
+    /// `memory_block_buffer_target` most-recent blocks are intentionally kept in memory to allow
+    /// fast re-org handling and payload building without requiring a database read.
+    ///
+    /// This value should be less than `--engine.persistence-threshold`; if it is equal to or
+    /// greater than the threshold, no blocks will be flushed during a normal persistence run and
+    /// the in-memory set will only shrink under backpressure.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
     pub memory_block_buffer_target: u64,
 
