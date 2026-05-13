@@ -200,6 +200,7 @@ export BENCH_WORK_DIR
 export SCHELK_MOUNT="${SCHELK_MOUNT:-/reth-bench}"
 export BENCH_RPC_URL="${BENCH_RPC_URL:-https://ethereum.reth.rs/rpc}"
 export BENCH_METRICS_ADDR="127.0.0.1:9001"
+export BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-200}"
 
 # ── Step 1: Resolve refs to full SHAs ────────────────────────────────
 echo "▸ Resolving git refs..."

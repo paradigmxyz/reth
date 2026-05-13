@@ -14,6 +14,7 @@
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 #               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
+#               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (default 200, matches txgen)
 set -euxo pipefail
 
 LABEL="$1"
@@ -26,8 +27,45 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
+TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-200}"
+
+capture_unix_time_ms() {
+  python3 -c 'import time; print(time.time_ns() // 1_000_000)'
+}
+
+record_target_metric_range() {
+  local start_ms="$1"
+  local end_ms="$2"
+  if [ -z "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+    return 0
+  fi
+
+  python3 - "$TARGET_METRICS_RANGE" "$start_ms" "$end_ms" "${BENCH_ID:-}" "$(basename "$OUTPUT_DIR")" <<'PY'
+import json
+import sys
+
+output_path, start_ms, end_ms, benchmark_id, benchmark_run = sys.argv[1:6]
+start_ms = int(start_ms)
+end_ms = int(end_ms)
+
+with open(output_path, "w") as f:
+    json.dump(
+        {
+            "benchmark_id": benchmark_id,
+            "benchmark_run": benchmark_run,
+            "range_start_ms": start_ms,
+            "range_end_ms": end_ms,
+            "duration_ms": end_ms - start_ms,
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+PY
+}
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
@@ -305,6 +343,17 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     sleep 0.5  # give tracy-capture time to connect
   fi
 
+  TARGET_METRICS_START_MS=""
+  TARGET_METRICS_ARGS=()
+  if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+    TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
+    TARGET_METRICS_ARGS=(
+      --metrics-url "http://${BENCH_METRICS_ADDR}/"
+      --metrics-output "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+      --scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS"
+    )
+  fi
+
   if [ "${BENCH_BLOCKS:-0}" -le 0 ] 2>/dev/null; then
     echo "::error::BENCH_BLOCKS must be greater than 0 for big-block benchmarks"
     exit 1
@@ -317,7 +366,13 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     --big-blocks "$BENCH_BLOCKS" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
+    "${TARGET_METRICS_ARGS[@]}" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+
+  if [ -n "$TARGET_METRICS_START_MS" ]; then
+    TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
+    record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
+  fi
 else
   # Standard mode: warmup + new-payload-fcu
   WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
@@ -341,6 +396,17 @@ else
     sleep 0.5  # give tracy-capture time to connect
   fi
 
+  TARGET_METRICS_START_MS=""
+  TARGET_METRICS_ARGS=()
+  if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+    TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
+    TARGET_METRICS_ARGS=(
+      --metrics-url "http://${BENCH_METRICS_ADDR}/"
+      --metrics-output "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+      --scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS"
+    )
+  fi
+
   # Benchmark
   $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
     --rpc-url "$BENCH_RPC_URL" \
@@ -348,7 +414,13 @@ else
     --jwt-secret "$DATADIR/jwt.hex" \
     --advance "$BENCH_BLOCKS" \
     "${EXTRA_BENCH_ARGS[@]}" \
+    "${TARGET_METRICS_ARGS[@]}" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+
+  if [ -n "$TARGET_METRICS_START_MS" ]; then
+    TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
+    record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
+  fi
 fi
 
 # cleanup runs via trap

@@ -308,11 +308,13 @@ jobs:
       BENCH_ABBA: "true"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
       BENCH_DRIVER: txgen
       BENCH_NODE_BIN: reth
       BENCH_DRIVER_REASON: ""
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
       BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
@@ -696,6 +698,9 @@ jobs:
           fi
           if [ -n "${BENCH_DRIVER_REASON:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --driver-reason $BENCH_DRIVER_REASON"
+          fi
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS

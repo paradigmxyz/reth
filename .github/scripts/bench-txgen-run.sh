@@ -12,7 +12,8 @@
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
-#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
+#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
+#               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (default 200)
 set -euxo pipefail
 
 LABEL="$1"
@@ -26,8 +27,45 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
+TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-200}"
+
+capture_unix_time_ms() {
+  python3 -c 'import time; print(time.time_ns() // 1_000_000)'
+}
+
+record_target_metric_range() {
+  local start_ms="$1"
+  local end_ms="$2"
+  if [ -z "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+    return 0
+  fi
+
+  python3 - "$TARGET_METRICS_RANGE" "$start_ms" "$end_ms" "${BENCH_ID:-}" "$(basename "$OUTPUT_DIR")" <<'PY'
+import json
+import sys
+
+output_path, start_ms, end_ms, benchmark_id, benchmark_run = sys.argv[1:6]
+start_ms = int(start_ms)
+end_ms = int(end_ms)
+
+with open(output_path, "w") as f:
+    json.dump(
+        {
+            "benchmark_id": benchmark_id,
+            "benchmark_run": benchmark_run,
+            "range_start_ms": start_ms,
+            "range_end_ms": end_ms,
+            "duration_ms": end_ms - start_ms,
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+PY
+}
 
 # Unsupported txgen-path behavior is made explicit here. Keep this check near
 # the top so BAL support can be added when txgen supports it.
@@ -318,13 +356,32 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
+TARGET_METRICS_START_MS=""
+TXGEN_METRICS_ARGS=()
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+  TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
+  TXGEN_METRICS_ARGS=(
+    --metrics-url "http://${BENCH_METRICS_ADDR}/"
+    --scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS"
+  )
+fi
+
+
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
 $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --engine http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
+  "${TXGEN_METRICS_ARGS[@]}" \
   --wait-for-persistence never \
   --report json:"$OUTPUT_DIR/report.json" 2>&1 | sed -u "s/^/[bench] /"
+
+if [ -n "$TARGET_METRICS_START_MS" ]; then
+  TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
+  record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
+  jq -c '.samples[] | select(.name | startswith("txgen_") | not)' \
+    "$OUTPUT_DIR/report.json" > "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+fi
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"

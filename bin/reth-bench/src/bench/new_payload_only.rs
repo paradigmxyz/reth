@@ -59,7 +59,12 @@ impl Command {
 
         let total_blocks = benchmark_mode.total_blocks();
 
-        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
+        let metrics_scraper = MetricsScraper::maybe_new_with_output_dir(
+            self.benchmark.metrics_url.clone(),
+            self.benchmark.metrics_output.clone(),
+            self.benchmark.output.as_deref(),
+            self.benchmark.scrape_interval_ms,
+        )?;
 
         if use_reth_namespace {
             info!("Using reth_newPayload endpoint");
@@ -179,12 +184,6 @@ impl Command {
             let row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((row, new_payload_result));
-
-            if let Some(scraper) = metrics_scraper.as_mut() &&
-                let Err(err) = scraper.scrape_after_block(block_number).await
-            {
-                tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
-            }
         }
 
         // Check if the spawned task encountered an error
@@ -215,11 +214,11 @@ impl Command {
             }
             writer.flush()?;
 
-            if let Some(scraper) = &metrics_scraper {
-                scraper.write_csv(&path)?;
-            }
-
             info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", path);
+        }
+
+        if let Some(scraper) = metrics_scraper {
+            scraper.finish().await?;
         }
 
         // accumulate the results and calculate the overall Ggas/s

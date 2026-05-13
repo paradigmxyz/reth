@@ -626,11 +626,13 @@ jobs:
       BENCH_OTLP: ${{ needs.reth-bench-ack.outputs.otlp }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
       BENCH_SLACK: ${{ needs.reth-bench-ack.outputs.slack }}
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
       BENCH_DRIVER: ${{ needs.reth-bench-ack.outputs.driver }}
       BENCH_NODE_BIN: ${{ needs.reth-bench-ack.outputs.node-bin }}
       BENCH_DRIVER_REASON: ${{ needs.reth-bench-ack.outputs.driver-reason }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       TXGEN_REV: 64826ac816380586e4856e2d1d2d20f4d4e66198
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
@@ -1243,6 +1245,9 @@ jobs:
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS

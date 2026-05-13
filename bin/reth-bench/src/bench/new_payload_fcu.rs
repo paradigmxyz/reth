@@ -204,7 +204,12 @@ impl Command {
 
         let total_blocks = benchmark_mode.total_blocks();
 
-        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
+        let metrics_scraper = MetricsScraper::maybe_new_with_output_dir(
+            self.benchmark.metrics_url.clone(),
+            self.benchmark.metrics_output.clone(),
+            self.benchmark.output.as_deref(),
+            self.benchmark.scrape_interval_ms,
+        )?;
 
         if use_reth_namespace {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
@@ -483,12 +488,6 @@ impl Command {
             };
             info!(target: "reth-bench", progress, %combined_result);
 
-            if let Some(scraper) = metrics_scraper.as_mut() &&
-                let Err(err) = scraper.scrape_after_block(block_number).await
-            {
-                warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
-            }
-
             if let Some(wait_time) = self.wait_time {
                 let remaining = wait_time.saturating_sub(start.elapsed());
                 if !remaining.is_zero() {
@@ -508,8 +507,8 @@ impl Command {
             write_benchmark_results(path, &gas_output_results, &combined_results)?;
         }
 
-        if let (Some(path), Some(scraper)) = (&self.benchmark.output, &metrics_scraper) {
-            scraper.write_csv(path)?;
+        if let Some(scraper) = metrics_scraper {
+            scraper.finish().await?;
         }
 
         let gas_output =
