@@ -195,66 +195,13 @@ def _paired_data(
     return pairs, lat_diffs_ms, mgas_diffs, total_lat_diffs_ms, persist_diffs_ms
 
 
-def _optimal_block_size(diffs: list[float]) -> int:
-    """Estimate optimal block size for block bootstrap using Newey-West
-    autocorrelation structure.
-
-    Uses the lag-1 autocorrelation to pick a block length that captures
-    serial dependence (e.g., from persistence phase offsets affecting
-    consecutive blocks). Falls back to 1 (iid bootstrap) when
-    autocorrelation is negligible.
-    """
-    n = len(diffs)
-    if n < 10:
-        return 1
-    mean = sum(diffs) / n
-    centered = [d - mean for d in diffs]
-
-    # Compute variance and lag-1 autocovariance
-    var = sum(c * c for c in centered) / n
-    if var < 1e-15:
-        return 1
-    cov1 = sum(centered[i] * centered[i + 1] for i in range(n - 1)) / n
-    rho = cov1 / var
-
-    # Politis & White (2004) rule-of-thumb: block_size ~ (2*rho/(1-rho^2))^(2/3) * n^(1/3)
-    # Clamp rho to avoid blowup near |rho| = 1
-    rho = max(-0.99, min(0.99, rho))
-    if abs(rho) < 0.02:
-        return 1
-    raw = abs(2.0 * rho / (1.0 - rho * rho)) ** (2.0 / 3.0) * n ** (1.0 / 3.0)
-    block_size = max(1, min(int(round(raw)), n // 4))
-    return block_size
-
-
-def _block_bootstrap_sample(rng: random.Random, data: list, block_size: int) -> list:
-    """Draw a block bootstrap sample of length len(data)."""
-    n = len(data)
-    if block_size <= 1:
-        return rng.choices(data, k=n)
-    result = []
-    while len(result) < n:
-        start = rng.randrange(n)
-        for j in range(block_size):
-            if len(result) >= n:
-                break
-            result.append(data[(start + j) % n])
-    return result
-
-
 def _bootstrap_ci(rng: random.Random, diffs: list[float], n_iter: int = BOOTSTRAP_ITERATIONS) -> float:
-    """Compute 95% bootstrap CI half-width for the mean of *diffs*.
-
-    Uses block bootstrap with Newey-West-derived block size to account
-    for autocorrelation in consecutive block diffs.
-    """
+    """Compute 95% bootstrap CI half-width for the mean of *diffs*."""
     if len(diffs) < 2:
         return 0.0
     n = len(diffs)
-    block_size = _optimal_block_size(diffs)
     boot_means = sorted(
-        sum(_block_bootstrap_sample(rng, diffs, block_size)) / n
-        for _ in range(n_iter)
+        sum(rng.choices(diffs, k=n)) / n for _ in range(n_iter)
     )
     lo = int(n_iter * 0.025)
     hi = int(n_iter * 0.975)
@@ -267,19 +214,13 @@ def _bootstrap_percentile_ci(
     pct: int,
     n_iter: int = BOOTSTRAP_ITERATIONS,
 ) -> float:
-    """Compute 95% bootstrap CI half-width for a difference-of-percentiles.
-
-    Uses block bootstrap to preserve autocorrelation structure.
-    """
+    """Compute 95% bootstrap CI half-width for a difference-of-percentiles."""
     if len(pairs) < 2:
         return 0.0
     n = len(pairs)
-    # Use latency diffs to determine block size (they carry the autocorrelation)
-    lat_diffs = [p[1] - p[0] for p in pairs]
-    block_size = _optimal_block_size(lat_diffs)
     boot_diffs = []
     for _ in range(n_iter):
-        sample = _block_bootstrap_sample(rng, pairs, block_size)
+        sample = rng.choices(pairs, k=n)
         b_sorted = sorted(p[0] for p in sample)
         f_sorted = sorted(p[1] for p in sample)
         boot_diffs.append(percentile(f_sorted, pct) - percentile(b_sorted, pct))
