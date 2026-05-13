@@ -52,12 +52,7 @@ enum DeferredTrieDataInner {
     /// Wrapped in `Option` to allow taking ownership during computation.
     Pending(Option<PendingInputs>),
     /// Data has been computed and is ready.
-    Ready {
-        /// Sorted hashed post-state produced by execution.
-        hashed_state: Arc<HashedPostStateSorted>,
-        /// Sorted trie updates produced by state root computation.
-        trie_updates: Arc<TrieUpdatesSorted>,
-    },
+    Ready(ComputedTrieData),
 }
 
 /// Inputs kept while a deferred trie computation is pending.
@@ -76,7 +71,7 @@ impl fmt::Debug for DeferredTrieData {
             DeferredTrieDataInner::Pending(_) => {
                 f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
             }
-            DeferredTrieDataInner::Ready { .. } => {
+            DeferredTrieDataInner::Ready(_) => {
                 f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
             }
         }
@@ -96,13 +91,7 @@ impl DeferredTrieData {
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        let ComputedTrieData { hashed_state, trie_updates } = bundle;
-        Self {
-            state: Arc::new(Mutex::new(DeferredTrieDataInner::Ready {
-                hashed_state,
-                trie_updates,
-            })),
-        }
+        Self { state: Arc::new(Mutex::new(DeferredTrieDataInner::Ready(bundle))) }
     }
 
     /// Sorts block execution outputs.
@@ -144,19 +133,16 @@ impl DeferredTrieData {
     pub fn wait_cloned(&self) -> ComputedTrieData {
         let mut state = self.state.lock();
         match &mut *state {
-            DeferredTrieDataInner::Ready { hashed_state, trie_updates } => {
+            DeferredTrieDataInner::Ready(bundle) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                ComputedTrieData::new(Arc::clone(hashed_state), Arc::clone(trie_updates))
+                bundle.clone()
             }
             DeferredTrieDataInner::Pending(maybe_inputs) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
 
                 let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
                 let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
-                *state = DeferredTrieDataInner::Ready {
-                    hashed_state: Arc::clone(&computed.hashed_state),
-                    trie_updates: Arc::clone(&computed.trie_updates),
-                };
+                *state = DeferredTrieDataInner::Ready(computed.clone());
 
                 computed
             }
