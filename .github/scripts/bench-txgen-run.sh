@@ -351,6 +351,6 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
   -m "platform=ethereum" \
-  -m "mode=replay" 2>&1 | sed -u "s/^/[bench] /"
+  -m "scenario=replay" 2>&1 | sed -u "s/^/[bench] /"
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
