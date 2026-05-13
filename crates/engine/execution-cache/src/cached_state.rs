@@ -139,6 +139,15 @@ impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
     }
 }
 
+#[inline]
+fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
+    if value.is_zero() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 /// Represents the status of a key in the cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CachedStatus<T> {
@@ -480,13 +489,13 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
                     if let Some(stats) = &self.cache_stats {
                         stats.record_storage_miss();
                     }
-                    Ok(Some(value).filter(|v| !v.is_zero()))
+                    Ok(nonzero_storage_value(value))
                 }
                 CachedStatus::Cached(value) => {
                     if let Some(stats) = &self.cache_stats {
                         stats.record_storage_hit();
                     }
-                    Ok(Some(value).filter(|v| !v.is_zero()))
+                    Ok(nonzero_storage_value(value))
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
@@ -494,7 +503,7 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_hit();
             }
-            Ok(Some(value).filter(|v| !v.is_zero()))
+            Ok(nonzero_storage_value(value))
         } else {
             self.metrics.storage_cache_misses.increment(1);
             if let Some(stats) = &self.cache_stats {
