@@ -37,6 +37,8 @@ JWT_SECRET="${DATADIR}/jwt.hex"
 RETH_SCOPE="${RETH_SCOPE:-reth-benchmarkoor.scope}"
 ENGINE_URL="${BENCHMARKOOR_ENGINE_URL:-http://127.0.0.1:8551}"
 HTTP_URL="http://127.0.0.1:8545"
+ENGINE_HOST="127.0.0.1"
+ENGINE_PORT="8551"
 
 TAIL_PID=""
 CURRENT_LOG=""
@@ -101,6 +103,24 @@ rpc_call() {
   curl -sf "$HTTP_URL" -X POST \
     -H 'Content-Type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"method\":\"${method}\",\"params\":${params},\"id\":1}"
+}
+
+wait_for_engine_port() {
+  local label="$1"
+  local phase="$2"
+  local deadline
+  deadline=$((SECONDS + 30))
+
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if timeout 0.1 bash -c "</dev/tcp/${ENGINE_HOST}/${ENGINE_PORT}" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.05
+  done
+
+  echo "::error::reth (${label}/${phase}) engine port ${ENGINE_HOST}:${ENGINE_PORT} did not open within 30s"
+  cat "$CURRENT_LOG"
+  exit 1
 }
 
 prerun_head_file() {
@@ -455,6 +475,8 @@ start_node() {
     stdbuf -oL tail -f "$CURRENT_LOG" | sed -u "s/^/[reth] /" &
     TAIL_PID=$!
   fi
+
+  wait_for_engine_port "$label" "$phase"
 }
 
 benchmarkoor_common_args() {
