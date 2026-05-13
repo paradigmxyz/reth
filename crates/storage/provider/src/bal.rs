@@ -202,8 +202,22 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
+    fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>> {
+        let inner = self.inner.read();
+        let mut result = Vec::new();
+
+        for offset in 0..count {
+            let Some(block_number) = start.checked_add(offset) else { break };
+            let Some(block_hash) =
+                inner.hashes_by_number.get(&block_number).and_then(|hashes| hashes.first())
+            else {
+                break
+            };
+            let Some(entry) = inner.entries.get(block_hash) else { break };
+            result.push(entry.bal.clone());
+        }
+
+        Ok(result)
     }
 
     fn bal_stream(&self) -> BalNotificationStream {
@@ -259,6 +273,66 @@ mod tests {
         let store = InMemoryBalStore::default();
 
         assert!(store.get_by_range(1, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn range_lookup_returns_ordered_bals() {
+        let store = InMemoryBalStore::default();
+        let bal1 = Bytes::from_static(b"bal1");
+        let bal2 = Bytes::from_static(b"bal2");
+        let bal3 = Bytes::from_static(b"bal3");
+
+        store.insert(NumHash::new(2, B256::random()), sealed_bal(bal2.clone())).unwrap();
+        store.insert(NumHash::new(1, B256::random()), sealed_bal(bal1.clone())).unwrap();
+        store.insert(NumHash::new(3, B256::random()), sealed_bal(bal3.clone())).unwrap();
+
+        assert_eq!(store.get_by_range(1, 3).unwrap(), vec![bal1, bal2, bal3]);
+    }
+
+    #[test]
+    fn range_lookup_stops_at_first_missing_block_number() {
+        let store = InMemoryBalStore::default();
+        let bal1 = Bytes::from_static(b"bal1");
+        let bal2 = Bytes::from_static(b"bal2");
+
+        store.insert(NumHash::new(1, B256::random()), sealed_bal(bal1.clone())).unwrap();
+        store.insert(NumHash::new(2, B256::random()), sealed_bal(bal2.clone())).unwrap();
+        store
+            .insert(NumHash::new(4, B256::random()), sealed_bal(Bytes::from_static(b"bal4")))
+            .unwrap();
+
+        assert_eq!(store.get_by_range(1, 4).unwrap(), vec![bal1, bal2]);
+    }
+
+    #[test]
+    fn range_lookup_handles_count_zero_and_start() {
+        let store = InMemoryBalStore::default();
+        let bal2 = Bytes::from_static(b"bal2");
+        let bal3 = Bytes::from_static(b"bal3");
+
+        store
+            .insert(NumHash::new(1, B256::random()), sealed_bal(Bytes::from_static(b"bal1")))
+            .unwrap();
+        store.insert(NumHash::new(2, B256::random()), sealed_bal(bal2.clone())).unwrap();
+        store.insert(NumHash::new(3, B256::random()), sealed_bal(bal3.clone())).unwrap();
+
+        assert!(store.get_by_range(2, 0).unwrap().is_empty());
+        assert_eq!(store.get_by_range(2, 2).unwrap(), vec![bal2, bal3]);
+    }
+
+    #[test]
+    fn range_lookup_uses_first_hash_for_same_number() {
+        let store = InMemoryBalStore::default();
+        let bal1a = Bytes::from_static(b"bal1a");
+        let bal2 = Bytes::from_static(b"bal2");
+
+        store.insert(NumHash::new(1, B256::random()), sealed_bal(bal1a.clone())).unwrap();
+        store
+            .insert(NumHash::new(1, B256::random()), sealed_bal(Bytes::from_static(b"bal1b")))
+            .unwrap();
+        store.insert(NumHash::new(2, B256::random()), sealed_bal(bal2.clone())).unwrap();
+
+        assert_eq!(store.get_by_range(1, 2).unwrap(), vec![bal1a, bal2]);
     }
 
     #[test]
