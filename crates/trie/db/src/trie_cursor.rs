@@ -304,10 +304,9 @@ where
                     &A::StorageValue::new(nibbles, node.clone()),
                 )?,
                 (true, None) => self.cursor.delete_current()?,
-                (false, Some(node)) => self.cursor.upsert(
-                    self.hashed_address,
-                    &A::StorageValue::new(nibbles, node.clone()),
-                )?,
+                (false, Some(node)) => self
+                    .cursor
+                    .upsert(self.hashed_address, &A::StorageValue::new(nibbles, node.clone()))?,
                 (false, None) => {}
             }
         }
