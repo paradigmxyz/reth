@@ -9583,6 +9583,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "derive_more",
  "eyre",
  "itertools 0.14.0",
  "metrics",

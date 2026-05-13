@@ -59,6 +59,7 @@ strum.workspace = true
 eyre.workspace = true
 reth-tokio-util.workspace = true
 tokio = { workspace = true, features = ["sync"], optional = true }
+derive_more.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
