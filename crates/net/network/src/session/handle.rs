@@ -76,11 +76,8 @@ pub struct ActiveSessionHandle<N: NetworkPrimitives> {
     pub(crate) local_addr: Option<SocketAddr>,
     /// The TCP listening port the peer announced in its `Hello` message, if non-zero.
     ///
-    /// The devp2p `Hello` message's `listenPort` field is officially marked legacy in the
-    /// [RLPx spec](https://github.com/ethereum/devp2p/blob/master/rlpx.md), but most clients
-    /// (other than geth) still send their actual listening port. For inbound connections this
-    /// is the only in-band way to learn a peer's dialable port, since `remote_addr` only carries
-    /// the OS-assigned ephemeral source port of the TCP connection.
+    /// This is effectively deprecated, but we still keep it around if a peer announced it as it's
+    /// likely still more useful than the ephemeral source port.
     pub(crate) peer_listen_port: Option<u16>,
     /// The Status message the peer sent for the `eth` handshake
     pub(crate) status: Arc<UnifiedStatus>,
