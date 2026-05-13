@@ -705,6 +705,10 @@ if [[ "$label" == baseline* ]]; then
   run_type="baseline"
 fi
 
+selected_count="$(grep -cve '^[[:space:]]*$' "$tests_jsonl" || true)"
+completed_count=0
+recorded_failure_count=0
+
 while IFS= read -r test_entry; do
   [ -n "$test_entry" ] || continue
   test_name="$(jq -r '.name' <<< "$test_entry")"
@@ -782,6 +786,7 @@ while IFS= read -r test_entry; do
       "$wall_elapsed_secs" \
       "$benchmarkoor_status" \
       "$results"
+    recorded_failure_count=$(( recorded_failure_count + 1 ))
   elif [ "$emitted_count" -le 0 ]; then
     echo "::warning::benchmarkoor-replay did not emit a run_many_result for ${test_name}; recording failure and continuing"
     append_benchmarkoor_failure_result \
@@ -795,8 +800,12 @@ while IFS= read -r test_entry; do
       "$wall_elapsed_secs" \
       0 \
       "$results"
+    recorded_failure_count=$(( recorded_failure_count + 1 ))
   fi
+
+  completed_count=$(( completed_count + 1 ))
 done < "$tests_jsonl"
 
+echo "Completed ${completed_count}/${selected_count} selected benchmarkoor test(s) for ${label}; recorded ${recorded_failure_count} replay failure(s)"
 finalize_run_state "$binary"
 echo "results=${results}"
