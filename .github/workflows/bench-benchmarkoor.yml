@@ -6,11 +6,6 @@
 # page cache, and measures only the testing fixture replay.
 
 on:
-  # Temporary test trigger for branch-only workflow validation.
-  # Remove before merging this workflow.
-  push:
-    branches:
-      - dan/create-benchmarkoor-replay-workflow
   workflow_dispatch:
     inputs:
       pr:
