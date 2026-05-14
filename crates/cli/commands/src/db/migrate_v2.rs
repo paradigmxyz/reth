@@ -367,10 +367,6 @@ impl Command {
                     StageId::SenderRecovery,
                     StageCheckpoint::new(first_indices_entry - 1),
                 )?;
-                provider_rw.save_stage_checkpoint(
-                    StageId::TransactionLookup,
-                    StageCheckpoint::new(first_indices_entry - 1),
-                )?;
 
                 // Make sure that senders static files segment is at the correct height.
                 let static_file_provider = provider_rw.static_file_provider();
