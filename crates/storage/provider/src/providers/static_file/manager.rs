@@ -2503,11 +2503,62 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
-        self.walk_storage_changeset_range(range).collect()
+        self.storage_changesets_range_with_cursor(range)
     }
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
+    /// Fetches storage changesets in a bounded range while reusing the static-file cursor for each
+    /// loaded static-file segment.
+    pub fn storage_changesets_range_with_cursor(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
+        let range = *range.start()..range.end().saturating_add(1);
+        let mut changesets = Vec::new();
+
+        let mut block_number = range.start;
+        while block_number < range.end {
+            let provider = match self.get_segment_provider_for_block(
+                StaticFileSegment::StorageChangeSets,
+                block_number,
+                None,
+            ) {
+                Ok(provider) => provider,
+                Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(changesets),
+                Err(err) => return Err(err),
+            };
+
+            let mut cursor = provider.cursor()?;
+            let provider_end = provider
+                .user_header()
+                .block_range()
+                .map(|range| range.end().saturating_add(1))
+                .unwrap_or(range.end)
+                .min(range.end);
+            while block_number < provider_end {
+                let Some(offset) = provider.read_changeset_offset(block_number)? else {
+                    block_number += 1;
+                    continue
+                };
+
+                changesets.reserve(offset.num_changes() as usize);
+                for i in offset.changeset_range() {
+                    if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
+                        let block_address = BlockNumberAddress((block_number, change.address));
+                        let entry = StorageEntry { key: change.key, value: change.value };
+                        changesets.push((block_address, entry));
+                    }
+                }
+
+                block_number += 1;
+            }
+        }
+
+        Ok(changesets)
+    }
+
     /// Creates an iterator for walking through account changesets in the specified block range.
     ///
     /// This returns a lazy iterator that fetches changesets block by block to avoid loading
