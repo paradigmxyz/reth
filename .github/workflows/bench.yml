@@ -1195,6 +1195,13 @@ jobs:
           done
 
       # Results & charts
+      - name: Upload raw results
+        if: success()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: bench-raw-results
+          path: ${{ env.BENCH_WORK_DIR }}
+
       - name: Parse results
         id: results
         if: success()
