@@ -89,7 +89,7 @@ function blocksLabel(summary) {
   return parts;
 }
 
-// The 7 metric rows shared by all renderers.
+// The metric rows shared by all renderers.
 // Returns an array of { label, baseline, feature, change } objects.
 function metricRows(summary) {
   const b = summary.baseline.stats;
