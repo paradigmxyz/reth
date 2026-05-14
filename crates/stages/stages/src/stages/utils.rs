@@ -26,6 +26,10 @@ use tracing::info;
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 
+/// Maximum number of distinct storage keys to keep in the in-memory history-index cache before
+/// spilling to ETL.
+const STORAGE_HISTORY_CACHE_HIGH_WATERMARK: usize = 128 * 1024;
+
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
 ///
@@ -215,6 +219,11 @@ where
                 current_block = current_block_number,
                 "Collecting indices"
             );
+            collect_indices(cache.drain(), &mut insert_fn)?;
+            flush_counter = 0;
+        }
+
+        if cache.len() >= STORAGE_HISTORY_CACHE_HIGH_WATERMARK {
             collect_indices(cache.drain(), &mut insert_fn)?;
             flush_counter = 0;
         }
