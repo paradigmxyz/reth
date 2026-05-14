@@ -2402,7 +2402,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
         let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
-        self.walk_account_changeset_range(range).collect()
+        self.account_changesets_range_with_cursor(range)
     }
 }
 
@@ -2508,6 +2508,57 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
+    /// Fetches account changesets in a bounded range while reusing the static-file cursor for each
+    /// loaded static-file segment.
+    pub fn account_changesets_range_with_cursor(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+        let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
+        let range = *range.start()..range.end().saturating_add(1);
+        let mut changesets = Vec::new();
+
+        let mut block_number = range.start;
+        while block_number < range.end {
+            let provider = match self.get_segment_provider_for_block(
+                StaticFileSegment::AccountChangeSets,
+                block_number,
+                None,
+            ) {
+                Ok(provider) => provider,
+                Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(changesets),
+                Err(err) => return Err(err),
+            };
+
+            let mut cursor = provider.cursor()?;
+            let provider_end = provider
+                .user_header()
+                .block_range()
+                .map(|range| range.end().saturating_add(1))
+                .unwrap_or(range.end)
+                .min(range.end);
+            while block_number < provider_end {
+                let Some(offset) = provider.read_changeset_offset(block_number)? else {
+                    block_number += 1;
+                    continue
+                };
+
+                changesets.reserve(offset.num_changes() as usize);
+                for i in offset.changeset_range() {
+                    if let Some(change) =
+                        cursor.get_one::<reth_db::static_file::AccountChangesetMask>(i.into())?
+                    {
+                        changesets.push((block_number, change));
+                    }
+                }
+
+                block_number += 1;
+            }
+        }
+
+        Ok(changesets)
+    }
+
     /// Creates an iterator for walking through account changesets in the specified block range.
     ///
     /// This returns a lazy iterator that fetches changesets block by block to avoid loading

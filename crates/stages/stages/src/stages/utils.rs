@@ -139,29 +139,37 @@ where
     // Use the new walker for lazy iteration over static file changesets
     let static_file_provider = provider.static_file_provider();
 
-    let walker = static_file_provider.walk_account_changeset_range(range);
-
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
 
-    for changeset_result in walker {
-        let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
-        cache.entry(address).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
+    if range.end.saturating_sub(range.start) <= DEFAULT_CACHE_THRESHOLD {
+        for (block_number, AccountBeforeTx { address, .. }) in
+            static_file_provider.account_changesets_range_with_cursor(range.clone())?
+        {
+            cache.entry(address).or_default().push(block_number);
         }
+    } else {
+        let walker = static_file_provider.walk_account_changeset_range(range);
 
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
+        for changeset_result in walker {
+            let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
+            cache.entry(address).or_default().push(block_number);
+
+            if block_number != current_block_number {
+                current_block_number = block_number;
+                flush_counter += 1;
+            }
+
+            if flush_counter > DEFAULT_CACHE_THRESHOLD {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = current_block_number.saturating_sub(start_block) + 1,
+                    current_block = current_block_number,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                flush_counter = 0;
+            }
         }
     }
     collect_indices(cache.into_iter(), insert_fn)?;
