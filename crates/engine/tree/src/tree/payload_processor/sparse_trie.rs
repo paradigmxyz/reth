@@ -570,18 +570,32 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Process all storage updates, skipping tries with no pending updates.
-        let span = trace_span!("process_storage_leaf_updates").entered();
+        const THRESHOLD: usize = 1000;
+
+        let mut batches = vec![vec![]];
+        let mut last_updates = 0;
+
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
             }
+
+            if last_updates + updates.len() > THRESHOLD {
+                batches.push(vec![]);
+                last_updates = 0;
+            }
+            last_updates += updates.len();
+            batches.last_mut().unwrap().push((address, updates));
+        }
+
+        let span = trace_span!("process_storage_leaf_updates").entered();
+        let process_updates = |address: &B256,
+                               trie: &mut RevealableSparseTrie<S>,
+                               updates: &mut B256Map<LeafUpdate>,
+                               fetched: &mut B256Map<u8>| {
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
 
-            let trie = self.trie.get_or_create_storage_trie_mut(*address);
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
             let mut targets = Vec::new();
-
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
@@ -596,11 +610,69 @@ where
                 }
             })?;
             let updates_len_after = updates.len();
-            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
-            self.storage_cache_misses += updates_len_after as u64;
 
-            if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
+            let hits = (updates_len_before - updates_len_after) as u64;
+            let misses = updates_len_after as u64;
+
+            SparseTrieResult::Ok((targets, hits, misses))
+        };
+
+        // Process all storage updates, skipping tries with no pending updates.
+        if batches.len() == 1 {
+            for (address, updates) in batches.pop().unwrap() {
+                let trie = self.trie.get_or_create_storage_trie_mut(*address);
+                let fetched = self.fetched_storage_targets.entry(*address).or_default();
+                let (targets, hits, misses) = process_updates(address, trie, updates, fetched)?;
+                self.storage_cache_hits += hits;
+                self.storage_cache_misses += misses;
+
+                if !targets.is_empty() {
+                    self.pending_targets.extend_storage_targets(address, targets);
+                }
+            }
+        } else {
+            let results = batches
+                .into_iter()
+                .map(|batch| {
+                    batch
+                        .into_iter()
+                        .map(|(address, updates)| {
+                            let trie = self.trie.take_or_create_storage_trie(address);
+                            let fetched =
+                                self.fetched_storage_targets.remove(address).unwrap_or_default();
+
+                            (address, updates, trie, fetched)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|batch| {
+                    batch
+                        .into_iter()
+                        .map(|(address, updates, mut trie, mut fetched)| {
+                            process_updates(address, &mut trie, updates, &mut fetched).map(
+                                |(targets, hits, misses)| {
+                                    (address, targets, hits, misses, trie, fetched)
+                                },
+                            )
+                        })
+                        .collect::<SparseTrieResult<Vec<_>>>()
+                })
+                .collect::<SparseTrieResult<Vec<_>>>()?
+                .into_iter()
+                .flatten();
+
+            for (address, targets, hits, misses, trie, fetched) in results {
+                self.storage_cache_hits += hits;
+                self.storage_cache_misses += misses;
+
+                if !targets.is_empty() {
+                    self.pending_targets.extend_storage_targets(address, targets);
+                }
+
+                self.trie.insert_storage_trie(*address, trie);
+                self.fetched_storage_targets.insert(*address, fetched);
             }
         }
 
