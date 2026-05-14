@@ -863,7 +863,8 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
     }
 }
 
-/// Removes existing snapshot data while preserving node identity and known peers.
+/// Removes existing snapshot data while preserving files listed in
+/// [`FORCE_PRESERVED_DATADIR_FILES`].
 fn clear_existing_datadir(target_dir: &Path) -> Result<()> {
     if !target_dir.try_exists()? {
         return Ok(());
