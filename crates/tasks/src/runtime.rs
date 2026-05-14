@@ -7,7 +7,10 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+use crate::pool::{
+    build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, BlockingWorkerSet,
+    WorkerPool,
+};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
@@ -43,6 +46,14 @@ pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
 
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
+
+/// Minimum default number of trie storage proof worker threads.
+#[cfg(feature = "rayon")]
+pub const DEFAULT_PROOF_STORAGE_WORKER_THREADS_FLOOR: usize = 24;
+
+/// Minimum default number of trie account proof worker threads.
+#[cfg(feature = "rayon")]
+pub const DEFAULT_PROOF_ACCOUNT_WORKER_THREADS_FLOOR: usize = 24;
 
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
@@ -104,10 +115,10 @@ pub struct RayonConfig {
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, derived from available parallelism with a minimum floor.
     pub proof_storage_worker_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, derived from available parallelism with a minimum floor.
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
@@ -197,6 +208,20 @@ impl RayonConfig {
         let _ = self.reserved_cpu_cores;
         self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
     }
+
+    /// Compute the proof storage worker thread count.
+    fn proof_storage_worker_thread_count(&self, default_threads: usize) -> usize {
+        self.proof_storage_worker_threads.unwrap_or_else(|| {
+            default_threads.saturating_mul(2).max(DEFAULT_PROOF_STORAGE_WORKER_THREADS_FLOOR)
+        })
+    }
+
+    /// Compute the proof account worker thread count.
+    fn proof_account_worker_thread_count(&self, default_threads: usize) -> usize {
+        self.proof_account_worker_threads.unwrap_or_else(|| {
+            default_threads.saturating_mul(2).max(DEFAULT_PROOF_ACCOUNT_WORKER_THREADS_FLOOR)
+        })
+    }
 }
 
 /// Configuration for building a [`Runtime`].
@@ -265,10 +290,10 @@ struct RuntimeInner {
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: WorkerPool,
+    proof_storage_worker_pool: BlockingWorkerSet,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: WorkerPool,
+    proof_account_worker_pool: BlockingWorkerSet,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
@@ -344,13 +369,13 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_storage_worker_pool(&self) -> &BlockingWorkerSet {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_account_worker_pool(&self) -> &BlockingWorkerSet {
         &self.0.proof_account_worker_pool
     }
 
@@ -851,14 +876,14 @@ impl RuntimeBuilder {
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
+                config.rayon.proof_storage_worker_thread_count(default_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                BlockingWorkerSet::new(proof_storage_worker_threads, "proof-strg");
 
             let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
+                config.rayon.proof_account_worker_thread_count(default_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                BlockingWorkerSet::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
@@ -954,6 +979,37 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn proof_worker_defaults_have_thread_floor() {
+        let config = RayonConfig::default();
+
+        assert_eq!(
+            config.proof_storage_worker_thread_count(2),
+            DEFAULT_PROOF_STORAGE_WORKER_THREADS_FLOOR
+        );
+        assert_eq!(
+            config.proof_account_worker_thread_count(2),
+            DEFAULT_PROOF_ACCOUNT_WORKER_THREADS_FLOOR
+        );
+
+        assert_eq!(config.proof_storage_worker_thread_count(32), 64);
+        assert_eq!(config.proof_account_worker_thread_count(32), 64);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn proof_worker_explicit_counts_override_thread_floor() {
+        let config = RayonConfig {
+            proof_storage_worker_threads: Some(8),
+            proof_account_worker_threads: Some(4),
+            ..Default::default()
+        };
+
+        assert_eq!(config.proof_storage_worker_thread_count(2), 8);
+        assert_eq!(config.proof_account_worker_thread_count(2), 4);
     }
 
     #[test]
