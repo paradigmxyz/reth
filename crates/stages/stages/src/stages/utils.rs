@@ -26,6 +26,10 @@ use tracing::info;
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 
+/// Maximum number of distinct keys to keep in the generic history-index cache before spilling to
+/// ETL.
+const HISTORY_CACHE_HIGH_WATERMARK: usize = 128 * 1024;
+
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
 ///
@@ -92,6 +96,11 @@ where
                 collect(&mut cache)?;
                 flush_counter = 0;
             }
+        }
+
+        if cache.len() >= HISTORY_CACHE_HIGH_WATERMARK {
+            collect(&mut cache)?;
+            flush_counter = 0;
         }
     }
     collect(&mut cache)?;
