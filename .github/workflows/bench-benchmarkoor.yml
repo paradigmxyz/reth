@@ -101,7 +101,7 @@ on:
       limit:
         description: "Maximum matching tests to run (0 = all)"
         required: false
-        default: "0"
+        default: "20"
         type: string
       repetitions:
         description: "Runs per side: 1 or 2"
@@ -456,7 +456,7 @@ jobs:
           GAS_BUCKET: ${{ inputs.gas_bucket || '' }}
           CACHE_STRATEGY: ${{ inputs.cache_strategy || '' }}
           ACCOUNT_MODE: ${{ inputs.account_mode || '' }}
-          LIMIT: ${{ inputs.limit || '0' }}
+          LIMIT: ${{ inputs.limit || '20' }}
         run: |
           set -euo pipefail
           if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
@@ -519,6 +519,43 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "BENCHMARKOOR_INDEX=$INDEX" >> "$GITHUB_ENV"
           echo "BENCHMARKOOR_TESTS_FILE=$TESTS_FILE" >> "$GITHUB_ENV"
+
+      - name: Check block discard support
+        run: |
+          set -euo pipefail
+          echo "::group::Block discard capabilities"
+          lsblk -D -o NAME,TYPE,SIZE,DISC-GRAN,DISC-MAX,DISC-ZERO,MOUNTPOINTS || true
+          echo
+
+          if sudo test -f /var/lib/schelk/state.json; then
+            echo "schelk state:"
+            sudo jq . /var/lib/schelk/state.json || true
+            echo
+          fi
+
+          found=0
+          for queue in /sys/block/{ram*,brd*,loop*,nvme*,dm-*}/queue; do
+            [ -d "$queue" ] || continue
+            found=1
+            dev="$(basename "$(dirname "$queue")")"
+            max="$(cat "$queue/discard_max_bytes" 2>/dev/null || printf 'missing')"
+            gran="$(cat "$queue/discard_granularity" 2>/dev/null || printf 'missing')"
+            zeroes="$(cat "$queue/discard_zeroes_data" 2>/dev/null || printf 'missing')"
+            printf '%s: discard_max_bytes=%s discard_granularity=%s discard_zeroes_data=%s\n' \
+              "$dev" "$max" "$gran" "$zeroes"
+            if [[ "$dev" == ram* || "$dev" == brd* ]]; then
+              if [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ]; then
+                echo "::notice::/dev/${dev} advertises discard support with discard_max_bytes=${max}"
+              else
+                echo "::notice::/dev/${dev} does not advertise discard support; discard_max_bytes=${max}"
+              fi
+            fi
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo "::notice::No matching sysfs block queues found for discard diagnostics"
+          fi
+          echo "::endgroup::"
 
       - name: Import snapshot into schelk
         id: snapshot
