@@ -470,25 +470,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         // Legacy single-URL mode: download one archive and extract it
         if let Some(ref url) = self.url {
             let target_dir = data_dir.data_dir();
-            if self.force && target_dir.try_exists()? {
-                info!(target: "reth::cli", dir = ?target_dir, "Clearing existing data directory");
-                for entry in fs::read_dir(target_dir)? {
-                    let entry = entry?;
-                    let file_name = entry.file_name();
-                    if FORCE_PRESERVED_DATADIR_FILES
-                        .iter()
-                        .any(|preserved| file_name == OsStr::new(preserved))
-                    {
-                        continue;
-                    }
-
-                    let path = entry.path();
-                    if entry.file_type()?.is_dir() {
-                        fs::remove_dir_all(&path)?;
-                    } else {
-                        fs::remove_file(&path)?;
-                    }
-                }
+            if self.force {
+                clear_existing_datadir(target_dir)?;
             }
             fs::create_dir_all(target_dir)?;
 
@@ -522,25 +505,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let target_dir = data_dir.data_dir();
         let planned_downloads = collect_planned_archives(&manifest, &selections)?;
-        if self.force && target_dir.try_exists()? {
-            info!(target: "reth::cli", dir = ?target_dir, "Clearing existing data directory");
-            for entry in fs::read_dir(target_dir)? {
-                let entry = entry?;
-                let file_name = entry.file_name();
-                if FORCE_PRESERVED_DATADIR_FILES
-                    .iter()
-                    .any(|preserved| file_name == OsStr::new(preserved))
-                {
-                    continue;
-                }
-
-                let path = entry.path();
-                if entry.file_type()?.is_dir() {
-                    fs::remove_dir_all(&path)?;
-                } else {
-                    fs::remove_file(&path)?;
-                }
-            }
+        if self.force {
+            clear_existing_datadir(target_dir)?;
         }
         fs::create_dir_all(target_dir)?;
         let startup_summary = summarize_download_startup(&planned_downloads.archives, target_dir)?;
@@ -895,6 +861,32 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
             }
         }
     }
+}
+
+/// Removes existing snapshot data while preserving node identity and known peers.
+fn clear_existing_datadir(target_dir: &Path) -> Result<()> {
+    if !target_dir.try_exists()? {
+        return Ok(());
+    }
+
+    info!(target: "reth::cli", dir = ?target_dir, "Clearing existing data directory");
+    for entry in fs::read_dir(target_dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if FORCE_PRESERVED_DATADIR_FILES.iter().any(|preserved| file_name == OsStr::new(preserved))
+        {
+            continue;
+        }
+
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
