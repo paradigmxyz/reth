@@ -87,22 +87,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            match builder.push(indexed_receipt.index, &encode_buf) {
-                Ok(()) => {
-                    received_count += 1;
-                }
-                Err(err) => {
-                    // If a duplicate or out-of-bounds index is streamed, skip it and
-                    // fall back to computing the receipt root from the full receipts
-                    // vector later.
-                    tracing::error!(
-                        target: "engine::tree::payload_processor",
-                        index = indexed_receipt.index,
-                        ?err,
-                        "Receipt root task received invalid receipt index, skipping"
-                    );
-                }
-            }
+            // Receipt indices are produced by the block executor in transaction order and are
+            // bounded by `receipts_len`, so avoid re-validating every streamed receipt on the hot
+            // path. `finalize` below still catches aborted execution that sends too few receipts.
+            builder.push_unchecked(indexed_receipt.index, &encode_buf);
+            received_count += 1;
         }
 
         let Ok(root) = builder.finalize() else {
