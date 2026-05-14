@@ -83,6 +83,8 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
+const PAR_STATE_CHANGE_SORT_THRESHOLD: usize = 1024;
+
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitOrder {
@@ -2617,9 +2619,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
+        if changes.accounts.len() >= PAR_STATE_CHANGE_SORT_THRESHOLD {
+            changes.accounts.par_sort_by_key(|a| a.0);
+        } else {
+            changes.accounts.sort_by_key(|a| a.0);
+        }
+        if changes.storage.len() >= PAR_STATE_CHANGE_SORT_THRESHOLD {
+            changes.storage.par_sort_by_key(|a| a.address);
+        } else {
+            changes.storage.sort_by_key(|a| a.address);
+        }
+        if changes.contracts.len() >= PAR_STATE_CHANGE_SORT_THRESHOLD {
+            changes.contracts.par_sort_by_key(|a| a.0);
+        } else {
+            changes.contracts.sort_by_key(|a| a.0);
+        }
 
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
@@ -2651,7 +2665,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .map(|(k, value)| StorageEntry { key: k.into(), value })
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.key);
+                if storage.len() >= PAR_STATE_CHANGE_SORT_THRESHOLD {
+                    storage.par_sort_unstable_by_key(|a| a.key);
+                } else {
+                    storage.sort_unstable_by_key(|a| a.key);
+                }
 
                 for entry in storage {
                     tracing::trace!(?address, ?entry.key, "Updating plain state storage");
