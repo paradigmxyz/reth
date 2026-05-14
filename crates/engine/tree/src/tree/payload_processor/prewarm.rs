@@ -632,8 +632,8 @@ where
 
     /// Hashes and streams a single BAL account's state to the sparse trie task.
     ///
-    /// For each account, storage slots are hashed and sent immediately, then the account is read
-    /// from the database and sent as a separate update.
+    /// For each account, storage slots are hashed, the account is read from the database, and both
+    /// updates are sent together.
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
@@ -649,21 +649,20 @@ where
         }
         let address = account_changes.address;
         let mut hashed_address = None;
+        let mut storage_map = None;
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut hashed_storage = reth_trie::HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
                 if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
+                    hashed_storage.storage.insert(hashed_slot, last_change.new_value);
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            storage_map = Some((hashed_address, hashed_storage));
         }
 
         if provider.is_none() {
@@ -742,6 +741,9 @@ where
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
         let mut hashed_state = reth_trie::HashedPostState::default();
+        if let Some((hashed_address, storage_map)) = storage_map {
+            hashed_state.storages.insert(hashed_address, storage_map);
+        }
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
