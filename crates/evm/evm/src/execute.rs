@@ -593,26 +593,21 @@ where
 
         let has_bal = block.header().block_access_list_hash().is_some();
 
-        if has_bal {
+        let result = if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
-        } else {
-            executor.evm_mut().db_mut().bal_state.bal_builder = None;
-        }
-
-        executor.apply_pre_execution_changes()?;
-
-        if has_bal {
+            executor.apply_pre_execution_changes()?;
             executor.evm_mut().db_mut().bump_bal_index();
-        }
 
-        for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
-            if has_bal {
+            for tx in block.transactions_recovered() {
+                executor.execute_transaction(tx)?;
                 executor.evm_mut().db_mut().bump_bal_index();
             }
-        }
 
-        let result = executor.apply_post_execution_changes()?;
+            executor.apply_post_execution_changes()?
+        } else {
+            executor.evm_mut().db_mut().bal_state.bal_builder = None;
+            executor.execute_block(block.transactions_recovered())?
+        };
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
