@@ -242,17 +242,17 @@ impl ArenaSparseSubtrie {
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
         let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
-        // Queue: (new_idx, path TO the node — excluding its own short_key)
-        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        // Queue: (new_idx, path TO the node — excluding its own short_key, retained key range)
+        let mut queue: VecDeque<(Index, Nibbles, core::ops::Range<usize>)> = VecDeque::new();
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        queue.push_back((new_root, self.path));
+        queue.push_back((new_root, self.path, 0..retained_leaves.len()));
 
-        while let Some((new_idx, node_path)) = queue.pop_front() {
+        while let Some((new_idx, node_path, retained_range)) = queue.pop_front() {
             new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
@@ -276,6 +276,7 @@ impl ArenaSparseSubtrie {
                 })
                 .collect();
 
+            let mut retained_start = retained_range.start;
             for (child_pos, nibble, old_child_idx) in children {
                 // Child's path in the trie (edges to reach it, excluding its own short_key).
                 let mut child_path = branch_logical_path;
@@ -290,7 +291,11 @@ impl ArenaSparseSubtrie {
                 let mut child_prefix = child_path;
                 child_prefix.extend(child_short_key);
 
-                if has_prefix(retained_leaves, &child_prefix) {
+                let child_retained_range =
+                    prefix_range(retained_leaves, retained_start, &child_prefix);
+                retained_start = child_retained_range.end;
+
+                if !child_retained_range.is_empty() {
                     // Retained — move child to new arena.
                     let child_node = self.arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
@@ -298,7 +303,7 @@ impl ArenaSparseSubtrie {
                         unreachable!()
                     };
                     b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-                    queue.push_back((new_child_idx, child_path));
+                    queue.push_back((new_child_idx, child_path, child_retained_range));
                 } else {
                     // Not retained — blind the child slot in the new arena.
                     let rlp_node = self.arena[old_child_idx]
@@ -325,13 +330,7 @@ impl ArenaSparseSubtrie {
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
-        return pruned;
-
-        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
-        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
-            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
-            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
-        }
+        pruned
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
