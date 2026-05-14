@@ -5,16 +5,19 @@ Usage:
     bench-reth-summary.py <combined_csv> <gas_csv> \
         --output-summary <summary.json> \
         --output-markdown <comment.md> \
-        --baseline-csv <baseline_combined.csv> \
+        --baseline-csv <baseline_combined.csv> [<baseline_combined.csv> ...] \
         [--repo <owner/repo>] \
         [--baseline-ref <sha>] \
         [--feature-name <name>] \
         [--feature-sha <sha>]
 
 Generates a paired statistical comparison between baseline and feature.
-Matches blocks by number and computes per-block diffs to cancel out gas
-variance. Fails if baseline or feature CSV is missing or empty.
+Matches blocks by number for every baseline-run x feature-run combination and
+computes per-block diffs to cancel out gas variance. Fails if baseline or
+feature CSV is missing or empty.
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
@@ -25,9 +28,9 @@ import sys
 
 GIGAGAS = 1_000_000_000
 BOOTSTRAP_ITERATIONS = 10_000
-# t-critical for between-pairing CI (df=3, 4 cross-pairings).
-# Set conservatively to reduce false positives from run-level bias.
-T_BETWEEN_PAIRINGS = 4.5
+# Conservative floor for the between-pairing CI. The historical ABBA path used
+# 4.5 for four cross-pairings, so keep that as the minimum.
+T_BETWEEN_PAIRINGS_MIN = 4.5
 
 
 def _opt_int(row: dict, key: str) -> int | None:
@@ -246,7 +249,47 @@ def _between_pairing_ci(pairing_means: list[float]) -> float:
     mean = sum(pairing_means) / n
     sd = math.sqrt(sum((x - mean) ** 2 for x in pairing_means) / (n - 1))
     se = sd / math.sqrt(n)
-    return T_BETWEEN_PAIRINGS * se
+    return _t_critical_95(n - 1) * se
+
+
+def _t_critical_95(df: int) -> float:
+    """Return a two-sided 95% t critical value with a conservative floor."""
+    if df <= 0:
+        return 0.0
+    table = {
+        1: 12.706,
+        2: 4.303,
+        3: 3.182,
+        4: 2.776,
+        5: 2.571,
+        6: 2.447,
+        7: 2.365,
+        8: 2.306,
+        9: 2.262,
+        10: 2.228,
+        11: 2.201,
+        12: 2.179,
+        13: 2.160,
+        14: 2.145,
+        15: 2.131,
+        16: 2.120,
+        17: 2.110,
+        18: 2.101,
+        19: 2.093,
+        20: 2.086,
+        21: 2.080,
+        22: 2.074,
+        23: 2.069,
+        24: 2.064,
+        25: 2.060,
+        26: 2.056,
+        27: 2.052,
+        28: 2.048,
+        29: 2.045,
+        30: 2.042,
+    }
+    critical = table.get(df, 1.96)
+    return max(critical, T_BETWEEN_PAIRINGS_MIN)
 
 
 def _cross_pair_directions(
@@ -255,9 +298,8 @@ def _cross_pair_directions(
 ) -> dict[str, bool]:
     """Check if the direction of change agrees across all cross-pairings.
 
-    With ABBA runs [B1, B2] and [F1, F2], generates all 4 pairings:
-    (B1,F1), (B2,F2), (B1,F2), (B2,F1). For each metric, returns True
-    only if the mean diff has the same sign across all pairings.
+    Generates every baseline-run x feature-run pairing. For each metric,
+    returns True only if the mean diff has the same sign across all pairings.
 
     With a single run pair, always returns True (no cross-check possible).
     """
@@ -294,8 +336,8 @@ def compute_paired_stats(
 ) -> dict:
     """Compute paired statistics between baseline and feature runs.
 
-    Uses all cross-pairings (B1-F1, B2-F2, B1-F2, B2-F1) for pooled
-    diffs and CIs. The final CI for each metric is the max of:
+    Uses all baseline-run x feature-run cross-pairings for pooled diffs and
+    CIs. The final CI for each metric is the max of:
     - Within-block bootstrap CI (captures per-block variance)
     - Between-pairing CI (captures run-level bias)
 
@@ -406,6 +448,7 @@ def compute_paired_stats(
         "wall_clock_ci_ms": wall_clock_ci_ms,
         "persist_ci_ms": persist_ci_ms,
         "blocks": max(blocks_per_pair),
+        "pairings": len(blocks_per_pair),
         "directions_agree": directions,
     }
 
@@ -522,6 +565,8 @@ def generate_comparison_table(
     bal_mode: str | None = None,
     driver: str | None = None,
     driver_reason: str | None = None,
+    run_pairs: int | None = None,
+    run_combinations: int | None = None,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
     n = paired["blocks"]
@@ -577,6 +622,9 @@ def generate_comparison_table(
         meta_parts.append(f"driver: {driver_label}")
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
+    if run_pairs:
+        combinations = f", {run_combinations} combinations" if run_combinations else ""
+        meta_parts.append(f"{run_pairs} run pairs{combinations}")
     if wait_time:
         meta_parts.append(f"wait time: {wait_time}")
     display_mode = display_bal_mode(bal_mode)
@@ -639,14 +687,14 @@ def generate_markdown(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse reth-bench ABBA results")
+    parser = argparse.ArgumentParser(description="Parse reth-bench run-pair results")
     parser.add_argument(
         "--baseline-csv", nargs="+", required=True,
-        help="Baseline combined_latency.csv files (A1, A2)",
+        help="Baseline combined_latency.csv files",
     )
     parser.add_argument(
         "--feature-csv", "--branch-csv", nargs="+", required=True,
-        help="Feature combined_latency.csv files (B1, B2)",
+        help="Feature combined_latency.csv files",
     )
     parser.add_argument("--gas-csv", required=True, help="Path to total_gas.csv")
     parser.add_argument(
@@ -668,10 +716,11 @@ def main():
     parser.add_argument("--driver", default=None, help="Benchmark driver used for this run")
     parser.add_argument("--driver-reason", default=None, help="Why the benchmark fell back to this driver")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
+    parser.add_argument("--run-pairs", type=int, default=None, help="Configured number of benchmark run pairs")
     args = parser.parse_args()
 
-    if len(args.baseline_csv) != len(args.feature_csv):
-        print("Must provide equal number of baseline and feature CSVs", file=sys.stderr)
+    if args.run_pairs is not None and args.run_pairs < 1:
+        print("--run-pairs must be greater than zero", file=sys.stderr)
         sys.exit(1)
 
     baseline_runs = []
@@ -723,8 +772,11 @@ def main():
         bal_mode=bal_mode,
         driver=args.driver,
         driver_reason=args.driver_reason,
+        run_pairs=args.run_pairs,
+        run_combinations=paired_stats["pairings"],
     )
-    print(f"Generated comparison ({paired_stats['n']} paired blocks, "
+    print(f"Generated comparison ({paired_stats['n']} paired datapoints across "
+          f"{paired_stats['pairings']} run combinations, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
 
     base_url = f"https://github.com/{args.repo}/commit"
@@ -757,6 +809,12 @@ def main():
         "driver_reason": args.driver_reason,
         "big_blocks": args.big_blocks,
         "warmup_blocks": args.warmup_blocks,
+        "run_pairs": args.run_pairs,
+        "run_counts": {
+            "baseline": len(baseline_runs),
+            "feature": len(feature_runs),
+            "pairings": paired_stats["pairings"],
+        },
         "wait_time": args.wait_time,
         "bal_mode": bal_mode,
         "baseline": {
