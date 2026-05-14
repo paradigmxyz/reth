@@ -55,6 +55,8 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     branch_stack: Vec<ProofTrieBranch>,
     /// The path of the last branch in `branch_stack`.
     branch_path: Nibbles,
+    /// Cached nibble length of `branch_path` for hot proof construction paths.
+    branch_path_len: usize,
     /// Children of branches in the `branch_stack`.
     ///
     /// Each branch in `branch_stack` tracks which children are in this stack using its
@@ -99,6 +101,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             hashed_cursor,
             branch_stack: Vec::<_>::with_capacity(64),
             branch_path: Nibbles::new(),
+            branch_path_len: 0,
             child_stack: Vec::<_>::with_capacity(64),
             cached_branch_stack: Vec::<_>::with_capacity(64),
             retained_proofs: Vec::<_>::with_capacity(32),
@@ -150,6 +153,13 @@ where
     #[inline]
     const fn maybe_parent_nibble(&self) -> usize {
         !self.branch_stack.is_empty() as usize
+    }
+
+    /// Updates the current branch path and its cached nibble length together.
+    #[inline]
+    fn set_branch_path(&mut self, path: Nibbles) {
+        self.branch_path = path;
+        self.branch_path_len = path.len();
     }
 
     /// Returns true if the proof of a node at the given path should be retained. A node is retained
@@ -436,7 +446,7 @@ where
         } else {
             // When there is a current branch then trim off its path as well as the nibble that it
             // has set for this leaf.
-            trim_nibbles_prefix(&new_child_path, self.branch_path.len() + 1)
+            trim_nibbles_prefix(&new_child_path, self.branch_path_len + 1)
         };
 
         // Get the new branch's first child, which is the child on the top of the stack with which
@@ -474,8 +484,9 @@ where
         // If the new branch is the first branch then we do not add the extra 1, as there is no
         // nibble in a parent branch to account for.
         let branch_path_len =
-            self.branch_path.len() + common_prefix_len + self.maybe_parent_nibble();
+            self.branch_path_len + common_prefix_len + self.maybe_parent_nibble();
         self.branch_path = new_child_path.slice_unchecked(0, branch_path_len);
+        self.branch_path_len = branch_path_len;
 
         // Push the new branch onto the `branch_stack`. We do not yet set the `state_mask` bit of
         // the new child; whatever actually pushes the child onto the `child_stack` is expected to
@@ -565,7 +576,7 @@ where
         // It's important to calculate this short key prior to modifying the `branch_path`.
         let short_key = trim_nibbles_prefix(
             &self.branch_path,
-            self.branch_path.len() - branch.ext_len as usize,
+            self.branch_path_len - branch.ext_len as usize,
         );
 
         // Compute hash for the branch node if it has a parent extension.
@@ -588,10 +599,11 @@ where
         // Update the branch_path. If this branch is the only branch then only its extension needs
         // to be trimmed, otherwise we also need to remove its nibble from its parent.
         let new_path_len =
-            self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
+            self.branch_path_len - branch.ext_len as usize - self.maybe_parent_nibble();
 
-        debug_assert!(self.branch_path.len() >= new_path_len);
+        debug_assert!(self.branch_path_len >= new_path_len);
         self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
+        self.branch_path_len = new_path_len;
 
         Ok(())
     }
@@ -648,7 +660,7 @@ where
             // If the current branch does not share all of its nibbles with the new key then it is
             // not the parent of the new key. In this case the current branch will have no more
             // children. We can pop it and loop back to the top to try again with its parent branch.
-            if common_prefix_len < self.branch_path.len() {
+            if common_prefix_len < self.branch_path_len {
                 self.pop_branch(targets)?;
                 continue
             }
@@ -770,7 +782,7 @@ where
         // If both stacks are empty then there were no leaves before this cached branch, push it and
         // be done; the extension of the branch will be its full path.
         if self.child_stack.is_empty() && parent_branch.is_none() {
-            self.branch_path = cached_path;
+            self.set_branch_path(cached_path);
             self.branch_stack
                 .push(Self::new_from_cached_branch(cached_branch, cached_path.len() as u8));
             return Ok(())
@@ -778,7 +790,7 @@ where
 
         // Get the nibble which should be set in the parent branch's `state_mask` for this new
         // branch.
-        let cached_branch_nibble = cached_path.get_unchecked(self.branch_path.len());
+        let cached_branch_nibble = cached_path.get_unchecked(self.branch_path_len);
 
         // We calculate the `ext_len` of the new branch, and potentially update its nibble if a new
         // parent branch is inserted here, based on the state of the parent branch.
@@ -807,7 +819,7 @@ where
             // If there is a parent branch but its `state_mask` bit for this branch is not set
             // then we can simply calculate the `ext_len` based on the difference of each, minus
             // 1 to account for the nibble in the `state_mask`.
-            (cached_branch_nibble, cached_path.len() - self.branch_path.len() - 1)
+            (cached_branch_nibble, cached_path.len() - self.branch_path_len - 1)
         };
 
         // `commit_last_child` relies on the last set bit of the parent branch's `state_mask` to
@@ -822,7 +834,7 @@ where
         }
 
         // Finally update the `branch_path` and push the new branch.
-        self.branch_path = cached_path;
+        self.set_branch_path(cached_path);
         self.branch_stack.push(Self::new_from_cached_branch(cached_branch, ext_len as u8));
 
         trace!(
@@ -1066,7 +1078,7 @@ where
             // Since we've popped all branches which don't start with cached_path, branch_path at
             // this point must be equal to or shorter than cached_path.
             debug_assert!(
-                self.branch_path.len() < cached_path.len() || self.branch_path == cached_path,
+                self.branch_path_len < cached_path.len() || self.branch_path == cached_path,
                 "branch_path {:?} is different-or-longer-than cached_path {cached_path:?}",
                 self.branch_path
             );
@@ -1095,11 +1107,10 @@ where
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
             // children have already been constructed.
             if self.prefix_set.contains(&self.branch_path) {
-                let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
                 for nibble in 0u8..16 {
                     if !curr_state_mask.is_bit_set(nibble) {
-                        child_path.truncate(branch_path_len);
+                        child_path.truncate(self.branch_path_len);
                         child_path.push_unchecked(nibble);
                         if self.prefix_set.contains(&child_path) {
                             next_child_nibbles.set_bit(nibble);
@@ -1115,10 +1126,10 @@ where
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
             // function would select the same child again.
             if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref.len() > self.branch_path.len()
+                uncalculated_lower_bound_ref.len() > self.branch_path_len
             {
                 let lower_nibble =
-                    uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len());
+                    uncalculated_lower_bound_ref.get_unchecked(self.branch_path_len);
                 // Clear all nibbles strictly below `lower_nibble` since they've been processed.
                 let already_processed_mask = TrieMask::new((1u16 << lower_nibble) - 1);
                 next_child_nibbles &= !already_processed_mask;
@@ -1329,6 +1340,7 @@ where
         debug_assert!(self.cached_branch_stack.is_empty());
         debug_assert!(self.branch_stack.is_empty());
         debug_assert!(self.branch_path.is_empty());
+        debug_assert_eq!(self.branch_path_len, 0);
         debug_assert!(self.child_stack.is_empty());
 
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
@@ -1421,6 +1433,7 @@ where
         // only be a single node left: the root node.
         debug_assert!(self.branch_stack.is_empty());
         debug_assert!(self.branch_path.is_empty());
+        debug_assert_eq!(self.branch_path_len, 0);
         debug_assert!(self.child_stack.len() < 2);
 
         // The `cached_branch_stack` may still have cached branches on it, as it's not affected by
@@ -1465,6 +1478,7 @@ where
     fn clear_computation_state(&mut self) {
         self.branch_stack.clear();
         self.branch_path = Nibbles::new();
+        self.branch_path_len = 0;
         self.child_stack.clear();
         self.cached_branch_stack.clear();
         self.retained_proofs.clear();
@@ -1985,7 +1999,7 @@ mod tests {
         proof_calculator
             .child_stack
             .push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&B256::ZERO)));
-        proof_calculator.branch_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        proof_calculator.set_branch_path(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
 
         // clear_computation_state should reset everything so a subsequent call works.
         proof_calculator.clear_computation_state();
