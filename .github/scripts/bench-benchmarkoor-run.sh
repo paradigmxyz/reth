@@ -154,6 +154,51 @@ wait_for_engine_port() {
   exit 1
 }
 
+snapshot_block_number() {
+  local block="${BENCHMARKOOR_SUITE#*/}"
+  if [[ "$block" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$block"
+  fi
+}
+
+wait_for_snapshot_pipeline() {
+  local expected_block timeout start_ns deadline
+  expected_block="$(snapshot_block_number)"
+  timeout="${BENCH_SNAPSHOT_PIPELINE_TIMEOUT_SECS:-300}"
+  start_ns="$(now_ns)"
+  deadline=$((SECONDS + timeout))
+
+  if [ -n "$expected_block" ]; then
+    echo "Waiting for Reth snapshot pipeline to finish at block ${expected_block}"
+  else
+    echo "Waiting for Reth snapshot pipeline to finish"
+  fi
+
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local sync_response block_response block_hex block_dec
+    sync_response="$(rpc_call eth_syncing 2>/dev/null || true)"
+    if jq -e '.result == false' <<< "$sync_response" >/dev/null 2>&1; then
+      block_response="$(rpc_call eth_blockNumber 2>/dev/null || true)"
+      block_hex="$(jq -er '.result' <<< "$block_response" 2>/dev/null || true)"
+      if [[ "$block_hex" =~ ^0x[0-9a-fA-F]+$ ]]; then
+        block_dec=$(( 16#${block_hex#0x} ))
+        if [ -z "$expected_block" ] || [ "$block_dec" -ge "$expected_block" ]; then
+          echo "Reth snapshot pipeline finished after $(elapsed_secs "$start_ns")s at block ${block_dec}"
+          return 0
+        fi
+      elif [ -z "$expected_block" ]; then
+        echo "Reth snapshot pipeline finished after $(elapsed_secs "$start_ns")s"
+        return 0
+      fi
+    fi
+    sleep 0.05
+  done
+
+  echo "::error::reth snapshot pipeline did not finish within ${timeout}s before benchmarkoor prerun"
+  cat "$CURRENT_LOG"
+  exit 1
+}
+
 prerun_head_file() {
   if [ -n "${BENCH_PRERUN_HEAD_FILE:-}" ]; then
     printf '%s\n' "$BENCH_PRERUN_HEAD_FILE"
@@ -662,6 +707,7 @@ if [ "$MODE" = "prepare" ]; then
 
   recover_schelk
   start_node "$binary" "prepare" "$output_dir" "prerun"
+  wait_for_snapshot_pipeline
 
   sudo_schelk="${output_dir}/sudo-schelk"
   cat > "$sudo_schelk" <<'SH'
