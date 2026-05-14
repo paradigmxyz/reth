@@ -85,12 +85,15 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Resets the state and points to the given canonical head.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
         let engine_kind = self.engine_kind;
+        let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
+        if !removed_hashes.is_empty() {
+            self.state_trie_overlays.remove_blocks(removed_hashes);
+        }
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
         self.parent_to_child.clear();
         self.current_canonical_head = current_canonical_head;
         self.engine_kind = engine_kind;
-        self.state_trie_overlays.clear();
     }
 
     /// Returns the number of executed blocks stored.
