@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-fixture_variant="${1:-osaka}"
+fixture_variant="${1:-amsterdam}"
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.6.1/fixtures_bal.tar.gz"
-        eels_branch="devnets/bal/3"
+        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-bal%40v7.1.1/fixtures_bal.tar.gz"
+        eels_branch="devnets/bal/7"
         ;;
     osaka)
         eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
