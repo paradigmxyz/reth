@@ -385,16 +385,26 @@ pub(crate) struct OperationMetrics {
 }
 
 impl OperationMetrics {
+    /// Returns true if this operation should record a value-size duration.
+    pub(crate) fn should_time_value(value_size: Option<usize>) -> bool {
+        value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES)
+    }
+
+    /// Record only the operation count.
+    pub(crate) fn record_call(&self) {
+        self.calls_total.increment(1);
+    }
+
     /// Record operation metric.
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [`LARGE_VALUE_THRESHOLD_BYTES`].
     pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
-        self.calls_total.increment(1);
+        self.record_call();
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
-        if value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES) {
+        if Self::should_time_value(value_size) {
             let start = Instant::now();
             let result = f();
             self.large_value_duration_seconds.record(start.elapsed());

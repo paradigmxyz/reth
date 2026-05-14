@@ -2,7 +2,7 @@
 
 use super::utils::*;
 use crate::{
-    metrics::{Operation, TableOperationMetrics},
+    metrics::{Operation, OperationMetrics, TableOperationMetrics},
     DatabaseError,
 };
 use reth_db_api::{
@@ -54,7 +54,13 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if let Some(metrics) = self.metrics.clone() {
-            metrics[operation.index()].record(value_size, || f(self))
+            let metrics = &metrics[operation.index()];
+            if OperationMetrics::should_time_value(value_size) {
+                metrics.record(value_size, || f(self))
+            } else {
+                metrics.record_call();
+                f(self)
+            }
         } else {
             f(self)
         }
