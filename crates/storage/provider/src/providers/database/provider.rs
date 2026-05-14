@@ -3079,6 +3079,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     where
         TX: DbTxMut,
     {
+        if trie_updates.account_nodes_ref().is_empty() {
+            return Ok(())
+        }
+
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
@@ -3109,6 +3113,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     where
         TX: DbTxMut,
     {
+        if storage_tries.is_empty() {
+            return Ok(())
+        }
+
         let mut cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
@@ -3157,7 +3165,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
         let mut storage_tries = storage_tries.collect::<Vec<_>>();
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        if storage_tries.is_empty() {
+            return Ok(0)
+        }
+        if storage_tries.len() > 1 {
+            storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        }
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
         });
