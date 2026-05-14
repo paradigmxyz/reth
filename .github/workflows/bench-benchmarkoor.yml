@@ -183,6 +183,18 @@ jobs:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
+      - name: Print runner OS and kernel
+        run: |
+          set -euo pipefail
+          echo "::group::Runner OS"
+          uname -a
+          echo "kernel=$(uname -r)"
+          if [ -f /etc/os-release ]; then
+            cat /etc/os-release
+          fi
+          lsb_release -a 2>/dev/null || true
+          echo "::endgroup::"
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
