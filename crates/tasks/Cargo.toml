@@ -33,6 +33,10 @@ rayon = { workspace = true, optional = true }
 crossbeam-utils = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 
+# Non-rayon worker pool for long-running blocking workers. Avoids the
+# crossbeam-epoch global participant list growth that rayon pools incur.
+threadpool = "1.8"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 

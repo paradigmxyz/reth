@@ -301,6 +301,58 @@ impl WorkerPool {
     }
 }
 
+/// A persistent set of OS threads that does not use `crossbeam-epoch`.
+///
+/// Used for long-running blocking workers where rayon's work-stealing is not needed.
+/// Backed by [`threadpool::ThreadPool`], which uses `Mutex<VecDeque>` internally — no
+/// crossbeam-epoch participant registration happens. This avoids inflating the global
+/// participant list scanned by rayon's idle-steal loop in `Global::try_advance`.
+#[derive(Debug)]
+pub struct BlockingWorkerSet {
+    pool: OnceLock<threadpool::ThreadPool>,
+    num_threads: usize,
+    thread_name: &'static str,
+}
+
+impl BlockingWorkerSet {
+    /// Creates a new lazy `BlockingWorkerSet`. Threads are spawned on first access.
+    pub const fn new(num_threads: usize, thread_name: &'static str) -> Self {
+        Self { pool: OnceLock::new(), num_threads, thread_name }
+    }
+
+    fn pool(&self) -> &threadpool::ThreadPool {
+        self.pool.get_or_init(|| {
+            threadpool::Builder::new()
+                .num_threads(self.num_threads)
+                .thread_name(self.thread_name.to_string())
+                .build()
+        })
+    }
+
+    /// Total number of worker threads.
+    pub fn current_num_threads(&self) -> usize {
+        self.pool().max_count()
+    }
+
+    /// Spawns a single closure onto the pool. The pool dispatches it to an available worker.
+    pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
+        self.pool().execute(f);
+    }
+
+    /// Submits `n` copies of `f` to the pool. With a pool of exactly `n` threads and
+    /// closures that block indefinitely, each copy lands on a distinct worker after warmup.
+    pub fn broadcast<F>(&self, n: usize, f: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        let f = Arc::new(f);
+        for _ in 0..n {
+            let f = f.clone();
+            self.pool().execute(move || f());
+        }
+    }
+}
+
 /// Builds a rayon thread pool with a panic handler that prevents aborting the process.
 ///
 /// Rust's default panic hook already logs the panic message and backtrace to stderr, so the handler
