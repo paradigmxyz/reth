@@ -331,19 +331,16 @@ impl Worker {
     /// If state of type `T` already exists, passes `Some(&mut T)` to the closure so resources
     /// can be reused. On first init, passes `None`.
     pub fn init<T: 'static>(&mut self, f: impl FnOnce(Option<&mut T>) -> T) {
-        let existing =
-            self.state.take().and_then(|mut b| b.downcast_mut::<T>().is_some().then_some(b));
-
-        let new_state = match existing {
-            Some(mut boxed) => {
-                let r = boxed.downcast_mut::<T>().expect("type checked above");
-                *r = f(Some(r));
-                boxed
+        self.state = Some(match self.state.take() {
+            Some(boxed) => match boxed.downcast::<T>() {
+                Ok(mut typed) => {
+                    *typed = f(Some(&mut typed));
+                    typed
+                }
+                Err(_) => Box::new(f(None)),
             }
             None => Box::new(f(None)),
-        };
-
-        self.state = Some(new_state);
+        });
     }
 
     /// Returns a reference to the state, downcasted to `T`.
