@@ -37,6 +37,8 @@ use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, Stor
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
+const PAR_CHANGESET_SORT_THRESHOLD: usize = 1024;
+
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
     EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
@@ -614,7 +616,11 @@ where
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
         // First sort the changesets
-        changeset.par_sort_by_key(|a| a.address);
+        if changeset.len() >= PAR_CHANGESET_SORT_THRESHOLD {
+            changeset.par_sort_by_key(|a| a.address);
+        } else {
+            changeset.sort_by_key(|a| a.address);
+        }
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -643,7 +649,11 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<StorageBeforeTx>,
     ) -> ProviderResult<()> {
-        changeset.par_sort_by_key(|change| (change.address, change.key));
+        if changeset.len() >= PAR_CHANGESET_SORT_THRESHOLD {
+            changeset.par_sort_by_key(|change| (change.address, change.key));
+        } else {
+            changeset.sort_by_key(|change| (change.address, change.key));
+        }
 
         match self {
             Self::Database(cursor) => {
