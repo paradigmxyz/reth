@@ -888,7 +888,7 @@ struct StorageTries<S = ParallelSparseTrie> {
 }
 
 #[cfg(feature = "std")]
-impl<S: SparseTrieTrait> StorageTries<S> {
+impl<S: SparseTrieTrait + Default> StorageTries<S> {
     /// Prunes storage tries using LFU-retained slots.
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
@@ -908,21 +908,18 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             });
         }
 
-        // Cheap sequential drain: move already-cleared tries into the reuse pool.
-        let addresses_to_evict: Vec<B256> = self
-            .tries
-            .keys()
-            .filter(|address| !retained_slots.contains_key(*address))
-            .copied()
-            .collect();
-
-        let evicted = addresses_to_evict.len();
-        self.cleared_tries.reserve(evicted);
-        for address in &addresses_to_evict {
-            if let Some(trie) = self.tries.remove(address) {
-                self.cleared_tries.push(trie);
+        // Cheap sequential drain: move already-cleared tries into the reuse pool without building
+        // a temporary address list and then hashing every evicted address again for removal.
+        let mut evicted = 0;
+        self.tries.retain(|address, trie| {
+            if retained_slots.contains_key(address) {
+                return true;
             }
-        }
+
+            evicted += 1;
+            self.cleared_tries.push(core::mem::take(trie));
+            false
+        });
 
         evicted
     }
