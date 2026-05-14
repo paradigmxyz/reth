@@ -7516,10 +7516,12 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "serde_json",
+ "tar",
  "tempfile",
  "tokio",
  "toml",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
