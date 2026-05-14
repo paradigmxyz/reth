@@ -104,6 +104,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let bal_store = storage.bal_store().clone();
+
         Ok(Self {
             database: storage,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(
@@ -111,7 +113,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
-            bal_store: BalStoreHandle::default(),
+            bal_store,
         })
     }
 

@@ -17,6 +17,8 @@ on:
 env:
   DOCKER_USERNAME: ${{ github.actor }}
 
+permissions: {}
+
 jobs:
   tag-reth-latest:
     name: Tag reth as latest
@@ -27,16 +29,22 @@ jobs:
       contents: read
     steps:
       - name: Log in to Docker
+        env:
+          DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
+          echo "$DOCKER_PASSWORD" | docker login ghcr.io --username "${DOCKER_USERNAME}" --password-stdin
 
       - name: Pull reth release image
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          docker pull ghcr.io/${{ github.repository_owner }}/reth:${{ inputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/reth:${VERSION}
 
       - name: Tag reth as latest
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          docker tag ghcr.io/${{ github.repository_owner }}/reth:${{ inputs.version }} ghcr.io/${{ github.repository_owner }}/reth:latest
+          docker tag ghcr.io/${{ github.repository_owner }}/reth:${VERSION} ghcr.io/${{ github.repository_owner }}/reth:latest
 
       - name: Push reth latest tag
         run: |

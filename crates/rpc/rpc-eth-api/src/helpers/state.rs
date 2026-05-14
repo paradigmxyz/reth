@@ -115,6 +115,11 @@ pub trait EthState: LoadState + SpawnBlocking {
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<HashMap<Address, Vec<B256>>, Self::Error>> + Send {
         async move {
+            if requests.is_empty() {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    "empty request".to_string(),
+                )));
+            }
             let total_slots: usize = requests.values().map(|slots| slots.len()).sum();
             if total_slots > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
                 return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(

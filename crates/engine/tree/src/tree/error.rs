@@ -1,5 +1,6 @@
 //! Internal errors for the tree module.
 
+use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
@@ -116,9 +117,25 @@ pub enum InsertBlockErrorKind {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
+    /// final-hash mismatch.
+    #[error(transparent)]
+    InvalidBlockAccessList(BalExecutionError),
     /// Other errors.
     #[error(transparent)]
     Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
+}
+
+impl From<BalExecutionError> for InsertBlockErrorKind {
+    fn from(e: BalExecutionError) -> Self {
+        match e {
+            // Worker EVM errors flow through the standard execution-error path so existing
+            // metrics and routing apply.
+            BalExecutionError::Evm(inner) => Self::Execution(inner),
+            BalExecutionError::Provider(inner) => Self::Provider(inner),
+            other => Self::InvalidBlockAccessList(other),
+        }
+    }
 }
 
 impl InsertBlockErrorKind {
@@ -147,6 +164,9 @@ impl InsertBlockErrorKind {
                 }
             }
             Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
+            Self::InvalidBlockAccessList(err) => {
+                Ok(InsertBlockValidationError::InvalidBlockAccessList(err))
+            }
             Self::Other(err) => Err(InternalBlockExecutionError::Other(err).into()),
         }
     }
@@ -172,6 +192,10 @@ pub enum InsertBlockValidationError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
+    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
+    /// final-hash mismatch.
+    #[error(transparent)]
+    InvalidBlockAccessList(BalExecutionError),
 }
 
 /// Errors that may occur when inserting a payload.

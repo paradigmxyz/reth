@@ -61,6 +61,7 @@ pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
@@ -74,6 +75,7 @@ pub use reth_execution_cache::{
     CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
     PayloadExecutionCache, SavedCache,
 };
+pub use types::{ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
@@ -1511,9 +1513,9 @@ where
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
             self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get();
+                let _ = prepared.overlay.get(prepared.anchor_hash);
             });
         }
 
@@ -1548,15 +1550,31 @@ where
             },
             FromEngine::Request(request) => {
                 match request {
-                    EngineApiRequest::InsertExecutedBlock(block) => {
-                        let block_num_hash = block.recovered_block().num_hash();
+                    EngineApiRequest::InsertExecutedBlock(payload) => {
+                        let block_num_hash = payload.recovered_block.num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
+                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+                            // block already known to the tree (e.g. delivered via newPayload first)
+                            return Ok(ops::ControlFlow::Continue(()))
+                        }
+
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
+
+                        let block = match self
+                            .payload_validator
+                            .on_inserted_executed_block(payload, &self.state)
+                        {
+                            Ok(block) => block,
+                            Err(err) => {
+                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
+                                return Ok(ops::ControlFlow::Continue(()))
+                            }
+                        };
 
                         // if the parent is the canonical head, we can insert the block as the
                         // pending block
@@ -1568,7 +1586,6 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
-                        self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -1917,7 +1934,35 @@ where
             self.on_canonical_chain_update(chain_update);
         }
 
+        self.on_canonicalized_sync_target(target);
+
         Ok(())
+    }
+
+    /// Applies the tracked forkchoice state once its sync target head becomes canonical.
+    fn on_canonicalized_sync_target(&mut self, target: B256) {
+        let Some(sync_target_state) = self
+            .state
+            .forkchoice_state_tracker
+            .sync_target_state()
+            .filter(|state| state.head_block_hash == target)
+        else {
+            return;
+        };
+
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(sync_target_state) {
+            debug!(
+                target: "engine::tree",
+                head = %sync_target_state.head_block_hash,
+                safe = %sync_target_state.safe_block_hash,
+                finalized = %sync_target_state.finalized_block_hash,
+                ?outcome,
+                "Canonicalized sync target head before safe/finalized could be applied"
+            );
+            return;
+        }
+
+        self.state.forkchoice_state_tracker.promote_sync_target_to_valid(sync_target_state);
     }
 
     /// Convenience function to handle an optional tree event.
@@ -2307,7 +2352,10 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
+        self.emit_event(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(head),
+            error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+        });
 
         Ok(status)
     }
@@ -2877,12 +2925,7 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(
-            &mut V,
-            Input,
-            TreeCtx<'_, N>,
-        )
-            -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
+        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2952,7 +2995,8 @@ where
 
         let start = Instant::now();
 
-        let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
@@ -3029,12 +3073,21 @@ where
             InsertBlockValidationError::Consensus(err) => self.consensus.is_transient_error(err),
             _ => false,
         };
-        if !is_transient {
+        if is_transient {
+            warn!(
+                target: "engine::tree",
+                invalid_hash=%block.hash(),
+                invalid_number=block.number(),
+                %validation_err,
+                "Skipping invalid header cache insert for transient validation error",
+            );
+        } else {
             self.state.invalid_headers.insert(block.block_with_parent());
         }
-        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
-            Box::new(block),
-        )));
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(block),
+            error: validation_err.to_string(),
+        }));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },

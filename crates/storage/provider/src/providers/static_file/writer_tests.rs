@@ -809,4 +809,78 @@ mod tests {
             "Should have 7 blocks * 5 changes = 35 rows"
         );
     }
+
+    /// Opening a writer for a block past the first range boundary should succeed
+    /// even when no previous static file exists for the segment.
+    #[test]
+    fn test_get_writer_no_previous_file() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        // Request a writer starting at block 250, which falls into range 200..=299.
+        // No file exists for range 100..=199 (the "previous" range).
+        // This must not panic or error.
+        let mut writer = provider
+            .get_writer(250, StaticFileSegment::AccountChangeSets)
+            .expect("get_writer should succeed without previous file");
+
+        // The index should have no entry for AccountChangeSets yet (empty jar).
+        assert!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets).is_none(),
+            "Empty jar should not create an index entry"
+        );
+
+        // Writing data requires padding from the range start (200) to block 250,
+        // same as the migration code does.
+        let writer_start = writer.next_block_number();
+        for block in writer_start..250 {
+            writer.append_account_changeset(vec![], block).unwrap();
+        }
+        let changeset = generate_test_changeset(250, 2);
+        writer.append_account_changeset(changeset, 250).unwrap();
+        writer.commit().unwrap();
+
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets).unwrap(),
+            250,
+            "After writing block 250, highest block should be 250"
+        );
+    }
+
+    /// When a previous file DOES exist, opening a new empty writer for the next
+    /// range should still update the index to point at the previous file.
+    #[test]
+    fn test_get_writer_with_previous_file() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        // Write blocks 0..=99 to fill the first file completely.
+        {
+            let mut writer = provider.get_writer(0, StaticFileSegment::AccountChangeSets).unwrap();
+            for block in 0..100 {
+                writer.append_account_changeset(generate_test_changeset(block, 1), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets).unwrap(),
+            99
+        );
+
+        // Now get a writer for block 100 (next range 100..=199).
+        // The previous file (0..=99) exists, so this should succeed.
+        let writer = provider
+            .get_writer(100, StaticFileSegment::AccountChangeSets)
+            .expect("get_writer should succeed with previous file");
+
+        // The index should still reflect the previous file's max block.
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets).unwrap(),
+            99,
+            "Index should still point at previous file's max block"
+        );
+
+        drop(writer);
+    }
 }

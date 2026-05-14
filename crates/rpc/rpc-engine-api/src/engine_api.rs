@@ -3,11 +3,11 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -27,7 +27,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -77,7 +77,7 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
     EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
     PayloadT: PayloadTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<PayloadT>,
@@ -294,7 +294,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -701,12 +701,40 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
-        })
-        .await
+        let mut payload_bodies = self
+            .get_payload_bodies_by_range_with(start, count, |block| {
+                let block_hash = block.header().hash_slow();
+                (
+                    block_hash,
+                    ExecutionPayloadBodyV2 {
+                        transactions: block.body().encoded_2718_transactions(),
+                        withdrawals: block
+                            .body()
+                            .withdrawals()
+                            .cloned()
+                            .map(Withdrawals::into_inner),
+                        block_access_list: None,
+                    },
+                )
+            })
+            .await?;
+
+        let block_hashes = payload_bodies
+            .iter()
+            .filter_map(|payload_body| payload_body.as_ref().map(|(block_hash, _)| *block_hash))
+            .collect::<Vec<_>>();
+        let block_access_lists = self.get_block_access_lists_by_hashes(block_hashes).await?;
+
+        for (payload_body, block_access_list) in
+            payload_bodies.iter_mut().filter_map(Option::as_mut).zip(block_access_lists)
+        {
+            payload_body.1.block_access_list = block_access_list;
+        }
+
+        Ok(payload_bodies
+            .into_iter()
+            .map(|payload_body| payload_body.map(|(_, payload_body)| payload_body))
+            .collect())
     }
 
     /// Metrics version of `get_payload_bodies_by_range_v2`
@@ -759,6 +787,30 @@ where
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
+    async fn get_block_access_lists_by_hashes(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<Vec<Option<Bytes>>> {
+        let len = hashes.len() as u64;
+        if len > MAX_PAYLOAD_BODIES_LIMIT {
+            return Err(EngineApiError::PayloadRequestTooLarge { len });
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let bal_store = self.inner.provider.bal_store().clone();
+
+        self.inner.task_spawner.spawn_blocking_task(async move {
+            tx.send(
+                bal_store
+                    .get_by_hashes(&hashes)
+                    .map_err(|err| EngineApiError::Internal(Box::new(err))),
+            )
+            .ok();
+        });
+
+        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
+    }
+
     /// Called to retrieve execution payload bodies by hashes.
     pub async fn get_payload_bodies_by_hash_v1(
         &self,
@@ -789,12 +841,23 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
-        })
-        .await
+        let payload_bodies =
+            self.get_payload_bodies_by_hash_with(hashes.clone(), |block| ExecutionPayloadBodyV2 {
+                transactions: block.body().encoded_2718_transactions(),
+                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+                block_access_list: None,
+            });
+        let block_access_lists = self.get_block_access_lists_by_hashes(hashes);
+        let (mut payload_bodies, block_access_lists) =
+            tokio::try_join!(payload_bodies, block_access_lists)?;
+
+        for (payload_body, block_access_list) in payload_bodies.iter_mut().zip(block_access_lists) {
+            if let Some(payload_body) = payload_body {
+                payload_body.block_access_list = block_access_list;
+            }
+        }
+
+        Ok(payload_bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_hash_v2`
@@ -953,6 +1016,35 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
+    fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        // Spec requires returning `null` if syncing.
+        if (*self.inner.is_syncing)() {
+            return Ok(None)
+        }
+
+        self.inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
+            .map(Some)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
     /// Metered version of `get_blobs_v2`.
     pub fn get_blobs_v2_metered(
         &self,
@@ -1009,6 +1101,28 @@ where
 
         res
     }
+
+    /// Metered version of `get_blobs_v4`.
+    pub fn get_blobs_v4_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let hashes_len = versioned_hashes.len();
+        let start = Instant::now();
+        let res = Self::get_blobs_v4(self, versioned_hashes, indices_bitarray);
+        self.inner.metrics.latency.get_blobs_v4.record(start.elapsed());
+
+        if let Ok(Some(blobs)) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = hashes_len - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
+    }
 }
 
 // This is the concrete ethereum engine API implementation.
@@ -1016,7 +1130,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -1257,7 +1371,7 @@ where
 
     /// Handler for `engine_getPayloadV6`
     ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    /// Post-Amsterdam payload handler that includes Block Access Lists (BAL).
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     async fn get_payload_v6(
@@ -1375,6 +1489,15 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
+
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV4");
+        Ok(self.get_blobs_v4_metered(versioned_hashes, indices_bitarray)?)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1438,8 +1561,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Address, Bytes, B256};
+    use alloy_eips::{eip7685::Requests, NumHash};
+    use alloy_primitives::{keccak256, Address, Bytes, Sealed, B256};
     use alloy_rpc_types_engine::{
         ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
     };
@@ -1453,7 +1576,7 @@ mod tests {
     };
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore};
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -1508,6 +1631,114 @@ mod tests {
         let (_, api) = setup_engine_api();
         let res = api.get_client_version_v1(client.clone());
         assert_eq!(res.unwrap(), vec![client]);
+    }
+
+    #[tokio::test]
+    async fn get_payload_bodies_by_hash_v2_returns_block_access_list_from_store() {
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+        let mut provider = MockEthProvider::default();
+        provider.bal_store = bal_store.clone();
+        let provider = Arc::new(provider);
+
+        let client = ClientVersionV1 {
+            code: ClientCode::RH,
+            name: "Reth".to_string(),
+            version: "v0.2.0-beta.5".to_string(),
+            commit: "defa64b2".to_string(),
+        };
+        let chain_spec: Arc<ChainSpec> = MAINNET.clone();
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, _engine_rx) = unbounded_channel();
+        let api = EngineApi::new(
+            provider.clone(),
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            client,
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+
+        let mut block = Block::default();
+        block.header.number = 1;
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block);
+
+        let mut block_without_bal = Block::default();
+        block_without_bal.header.number = 2;
+        let block_without_bal_hash = block_without_bal.header.hash_slow();
+        provider.add_block(block_without_bal_hash, block_without_bal);
+
+        let raw_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+        let sealed_bal = Sealed::new_unchecked(raw_bal.clone(), keccak256(&raw_bal));
+        bal_store.insert(NumHash::new(1, block_hash), sealed_bal).unwrap();
+
+        let missing_hash = B256::with_last_byte(3);
+        let response = api
+            .get_payload_bodies_by_hash_v2(vec![block_hash, block_without_bal_hash, missing_hash])
+            .await
+            .unwrap();
+
+        assert_eq!(response.len(), 3);
+        assert_eq!(response[0].as_ref().unwrap().block_access_list, Some(raw_bal));
+        assert_eq!(response[1].as_ref().unwrap().block_access_list, None);
+        assert!(response[2].is_none());
+    }
+
+    #[tokio::test]
+    async fn get_payload_bodies_by_range_v2_returns_block_access_lists_from_store() {
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+        let mut provider = MockEthProvider::default();
+        provider.bal_store = bal_store.clone();
+        let provider = Arc::new(provider);
+
+        let client = ClientVersionV1 {
+            code: ClientCode::RH,
+            name: "Reth".to_string(),
+            version: "v0.2.0-beta.5".to_string(),
+            commit: "defa64b2".to_string(),
+        };
+        let chain_spec: Arc<ChainSpec> = MAINNET.clone();
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, _engine_rx) = unbounded_channel();
+        let api = EngineApi::new(
+            provider.clone(),
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            client,
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+
+        let mut block = Block::default();
+        block.header.number = 1;
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block);
+
+        let mut block_without_bal = Block::default();
+        block_without_bal.header.number = 3;
+        let block_without_bal_hash = block_without_bal.header.hash_slow();
+        provider.add_block(block_without_bal_hash, block_without_bal);
+
+        let raw_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+        let sealed_bal = Sealed::new_unchecked(raw_bal.clone(), keccak256(&raw_bal));
+        bal_store.insert(NumHash::new(1, block_hash), sealed_bal).unwrap();
+
+        let response = api.get_payload_bodies_by_range_v2(1, 3).await.unwrap();
+
+        assert_eq!(response.len(), 3);
+        assert_eq!(response[0].as_ref().unwrap().block_access_list, Some(raw_bal));
+        assert!(response[1].is_none());
+        assert_eq!(response[2].as_ref().unwrap().block_access_list, None);
     }
 
     struct EngineApiTestHandle {
@@ -1657,6 +1888,37 @@ mod tests {
         );
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
+        assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn get_blobs_v4_returns_null_when_syncing() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, _engine_rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            TestNetworkInfo { syncing: true },
+        );
+
+        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128));
         assert_matches!(res, Ok(None));
     }
 

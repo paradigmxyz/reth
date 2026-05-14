@@ -86,7 +86,7 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jem
 Finally, if the purpose of the benchmark is to profile the node when `snmalloc` is configured as the default allocator, it would be built with the following
 command:
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-features --features "snmalloc-native,asm-keccak,min-debug-logs"
+RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-features --features "snmalloc-native,asm-keccak,min-trace-logs"
 ```
 
 ### Run the Benchmark:

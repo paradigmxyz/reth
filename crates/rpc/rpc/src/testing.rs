@@ -179,7 +179,7 @@ where
 
                     let tip = tx.effective_tip_per_gas(base_fee).unwrap_or_default();
                     let gas_used = match builder.execute_transaction(tx) {
-                        Ok(gas_used) => gas_used,
+                        Ok(gas_used) => gas_used.tx_gas_used(),
                         Err(err) => {
                             if skip_invalid_transactions {
                                 debug!(

@@ -20,6 +20,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_evm_ethereum::EthEvmConfig;
+use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -27,7 +28,8 @@ use reth_network_api::{
 };
 use reth_network_peers::PeerId;
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+    noop::NoopProvider, BalProvider, BlockReader, BlockReaderIdExt, HeaderProvider,
+    StateProviderFactory,
 };
 use reth_tasks::Runtime;
 use reth_tokio_util::EventStream;
@@ -45,12 +47,11 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    sync::{
-        mpsc::{channel, unbounded_channel},
-        oneshot,
-    },
+    sync::{mpsc::channel, oneshot},
     task::JoinHandle,
 };
+
+use crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -247,6 +248,7 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
         > + HeaderProvider
+        + BalProvider
         + Clone
         + Unpin
         + 'static,
@@ -319,6 +321,7 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
         > + HeaderProvider
+        + BalProvider
         + Unpin
         + 'static,
     Pool: TransactionPool<
@@ -462,7 +465,10 @@ where
     }
 
     /// Set a new request handler that's connected to the peer's network
-    pub fn install_request_handler(&mut self) {
+    pub fn install_request_handler(&mut self)
+    where
+        C: BalProvider,
+    {
         let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
@@ -472,7 +478,10 @@ where
 
     /// Set a new transactions manager that's connected to the peer's network
     pub fn install_transactions_manager(&mut self, pool: Pool) {
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = memory_bounded_channel(
+            DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            "test_tx_channel",
+        );
         self.network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
             self.handle(),
@@ -490,7 +499,10 @@ where
         P: TransactionPool,
     {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = memory_bounded_channel(
+            DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            "test_tx_channel",
+        );
         network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
             network.handle().clone(),
@@ -531,7 +543,10 @@ where
         P: TransactionPool,
     {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = memory_bounded_channel(
+            DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            "test_tx_channel",
+        );
         network.set_transactions(tx);
 
         let announcement_policy = StrictEthAnnouncementFilter::default();
@@ -573,6 +588,7 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
         > + HeaderProvider
+        + BalProvider
         + Unpin
         + 'static,
     Pool: TransactionPool<

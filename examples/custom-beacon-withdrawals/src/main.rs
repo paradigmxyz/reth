@@ -5,11 +5,11 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx, GasOutput},
+    block::{BlockExecutorFactory, ExecutableTx, GasOutput},
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
     precompiles::PrecompilesMap,
     revm::context::Block as _,
-    EthEvm, EthEvmFactory,
+    EthEvm, EthEvmFactory, EvmFactory,
 };
 use alloy_sol_types::{sol, SolCall};
 use reth_ethereum::{
@@ -94,6 +94,9 @@ impl BlockExecutorFactory for CustomEvmConfig {
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
+    type TxExecutionResult = EthTxResult<<EthEvmFactory as EvmFactory>::HaltReason, TxType>;
+    type Executor<'a, DB: StateDB, I: InspectorFor<Self, DB>> =
+        CustomBlockExecutor<'a, EthEvm<DB, I, PrecompilesMap>>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         self.inner.evm_factory()
@@ -103,10 +106,10 @@ impl BlockExecutorFactory for CustomEvmConfig {
         &'a self,
         evm: EthEvm<DB, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    ) -> Self::Executor<'a, DB, I>
     where
-        DB: StateDB + 'a,
-        I: InspectorFor<Self, DB> + 'a,
+        DB: StateDB,
+        I: InspectorFor<Self, DB>,
     {
         CustomBlockExecutor {
             inner: EthBlockExecutor::new(
@@ -211,10 +214,7 @@ where
         self.inner.execute_transaction_without_commit(tx)
     }
 
-    fn commit_transaction(
-        &mut self,
-        output: Self::Result,
-    ) -> Result<GasOutput, BlockExecutionError> {
+    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
         self.inner.commit_transaction(output)
     }
 

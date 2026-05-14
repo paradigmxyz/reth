@@ -5,7 +5,7 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage, TX_MEMORY_BUDGET_MULTIPLIER},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
     RawCapabilityMessage, SnapProtocolMessage, SnapVersion,
 };
@@ -298,7 +298,11 @@ where
         // See also <https://github.com/paradigmxyz/reth/blob/main/crates/net/eth-wire/src/capability.rs#L272-L283>.
         if message_id <= EthMessageID::max(self.eth_version) {
             let mut buf = bytes.as_ref();
-            match ProtocolMessage::decode_message(self.eth_version, &mut buf) {
+            match ProtocolMessage::decode_message_with_tx_memory_budget(
+                self.eth_version,
+                &mut buf,
+                self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+            ) {
                 Ok(protocol_msg) => {
                     if matches!(protocol_msg.message, EthMessage::Status(_)) {
                         return Err(EthSnapStreamError::StatusNotInHandshake);
@@ -571,9 +575,9 @@ mod tests {
         let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
         let snap2_msg = SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
             request_id: 1,
-            block_access_lists: BlockAccessLists(vec![alloy_primitives::Bytes::from_static(&[
-                alloy_rlp::EMPTY_LIST_CODE,
-            ])]),
+            block_access_lists: BlockAccessLists(vec![Some(alloy_primitives::Bytes::from_static(
+                &[alloy_rlp::EMPTY_LIST_CODE],
+            ))]),
         });
 
         let encoded = EthSnapStreamInner::<EthNetworkPrimitives>::new_with_snap_version(
