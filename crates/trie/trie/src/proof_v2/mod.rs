@@ -1773,7 +1773,7 @@ impl TrieCursorState {
     fn before(&self, path: &Nibbles) -> bool {
         match self {
             Self::Unseeked => true,
-            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => path < seeked_to,
+            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => seeked_to < path,
             Self::Exhausted => false,
         }
     }
