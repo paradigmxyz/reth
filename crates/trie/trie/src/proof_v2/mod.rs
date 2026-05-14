@@ -537,8 +537,12 @@ where
             "A branch must have at least two children, got {num_children}"
         );
 
-        // Collect children into RlpNode Vec. Children are in lexicographic order.
-        for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+        // Collect children into RlpNode Vec. Popping avoids constructing a drain iterator in this
+        // hot path; reverse the appended range afterwards to restore lexicographic order.
+        rlp_nodes_buf.reserve(num_children);
+        let append_start = rlp_nodes_buf.len();
+        for _ in 0..num_children {
+            let child = self.child_stack.pop().expect("checked child_stack length above");
             let child_rlp_node = match child {
                 ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
                 uncommitted_child => {
@@ -554,6 +558,7 @@ where
             };
             rlp_nodes_buf.push(child_rlp_node);
         }
+        rlp_nodes_buf[append_start..].reverse();
 
         debug_assert_eq!(
             rlp_nodes_buf.len(),
