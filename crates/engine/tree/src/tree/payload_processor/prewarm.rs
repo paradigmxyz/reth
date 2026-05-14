@@ -28,7 +28,8 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader
+    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
