@@ -76,6 +76,10 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
+/// prewarm workers exceeds the execution time saved.
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
@@ -489,7 +493,9 @@ where
             PrewarmMode::BlockAccessList(
                 env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
             )
-        } else if self.disable_transaction_prewarming {
+        } else if self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        {
             PrewarmMode::Skipped
         } else {
             PrewarmMode::Transactions(transactions)
