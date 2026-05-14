@@ -816,6 +816,8 @@ where
 /// given state.
 fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
     let mut targets = MultiProofTargetsV2::default();
+    targets.account_targets.reserve(state.len());
+    targets.storage_targets.reserve(state.len());
     let mut storage_target_count = 0;
     for (addr, account) in state {
         // if the account was not touched, or if the account was selfdestructed, do not
