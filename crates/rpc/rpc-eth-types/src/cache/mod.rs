@@ -3,7 +3,8 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::{eip7928::bal::DecodedBal, BlockHashOrNumber};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;

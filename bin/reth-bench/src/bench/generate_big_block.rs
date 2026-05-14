@@ -6,10 +6,8 @@
 //! [`ExecutionData`] and environment switches at each block boundary.
 
 use alloy_consensus::TxEnvelope;
-use alloy_eips::{
-    eip7928::{AccountChanges, BlockAccessList, SlotChanges},
-    Typed2718,
-};
+use alloy_eip7928::{AccountChanges, BlockAccessList, SlotChanges};
+use alloy_eips::Typed2718;
 use alloy_primitives::{Bytes, B256};
 use alloy_provider::{
     network::{AnyNetwork, AnyRpcBlock},
@@ -532,6 +530,16 @@ async fn fetch_one_block(
         return Ok(None);
     };
 
+    // `alloy-provider` returns `alloy_eips::eip7928::BlockAccessList` (alloy_eip7928 0.3);
+    // re-encode through the shared wire format into the 0.4 type used by the rest of
+    // reth-bench.
+    let block_access_list = block_access_list
+        .map(|bal| {
+            let raw = alloy_rlp::encode(&bal);
+            <BlockAccessList as alloy_rlp::Decodable>::decode(&mut raw.as_slice())
+        })
+        .transpose()?;
+
     Ok(Some((rpc_block, block_access_list)))
 }
 
@@ -579,17 +587,17 @@ fn shift_account_changes(
     let shift = tx_index_offset + 2 * segment_idx;
     for slot_changes in &mut account_changes.storage_changes {
         for change in &mut slot_changes.changes {
-            change.block_access_index += shift;
+            change.block_access_index.0 += shift;
         }
     }
     for change in &mut account_changes.balance_changes {
-        change.block_access_index += shift;
+        change.block_access_index.0 += shift;
     }
     for change in &mut account_changes.nonce_changes {
-        change.block_access_index += shift;
+        change.block_access_index.0 += shift;
     }
     for change in &mut account_changes.code_changes {
-        change.block_access_index += shift;
+        change.block_access_index.0 += shift;
     }
 }
 
@@ -643,8 +651,12 @@ pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7928::{BalanceChange, CodeChange, NonceChange, StorageChange};
+    use alloy_eip7928::{BalanceChange, BlockAccessIndex, CodeChange, NonceChange, StorageChange};
     use alloy_primitives::{Address, U256};
+
+    fn bai(value: u64) -> BlockAccessIndex {
+        BlockAccessIndex::new(value)
+    }
 
     #[test]
     fn merge_block_access_list_offsets_and_merges_accounts() {
@@ -655,11 +667,11 @@ mod tests {
             address: shared,
             storage_changes: vec![SlotChanges::new(
                 U256::from(1),
-                vec![StorageChange::new(0, U256::from(10))],
+                vec![StorageChange::new(bai(0), U256::from(10))],
             )],
             storage_reads: vec![U256::from(3)],
-            balance_changes: vec![BalanceChange::new(1, U256::from(100))],
-            nonce_changes: vec![NonceChange::new(2, 7)],
+            balance_changes: vec![BalanceChange::new(bai(1), U256::from(100))],
+            nonce_changes: vec![NonceChange::new(bai(2), 7)],
             code_changes: vec![],
         }];
 
@@ -667,19 +679,25 @@ mod tests {
             AccountChanges {
                 address: shared,
                 storage_changes: vec![
-                    SlotChanges::new(U256::from(1), vec![StorageChange::new(1, U256::from(20))]),
-                    SlotChanges::new(U256::from(2), vec![StorageChange::new(2, U256::from(30))]),
+                    SlotChanges::new(
+                        U256::from(1),
+                        vec![StorageChange::new(bai(1), U256::from(20))],
+                    ),
+                    SlotChanges::new(
+                        U256::from(2),
+                        vec![StorageChange::new(bai(2), U256::from(30))],
+                    ),
                 ],
                 storage_reads: vec![U256::from(4)],
-                balance_changes: vec![BalanceChange::new(0, U256::from(150))],
-                nonce_changes: vec![NonceChange::new(2, 8)],
-                code_changes: vec![CodeChange::new(1, Bytes::from_static(&[0xaa]))],
+                balance_changes: vec![BalanceChange::new(bai(0), U256::from(150))],
+                nonce_changes: vec![NonceChange::new(bai(2), 8)],
+                code_changes: vec![CodeChange::new(bai(1), Bytes::from_static(&[0xaa]))],
             },
             AccountChanges {
                 address: other,
                 storage_changes: vec![SlotChanges::new(
                     U256::from(9),
-                    vec![StorageChange::new(0, U256::from(90))],
+                    vec![StorageChange::new(bai(0), U256::from(90))],
                 )],
                 storage_reads: vec![],
                 balance_changes: vec![],
@@ -700,13 +718,13 @@ mod tests {
                 .iter()
                 .map(|change| change.block_access_index)
                 .collect::<Vec<_>>(),
-            vec![1, 3]
+            vec![bai(1), bai(3)]
         );
         assert_eq!(
             shared.nonce_changes.iter().map(|change| change.block_access_index).collect::<Vec<_>>(),
-            vec![2, 5]
+            vec![bai(2), bai(5)]
         );
-        assert_eq!(shared.code_changes[0].block_access_index, 4);
+        assert_eq!(shared.code_changes[0].block_access_index, bai(4));
 
         let slot_one = shared
             .storage_changes
@@ -715,7 +733,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             slot_one.changes.iter().map(|change| change.block_access_index).collect::<Vec<_>>(),
-            vec![0, 4]
+            vec![bai(0), bai(4)]
         );
 
         let slot_two = shared
@@ -723,11 +741,11 @@ mod tests {
             .iter()
             .find(|slot_changes| slot_changes.slot == U256::from(2))
             .unwrap();
-        assert_eq!(slot_two.changes[0].block_access_index, 5);
+        assert_eq!(slot_two.changes[0].block_access_index, bai(5));
 
         let other = &merged[1];
         assert_eq!(other.address, Address::repeat_byte(0x22));
-        assert_eq!(other.storage_changes[0].changes[0].block_access_index, 3);
+        assert_eq!(other.storage_changes[0].changes[0].block_access_index, bai(3));
     }
 
     #[test]
@@ -743,7 +761,10 @@ mod tests {
         // these per-block BAL entries are merged for a standalone big block.
         let mut existing = AccountChanges {
             address,
-            storage_changes: vec![SlotChanges::new(A, vec![StorageChange::new(0, U256::from(10))])],
+            storage_changes: vec![SlotChanges::new(
+                A,
+                vec![StorageChange::new(bai(0), U256::from(10))],
+            )],
             storage_reads: vec![B, C],
             balance_changes: vec![],
             nonce_changes: vec![],
@@ -755,7 +776,10 @@ mod tests {
         // merge should also dedupe it. D remains read-only.
         let incoming = AccountChanges {
             address,
-            storage_changes: vec![SlotChanges::new(B, vec![StorageChange::new(1, U256::from(20))])],
+            storage_changes: vec![SlotChanges::new(
+                B,
+                vec![StorageChange::new(bai(1), U256::from(20))],
+            )],
             storage_reads: vec![A, C, D],
             balance_changes: vec![],
             nonce_changes: vec![],

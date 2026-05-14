@@ -1,8 +1,9 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
-use revm_database::state::bal::{alloy::AlloyBal, Bal as RevmBal};
+use revm_database::state::bal::Bal as RevmBal;
 
 /// Raw BAL RLP bytes sealed by the BAL hash.
 pub type SealedBal = Sealed<Bytes>;
@@ -93,11 +94,9 @@ pub trait BalStore: Send + Sync + 'static {
         block_hash: BlockHash,
     ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
         let Some(raw) = self.get_by_hash(block_hash)? else { return Ok(None) };
-        // revm-state's `Bal` is built from `alloy_eip7928 0.4`, while reth's `DecodedBal` is
-        // generic over `alloy_eip7928 0.3`. Re-decode the wire-format RLP into the revm-side
-        // `AlloyBal` and convert.
-        let alloy_bal = <AlloyBal as alloy_rlp::Decodable>::decode(&mut raw.as_ref())
-            .map_err(reth_storage_errors::provider::ProviderError::other)?;
+        let alloy_bal =
+            <alloy_eip7928::BlockAccessList as alloy_rlp::Decodable>::decode(&mut raw.as_ref())
+                .map_err(reth_storage_errors::provider::ProviderError::other)?;
         let revm_bal = RevmBal::try_from(alloy_bal)
             .map_err(reth_storage_errors::provider::ProviderError::other)?;
         Ok(Some(DecodedBal::new(revm_bal, raw)))

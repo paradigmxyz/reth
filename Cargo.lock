@@ -271,6 +271,7 @@ checksum = "4d93ce7e41bcd2b9ee2c1d92c223c1be4a274d387538d6d3f956b768986ce451"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "borsh",
  "once_cell",
  "serde",
@@ -7573,7 +7574,7 @@ name = "reth-bench"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
@@ -7852,7 +7853,7 @@ name = "reth-consensus"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-primitives",
  "auto_impl",
  "reth-execution-types",
@@ -8260,7 +8261,7 @@ name = "reth-engine-tree"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
@@ -8476,7 +8477,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-genesis",
  "alloy-hardforks 0.4.7",
@@ -8669,10 +8670,10 @@ name = "reth-evm"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
- "alloy-rlp",
  "auto_impl",
  "derive_more",
  "futures-util",
@@ -9544,7 +9545,7 @@ name = "reth-provider"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -9935,7 +9936,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-evm",
  "alloy-json-rpc",
@@ -9979,6 +9980,7 @@ name = "reth-rpc-eth-types"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-evm",
  "alloy-network",
@@ -10527,7 +10529,7 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "2.2.0"
 dependencies = [
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.1",
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",

@@ -1,6 +1,6 @@
 //! Helpers for `eth_blockAccessList` RPC method.
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::BlockAccessList;
+use alloy_eip7928::BlockAccessList;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
@@ -9,21 +9,11 @@ use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
 };
 use reth_storage_api::StateProviderFactory;
-use revm::state::bal::alloy::AlloyBal;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
     RpcNodeCore,
 };
-
-/// Convert revm's [`AlloyBal`] (`alloy_eip7928` 0.4) into reth's [`BlockAccessList`]
-/// (`alloy_eip7928` 0.3) by round-tripping through RLP. The wire format is identical
-/// across versions; only the Rust types differ.
-fn alloy_bal_to_block_access_list(bal: AlloyBal) -> Option<BlockAccessList> {
-    let mut buf = Vec::new();
-    alloy_rlp::Encodable::encode(&bal, &mut buf);
-    <BlockAccessList as alloy_rlp::Decodable>::decode(&mut buf.as_slice()).ok()
-}
 
 /// Helper trait for `eth_blockAccessList` RPC method.
 pub trait GetBlockAccessList: Trace + Call + LoadBlock {
@@ -68,7 +58,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                     .apply_post_execution_changes()
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let bal = db.take_built_alloy_bal().and_then(alloy_bal_to_block_access_list);
+                let bal = db.take_built_alloy_bal();
                 Ok(bal)
             })
             .await

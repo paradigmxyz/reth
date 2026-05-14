@@ -27,7 +27,7 @@ reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
-alloy-eip7928 = { version = "0.4", default-features = false, features = ["rlp"] }
+alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true

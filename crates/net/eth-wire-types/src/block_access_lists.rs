@@ -89,20 +89,22 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockAccessLists {
 mod tests {
     use super::*;
     use alloy_eip7928::{
-        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
     };
     use alloy_primitives::{Address, U256};
     use alloy_rlp::EMPTY_LIST_CODE;
 
     fn elaborate_account_changes(seed: u8) -> Vec<AccountChanges> {
+        let bai = BlockAccessIndex::new;
         vec![
             AccountChanges {
                 address: Address::from([seed; 20]),
                 storage_changes: vec![SlotChanges::new(
                     U256::from_be_bytes([seed.wrapping_add(1); 32]),
                     vec![
-                        StorageChange::new(1, U256::from_be_bytes([seed.wrapping_add(2); 32])),
-                        StorageChange::new(2, U256::from_be_bytes([seed.wrapping_add(3); 32])),
+                        StorageChange::new(bai(1), U256::from_be_bytes([seed.wrapping_add(2); 32])),
+                        StorageChange::new(bai(2), U256::from_be_bytes([seed.wrapping_add(3); 32])),
                     ],
                 )],
                 storage_reads: vec![
@@ -110,15 +112,15 @@ mod tests {
                     U256::from_be_bytes([seed.wrapping_add(5); 32]),
                 ],
                 balance_changes: vec![
-                    BalanceChange::new(1, U256::from(1_000 + seed as u64)),
-                    BalanceChange::new(2, U256::from(2_000 + seed as u64)),
+                    BalanceChange::new(bai(1), U256::from(1_000 + seed as u64)),
+                    BalanceChange::new(bai(2), U256::from(2_000 + seed as u64)),
                 ],
                 nonce_changes: vec![
-                    NonceChange::new(1, seed as u64),
-                    NonceChange::new(2, seed as u64 + 1),
+                    NonceChange::new(bai(1), seed as u64),
+                    NonceChange::new(bai(2), seed as u64 + 1),
                 ],
                 code_changes: vec![CodeChange::new(
-                    1,
+                    bai(1),
                     Bytes::from(vec![0x60, seed, 0x61, seed.wrapping_add(1), 0x56]),
                 )],
             },
@@ -126,9 +128,9 @@ mod tests {
                 address: Address::from([seed.wrapping_add(9); 20]),
                 storage_changes: Vec::new(),
                 storage_reads: vec![U256::from_be_bytes([seed.wrapping_add(10); 32])],
-                balance_changes: vec![BalanceChange::new(3, U256::from(3_000 + seed as u64))],
-                nonce_changes: vec![NonceChange::new(3, seed as u64 + 2)],
-                code_changes: vec![CodeChange::new(2, Bytes::from(vec![0x5f, 0x5f, 0xf3]))],
+                balance_changes: vec![BalanceChange::new(bai(3), U256::from(3_000 + seed as u64))],
+                nonce_changes: vec![NonceChange::new(bai(3), seed as u64 + 2)],
+                code_changes: vec![CodeChange::new(bai(2), Bytes::from(vec![0x5f, 0x5f, 0xf3]))],
             },
         ]
     }
