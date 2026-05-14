@@ -6,6 +6,10 @@
 
 use crate::{EthPrimitives, ExecutedBlock};
 use alloy_primitives::B256;
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 use reth_primitives_traits::{
     dashmap::{mapref::entry::Entry, DashMap},
     AlloyBlockHeader, NodePrimitives,
@@ -13,7 +17,11 @@ use reth_primitives_traits::{
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{fmt, sync::Arc, time::Instant};
+use std::{
+    fmt,
+    sync::{Arc, LazyLock},
+    time::Instant,
+};
 use tracing::{debug, trace};
 
 /// Manages flattened state trie overlays for in-memory blocks.
@@ -27,6 +35,21 @@ pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
 }
+
+/// Metrics for state trie overlay management.
+#[derive(Metrics)]
+#[metrics(scope = "sync.block_validation.state_trie_overlay")]
+struct StateTrieOverlayMetrics {
+    /// Duration of overlay computation in seconds.
+    overlay_computation_duration_seconds: Histogram,
+    /// Number of overlay cache hits.
+    overlay_cache_hits: Counter,
+    /// Number of overlay cache misses.
+    overlay_cache_misses: Counter,
+}
+
+static STATE_TRIE_OVERLAY_METRICS: LazyLock<StateTrieOverlayMetrics> =
+    LazyLock::new(StateTrieOverlayMetrics::default);
 
 impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
     fn default() -> Self {
@@ -232,6 +255,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let span = tracing::Span::current();
 
         if let Some(input) = self.overlays.get(&key).map(|entry| Arc::clone(entry.value())) {
+            STATE_TRIE_OVERLAY_METRICS.overlay_cache_hits.increment(1);
             span.record("cache_hit", true);
             return Ok(input)
         }
@@ -267,10 +291,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         // The vacant entry is the cache-fill gate: racing callers block instead of recomputing.
         let input = match self.overlays.entry(key) {
             Entry::Occupied(entry) => {
+                STATE_TRIE_OVERLAY_METRICS.overlay_cache_hits.increment(1);
                 span.record("cache_hit", true);
                 return Ok(Arc::clone(entry.get()))
             }
             Entry::Vacant(entry) => {
+                STATE_TRIE_OVERLAY_METRICS.overlay_cache_misses.increment(1);
                 let input = {
                     #[cfg(feature = "rayon")]
                     {
@@ -392,6 +418,7 @@ fn compute_overlay<N: NodePrimitives>(
     };
 
     let elapsed = started_at.elapsed();
+    STATE_TRIE_OVERLAY_METRICS.overlay_computation_duration_seconds.record(elapsed.as_secs_f64());
     tracing::Span::current().record("elapsed_us", elapsed.as_micros() as u64);
     debug!(
         target: "chain_state::state_trie_overlay",
