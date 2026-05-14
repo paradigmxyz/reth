@@ -11,12 +11,35 @@
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
-#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ
+#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
 set -euxo pipefail
 
 LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
+
+# Resolve git SHA for this run label
+GIT_SHA=""
+case "$LABEL" in
+  baseline*) GIT_SHA="${BASELINE_REF:-}" ;;
+  feature*)  GIT_SHA="${FEATURE_REF:-}" ;;
+esac
+
+# Resolve git-ref: tag if tagged, otherwise branch name, otherwise raw SHA
+GIT_REF="$GIT_SHA"
+if [ -n "$GIT_SHA" ]; then
+  TAG_NAME=$(git tag --points-at "$GIT_SHA" 2>/dev/null | head -1)
+  if [ -n "$TAG_NAME" ]; then
+    GIT_REF="$TAG_NAME"
+  else
+    BRANCH_NAME=$(git branch -r --points-at "$GIT_SHA" 2>/dev/null | sed 's|^ *origin/||' | head -1)
+    if [ -n "$BRANCH_NAME" ]; then
+      GIT_REF="$BRANCH_NAME"
+    fi
+  fi
+fi
+
 DATADIR_NAME="datadir"
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 if [ "$BIG_BLOCKS" = "true" ]; then
@@ -94,7 +117,7 @@ echo "=== Cache state after drop ==="
 free -h
 grep Cached /proc/meminfo
 
-ONLINE=$(nproc --all)
+ONLINE=$(getconf _NPROCESSORS_ONLN)
 MAX_RETH=$(( ONLINE - 1 ))
 if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
   MAX_RETH=$BENCH_CORES
@@ -137,7 +160,7 @@ fi
 
 if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
   if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
-    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench --tracing-otlp.service-version="${LABEL}")
   fi
   if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
     RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
@@ -220,19 +243,12 @@ else
   echo "reth (${LABEL}) binary does not support --debug.startup-sync-state-idle, skipping sync wait"
 fi
 
-TXGEN_ETHEREUM="$(which txgen-ethereum)"
 TXGEN_BENCH="$(which bench)"
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 TXGEN_SEND_ARGS=()
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   TXGEN_SEND_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
-
-HEAD_JSON=$(curl -sf http://127.0.0.1:8545 -X POST \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}')
-HEAD_HEX=$(jq -r '.result' <<< "$HEAD_JSON")
-HEAD_DEC=$((16#${HEAD_HEX#0x}))
 
 WARMUP="${BENCH_WARMUP_BLOCKS:-0}"
 BLOCKS="${BENCH_BLOCKS:?BENCH_BLOCKS must be set}"
@@ -244,43 +260,64 @@ fi
 
 TXGEN_DIR="$OUTPUT_DIR/txgen"
 mkdir -p "$TXGEN_DIR"
-ALL_BLOCKS="$TXGEN_DIR/all-blocks.ndjson"
-WARMUP_BLOCKS="$TXGEN_DIR/warmup-blocks.ndjson"
-BENCHMARK_BLOCKS="$TXGEN_DIR/benchmark-blocks.ndjson"
-if [ "$BIG_BLOCKS" = "true" ]; then
-  ALL_BIG_BLOCKS="$TXGEN_DIR/all-big-blocks.ndjson"
-  WARMUP_BIG_BLOCKS="$TXGEN_DIR/warmup-big-blocks.ndjson"
-  MEASURED_BIG_BLOCKS="$TXGEN_DIR/measured-big-blocks.ndjson"
-  ALL_BLOCKS="$ALL_BIG_BLOCKS"
-  WARMUP_BLOCKS="$WARMUP_BIG_BLOCKS"
-  BENCHMARK_BLOCKS="$MEASURED_BIG_BLOCKS"
-fi
 
-EXTRACT_FROM=$(( HEAD_DEC + 1 ))
-if [ "$BIG_BLOCKS" = "true" ]; then
-  echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
-  "$TXGEN_ETHEREUM" extract-big-blocks \
-    --rpc "$BENCH_RPC_URL" \
-    --from "$EXTRACT_FROM" \
-    --count "$TOTAL" \
-    --target-gas "${BENCH_BIG_BLOCKS_TARGET_GAS:-1G}" \
-    -o "$ALL_BIG_BLOCKS"
+# Use pre-extracted payloads if available, otherwise extract inline.
+if [ -n "${TXGEN_PAYLOADS_DIR:-}" ] && [ -d "$TXGEN_PAYLOADS_DIR" ]; then
+  echo "Using pre-extracted payloads from ${TXGEN_PAYLOADS_DIR}"
+  if [ "$BIG_BLOCKS" = "true" ]; then
+    WARMUP_BLOCKS="$TXGEN_PAYLOADS_DIR/warmup-big-blocks.ndjson"
+    BENCHMARK_BLOCKS="$TXGEN_PAYLOADS_DIR/measured-big-blocks.ndjson"
+  else
+    WARMUP_BLOCKS="$TXGEN_PAYLOADS_DIR/warmup-blocks.ndjson"
+    BENCHMARK_BLOCKS="$TXGEN_PAYLOADS_DIR/benchmark-blocks.ndjson"
+  fi
+  if [ ! -f "$BENCHMARK_BLOCKS" ]; then
+    echo "::error::Pre-extracted payloads missing: ${BENCHMARK_BLOCKS}"
+    exit 1
+  fi
 else
-  EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
-  echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
-  "$TXGEN_ETHEREUM" extract \
-    --rpc "$BENCH_RPC_URL" \
-    --from "$EXTRACT_FROM" \
-    --to "$EXTRACT_TO" \
-    -o "$ALL_BLOCKS"
-fi
+  TXGEN_ETHEREUM="$(which txgen-ethereum)"
+  HEAD_JSON=$(curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}')
+  HEAD_HEX=$(jq -r '.result' <<< "$HEAD_JSON")
+  HEAD_DEC=$((16#${HEAD_HEX#0x}))
 
-if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
-  head -n "$WARMUP" "$ALL_BLOCKS" > "$WARMUP_BLOCKS"
-else
-  : > "$WARMUP_BLOCKS"
+  ALL_BLOCKS="$TXGEN_DIR/all-blocks.ndjson"
+  WARMUP_BLOCKS="$TXGEN_DIR/warmup-blocks.ndjson"
+  BENCHMARK_BLOCKS="$TXGEN_DIR/benchmark-blocks.ndjson"
+  if [ "$BIG_BLOCKS" = "true" ]; then
+    ALL_BLOCKS="$TXGEN_DIR/all-big-blocks.ndjson"
+    WARMUP_BLOCKS="$TXGEN_DIR/warmup-big-blocks.ndjson"
+    BENCHMARK_BLOCKS="$TXGEN_DIR/measured-big-blocks.ndjson"
+  fi
+
+  EXTRACT_FROM=$(( HEAD_DEC + 1 ))
+  if [ "$BIG_BLOCKS" = "true" ]; then
+    echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+    "$TXGEN_ETHEREUM" extract-big-blocks \
+      --rpc "$BENCH_RPC_URL" \
+      --from "$EXTRACT_FROM" \
+      --count "$TOTAL" \
+      --target-gas "${BENCH_BIG_BLOCKS_TARGET_GAS:-1G}" \
+      -o "$ALL_BLOCKS"
+  else
+    EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
+    echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+    "$TXGEN_ETHEREUM" extract \
+      --rpc "$BENCH_RPC_URL" \
+      --from "$EXTRACT_FROM" \
+      --to "$EXTRACT_TO" \
+      -o "$ALL_BLOCKS"
+  fi
+
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    head -n "$WARMUP" "$ALL_BLOCKS" > "$WARMUP_BLOCKS"
+  else
+    : > "$WARMUP_BLOCKS"
+  fi
+  awk -v warmup="$WARMUP" 'NR > warmup { print }' "$ALL_BLOCKS" > "$BENCHMARK_BLOCKS"
 fi
-awk -v warmup="$WARMUP" 'NR > warmup { print }' "$ALL_BLOCKS" > "$BENCHMARK_BLOCKS"
 
 if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
   echo "Running txgen warmup (${WARMUP} blocks)..."
@@ -303,6 +340,11 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
+CLICKHOUSE_REPORT=()
+if [ -n "${CLICKHOUSE_URL:-}" ]; then
+  CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
+fi
+
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
 $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --engine http://127.0.0.1:8551 \
@@ -310,6 +352,11 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
   --wait-for-persistence never \
-  --report json:"$OUTPUT_DIR/report.json" 2>&1 | sed -u "s/^/[bench] /"
+  --report json:"$OUTPUT_DIR/report.json" \
+  "${CLICKHOUSE_REPORT[@]}" \
+  -m "git-sha=$GIT_SHA" \
+  -m "git-ref=$GIT_REF" \
+  -m "platform=ethereum" \
+  -m "scenario=replay" 2>&1 | sed -u "s/^/[bench] /"
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"

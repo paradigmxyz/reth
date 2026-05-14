@@ -375,6 +375,8 @@ pub struct NetworkArgs {
     /// Name of network interface used to communicate with peers.
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+    /// If `--discovery.addr` is left at its default, discv4 will also bind to the resolved
+    /// interface address.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
 
@@ -441,7 +443,13 @@ pub struct NetworkArgs {
 }
 
 impl NetworkArgs {
-    /// Returns the resolved IP address.
+    /// Returns the IP address used for the `RLPx` TCP listener.
+    ///
+    /// If `--net-if.experimental` is set, this resolves the interface name to a concrete local IP
+    /// address. That concrete address is also passed to discv5 as the default address to advertise
+    /// in the local ENR.
+    ///
+    /// If no interface is configured, this returns the configured `--addr` value.
     pub fn resolved_addr(&self) -> IpAddr {
         if let Some(ref if_name) = self.net_if {
             let if_name = if if_name.is_empty() { DEFAULT_NET_IF_NAME } else { if_name };
@@ -460,6 +468,21 @@ impl NetworkArgs {
         }
 
         self.addr
+    }
+
+    /// Returns the IP address used for the discovery v4 UDP bind socket.
+    ///
+    /// By default this is `--discovery.addr`. When `--net-if.experimental` is set and
+    /// `--discovery.addr` is still the wildcard default, discovery v4 follows the resolved `RLPx`
+    /// listener address. That keeps discv4 and discv5 on the same concrete UDP address when they
+    /// share a port; otherwise discv4 would bind wildcard while discv5 binds the resolved
+    /// interface address, which prevents socket sharing.
+    fn resolved_discovery_addr(&self, listener_addr: IpAddr) -> IpAddr {
+        if self.net_if.is_some() && self.discovery.addr == DEFAULT_DISCOVERY_ADDR {
+            return listener_addr;
+        }
+
+        self.discovery.addr
     }
 
     /// Returns the resolved bootnodes if any are provided.
@@ -532,7 +555,13 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
         executor: Runtime,
     ) -> NetworkConfigBuilder<N> {
-        let addr = self.resolved_addr();
+        // `listener_addr` is the concrete RLPx TCP bind address. With `--net-if.experimental`,
+        // this is the resolved interface IP and is also used as discv5's default address.
+        let listener_addr = self.resolved_addr();
+        // Discovery v4 has its own CLI bind address. If left at the wildcard default while
+        // `--net-if.experimental` is active, make it follow the listener address so discv4 and
+        // discv5 can share the same UDP socket.
+        let discovery_addr = self.resolved_discovery_addr(listener_addr);
         let chain_bootnodes = self
             .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
@@ -569,11 +598,11 @@ impl NetworkArgs {
             })
             // apply discovery settings
             .apply(|builder| {
-                let rlpx_socket = (addr, self.port).into();
+                let rlpx_socket = (listener_addr, self.port).into();
                 self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
-            .listener_addr(SocketAddr::new(addr, self.port))
-            .discovery_addr(SocketAddr::new(self.discovery.addr, self.discovery.port))
+            .listener_addr(SocketAddr::new(listener_addr, self.port))
+            .discovery_addr(SocketAddr::new(discovery_addr, self.discovery.port))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
             .eth_max_message_size_opt(self.eth_max_message_size.map(NonZeroUsize::get))
@@ -907,6 +936,9 @@ pub struct DiscoveryArgs {
     pub disable_nat: bool,
 
     /// The UDP address to use for devp2p peer discovery version 4.
+    ///
+    /// If unset and `--net-if.experimental` is used, discv4 binds to the resolved interface
+    /// address.
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DefaultDiscoveryArgs::get_global().addr)]
     pub addr: IpAddr,
 
@@ -1311,6 +1343,39 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn net_if_uses_resolved_addr_for_default_discovery_addr() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--net-if.experimental", "en0"]).args;
+        let listener_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        assert_eq!(args.resolved_discovery_addr(listener_addr), listener_addr);
+    }
+
+    #[test]
+    fn net_if_preserves_custom_discovery_addr() {
+        let custom_discovery_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--net-if.experimental",
+            "en0",
+            "--discovery.addr",
+            "192.0.2.2",
+        ])
+        .args;
+        let listener_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        assert_eq!(args.resolved_discovery_addr(listener_addr), custom_discovery_addr);
+    }
+
+    #[test]
+    fn default_discovery_addr_is_preserved_without_net_if() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        let listener_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        assert_eq!(args.resolved_discovery_addr(listener_addr), DEFAULT_DISCOVERY_ADDR);
     }
 
     #[test]

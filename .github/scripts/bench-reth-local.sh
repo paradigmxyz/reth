@@ -459,7 +459,7 @@ run_bench "baseline-2" "$BASELINE_BIN" "$BENCH_WORK_DIR/baseline-2"
 
 # ── Compute Grafana URL ──────────────────────────────────────────────
 GRAFANA_BASE_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr"
-GRAFANA_DATASOURCE="ef57fux92e9z4e"
+GRAFANA_DATASOURCE="efk1hcn87dnnkd"
 LAST_RUN_DURATION=$(( $(date +%s) - LAST_RUN_START ))
 FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
 TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))

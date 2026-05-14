@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Ensures the benchmark snapshot in the schelk volume matches the configured
+# Ensures the benchmark snapshot in the schelk volume matches the expected
 # manifest. If the local manifest marker differs from the remote manifest, the
 # snapshot is replaced via `reth download` and promoted as the new schelk
 # baseline.
@@ -10,11 +10,14 @@
 #
 # Required env:
 #   SCHELK_MOUNT       - schelk mount point (e.g. /reth-bench)
-#   BENCH_SNAPSHOT_MANIFEST_URL - exact manifest URL to sync from
 #   BENCH_RETH_BINARY  - path to the reth-compatible binary (required to refresh)
 #
 # Optional env:
 #   BENCH_BIG_BLOCKS            - true when syncing the big-blocks datadir
+#   BENCH_SNAPSHOT_MANIFEST_URL - exact manifest URL to sync from (normal blocks)
+#   BENCH_BIG_BLOCKS_SNAPSHOT_ROOT - weekly snapshot root URL
+#   BENCH_BIG_BLOCKS_SNAPSHOT_PREFIX - weekly snapshot name prefix
+#   BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS - snapshot age in weeks (default: 2)
 #   BENCH_SNAPSHOT_NAME         - expected snapshot label for log/error output
 set -euo pipefail
 
@@ -37,6 +40,36 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 LOCAL_MANIFEST="$DATADIR/manifest.json"
 
+resolve_big_blocks_manifest() {
+  local age_weeks="${BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS:-2}"
+  local root="${BENCH_BIG_BLOCKS_SNAPSHOT_ROOT:-http://10.10.0.50:9000/reth-snapshots}"
+  local prefix="${BENCH_BIG_BLOCKS_SNAPSHOT_PREFIX:-reth-1-minimal-stable-weekly}"
+
+  if ! [[ "$age_weeks" =~ ^[0-9]+$ ]]; then
+    echo "::error::BENCH_BIG_BLOCKS_SNAPSHOT_AGE_WEEKS must be a non-negative integer"
+    exit 1
+  fi
+
+  local snapshot_week
+  if ! snapshot_week="$(date -u -d "${age_weeks} weeks ago" '+%G-W%V')"; then
+    echo "::error::Failed to resolve ${age_weeks}-week-old big-block snapshot week"
+    exit 1
+  fi
+
+  local snapshot_name="${prefix}-${snapshot_week}"
+  BENCH_SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-$snapshot_name}"
+  MANIFEST_URL="${root%/}/${snapshot_name}/manifest.json"
+}
+
+if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+  resolve_big_blocks_manifest
+else
+  : "${BENCH_SNAPSHOT_MANIFEST_URL:?BENCH_SNAPSHOT_MANIFEST_URL must be set}"
+  MANIFEST_URL="$BENCH_SNAPSHOT_MANIFEST_URL"
+fi
+
+MANIFEST_BASE_URL="${MANIFEST_URL%/*}"
+
 describe_snapshot() {
   if [ -n "${BENCH_SNAPSHOT_NAME:-}" ]; then
     printf '%s' "${BENCH_SNAPSHOT_NAME}"
@@ -51,28 +84,6 @@ EXPECTED_SNAPSHOT="$(describe_snapshot)"
 
 sudo schelk recover -y --kill || sudo schelk full-recover -y || true
 sudo schelk mount -y
-
-if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
-  if [ -d "$DATADIR/db" ] && [ -d "$DATADIR/static_files" ]; then
-    echo "Found local ${EXPECTED_SNAPSHOT} at ${DATADIR}; skipping manifest sync for big-block benchmarks"
-    exit 0
-  fi
-
-  echo "::error::Missing local ${EXPECTED_SNAPSHOT} at ${DATADIR}. Big-block benchmarks require a pre-populated schelk data volume."
-  ls -la "$SCHELK_MOUNT" || true
-  ls -la "$DATADIR" || true
-
-  if [ "$CHECK_ONLY" = true ]; then
-    exit 10
-  fi
-
-  exit 1
-fi
-
-: "${BENCH_SNAPSHOT_MANIFEST_URL:?BENCH_SNAPSHOT_MANIFEST_URL must be set}"
-
-MANIFEST_URL="$BENCH_SNAPSHOT_MANIFEST_URL"
-MANIFEST_BASE_URL="${MANIFEST_URL%/*}"
 
 REMOTE_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/reth-bench-remote-manifest.XXXXXX")"
 REMOTE_CANONICAL="$(mktemp "${TMPDIR:-/tmp}/reth-bench-remote-canonical.XXXXXX")"
@@ -92,10 +103,10 @@ sha256_file() {
   fi
 }
 
-echo "Using snapshot manifest from BENCH_SNAPSHOT_MANIFEST_URL"
+echo "Using ${EXPECTED_SNAPSHOT} manifest: ${MANIFEST_URL}"
 
 if ! curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 10 "$MANIFEST_URL" -o "$REMOTE_MANIFEST"; then
-  echo "::error::Failed to fetch snapshot manifest from BENCH_SNAPSHOT_MANIFEST_URL"
+  echo "::error::Failed to fetch snapshot manifest from ${MANIFEST_URL}"
   exit 2
 fi
 

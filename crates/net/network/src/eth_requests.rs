@@ -6,7 +6,6 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -343,29 +342,10 @@ where
         request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
-        let access_lists = self
-            .client
-            .bal_store()
-            .get_by_hashes_with_limit(&request.0, limit)
-            .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
+        let access_lists =
+            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
-}
-
-/// Builds the error fallback response while still enforcing the BAL response soft limit.
-fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLimit) -> Vec<Bytes> {
-    let mut out = Vec::with_capacity(count);
-    let mut size = 0;
-    for _ in 0..count {
-        let bal = Bytes::from_static(&[0xc0]);
-        size += bal.len();
-        out.push(bal);
-
-        if limit.exceeds(size) {
-            break
-        }
-    }
-    out
 }
 
 /// An endless future.
