@@ -108,7 +108,7 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
 /// Used as a [`BalIndexReader`] callback so the
 /// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
 /// starting segment without a trait bound on `DB`.
-fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
+const fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
     state.bal_state.bal_index().get()
 }
 
@@ -119,7 +119,7 @@ fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
 /// `bal_index` between sub-events of a segment boundary (post-N's `finish()`
 /// and pre-N+1's `apply_pre_execution_changes()`) without a trait bound on
 /// `DB`.
-fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
+const fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
     state.bump_bal_index();
 }
 
@@ -129,7 +129,7 @@ fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>
 /// [`BbBlockExecutor::initialize`](crate::evm::BbBlockExecutor) can renumber
 /// a worker's incoming `bal_index = i + 1` into the boundary-padded space
 /// `i + 1 + 2*k` (where `k` is the worker's segment index).
-fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
+const fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
     state.set_bal_index(revm::state::bal::BlockAccessIndex::new(index));
 }
 

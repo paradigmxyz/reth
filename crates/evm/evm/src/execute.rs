@@ -29,8 +29,8 @@ use revm::{
     state::bal::{alloy::AlloyBal, Bal},
 };
 
-/// Convert revm's [`AlloyBal`] (alloy_eip7928 0.4) into reth's [`BlockAccessList`]
-/// (alloy_eip7928 0.3) by round-tripping through RLP. The wire format is identical
+/// Convert revm's [`AlloyBal`] (`alloy_eip7928` 0.4) into reth's [`BlockAccessList`]
+/// (`alloy_eip7928` 0.3) by round-tripping through RLP. The wire format is identical
 /// across versions; only the Rust types differ.
 fn alloy_bal_to_block_access_list(bal: AlloyBal) -> Option<BlockAccessList> {
     let mut buf = Vec::new();

@@ -116,8 +116,8 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
-    let bal_v4 = alloy_bal_v3_to_v4(bal)
-        .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?;
+    let bal_v4 =
+        alloy_bal_v3_to_v4(bal).map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?;
     let input_bal_revm: Arc<RevmBal> = Arc::new(
         RevmBal::try_from(bal_v4)
             .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
@@ -306,7 +306,7 @@ impl BlockGasTracker {
         Ok(())
     }
 
-    fn record_result<H>(&mut self, result: &ResultAndState<H>) {
+    const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
         self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
         self.block_regular_gas_used =
@@ -435,7 +435,8 @@ mod tests {
             executor.evm_mut().db_mut().bump_bal_index();
             executor.apply_post_execution_changes().expect("post-exec");
         }
-        state.take_built_alloy_bal().expect("with_bal_builder was set")
+        let bal_v4 = state.take_built_alloy_bal().expect("with_bal_builder was set");
+        alloy_bal_v4_to_v3(&bal_v4).expect("v4 -> v3 RLP round-trip").into()
     }
 
     #[test]
@@ -556,7 +557,8 @@ mod tests {
             executor.evm_mut().db_mut().bump_bal_index();
             executor.apply_post_execution_changes().expect("post-exec");
         }
-        state.take_built_alloy_bal().expect("with_bal_builder was set")
+        let bal_v4 = state.take_built_alloy_bal().expect("with_bal_builder was set");
+        alloy_bal_v4_to_v3(&bal_v4).expect("v4 -> v3 RLP round-trip").into()
     }
 
     #[test]
@@ -722,7 +724,9 @@ mod tests {
             executor.apply_post_execution_changes().expect("serial post-exec")
         };
 
-        let bal = state.take_built_alloy_bal().expect("with_bal_builder was set");
+        let bal_v4 = state.take_built_alloy_bal().expect("with_bal_builder was set");
+        let bal: BlockAccessList =
+            alloy_bal_v4_to_v3(&bal_v4).expect("v4 -> v3 RLP round-trip").into();
         state.merge_transitions(BundleRetention::Reverts);
         let bundle_state = state.take_bundle();
 
