@@ -63,7 +63,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
     pub fn insert_block(&self, block: ExecutedBlock<N>) {
         let hash = block.recovered_block().hash();
         let parent_hash = block.recovered_block().parent_hash();
-        let block_for_overlay = block.clone();
 
         match self.blocks.entry(hash) {
             Entry::Occupied(_) => return,
@@ -77,11 +76,19 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             .iter()
             .filter_map(|entry| {
                 let key = *entry.key();
-                (key.tip_hash == parent_hash).then(|| (key.anchor_hash, Arc::clone(entry.value())))
+                (key.tip_hash == parent_hash).then_some(key.anchor_hash)
+            })
+            .collect::<Vec<_>>();
+        let cached_parent_overlays = cached_parent_overlays
+            .into_iter()
+            .filter(|anchor_hash| {
+                !self
+                    .overlays
+                    .contains_key(&OverlayCacheKey { anchor_hash: *anchor_hash, tip_hash: hash })
             })
             .collect::<Vec<_>>();
 
-        self.prepare_child_overlays(hash, block_for_overlay, cached_parent_overlays);
+        self.prepare_child_overlays(hash, cached_parent_overlays);
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
@@ -129,8 +136,18 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 .flatten()
         });
 
-        let input = Arc::new(self.compute_overlay(blocks, parent_input, anchor_hash));
-        self.overlays.insert(key, Arc::clone(&input));
+        let input = match self.overlays.entry(key) {
+            Entry::Occupied(entry) => return Ok(Arc::clone(entry.get())),
+            Entry::Vacant(entry) => {
+                let input = Arc::new(self.compute_overlay(blocks, parent_input, anchor_hash));
+                if !self.has_anchor_hash(tip_hash, anchor_hash) {
+                    return Err(StateTrieOverlayError { tip_hash, anchor_hash })
+                }
+                entry.insert(Arc::clone(&input));
+                input
+            }
+        };
+
         if !self.has_anchor_hash(tip_hash, anchor_hash) {
             self.overlays.remove_if(&key, |_, cached| Arc::ptr_eq(cached, &input));
             return Err(StateTrieOverlayError { tip_hash, anchor_hash })
@@ -139,12 +156,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Ok(input)
     }
 
-    fn prepare_child_overlays(
-        &self,
-        tip_hash: B256,
-        block: ExecutedBlock<N>,
-        cached_parent_overlays: Vec<(B256, Arc<TrieInputSorted>)>,
-    ) where
+    fn prepare_child_overlays(&self, tip_hash: B256, cached_parent_overlays: Vec<B256>)
+    where
         N: Send + Sync + 'static,
     {
         if cached_parent_overlays.is_empty() {
@@ -157,24 +170,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         };
 
         #[cfg(not(feature = "rayon"))]
-        let _ = (tip_hash, block, cached_parent_overlays);
+        let _ = (tip_hash, cached_parent_overlays);
 
         #[cfg(feature = "rayon")]
         {
-            let blocks = Arc::clone(&self.blocks);
-            let overlays = Arc::clone(&self.overlays);
-            for (anchor_hash, parent_input) in cached_parent_overlays {
-                let blocks = Arc::clone(&blocks);
-                let overlays = Arc::clone(&overlays);
-                let block = block.clone();
+            for anchor_hash in cached_parent_overlays {
+                let manager = <StateTrieOverlayManager<N> as Clone>::clone(self);
                 worker_pool.spawn(move || {
-                    let input =
-                        Arc::new(compute_overlay(vec![block], Some(parent_input), anchor_hash));
-                    let key = OverlayCacheKey { anchor_hash, tip_hash };
-                    overlays.insert(key, Arc::clone(&input));
-                    if !Self::has_anchor_hash_in(blocks.as_ref(), tip_hash, anchor_hash) {
-                        overlays.remove_if(&key, |_, cached| Arc::ptr_eq(cached, &input));
-                    }
+                    let _ = manager.get_overlay(tip_hash, anchor_hash);
                 });
             }
         }
