@@ -103,6 +103,19 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
         )
         .await?;
 
+    // NOTE: this currently fails on the bal-devnet-7 revm bump.
+    //
+    // Reth's `prepare_call_env` sets `cfg_env.disable_fee_charge = true` (added for L2 operator
+    // fees in `eth_call`, see <https://github.com/paradigmxyz/reth/issues/18470>). Older revm
+    // still touched the coinbase in `reward_beneficiary` regardless, so the prestate tracer
+    // picked it up and matched geth's snapshot. Newer revm (bluealloy/revm#3559, commit
+    // `28826aed`) early-returns from `reward_beneficiary` when fee charge is disabled, so the
+    // beneficiary is no longer loaded into the journal and the coinbase entry disappears from
+    // reth's `debug_traceCall` prestate output — while geth's snapshot still has it.
+    //
+    // Fixing this requires either re-enabling fee charge in the trace path (re-introducing
+    // operator-fee charges on L2 sims) or having revm-inspectors explicitly include the
+    // beneficiary. Leaving the assertion in place so the regression stays visible.
     similar_asserts::assert_eq!(trace, expected_frame);
 
     Ok(())
