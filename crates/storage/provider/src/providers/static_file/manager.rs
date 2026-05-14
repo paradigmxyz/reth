@@ -2318,6 +2318,10 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         };
 
         if let Some(offset) = provider.read_changeset_offset(block_number)? {
+            if offset.num_changes() == 0 {
+                return Ok(Vec::new())
+            }
+
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
@@ -2422,6 +2426,10 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         };
 
         if let Some(offset) = provider.read_changeset_offset(block_number)? {
+            if offset.num_changes() == 0 {
+                return Ok(Vec::new())
+            }
+
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
