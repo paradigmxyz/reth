@@ -5,7 +5,7 @@ fixture_variant="${1:-amsterdam}"
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-bal%40v7.1.1/fixtures_bal.tar.gz"
+        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-bal@v7.1.1/fixtures_bal.tar.gz"
         eels_branch="devnets/bal/7"
         ;;
     osaka)

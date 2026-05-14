@@ -10076,6 +10076,7 @@ name = "reth-stages"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
