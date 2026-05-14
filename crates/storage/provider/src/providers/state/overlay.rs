@@ -38,8 +38,12 @@ use tracing::{debug, debug_span, instrument};
 #[derive(Clone, Metrics)]
 #[metrics(scope = "storage.providers.overlay")]
 pub(crate) struct OverlayStateProviderMetrics {
-    /// Duration of creating the database provider transaction
-    create_provider_duration: Histogram,
+    // NOTE: create_provider_duration and database_provider_ro_duration histograms removed.
+    // Their `Histogram::record` calls on the first invocation from a thread permanently
+    // register that thread in crossbeam-epoch's global participant list (via metrics-util's
+    // `AtomicBucket::push` → `crossbeam_epoch::pin`). Because `database_provider_ro` is
+    // called once at startup of each proof worker, every worker became a participant, and
+    // rayon's idle work-stealing then paid for the longer list on every `try_advance` call.
     /// Duration of retrieving trie updates from the database
     retrieve_trie_reverts_duration: Histogram,
     /// Duration of retrieving hashed state from the database
@@ -48,8 +52,6 @@ pub(crate) struct OverlayStateProviderMetrics {
     trie_updates_size: Histogram,
     /// Size of hashed state (number of entries)
     hashed_state_size: Histogram,
-    /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call
-    database_provider_ro_duration: Histogram,
     /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
     overlay_cache_misses: Counter,
 }
@@ -518,20 +520,9 @@ where
     /// Create a read-only [`OverlayStateProvider`].
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
-        let overall_start = Instant::now();
-
-        // Get a read-only provider
-        let provider = {
-            let start = Instant::now();
-            let res = self.factory.database_provider_ro()?;
-            self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
-            res
-        };
-
+        let provider = self.factory.database_provider_ro()?;
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
-
         let is_v2 = provider.cached_storage_settings().is_v2();
-        self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }
 }
