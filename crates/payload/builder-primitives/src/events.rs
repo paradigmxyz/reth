@@ -15,7 +15,7 @@ use tracing::debug;
 pub enum Events<T: PayloadTypes> {
     /// The payload attributes as
     /// they are received from the CL through the engine api.
-    Attributes(T::PayloadBuilderAttributes),
+    Attributes(T::PayloadAttributes),
     /// The built payload that has been just built.
     /// Triggered by the CL whenever it asks for an execution payload.
     /// This event is only thrown if the CL is a validator.
@@ -91,7 +91,7 @@ pub struct PayloadAttributeStream<T: PayloadTypes> {
 }
 
 impl<T: PayloadTypes> Stream for PayloadAttributeStream<T> {
-    type Item = T::PayloadBuilderAttributes;
+    type Item = T::PayloadAttributes;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {

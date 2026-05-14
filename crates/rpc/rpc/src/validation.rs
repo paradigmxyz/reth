@@ -1,7 +1,7 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
@@ -202,7 +202,7 @@ where
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(&block, &output, None)?;
+        self.consensus.validate_block_post_execution(&block, &output, None, None)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -347,42 +347,26 @@ where
     /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
     pub fn validate_blobs_bundle(
         &self,
-        mut blobs_bundle: BlobsBundleV1,
+        blobs_bundle: BlobsBundleV1,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
-            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
-        {
-            return Err(ValidationApiError::InvalidBlobsBundle)
-        }
-
-        let versioned_hashes = blobs_bundle
-            .commitments
-            .iter()
-            .map(|c| kzg_to_versioned_hash(c.as_slice()))
-            .collect::<Vec<_>>();
-
-        let sidecar = blobs_bundle.pop_sidecar(blobs_bundle.blobs.len());
+        let versioned_hashes = blobs_bundle.versioned_hashes();
+        let sidecar =
+            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
 
         sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-
         Ok(versioned_hashes)
     }
-    /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
+
+    /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle
-            .commitments
-            .iter()
-            .map(|c| kzg_to_versioned_hash(c.as_slice()))
-            .collect::<Vec<_>>();
+        let versioned_hashes = blobs_bundle.versioned_hashes();
+        let sidecar =
+            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
 
-        blobs_bundle
-            .try_into_sidecar()
-            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?
-            .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-
+        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
         Ok(versioned_hashes)
     }
 
@@ -589,7 +573,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
 /// insertion order, then computes a SHA256 hash of the concatenated addresses.
 fn hash_disallow_list(disallow: &AddressSet) -> String {
     let mut sorted: Vec<_> = disallow.iter().collect();
-    sorted.sort(); // sort for deterministic hashing
+    sorted.sort_unstable(); // sort for deterministic hashing
 
     let mut hasher = Sha256::new();
     for addr in sorted {

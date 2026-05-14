@@ -1,0 +1,39 @@
+[package]
+name = "reth-execution-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Cross-block execution cache for payload processing"
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+fixed-cache = { workspace = true, features = ["stats"] }
+metrics.workspace = true
+parking_lot.workspace = true
+reth-errors.workspace = true
+reth-metrics = { workspace = true, features = ["common"] }
+reth-primitives-traits = { workspace = true, features = ["std"] }
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-trie.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["rand"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["test-utils"] }
+revm-state.workspace = true
+
+[features]
+test-utils = [
+    "reth-primitives-traits/test-utils",
+    "reth-revm/test-utils",
+    "reth-provider/test-utils",
+    "reth-trie/test-utils",
+]

@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant, TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
+    PruneCheckpointReader, ReceiptProviderIdExt, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -28,12 +28,12 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignerRecoverable,
+    SignerRecoverable, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, ChangesetEntry, DBProvider, DatabaseProviderFactory,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
@@ -68,6 +68,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub state_roots: Arc<Mutex<Vec<B256>>>,
     /// Local block body indices store
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
+    /// Local BAL store handle
+    pub bal_store: BalStoreHandle,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -85,6 +87,7 @@ where
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
+            bal_store: self.bal_store.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -102,6 +105,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
             block_body_indices: Default::default(),
+            bal_store: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -185,6 +189,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
+            bal_store: self.bal_store,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -209,6 +214,12 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
 impl Default for MockEthProvider {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec> BalProvider for MockEthProvider<T, ChainSpec> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
     }
 }
 
@@ -430,7 +441,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> TransactionsProvider
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
-        for (_, block) in self.blocks.lock().iter() {
+        for block in self.blocks.lock().values() {
             if range.contains(&block.header().number()) {
                 map.insert(block.header().number(), block.body().clone_transactions());
             }
@@ -857,7 +868,12 @@ where
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: reth_trie::ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }
@@ -882,14 +898,6 @@ where
     ) -> ProviderResult<Option<StorageValue>> {
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        Ok(None)
     }
 }
 
@@ -1017,10 +1025,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
-    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
@@ -1029,7 +1033,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, ChangesetEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
     }
 
@@ -1038,19 +1042,15 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
         _block_number: BlockNumber,
         _address: Address,
         _storage_key: B256,
-    ) -> ProviderResult<Option<ChangesetEntry>> {
+    ) -> ProviderResult<Option<StorageEntry>> {
         Ok(None)
     }
 
     fn storage_changesets_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, ChangesetEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
-    }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
     }
 }
 

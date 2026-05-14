@@ -139,7 +139,7 @@ where
                 }
             };
 
-            if headers.0.is_empty() {
+            if headers.is_empty() {
                 info!(
                     target: "net::filter",
                     "Peer {} does not have required block {}, banning",

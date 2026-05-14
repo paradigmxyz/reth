@@ -1,3 +1,4 @@
+use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -11,26 +12,46 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives_traits::{Account, Bytecode, StorageSlotKey};
+use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
     MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
     TrieInputSorted,
 };
 use reth_trie_db::{
-    hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
 };
 
-use std::fmt::Debug;
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+
+type DbStateRoot<'a, TX, A> = StateRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbStorageRoot<'a, TX, A> = StorageRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbStorageProof<'a, TX, A> = StorageProof<
+    'static,
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbProof<'a, TX, A> = Proof<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
 
 /// Result of a history lookup for an account or storage slot.
 ///
@@ -100,21 +121,47 @@ impl HistoryInfo {
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
 #[derive(Debug)]
-pub struct HistoricalStateProviderRef<'b, Provider> {
+pub struct HistoricalStateProviderRef<
+    'b,
+    Provider,
+    N: NodePrimitives = <Provider as NodePrimitivesProvider>::Primitives,
+> where
+    Provider: NodePrimitivesProvider<Primitives = N>,
+{
     /// Database provider
     provider: &'b Provider,
+    /// Changeset cache handle for retrieving trie changesets.
+    changeset_cache: ChangesetCache,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Marker for the provider's node primitives.
+    _primitives: PhantomData<N>,
 }
 
-impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
-    HistoricalStateProviderRef<'b, Provider>
+impl<'b, Provider, N> HistoricalStateProviderRef<'b, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     /// Create new `StateProvider` for historical block number
-    pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+    pub fn new(
+        provider: &'b Provider,
+        block_number: BlockNumber,
+        changeset_cache: ChangesetCache,
+    ) -> Self {
+        Self {
+            provider,
+            changeset_cache,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            _primitives: PhantomData,
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -123,8 +170,15 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         provider: &'b Provider,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
+        changeset_cache: ChangesetCache,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks }
+        Self {
+            provider,
+            changeset_cache,
+            block_number,
+            lowest_available_blocks,
+            _primitives: PhantomData,
+        }
     }
 
     /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
@@ -136,21 +190,26 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
-            let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
+        let visible_tip = self.provider.best_block_number()?;
+
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_accounts_history(self.provider, rocksdb_ref)?;
             reader.account_history_info(
                 address,
                 self.block_number,
                 self.lowest_available_blocks.account_history_block_number,
+                visible_tip,
             )
         })
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
+    ///
+    /// `lookup_key` is always a plain (unhashed) storage key.
     pub fn storage_history_lookup(
         &self,
         address: Address,
-        storage_key: StorageSlotKey,
+        lookup_key: B256,
     ) -> ProviderResult<HistoryInfo>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
@@ -159,23 +218,16 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
-            storage_key.to_hashed()
-        } else {
-            debug_assert!(
-                storage_key.is_plain(),
-                "expected plain storage key when use_hashed_state is false"
-            );
-            storage_key.as_b256()
-        };
+        let visible_tip = self.provider.best_block_number()?;
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
-            let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_storages_history(self.provider, rocksdb_ref)?;
             reader.storage_history_info(
                 address,
                 lookup_key,
                 self.block_number,
                 self.lowest_available_blocks.storage_history_block_number,
+                visible_tip,
             )
         })
     }
@@ -183,27 +235,16 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     /// Resolves a storage value by looking up the given key in history, changesets, or
     /// plain state.
     ///
-    /// Accepts a [`StorageSlotKey`]; the correct lookup key is derived internally
-    /// based on the storage mode.
+    /// `lookup_key` is always a plain (unhashed) storage key.
     fn storage_by_lookup_key(
         &self,
         address: Address,
-        storage_key: StorageSlotKey,
+        lookup_key: B256,
     ) -> ProviderResult<Option<StorageValue>>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
-            storage_key.to_hashed()
-        } else {
-            debug_assert!(
-                storage_key.is_plain(),
-                "expected plain storage key when use_hashed_state is false"
-            );
-            storage_key.as_b256()
-        };
-
-        match self.storage_history_lookup(address, storage_key)? {
+        match self.storage_history_lookup(address, lookup_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
@@ -218,11 +259,12 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 if self.provider.cached_storage_settings().use_hashed_state() {
                     let hashed_address = alloy_primitives::keccak256(address);
+                    let hashed_slot = alloy_primitives::keccak256(lookup_key);
                     Ok(self
                         .tx()
                         .cursor_dup_read::<tables::HashedStorages>()?
-                        .seek_by_key_subkey(hashed_address, lookup_key)?
-                        .filter(|entry| entry.key == lookup_key)
+                        .seek_by_key_subkey(hashed_address, hashed_slot)?
+                        .filter(|entry| entry.key == hashed_slot)
                         .map(|entry| entry.value)
                         .or(Some(StorageValue::ZERO)))
                 } else {
@@ -245,17 +287,11 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Ok(tip.saturating_sub(self.block_number) > limit)
     }
 
-    /// Retrieve revert hashed state for this history provider.
-    fn revert_state(&self) -> ProviderResult<HashedPostStateSorted>
+    fn build_overlay(&self, input: TrieInputSorted) -> ProviderResult<TrieInputSorted>
     where
-        Provider: StorageSettingsCache,
+        Provider:
+            BlockHashReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache,
     {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
-        {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
-
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
             tracing::warn!(
                 target: "providers::historical_sp",
@@ -264,27 +300,21 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             );
         }
 
-        reth_trie_db::from_reverts_auto(self.provider, self.block_number..)
-    }
+        // Historical providers expose state at the start of `self.block_number`, so the overlay
+        // builder needs the previous canonical block hash to preserve those semantics.
+        let target_block = self.block_number.saturating_sub(1);
+        let anchor_hash = self
+            .provider
+            .block_hash(target_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
-    /// Retrieve revert hashed storage for this history provider and target address.
-    fn revert_storage(&self, address: Address) -> ProviderResult<HashedStorage>
-    where
-        Provider: StorageSettingsCache,
-    {
-        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
+        let TrieInputSorted { nodes, state, prefix_sets } = input;
+        let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
+            .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
+        let Overlay { trie_updates, hashed_post_state } =
+            overlay_builder.build_overlay(self.provider)?;
 
-        if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
-            tracing::warn!(
-                target: "providers::historical_sp",
-                target = self.block_number,
-                "Attempt to calculate storage root for an old block might result in OOM"
-            );
-        }
-
-        hashed_storage_from_reverts_with_provider(self.provider, address, self.block_number)
+        Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -306,21 +336,26 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provider> {
+impl<Provider, N> HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider + BlockNumReader + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+{
     fn tx(&self) -> &Provider::Tx {
         self.provider.tx_ref()
     }
 }
 
-impl<
-        Provider: DBProvider
-            + BlockNumReader
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + StorageSettingsCache
-            + RocksDBProviderFactory
-            + NodePrimitivesProvider,
-    > AccountReader for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> AccountReader for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -348,8 +383,11 @@ impl<
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> BlockHashReader for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider:
+        DBProvider + BlockNumReader + BlockHashReader + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
@@ -365,65 +403,93 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
-impl<
-        Provider: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    > StateRootProvider for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> StateRootProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        Ok(StateRoot::overlay_root(self.tx(), &revert_state)?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(hashed_state),
+            ))?;
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.tx(), input)?)
+        })
     }
 
-    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
-        input.prepend(self.revert_state()?.into());
-        Ok(StateRoot::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))?)
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.tx(), input)?)
+        })
     }
 
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        Ok(StateRoot::overlay_root_with_updates(self.tx(), &revert_state)?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(hashed_state),
+            ))?;
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(self.tx(), input)?)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        mut input: TrieInput,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        input.prepend(self.revert_state()?.into());
-        Ok(StateRoot::overlay_root_from_nodes_with_updates(
-            self.tx(),
-            TrieInputSorted::from_unsorted(input),
-        )?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(self.tx(), input)?)
+        })
     }
 }
 
-impl<
-        Provider: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    > StorageRootProvider for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> StorageRootProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     fn storage_root(
         &self,
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        StorageRoot::overlay_root(self.tx(), address, revert_storage)
-            .map_err(|err| ProviderError::Database(err.into()))
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(HashedPostState::from_hashed_storage(
+                    alloy_primitives::keccak256(address),
+                    hashed_storage,
+                )),
+            ))?;
+            let hashed_storage = input
+                .state
+                .account_storages()
+                .get(&alloy_primitives::keccak256(address))
+                .cloned()
+                .unwrap_or_default()
+                .into();
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
+                .map_err(|err| ProviderError::Database(err.into()))
+        })
     }
 
     fn storage_proof(
@@ -432,10 +498,28 @@ impl<
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(HashedPostState::from_hashed_storage(
+                    alloy_primitives::keccak256(address),
+                    hashed_storage,
+                )),
+            ))?;
+            let hashed_storage = input
+                .state
+                .account_storages()
+                .get(&alloy_primitives::keccak256(address))
+                .cloned()
+                .unwrap_or_default()
+                .into();
+            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+                self.tx(),
+                address,
+                slot,
+                hashed_storage,
+            )
             .map_err(ProviderError::from)
+        })
     }
 
     fn storage_multiproof(
@@ -444,67 +528,139 @@ impl<
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(HashedPostState::from_hashed_storage(
+                    alloy_primitives::keccak256(address),
+                    hashed_storage,
+                )),
+            ))?;
+            let hashed_storage = input
+                .state
+                .account_storages()
+                .get(&alloy_primitives::keccak256(address))
+                .cloned()
+                .unwrap_or_default()
+                .into();
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                self.tx(),
+                address,
+                slots,
+                hashed_storage,
+            )
             .map_err(ProviderError::from)
+        })
     }
 }
 
-impl<
-        Provider: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    > StateProofProvider for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> StateProofProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     /// Get account and storage proofs.
     fn proof(
         &self,
-        mut input: TrieInput,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        input.prepend(self.revert_state()?.into());
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
-        proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = TrieInput::new(
+                Arc::unwrap_or_clone(nodes).into(),
+                Arc::unwrap_or_clone(state).into(),
+                prefix_sets,
+            );
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        })
     }
 
     fn multiproof(
         &self,
-        mut input: TrieInput,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        input.prepend(self.revert_state()?.into());
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
-        proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = TrieInput::new(
+                Arc::unwrap_or_clone(nodes).into(),
+                Arc::unwrap_or_clone(state).into(),
+                prefix_sets,
+            );
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        })
     }
 
-    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        input.prepend(self.revert_state()?.into());
-        TrieWitness::overlay_witness(self.tx(), input, target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let witness = TrieWitness::new(
+                InMemoryTrieCursorFactory::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                    nodes.as_ref(),
+                ),
+                HashedPostStateCursorFactory::new(
+                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                    state.as_ref(),
+                ),
+            )
+            .with_prefix_sets_mut(prefix_sets)
+            .with_execution_witness_mode(mode);
+            let witness =
+                if mode.is_canonical() { witness } else { witness.always_include_root_node() };
+            witness.compute(target).map_err(ProviderError::from).map(|hm| {
+                let mut values: Vec<_> = hm.into_values().collect();
+                if mode.is_canonical() {
+                    values.sort_unstable();
+                }
+                values
+            })
+        })
     }
 }
 
-impl<Provider> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provider> {
+impl<Provider, N> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+{
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 
-impl<
-        Provider: DBProvider
-            + BlockNumReader
-            + BlockHashReader
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + StorageSettingsCache
-            + RocksDBProviderFactory
-            + NodePrimitivesProvider,
-    > StateProvider for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> StateProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + BlockNumReader
+        + BlockHashReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     /// Expects a plain (unhashed) storage key slot.
     fn storage(
@@ -512,23 +668,14 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        self.storage_by_lookup_key(address, StorageSlotKey::plain(storage_key))
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        if !self.provider.cached_storage_settings().use_hashed_state() {
-            return Err(ProviderError::UnsupportedProvider)
-        }
-        self.storage_by_lookup_key(address, StorageSlotKey::hashed(hashed_storage_key))
+        self.storage_by_lookup_key(address, storage_key)
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> BytecodeReader
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider, N> BytecodeReader for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider + BlockNumReader + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
 {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
@@ -542,6 +689,8 @@ impl<Provider: DBProvider + BlockNumReader> BytecodeReader
 pub struct HistoricalStateProvider<Provider> {
     /// Database provider.
     provider: Provider,
+    /// Changeset cache handle for retrieving trie changesets.
+    changeset_cache: ChangesetCache,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
@@ -552,8 +701,17 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
     HistoricalStateProvider<Provider>
 {
     /// Create new `StateProvider` for historical block number
-    pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+    pub fn new(
+        provider: Provider,
+        block_number: BlockNumber,
+        changeset_cache: ChangesetCache,
+    ) -> Self {
+        Self {
+            provider,
+            changeset_cache,
+            block_number,
+            lowest_available_blocks: Default::default(),
+        }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -573,20 +731,30 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
         self.lowest_available_blocks.storage_history_block_number = Some(block_number);
         self
     }
+}
 
+impl<
+        Provider: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + NodePrimitivesProvider,
+    > HistoricalStateProvider<Provider>
+{
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
+    fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
         HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &self.provider,
             self.block_number,
             self.lowest_available_blocks,
+            self.changeset_cache.clone(),
         )
     }
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
+reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -716,12 +884,14 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_primitives_traits::{Account, StorageEntry, StorageSlotKey};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
+        NodePrimitivesProvider, PruneCheckpointReader, StageCheckpointReader,
+        StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
+    use reth_trie_db::ChangesetCache;
 
     const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
@@ -736,6 +906,8 @@ mod tests {
             + BlockHashReader
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + StorageSettingsCache
             + RocksDBProviderFactory
             + NodePrimitivesProvider,
@@ -810,48 +982,49 @@ mod tests {
 
         // run
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 2).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 2, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at3
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 3).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 3, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at3
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 4, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at7
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 7).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 7, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at7
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 9).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 9, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at10
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 10).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 10, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at10
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 11).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 11, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_at15
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 16).basic_account(&ADDRESS),
+            HistoricalStateProviderRef::new(&db, 16, ChangesetCache::new()).basic_account(&ADDRESS),
             Ok(Some(acc)) if acc == acc_plain
         ));
 
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1).basic_account(&HIGHER_ADDRESS),
+            HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new())
+                .basic_account(&HIGHER_ADDRESS),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1000).basic_account(&HIGHER_ADDRESS),
+            HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).basic_account(&HIGHER_ADDRESS),
             Ok(Some(acc)) if acc == higher_acc_plain
         ));
     }
@@ -910,43 +1083,46 @@ mod tests {
 
         // run
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 0, ChangesetCache::new())
+                .storage(ADDRESS, STORAGE),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 3, ChangesetCache::new())
+                .storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 4, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at7.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 7, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at7.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 9, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at10.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 10, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at10.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 11, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at15.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 16, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_plain.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new())
+                .storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
         ));
     }
@@ -965,13 +1141,14 @@ mod tests {
                 account_history_block_number: Some(3),
                 storage_history_block_number: Some(3),
             },
+            ChangesetCache::new(),
         );
         assert!(matches!(
             provider.account_history_lookup(ADDRESS),
             Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
         ));
 
@@ -984,13 +1161,14 @@ mod tests {
                 account_history_block_number: Some(2),
                 storage_history_block_number: Some(2),
             },
+            ChangesetCache::new(),
         );
         assert!(matches!(
             provider.account_history_lookup(ADDRESS),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
 
@@ -1003,13 +1181,14 @@ mod tests {
                 account_history_block_number: Some(1),
                 storage_history_block_number: Some(1),
             },
+            ChangesetCache::new(),
         );
         assert!(matches!(
             provider.account_history_lookup(ADDRESS),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
     }
@@ -1083,49 +1262,51 @@ mod tests {
         let db = factory.provider().unwrap();
 
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 0, ChangesetCache::new())
+                .storage(ADDRESS, STORAGE),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 3, ChangesetCache::new())
+                .storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 4, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at7.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 7, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at7.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 9, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at10.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 10, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at10.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 11, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_at15.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 16, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == entry_plain.value
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new())
+                .storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
         ));
     }
 
     #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn history_provider_get_storage_hashed_state() {
         use crate::BlockWriter;
         use alloy_primitives::keccak256;
@@ -1224,43 +1405,46 @@ mod tests {
         let db = factory.provider().unwrap();
 
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 0, ChangesetCache::new())
+                .storage(ADDRESS, STORAGE),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 3, ChangesetCache::new())
+                .storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 4, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(7)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 7, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(7)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 9, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(10)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 10, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(10)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 11, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(15)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 16, ChangesetCache::new()).storage(ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(100)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new())
+                .storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
         ));
         assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(1000)
         ));
     }
@@ -1272,106 +1456,5 @@ mod tests {
         assert!(needs_prev_shard_check(0, None, 5));
         assert!(!needs_prev_shard_check(0, Some(5), 5)); // found_block == block_number
         assert!(!needs_prev_shard_check(1, Some(10), 5)); // rank > 0
-    }
-
-    #[test]
-    fn test_historical_storage_by_hashed_key_unsupported_in_v1() {
-        let factory = create_test_provider_factory();
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
-
-        let db = factory.provider().unwrap();
-        let provider = HistoricalStateProviderRef::new(&db, 1);
-
-        assert!(matches!(
-            provider.storage_by_hashed_key(ADDRESS, STORAGE),
-            Err(ProviderError::UnsupportedProvider)
-        ));
-    }
-
-    #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
-    fn test_historical_storage_by_hashed_key_v2() {
-        use crate::BlockWriter;
-        use alloy_primitives::keccak256;
-        use reth_db_api::models::StorageSettings;
-        use reth_execution_types::ExecutionOutcome;
-        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-        use revm_database::BundleState;
-        use std::collections::HashMap;
-
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
-        let slot = U256::from_be_bytes(*STORAGE);
-        let hashed_storage = keccak256(STORAGE);
-        let account: revm_state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
-
-        let mut rng = generators::rng();
-        let blocks = random_block_range(
-            &mut rng,
-            0..=5,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
-        );
-
-        let mut addr_storage = HashMap::default();
-        addr_storage.insert(slot, (U256::ZERO, U256::from(100)));
-
-        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
-        let mut reverts: Vec<Revert> = vec![Vec::new(); 6];
-        reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];
-        reverts[5] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(50))])];
-
-        let bundle = BundleState::new([(ADDRESS, None, Some(account), addr_storage)], reverts, []);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .append_blocks_with_state(
-                blocks
-                    .into_iter()
-                    .map(|b| b.try_recover().expect("failed to seal block with senders"))
-                    .collect(),
-                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
-                Default::default(),
-            )
-            .unwrap();
-
-        let hashed_address = keccak256(ADDRESS);
-
-        provider_rw
-            .tx_ref()
-            .put::<tables::HashedStorages>(
-                hashed_address,
-                StorageEntry { key: hashed_storage, value: U256::from(100) },
-            )
-            .unwrap();
-        provider_rw
-            .tx_ref()
-            .put::<tables::HashedAccounts>(
-                hashed_address,
-                Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None },
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let db = factory.provider().unwrap();
-
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 0).storage_by_hashed_key(ADDRESS, hashed_storage),
-            Ok(None)
-        ));
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 3).storage_by_hashed_key(ADDRESS, hashed_storage),
-            Ok(Some(U256::ZERO))
-        ));
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, hashed_storage),
-            Ok(Some(v)) if v == U256::from(50)
-        ));
-
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, STORAGE),
-            Ok(None | Some(U256::ZERO))
-        ));
     }
 }

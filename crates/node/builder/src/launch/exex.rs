@@ -24,6 +24,8 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     /// The threshold for the number of blocks in the WAL before emitting a warning.
     wal_blocks_warning: usize,
+    /// The max notification buffer capacity for the ExEx manager.
+    capacity: usize,
 }
 
 impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
@@ -40,6 +42,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             components,
             config_container,
             wal_blocks_warning: DEFAULT_WAL_BLOCKS_WARNING,
+            capacity: DEFAULT_EXEX_MANAGER_CAPACITY,
         }
     }
 
@@ -53,6 +56,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         self
     }
 
+    /// Sets the max notification buffer capacity for the [`ExExManager`].
+    pub const fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = capacity;
+        self
+    }
+
     /// Launches all execution extensions.
     ///
     /// Spawns all extensions and returns the handle to the exex manager if any extensions are
@@ -60,7 +69,8 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     pub async fn launch(
         self,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
-        let Self { head, extensions, components, config_container, wal_blocks_warning } = self;
+        let Self { head, extensions, components, config_container, wal_blocks_warning, capacity } =
+            self;
         let head = BlockNumHash::new(head.number, head.hash);
 
         if extensions.is_empty() {
@@ -134,7 +144,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         let exex_manager = ExExManager::new(
             components.provider().clone(),
             exex_handles,
-            DEFAULT_EXEX_MANAGER_CAPACITY,
+            capacity,
             exex_wal,
             components.provider().finalized_block_stream(),
         )

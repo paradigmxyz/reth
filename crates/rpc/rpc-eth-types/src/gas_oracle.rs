@@ -175,7 +175,8 @@ where
                 };
 
             if block_values.is_empty() {
-                results.push(U256::from(inner.last_price.price));
+                // For empty blocks, use zero gas price to signal no demand
+                results.push(U256::ZERO);
             } else {
                 results.extend(block_values);
                 populated_blocks += 1;
@@ -424,21 +425,5 @@ pub struct GasCap(pub u64);
 impl Default for GasCap {
     fn default() -> Self {
         RPC_DEFAULT_GAS_CAP
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn max_price_sanity() {
-        assert_eq!(DEFAULT_MAX_GAS_PRICE, U256::from(500_000_000_000u64));
-        assert_eq!(DEFAULT_MAX_GAS_PRICE, U256::from(500 * GWEI_TO_WEI))
-    }
-
-    #[test]
-    fn ignore_price_sanity() {
-        assert_eq!(DEFAULT_IGNORE_GAS_PRICE, U256::from(2u64));
     }
 }

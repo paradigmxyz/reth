@@ -37,6 +37,14 @@ async fn test_eth_subscribe_all_supported_kinds_accept() {
                 serde_json::json!({"topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]}),
             ],
         ),
+        ("transactionReceipts", vec![]),
+        ("transactionReceipts", vec![serde_json::json!({"transactionHashes": []})]),
+        (
+            "transactionReceipts",
+            vec![
+                serde_json::json!({"transactionHashes": ["0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060"]}),
+            ],
+        ),
     ];
 
     for (kind, params) in cases {

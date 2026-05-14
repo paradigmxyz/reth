@@ -312,7 +312,7 @@ where
         .collect::<Vec<_>>();
 
     // Sort the transactions by their rewards in ascending order
-    transactions.sort_by_key(|tx| tx.reward);
+    transactions.sort_unstable_by_key(|tx| tx.reward);
 
     // Find the transaction that corresponds to the given percentile
     //

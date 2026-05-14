@@ -13,27 +13,21 @@ pub struct NodeExitFuture {
     /// The consensus engine future.
     /// This can be polled to wait for the consensus engine to exit.
     consensus_engine_fut: Option<BoxFuture<'static, eyre::Result<()>>>,
-
-    /// Flag indicating whether the node should be terminated after the pipeline sync.
-    terminate: bool,
 }
 
 impl fmt::Debug for NodeExitFuture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NodeExitFuture")
-            .field("consensus_engine_fut", &"...")
-            .field("terminate", &self.terminate)
-            .finish()
+        f.debug_struct("NodeExitFuture").field("consensus_engine_fut", &"...").finish()
     }
 }
 
 impl NodeExitFuture {
     /// Create a new `NodeExitFuture`.
-    pub fn new<F>(consensus_engine_fut: F, terminate: bool) -> Self
+    pub fn new<F>(consensus_engine_fut: F) -> Self
     where
         F: Future<Output = eyre::Result<()>> + 'static + Send,
     {
-        Self { consensus_engine_fut: Some(Box::pin(consensus_engine_fut)), terminate }
+        Self { consensus_engine_fut: Some(Box::pin(consensus_engine_fut)) }
     }
 }
 
@@ -46,11 +40,7 @@ impl Future for NodeExitFuture {
             match ready!(rx.poll_unpin(cx)) {
                 Ok(_) => {
                     this.consensus_engine_fut.take();
-                    if this.terminate {
-                        Poll::Ready(Ok(()))
-                    } else {
-                        Poll::Pending
-                    }
+                    Poll::Ready(Ok(()))
                 }
                 Err(err) => Poll::Ready(Err(err)),
             }
@@ -63,28 +53,15 @@ impl Future for NodeExitFuture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::future::poll_fn;
 
     #[tokio::test]
-    async fn test_node_exit_future_terminate_true() {
+    async fn test_node_exit_future() {
         let fut = async { Ok(()) };
 
-        let node_exit_future = NodeExitFuture::new(fut, true);
+        let node_exit_future = NodeExitFuture::new(fut);
 
         let res = node_exit_future.await;
 
         assert!(res.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_node_exit_future_terminate_false() {
-        let fut = async { Ok(()) };
-
-        let mut node_exit_future = NodeExitFuture::new(fut, false);
-        poll_fn(|cx| {
-            assert!(node_exit_future.poll_unpin(cx).is_pending());
-            Poll::Ready(())
-        })
-        .await;
     }
 }

@@ -19,11 +19,6 @@ use reth_trie::{
 
 /// Load prefix sets using a provider that implements [`ChangeSetReader`]. This function can read
 /// changesets from both static files and database.
-///
-/// Storage keys from changesets are tagged as
-/// [`Plain`](reth_primitives_traits::StorageSlotKey::Plain)
-/// or [`Hashed`](reth_primitives_traits::StorageSlotKey::Hashed) by the reader, so callers need
-/// not pass a `use_hashed_state` flag. Addresses are always hashed.
 pub fn load_prefix_sets_with_provider<Provider>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
@@ -61,7 +56,7 @@ where
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
-            .insert(Nibbles::unpack(storage_entry.key.to_hashed()));
+            .insert(Nibbles::unpack(keccak256(storage_entry.key)));
     }
 
     Ok(TriePrefixSets {

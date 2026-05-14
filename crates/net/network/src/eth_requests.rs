@@ -6,19 +6,18 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockAccessLists, BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockAccessLists,
-    GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, GetReceipts70, HeadersDirection,
-    NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
+    BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
+    HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -45,6 +44,11 @@ pub const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// `SOFT_RESPONSE_LIMIT`.
 pub const MAX_BODIES_SERVE: usize = 1024;
+
+/// Maximum number of block access lists to serve.
+///
+/// Used to limit lookups.
+pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
@@ -171,7 +175,7 @@ where
 
         let mut total_bytes = 0;
 
-        for hash in request.0 {
+        for hash in request {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = block.into_body();
                 total_bytes += body.length();
@@ -282,19 +286,6 @@ where
         let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
     }
 
-    /// Handles [`GetBlockAccessLists`] queries.
-    ///
-    /// For now this returns one empty BAL per requested hash.
-    fn on_block_access_lists_request(
-        &self,
-        _peer_id: PeerId,
-        request: GetBlockAccessLists,
-        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
-    ) {
-        let access_lists = request.0.into_iter().map(|_| Bytes::new()).collect();
-        let _ = response.send(Ok(BlockAccessLists(access_lists)));
-    }
-
     #[inline]
     fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
     where
@@ -304,7 +295,7 @@ where
         let mut receipts = Vec::new();
         let mut total_bytes = 0;
 
-        for hash in request.0 {
+        for hash in request {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
@@ -322,6 +313,39 @@ where
 
         receipts
     }
+
+    fn on_cells_request(
+        &self,
+        _peer_id: PeerId,
+        _request: GetCells,
+        response: oneshot::Sender<RequestResult<Cells>>,
+    ) {
+        let _ = response.send(Ok(Cells::default()));
+    }
+}
+
+impl<C, N> EthRequestHandler<C, N>
+where
+    N: NetworkPrimitives,
+    C: BalProvider,
+{
+    /// Handles [`GetBlockAccessLists`] queries.
+    ///
+    /// EIP-8159 defines the final `BlockAccessLists` response semantics:
+    /// <https://eips.ethereum.org/EIPS/eip-8159>
+    fn on_block_access_lists_request(
+        &self,
+        _peer_id: PeerId,
+        mut request: GetBlockAccessLists,
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    ) {
+        request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+
+        let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
+        let access_lists =
+            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
+        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+    }
 }
 
 /// An endless future.
@@ -330,7 +354,8 @@ where
 impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {
@@ -368,6 +393,9 @@ where
                     }
                     IncomingEthRequest::GetBlockAccessLists { peer_id, request, response } => {
                         this.on_block_access_lists_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetCells { peer_id, request, response } => {
+                        this.on_cells_request(peer_id, request, response)
                     }
                 }
             },
@@ -464,5 +492,16 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetBlockAccessLists,
         /// The channel sender for the response containing block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    },
+    /// Request Cells from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetCells {
+        /// The ID of the peer to request cells from.
+        peer_id: PeerId,
+        /// The requested block hashes.
+        request: GetCells,
+        /// The channel sender for the response containing cells.
+        response: oneshot::Sender<RequestResult<Cells>>,
     },
 }

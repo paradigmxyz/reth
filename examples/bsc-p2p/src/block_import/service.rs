@@ -10,8 +10,7 @@ use reth_network::{
 };
 use reth_network_api::PeerId;
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
-use reth_primitives::NodePrimitives;
-use reth_primitives_traits::{AlloyBlockHeader, Block};
+use reth_primitives_traits::{AlloyBlockHeader, Block, NodePrimitives};
 use reth_provider::{BlockHashReader, BlockNumReader};
 use std::{
     future::Future,
@@ -94,7 +93,7 @@ where
 
         Box::pin(async move {
             let sealed_block = block.block.block.clone().seal();
-            let payload = T::block_to_payload(sealed_block);
+            let payload = T::block_to_payload(sealed_block, None);
 
             match engine.new_payload(payload).await {
                 Ok(payload_status) => match payload_status.status {
@@ -155,8 +154,7 @@ where
                 finalized_block_hash: head_block_hash,
             };
 
-            match engine.fork_choice_updated(state, None, EngineApiMessageVersion::default()).await
-            {
+            match engine.fork_choice_updated(state, None).await {
                 Ok(response) => match response.payload_status.status {
                     PayloadStatusEnum::Valid => Outcome::<T> {
                         peer: peer_id,
@@ -230,8 +228,8 @@ mod tests {
     use reth_chainspec::ChainInfo;
     use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_eth_wire::NewBlock;
+    use reth_ethereum_primitives::Block;
     use reth_node_ethereum::EthEngineTypes;
-    use reth_primitives::Block;
     use reth_provider::ProviderError;
     use std::{
         sync::Arc,
@@ -362,9 +360,9 @@ mod tests {
             handle_engine_msg(from_engine, responses).await;
 
             let (service, handle) = ImportService::new(consensus, engine_handle);
-            tokio::spawn(Box::pin(async move {
+            tokio::spawn(async move {
                 service.await.unwrap();
-            }));
+            });
 
             Self { handle }
         }
@@ -402,7 +400,7 @@ mod tests {
 
     /// Creates a test block message
     fn create_test_block() -> NewBlockMessage<NewBlock<Block>> {
-        let block: reth_primitives::Block = Block::default();
+        let block: reth_ethereum_primitives::Block = Block::default();
         let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
         NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) }
     }
@@ -412,19 +410,14 @@ mod tests {
         mut from_engine: mpsc::UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
         responses: EngineResponses,
     ) {
-        tokio::spawn(Box::pin(async move {
+        tokio::spawn(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
                     BeaconEngineMessage::NewPayload { payload: _, tx } => {
                         tx.send(Ok(PayloadStatus::new(responses.new_payload.clone(), None)))
                             .unwrap();
                     }
-                    BeaconEngineMessage::ForkchoiceUpdated {
-                        state: _,
-                        payload_attrs: _,
-                        version: _,
-                        tx,
-                    } => {
+                    BeaconEngineMessage::ForkchoiceUpdated { state: _, payload_attrs: _, tx } => {
                         tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::new(
                             responses.fcu.clone(),
                             None,
@@ -434,6 +427,6 @@ mod tests {
                     _ => {}
                 }
             }
-        }));
+        });
     }
 }

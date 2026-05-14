@@ -43,3 +43,6 @@ impl reth_codecs::Compact for ClientVersion {
         (client_version, buf)
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(ClientVersion);

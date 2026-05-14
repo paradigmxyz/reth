@@ -505,9 +505,6 @@ where
         }
         let buffer_full = this.buffer.len() >= this.max_capacity;
 
-        // Update capacity
-        this.update_capacity();
-
         // Advance all poll senders
         let mut min_id = usize::MAX;
         for idx in (0..this.exex_handles.len()).rev() {

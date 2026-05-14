@@ -71,6 +71,9 @@ impl StoredBlockBodyIndices {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StoredBlockBodyIndices);
+
 /// The storage representation of block withdrawals.
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -81,6 +84,9 @@ pub struct StoredBlockWithdrawals {
     /// The block withdrawals.
     pub withdrawals: Withdrawals,
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StoredBlockWithdrawals);
 
 /// A storage representation of block withdrawals that is static file friendly. An inner `None`
 /// represents a pre-merge block.
@@ -115,6 +121,9 @@ impl reth_codecs::Compact for StaticFileBlockWithdrawals {
         }
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StaticFileBlockWithdrawals);
 
 #[cfg(test)]
 mod tests {

@@ -116,7 +116,7 @@ where
         match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| *tx.tx_hash()).collect()) {
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
-                for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
+                for ((tx, _), sidecar) in txs.iter().zip(blobs) {
                     if let PooledTransactionVariant::Eip4844(transaction) = tx
                         .clone()
                         .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
@@ -188,13 +188,13 @@ where
                 {
                     match notification {
                         CanonStateNotification::Commit { new } => {
-                            for (_, block) in new.blocks().iter() {
+                            for block in new.blocks().values() {
                                 this.process_block(block);
                             }
                         }
                         CanonStateNotification::Reorg { old, new } => {
                             // handle reorged blocks
-                            for (_, block) in old.blocks().iter() {
+                            for block in old.blocks().values() {
                                 let txs: Vec<BlobTransactionEvent> = block
                                     .body()
                                     .transactions()
@@ -215,7 +215,7 @@ where
                                 this.queued_actions.extend(txs);
                             }
 
-                            for (_, block) in new.blocks().iter() {
+                            for block in new.blocks().values() {
                                 this.process_block(block);
                             }
                         }

@@ -41,7 +41,6 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])? {
                 fn storage(&self, account: alloy_primitives::Address, storage_key: alloy_primitives::StorageKey) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::StorageValue>>;
-                fn storage_by_hashed_key(&self, address: alloy_primitives::Address, hashed_storage_key: alloy_primitives::StorageKey) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::StorageValue>>;
             }
             BytecodeReader $(where [$($generics)*])? {
                 fn bytecode_by_hash(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_primitives_traits::Bytecode>>;
@@ -60,7 +59,7 @@ macro_rules! delegate_provider_impls {
             StateProofProvider $(where [$($generics)*])? {
                 fn proof(&self, input: reth_trie::TrieInput, address: alloy_primitives::Address, slots: &[alloy_primitives::B256]) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::AccountProof>;
                 fn multiproof(&self, input: reth_trie::TrieInput, targets: reth_trie::MultiProofTargets) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::MultiProof>;
-                fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState) -> reth_storage_api::errors::provider::ProviderResult<Vec<alloy_primitives::Bytes>>;
+                fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState, mode: reth_trie::ExecutionWitnessMode) -> reth_storage_api::errors::provider::ProviderResult<Vec<alloy_primitives::Bytes>>;
             }
             HashedPostStateProvider $(where [$($generics)*])? {
                 fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> reth_trie::HashedPostState;

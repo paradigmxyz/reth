@@ -14,6 +14,9 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
+#[cfg(all(feature = "jemalloc", unix))]
+use reth_cli_util::allocator::tikv_jemalloc_sys as _;
+
 pub mod authenticated_transport;
 pub mod bench;
 pub mod bench_mode;

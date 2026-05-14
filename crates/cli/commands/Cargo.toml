@@ -46,14 +46,14 @@ reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
-reth-stages-types = { workspace = true, optional = true }
+reth-stages-types.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-tasks.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
@@ -84,9 +84,11 @@ tracing.workspace = true
 backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 tokio-stream.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
 url.workspace = true
 metrics.workspace = true
+blake3.workspace = true
+rayon.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -108,11 +110,11 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
 
 [features]
-default = []
 arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
+    "dep:reth-trie-common",
     "reth-db-api/arbitrary",
     "reth-eth-wire/arbitrary",
     "reth-db/arbitrary",
@@ -123,15 +125,12 @@ arbitrary = [
     "reth-codecs/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "reth-trie-common/test-utils",
+    "reth-trie-common?/test-utils",
     "reth-codecs/arbitrary",
     "reth-prune-types/arbitrary",
-    "reth-stages-types?/arbitrary",
-    "reth-trie-common/arbitrary",
+    "reth-stages-types/arbitrary",
+    "reth-trie-common?/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
-
-rocksdb = ["reth-db-common/rocksdb", "reth-stages/rocksdb", "reth-provider/rocksdb", "reth-prune/rocksdb"]
-edge = ["rocksdb"]

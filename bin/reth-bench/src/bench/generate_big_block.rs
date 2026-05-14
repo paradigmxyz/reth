@@ -1,27 +1,34 @@
-//! Command for generating large blocks by packing transactions from real blocks.
+//! Command for generating large blocks by merging transactions from consecutive real blocks.
 //!
-//! This command fetches transactions from existing blocks and packs them into a single
-//! large block using the `testing_buildBlockV1` RPC endpoint.
+//! This command fetches consecutive blocks from an RPC until a target gas usage is reached,
+//! takes block 0 as the "base" payload, concatenates transactions from subsequent blocks,
+//! and saves the result to disk as a [`BigBlockData`] JSON file containing the merged
+//! [`ExecutionData`] and environment switches at each block boundary.
 
-use crate::{
-    authenticated_transport::AuthenticatedTransportConnect, bench::helpers::parse_gas_limit,
+use alloy_consensus::TxEnvelope;
+use alloy_eips::{
+    eip7928::{AccountChanges, BlockAccessList, SlotChanges},
+    Typed2718,
 };
-use alloy_eips::{BlockNumberOrTag, Typed2718};
 use alloy_primitives::{Bytes, B256};
-use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
-use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ForkchoiceState, JwtSecret,
-    PayloadAttributes,
+use alloy_provider::{
+    network::{AnyNetwork, AnyRpcBlock},
+    Provider, RootProvider,
 };
-use alloy_transport::layers::RetryBackoffLayer;
+use alloy_rpc_client::ClientBuilder;
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 use clap::Parser;
 use eyre::Context;
-use reqwest::Url;
+use futures::{stream, Stream, StreamExt};
+use reth_chainspec::EthChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_rpc_api::TestingBuildBlockRequestV1;
-use std::future::Future;
-use tokio::sync::mpsc;
+use reth_engine_primitives::{BigBlockData, ExecutionPayload as _};
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 use tracing::{info, warn};
 
 /// A single transaction with its gas used and raw encoded bytes.
@@ -64,7 +71,7 @@ impl RpcTransactionSource {
     /// Create from an RPC URL with retry backoff.
     pub fn from_url(rpc_url: &str) -> eyre::Result<Self> {
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+            .layer(alloy_transport::layers::RetryBackoffLayer::new(10, 800, u64::MAX))
             .http(rpc_url.parse()?);
         let provider = RootProvider::<AnyNetwork>::new(client);
         Ok(Self { provider })
@@ -152,7 +159,7 @@ impl<S: TransactionSource> TransactionCollector<S> {
         while total_gas < gas_target {
             let Some((block_txs, _)) = self.source.fetch_block_transactions(current_block).await?
             else {
-                warn!(target: "reth-bench", block = current_block, "Block not found, stopping");
+                tracing::warn!(target: "reth-bench", block = current_block, "Block not found, stopping");
                 break;
             };
 
@@ -193,81 +200,6 @@ impl<S: TransactionSource> TransactionCollector<S> {
     }
 }
 
-/// `reth bench generate-big-block` command
-///
-/// Generates a large block by fetching transactions from existing blocks and packing them
-/// into a single block using the `testing_buildBlockV1` RPC endpoint.
-#[derive(Debug, Parser)]
-pub struct Command {
-    /// The RPC URL to use for fetching blocks (can be an external archive node).
-    #[arg(long, value_name = "RPC_URL")]
-    rpc_url: String,
-
-    /// The engine RPC URL (with JWT authentication).
-    #[arg(long, value_name = "ENGINE_RPC_URL", default_value = "http://localhost:8551")]
-    engine_rpc_url: String,
-
-    /// The RPC URL for `testing_buildBlockV1` calls (same node as engine, regular RPC port).
-    #[arg(long, value_name = "TESTING_RPC_URL", default_value = "http://localhost:8545")]
-    testing_rpc_url: String,
-
-    /// Path to the JWT secret file for engine API authentication.
-    #[arg(long, value_name = "JWT_SECRET")]
-    jwt_secret: std::path::PathBuf,
-
-    /// Target gas to pack into the block.
-    /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 1G = 1
-    /// billion).
-    #[arg(long, value_name = "TARGET_GAS", default_value = "30000000", value_parser = parse_gas_limit)]
-    target_gas: u64,
-
-    /// Block number to start fetching transactions from (required).
-    ///
-    /// This must be the last canonical block BEFORE any gas limit ramping was performed.
-    /// The command collects transactions from historical blocks starting at this number
-    /// to pack into large blocks.
-    ///
-    /// How to determine this value:
-    /// - If starting from a fresh node (no gas limit ramp yet): use the current chain tip
-    /// - If gas limit ramping has already been performed: use the block number that was the chain
-    ///   tip BEFORE ramping began (you must track this yourself)
-    ///
-    /// Using a block after ramping started will cause transaction collection to fail
-    /// because those blocks contain synthetic transactions that cannot be replayed.
-    #[arg(long, value_name = "FROM_BLOCK")]
-    from_block: u64,
-
-    /// Execute the payload (call newPayload + forkchoiceUpdated).
-    /// If false, only builds the payload and prints it.
-    #[arg(long, default_value = "false")]
-    execute: bool,
-
-    /// Number of payloads to generate. Each payload uses the previous as parent.
-    /// When count == 1, the payload is only generated and saved, not executed.
-    /// When count > 1, each payload is executed before building the next.
-    #[arg(long, default_value = "1")]
-    count: u64,
-
-    /// Number of transaction batches to prefetch in background when count > 1.
-    /// Higher values reduce latency but use more memory.
-    #[arg(long, default_value = "4")]
-    prefetch_buffer: usize,
-
-    /// Output directory for generated payloads. Each payload is saved as `payload_block_N.json`.
-    #[arg(long, value_name = "OUTPUT_DIR")]
-    output_dir: std::path::PathBuf,
-}
-
-/// A built payload ready for execution.
-struct BuiltPayload {
-    block_number: u64,
-    envelope: ExecutionPayloadEnvelopeV4,
-    block_hash: B256,
-    timestamp: u64,
-    /// The actual gas used in the built block.
-    gas_used: u64,
-}
-
 /// Result of collecting transactions from blocks.
 #[derive(Debug)]
 pub struct CollectionResult {
@@ -279,106 +211,89 @@ pub struct CollectionResult {
     pub next_block: u64,
 }
 
-/// Constants for retry logic.
-const MAX_BUILD_RETRIES: u32 = 5;
-/// Maximum retries for fetching a transaction batch.
-const MAX_FETCH_RETRIES: u32 = 5;
-/// Tolerance: if `gas_used` is within 1M of target, don't retry.
-const MIN_TARGET_SLACK: u64 = 1_000_000;
-/// Maximum gas to request in retries (10x target as safety cap).
-const MAX_ADDITIONAL_GAS_MULTIPLIER: u64 = 10;
+/// State used to continue generated big block replay from the benchmark node's current tip.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BigBlocksInitialState {
+    /// Real block hashes from previous big blocks, used for BLOCKHASH lookups.
+    pub prior_block_hashes: Vec<(u64, B256)>,
+    /// Block number to assign to the first generated synthetic block.
+    pub next_synthetic_block_number: u64,
+}
 
-/// Fetches a batch of transactions with retry logic.
+/// `reth bench generate-big-block` command
 ///
-/// Returns `None` if all retries are exhausted.
-async fn fetch_batch_with_retry<S: TransactionSource>(
-    collector: &TransactionCollector<S>,
-    block: u64,
-) -> Option<CollectionResult> {
-    for attempt in 1..=MAX_FETCH_RETRIES {
-        match collector.collect(block).await {
-            Ok(result) => return Some(result),
-            Err(e) => {
-                if attempt == MAX_FETCH_RETRIES {
-                    warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions after max retries");
-                    return None;
-                }
-                warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions, retrying...");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        }
-    }
-    None
-}
+/// Generates a large block by fetching consecutive blocks from an RPC, merging their
+/// transactions into a single payload, and saving the result to disk.
+#[derive(Debug, Parser)]
+pub struct Command {
+    /// The RPC URL to use for fetching blocks.
+    #[arg(long, value_name = "RPC_URL")]
+    rpc_url: String,
 
-/// Outcome of a build attempt check.
-enum RetryOutcome {
-    /// Payload is close enough to target gas.
-    Success,
-    /// Max retries reached, accept what we have.
-    MaxRetries,
-    /// Need more transactions with the specified gas amount.
-    NeedMore(u64),
-}
+    /// The chain name or path to a chain spec JSON file.
+    #[arg(long, value_name = "CHAIN", default_value = "mainnet")]
+    chain: String,
 
-/// Buffer for receiving transaction batches from the fetcher.
-///
-/// This abstracts over the channel to allow the main loop to request
-/// batches on demand, including for retries.
-struct TxBuffer {
-    receiver: mpsc::Receiver<CollectionResult>,
-}
+    /// Block number to start from.
+    #[arg(long, value_name = "FROM_BLOCK")]
+    from_block: u64,
 
-impl TxBuffer {
-    const fn new(receiver: mpsc::Receiver<CollectionResult>) -> Self {
-        Self { receiver }
-    }
+    /// Target gas usage per big block. Consecutive real blocks are merged until
+    /// this gas target is reached (or exceeded by the last included block).
+    /// Accepts optional suffixes: K (thousand), M (million), G (billion).
+    #[arg(long, value_name = "TARGET_GAS", value_parser = super::helpers::parse_gas_limit)]
+    target_gas: u64,
 
-    /// Take the next available batch from the fetcher.
-    async fn take_batch(&mut self) -> Option<CollectionResult> {
-        self.receiver.recv().await
-    }
+    /// Number of sequential big blocks to generate.
+    ///
+    /// Each big block merges real blocks until `--target-gas` is reached.
+    /// Sequential big blocks are chained: block N+1's `parent_hash` is set to
+    /// block N's computed hash.
+    #[arg(long, value_name = "NUM_BIG_BLOCKS", default_value = "1")]
+    num_big_blocks: u64,
+
+    /// Output directory for generated payloads.
+    #[arg(long, value_name = "OUTPUT_DIR")]
+    output_dir: std::path::PathBuf,
+
+    /// Query `eth_getBlockAccessListByBlockNumber` for each fetched block and persist
+    /// the flattened BAL on the stored payload.
+    #[arg(long, default_value_t = false)]
+    bal: bool,
+
+    /// Maximum number of in-flight RPC fetches to keep buffered ahead of the merger.
+    ///
+    /// Each entry is one full per-block fetch (block + receipts, plus BAL when `--bal` is
+    /// set). Larger values absorb RPC latency at the cost of more concurrent connections
+    /// and memory; the buffer persists across `--num-big-blocks` so prefetching continues
+    /// across big-block boundaries.
+    #[arg(long, value_name = "PREFETCH_BUFFER", default_value_t = 32)]
+    prefetch_buffer: usize,
 }
 
 impl Command {
-    /// Execute the `generate-big-block` command
+    /// Execute the `generate-big-block` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth-bench", target_gas = self.target_gas, count = self.count, "Generating big block(s)");
+        if self.target_gas == 0 {
+            return Err(eyre::eyre!("--target-gas must be greater than 0"));
+        }
+        if self.num_big_blocks == 0 {
+            return Err(eyre::eyre!("--num-big-blocks must be at least 1"));
+        }
 
-        // Set up authenticated engine provider
-        let jwt =
-            std::fs::read_to_string(&self.jwt_secret).wrap_err("Failed to read JWT secret file")?;
-        let jwt = JwtSecret::from_hex(jwt.trim())?;
-        let auth_url = Url::parse(&self.engine_rpc_url)?;
-
-        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
-        let auth_transport = AuthenticatedTransportConnect::new(auth_url.clone(), jwt);
-        let auth_client = ClientBuilder::default().connect_with(auth_transport).await?;
-        let auth_provider = RootProvider::<AnyNetwork>::new(auth_client);
-
-        // Set up testing RPC provider (for testing_buildBlockV1)
-        info!(target: "reth-bench", "Connecting to Testing RPC at {}", self.testing_rpc_url);
-        let testing_client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
-            .http(self.testing_rpc_url.parse()?);
-        let testing_provider = RootProvider::<AnyNetwork>::new(testing_client);
-
-        // Get the parent block (latest canonical block)
-        info!(target: "reth-bench", endpoint = "engine", method = "eth_getBlockByNumber", block = "latest", "RPC call");
-        let parent_block = auth_provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await?
-            .ok_or_else(|| eyre::eyre!("Failed to fetch latest block"))?;
-
-        let parent_hash = parent_block.header.hash;
-        let parent_number = parent_block.header.number;
-        let parent_timestamp = parent_block.header.timestamp;
+        // Resolve chain spec for blob params lookup
+        let chain_spec = EthereumChainSpecParser::parse(&self.chain)
+            .wrap_err_with(|| format!("Failed to parse chain spec: {}", self.chain))?;
 
         info!(
             target: "reth-bench",
-            parent_hash = %parent_hash,
-            parent_number = parent_number,
-            "Using initial parent block"
+            from_block = self.from_block,
+            target_gas = self.target_gas,
+            num_big_blocks = self.num_big_blocks,
+            include_bal = self.bal,
+            chain = %chain_spec.chain(),
+            output_dir = %self.output_dir.display(),
+            "Generating big block payloads"
         );
 
         // Create output directory
@@ -386,466 +301,482 @@ impl Command {
             format!("Failed to create output directory: {:?}", self.output_dir)
         })?;
 
-        let start_block = self.from_block;
+        // Set up RPC provider
+        let client = ClientBuilder::default()
+            .layer(alloy_transport::layers::RetryBackoffLayer::new(10, 800, u64::MAX))
+            .http(self.rpc_url.parse()?);
+        let provider = RootProvider::<AnyNetwork>::new(client);
 
-        // Use pipelined execution when generating multiple payloads
-        if self.count > 1 {
-            self.execute_pipelined(
-                &auth_provider,
-                &testing_provider,
-                start_block,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-        } else {
-            // Single payload - collect transactions and build with retry
-            let tx_source = RpcTransactionSource::from_url(&self.rpc_url)?;
-            let collector = TransactionCollector::new(tx_source, self.target_gas);
-            let result = collector.collect(start_block).await?;
+        // Persistent prefetch stream: keeps `prefetch_buffer` per-block fetches in flight
+        // ahead of the merger across all big blocks. Each item is a fully materialized
+        // `FetchedBlock` (or `None` once the chain tip is reached on this fetch).
+        let prefetch_buffer = self.prefetch_buffer.max(1);
+        let bal_enabled = self.bal;
+        let block_stream = stream::iter(self.from_block..)
+            .map(|block_number| {
+                let provider = provider.clone();
+                async move { fetch_one_block(provider, block_number, bal_enabled).await }
+            })
+            .buffered(prefetch_buffer);
 
-            if result.transactions.is_empty() {
-                return Err(eyre::eyre!("No transactions collected"));
-            }
+        let mut big_blocks_stream =
+            Box::pin(big_blocks_stream(self.num_big_blocks, self.target_gas, block_stream, None));
 
-            self.execute_sequential_with_retry(
-                &auth_provider,
-                &testing_provider,
-                &collector,
-                result,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-        }
-
-        info!(target: "reth-bench", count = self.count, output_dir = %self.output_dir.display(), "All payloads generated");
-        Ok(())
-    }
-
-    /// Sequential execution path with retry logic for underfilled payloads.
-    async fn execute_sequential_with_retry<S: TransactionSource>(
-        &self,
-        auth_provider: &RootProvider<AnyNetwork>,
-        testing_provider: &RootProvider<AnyNetwork>,
-        collector: &TransactionCollector<S>,
-        initial_result: CollectionResult,
-        mut parent_hash: B256,
-        mut parent_timestamp: u64,
-    ) -> eyre::Result<()> {
-        let mut current_result = initial_result;
-
-        for i in 0..self.count {
-            let built = self
-                .build_with_retry(
-                    testing_provider,
-                    collector,
-                    &mut current_result,
-                    i,
-                    parent_hash,
-                    parent_timestamp,
-                )
-                .await?;
-
-            self.save_payload(&built)?;
-
-            if self.execute || self.count > 1 {
-                info!(target: "reth-bench", payload = i + 1, block_hash = %built.block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
-                self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
-                info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
-            }
-
-            parent_hash = built.block_hash;
-            parent_timestamp = built.timestamp;
-        }
-        Ok(())
-    }
-
-    /// Build a payload with retry logic when `gas_used` is below target.
-    ///
-    /// Uses the ratio of `gas_used/gas_sent` to estimate how many more transactions
-    /// are needed to hit the target gas.
-    async fn build_with_retry<S: TransactionSource>(
-        &self,
-        testing_provider: &RootProvider<AnyNetwork>,
-        collector: &TransactionCollector<S>,
-        result: &mut CollectionResult,
-        index: u64,
-        parent_hash: B256,
-        parent_timestamp: u64,
-    ) -> eyre::Result<BuiltPayload> {
-        for attempt in 1..=MAX_BUILD_RETRIES {
-            let tx_bytes: Vec<Bytes> = result.transactions.iter().map(|t| t.raw.clone()).collect();
-            let gas_sent = result.gas_sent;
+        while let Some(big_block) = big_blocks_stream.next().await {
+            let big_block = big_block?;
+            // Save to disk
+            let range_start = big_block.env_switches[0].block_number();
+            let range_end = big_block.env_switches.last().unwrap().block_number();
+            let block_hash = big_block.block_hash();
+            let filename = format!("big_block_{range_start}_to_{range_end}.json");
+            let filepath = self.output_dir.join(&filename);
+            let json = serde_json::to_string_pretty(&big_block)?;
+            std::fs::write(&filepath, &json)
+                .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
 
             info!(
                 target: "reth-bench",
-                payload = index + 1,
-                attempt,
-                tx_count = tx_bytes.len(),
-                gas_sent,
-                parent_hash = %parent_hash,
-                "Building payload via testing_buildBlockV1"
+                path = %filepath.display(),
+                block_hash = %block_hash,
+                "Big block payload saved"
             );
-
-            let built = Self::build_payload_static(
-                testing_provider,
-                &tx_bytes,
-                index,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-
-            match self.check_retry_outcome(&built, index, attempt, gas_sent) {
-                RetryOutcome::Success | RetryOutcome::MaxRetries => return Ok(built),
-                RetryOutcome::NeedMore(additional_gas) => {
-                    let additional =
-                        collector.collect_gas(result.next_block, additional_gas).await?;
-                    result.transactions.extend(additional.transactions);
-                    result.gas_sent = result.gas_sent.saturating_add(additional.gas_sent);
-                    result.next_block = additional.next_block;
-                }
-            }
         }
-
-        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
-        Err(eyre::eyre!("build_with_retry exhausted retries without result"))
-    }
-
-    /// Pipelined execution - fetches transactions in background, builds with retry.
-    ///
-    /// The fetcher continuously produces transaction batches. The main loop consumes them,
-    /// builds payloads with retry logic (requesting more transactions if underfilled),
-    /// and executes each payload before moving to the next.
-    async fn execute_pipelined(
-        &self,
-        auth_provider: &RootProvider<AnyNetwork>,
-        testing_provider: &RootProvider<AnyNetwork>,
-        start_block: u64,
-        initial_parent_hash: B256,
-        initial_parent_timestamp: u64,
-    ) -> eyre::Result<()> {
-        // Create channel for transaction batches - fetcher sends CollectionResult
-        let (tx_sender, tx_receiver) = mpsc::channel::<CollectionResult>(self.prefetch_buffer);
-
-        // Spawn background task to continuously fetch transaction batches
-        let rpc_url = self.rpc_url.clone();
-        let target_gas = self.target_gas;
-
-        let fetcher_handle = tokio::spawn(async move {
-            let tx_source = match RpcTransactionSource::from_url(&rpc_url) {
-                Ok(source) => source,
-                Err(e) => {
-                    warn!(target: "reth-bench", error = %e, "Failed to create transaction source");
-                    return None;
-                }
-            };
-
-            let collector = TransactionCollector::new(tx_source, target_gas);
-            let mut current_block = start_block;
-
-            while let Some(batch) = fetch_batch_with_retry(&collector, current_block).await {
-                if batch.transactions.is_empty() {
-                    info!(target: "reth-bench", block = current_block, "Reached chain tip, stopping fetcher");
-                    break;
-                }
-
-                info!(
-                    target: "reth-bench",
-                    tx_count = batch.transactions.len(),
-                    gas_sent = batch.gas_sent,
-                    blocks = format!("{}..{}", current_block, batch.next_block),
-                    "Fetched transaction batch"
-                );
-                current_block = batch.next_block;
-
-                if tx_sender.send(batch).await.is_err() {
-                    break;
-                }
-            }
-
-            Some(current_block)
-        });
-
-        // Transaction buffer: holds transactions from batches + any extras from retries
-        let mut tx_buffer = TxBuffer::new(tx_receiver);
-
-        let mut parent_hash = initial_parent_hash;
-        let mut parent_timestamp = initial_parent_timestamp;
-
-        for i in 0..self.count {
-            // Get initial batch of transactions for this payload
-            let Some(mut result) = tx_buffer.take_batch().await else {
-                info!(
-                    target: "reth-bench",
-                    payloads_built = i,
-                    payloads_requested = self.count,
-                    "Transaction source exhausted, stopping"
-                );
-                break;
-            };
-
-            if result.transactions.is_empty() {
-                info!(
-                    target: "reth-bench",
-                    payloads_built = i,
-                    payloads_requested = self.count,
-                    "No more transactions available, stopping"
-                );
-                break;
-            }
-
-            // Build with retry - may need to request more transactions
-            let built = self
-                .build_with_retry_buffered(
-                    testing_provider,
-                    &mut tx_buffer,
-                    &mut result,
-                    i,
-                    parent_hash,
-                    parent_timestamp,
-                )
-                .await?;
-
-            self.save_payload(&built)?;
-
-            let current_block_hash = built.block_hash;
-            let current_timestamp = built.timestamp;
-
-            // Execute payload
-            info!(target: "reth-bench", payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
-            self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
-            info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
-
-            parent_hash = current_block_hash;
-            parent_timestamp = current_timestamp;
-        }
-
-        // Clean up the fetcher task
-        drop(tx_buffer);
-        let _ = fetcher_handle.await;
 
         Ok(())
     }
+}
 
-    /// Build a payload with retry logic, using the buffered transaction source.
-    async fn build_with_retry_buffered(
-        &self,
-        testing_provider: &RootProvider<AnyNetwork>,
-        tx_buffer: &mut TxBuffer,
-        result: &mut CollectionResult,
-        index: u64,
-        parent_hash: B256,
-        parent_timestamp: u64,
-    ) -> eyre::Result<BuiltPayload> {
-        for attempt in 1..=MAX_BUILD_RETRIES {
-            let tx_bytes: Vec<Bytes> = result.transactions.iter().map(|t| t.raw.clone()).collect();
-            let gas_sent = result.gas_sent;
+/// Produces a stream of big block payloads given a stream of regular blocks.
+pub(crate) fn big_blocks_stream(
+    num_big_blocks: u64,
+    target_gas: u64,
+    block_stream: impl Stream<Item = eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>>>
+        + Unpin,
+    initial_state: Option<BigBlocksInitialState>,
+) -> impl Stream<Item = eyre::Result<BigBlockData<ExecutionData>>> {
+    futures::stream::try_unfold(
+        (
+            block_stream,
+            initial_state.as_ref().map(|s| s.prior_block_hashes.clone()).unwrap_or_default(),
+            0,
+            initial_state.as_ref().map(|s| s.next_synthetic_block_number),
+            false,
+            0,
+        ),
+        move |(
+            mut block_stream,
+            mut accumulated_block_hashes,
+            mut big_block_idx,
+            next_synthetic_block_number,
+            mut reached_chain_tip,
+            mut first_block,
+        )| async move {
+            if reached_chain_tip || num_big_blocks == big_block_idx {
+                warn!(
+                    target: "reth-bench",
+                    generated = big_block_idx + 1,
+                    requested = num_big_blocks,
+                    "Reached chain tip, stopping generation early"
+                );
+                return Ok(None);
+            }
 
-            info!(
-                target: "reth-bench",
-                payload = index + 1,
-                attempt,
-                tx_count = tx_bytes.len(),
-                gas_sent,
-                parent_hash = %parent_hash,
-                "Building payload via testing_buildBlockV1"
-            );
+            // Drain the prefetch stream until the gas target is reached for this big block.
+            let mut blocks = Vec::new();
+            let mut block_access_lists: Vec<Option<BlockAccessList>> = Vec::new();
+            let mut accumulated_block_gas: u64 = 0;
 
-            let built = Self::build_payload_static(
-                testing_provider,
-                &tx_bytes,
-                index,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-
-            match self.check_retry_outcome(&built, index, attempt, gas_sent) {
-                RetryOutcome::Success | RetryOutcome::MaxRetries => return Ok(built),
-                RetryOutcome::NeedMore(additional_gas) => {
-                    let mut collected_gas = 0u64;
-                    while collected_gas < additional_gas {
-                        if let Some(batch) = tx_buffer.take_batch().await {
-                            collected_gas += batch.gas_sent;
-                            result.transactions.extend(batch.transactions);
-                            result.gas_sent = result.gas_sent.saturating_add(batch.gas_sent);
-                            result.next_block = batch.next_block;
-                        } else {
-                            warn!(target: "reth-bench", "Transaction fetcher exhausted, proceeding with available transactions");
-                            break;
-                        }
+            while accumulated_block_gas < target_gas {
+                let (block, block_access_list) = match block_stream.next().await {
+                    Some(Ok(Some(fetched))) => fetched,
+                    Some(Ok(None)) => {
+                        warn!(
+                            target: "reth-bench",
+                            "Block not found — reached chain tip"
+                        );
+                        reached_chain_tip = true;
+                        break;
                     }
+                    Some(Err(e)) => return Err(e),
+                    // The block-number stream is open-ended; this only fires if the
+                    // upstream `iter(from..)` is somehow exhausted.
+                    None => {
+                        reached_chain_tip = true;
+                        break;
+                    }
+                };
+
+                if first_block == 0 {
+                    first_block = block.header.number;
+                }
+
+                let block = block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                        tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+                    })?
+                    .into_consensus();
+
+                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+                let execution_data = ExecutionData { payload, sidecar };
+
+                let block_gas = execution_data.payload.as_v1().gas_used;
+
+                accumulated_block_gas += block_gas;
+                blocks.push(execution_data);
+                block_access_lists.push(block_access_list);
+            }
+
+            // If we hit the chain tip without fetching any blocks, stop generating.
+            if blocks.is_empty() {
+                warn!(
+                    target: "reth-bench",
+                    big_block = big_block_idx,
+                    requested = num_big_blocks,
+                    "No blocks available, stopping generation early"
+                );
+                return Ok(None);
+            }
+
+            let mut merged_block_access_list = None;
+            let mut cumulative_tx_count = 0;
+
+            for (block_idx, (block_data, block_access_list)) in
+                blocks.iter().zip(block_access_lists).enumerate()
+            {
+                if let Some(block_access_list) = block_access_list {
+                    merge_block_access_list(
+                        merged_block_access_list.get_or_insert_with(Default::default),
+                        block_access_list,
+                        cumulative_tx_count as u64,
+                        block_idx as u64,
+                    );
+                }
+
+                cumulative_tx_count += block_data.transaction_count();
+            }
+
+            if let Some(block_access_list) = &mut merged_block_access_list {
+                block_access_list.sort_unstable_by_key(|account| account.address);
+                for account in block_access_list {
+                    account.sort();
                 }
             }
-        }
 
-        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
-        Err(eyre::eyre!("build_with_retry_buffered exhausted retries without result"))
-    }
+            let big_block = BigBlockData {
+                env_switches: blocks,
+                prior_block_hashes: accumulated_block_hashes.clone(),
+                block_number: next_synthetic_block_number.unwrap_or(first_block) + big_block_idx,
+                merged_block_access_list: merged_block_access_list
+                    .as_ref()
+                    .map(|list| alloy_rlp::encode(list).into()),
+            };
 
-    /// Determines the outcome of a build attempt.
-    fn check_retry_outcome(
-        &self,
-        built: &BuiltPayload,
-        index: u64,
-        attempt: u32,
-        gas_sent: u64,
-    ) -> RetryOutcome {
-        let gas_used = built.gas_used;
+            // Accumulate real block hashes from this big block's env_switches for
+            // subsequent big blocks' BLOCKHASH lookups. Cap at 256 entries since the
+            // BLOCKHASH opcode only looks back 256 blocks.
+            for switch_data in &big_block.env_switches {
+                let block_number = switch_data.block_number();
+                let block_hash = switch_data.block_hash();
+                accumulated_block_hashes.push((block_number, block_hash));
+            }
+            if accumulated_block_hashes.len() > 256 {
+                let excess = accumulated_block_hashes.len() - 256;
+                accumulated_block_hashes.drain(..excess);
+            }
 
-        if gas_used + MIN_TARGET_SLACK >= self.target_gas {
             info!(
                 target: "reth-bench",
-                payload = index + 1,
-                gas_used,
-                target_gas = self.target_gas,
-                attempts = attempt,
-                "Payload built successfully"
+                block_hash = %big_block.block_hash(),
+                total_txs = %big_block.transaction_count(),
+                total_gas_used = %big_block.gas_used(),
+                env_switches = %big_block.env_switches.len(),
+                prior_block_hashes = %big_block.prior_block_hashes.len(),
+                bal_accounts = %merged_block_access_list.as_ref().map_or(0, Vec::len),
+                "Generated big block"
             );
-            return RetryOutcome::Success;
+
+            big_block_idx += 1;
+            Ok(Some((
+                big_block,
+                (
+                    block_stream,
+                    accumulated_block_hashes,
+                    big_block_idx,
+                    next_synthetic_block_number,
+                    reached_chain_tip,
+                    first_block,
+                ),
+            )))
+        },
+    )
+}
+
+/// Fetches one block + receipts (and optionally its BAL) from the RPC. Returns `Ok(None)`
+/// when the block doesn't exist yet (chain-tip reached).
+async fn fetch_one_block(
+    provider: RootProvider<AnyNetwork>,
+    block_number: u64,
+    bal_enabled: bool,
+) -> eyre::Result<Option<(AnyRpcBlock, Option<BlockAccessList>)>> {
+    let (rpc_block, block_access_list) =
+        tokio::try_join!(provider.get_block_by_number(block_number.into()).full(), async {
+            if bal_enabled {
+                provider.get_block_access_list_by_number(block_number.into()).await
+            } else {
+                Ok(None)
+            }
+        })?;
+    let Some(rpc_block) = rpc_block else {
+        return Ok(None);
+    };
+
+    Ok(Some((rpc_block, block_access_list)))
+}
+
+fn merge_block_access_list(
+    merged: &mut BlockAccessList,
+    incoming: BlockAccessList,
+    tx_index_offset: u64,
+    segment_idx: u64,
+) {
+    let mut account_positions = merged
+        .iter()
+        .enumerate()
+        .map(|(idx, account)| (account.address, idx))
+        .collect::<HashMap<_, _>>();
+
+    for mut account_changes in incoming {
+        shift_account_changes(&mut account_changes, tx_index_offset, segment_idx);
+
+        if let Some(&idx) = account_positions.get(&account_changes.address) {
+            merge_account_changes(&mut merged[idx], account_changes);
+        } else {
+            account_positions.insert(account_changes.address, merged.len());
+            merged.push(account_changes);
         }
-
-        if attempt == MAX_BUILD_RETRIES {
-            warn!(
-                target: "reth-bench",
-                payload = index + 1,
-                gas_used,
-                target_gas = self.target_gas,
-                gas_sent,
-                "Underfilled after max retries, accepting payload"
-            );
-            return RetryOutcome::MaxRetries;
-        }
-
-        if gas_used == 0 {
-            warn!(
-                target: "reth-bench",
-                payload = index + 1,
-                "Zero gas used in payload, requesting fixed chunk of additional transactions"
-            );
-            return RetryOutcome::NeedMore(self.target_gas);
-        }
-
-        let gas_sent_needed_total =
-            (self.target_gas as u128 * gas_sent as u128).div_ceil(gas_used as u128) as u64;
-        let additional = gas_sent_needed_total.saturating_sub(gas_sent);
-        let additional = additional.min(self.target_gas * MAX_ADDITIONAL_GAS_MULTIPLIER);
-
-        if additional == 0 {
-            info!(
-                target: "reth-bench",
-                payload = index + 1,
-                gas_used,
-                target_gas = self.target_gas,
-                "No additional transactions needed based on ratio"
-            );
-            return RetryOutcome::Success;
-        }
-
-        let ratio = gas_used as f64 / gas_sent as f64;
-        info!(
-            target: "reth-bench",
-            payload = index + 1,
-            gas_used,
-            gas_sent,
-            ratio = format!("{:.4}", ratio),
-            additional_gas = additional,
-            "Underfilled, collecting more transactions for retry"
-        );
-        RetryOutcome::NeedMore(additional)
     }
+}
 
-    /// Build a single payload via `testing_buildBlockV1`.
-    async fn build_payload_static(
-        testing_provider: &RootProvider<AnyNetwork>,
-        transactions: &[Bytes],
-        index: u64,
-        parent_hash: B256,
-        parent_timestamp: u64,
-    ) -> eyre::Result<BuiltPayload> {
-        let request = TestingBuildBlockRequestV1 {
-            parent_block_hash: parent_hash,
-            payload_attributes: PayloadAttributes {
-                timestamp: parent_timestamp + 12,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
+fn shift_account_changes(
+    account_changes: &mut AccountChanges,
+    tx_index_offset: u64,
+    segment_idx: u64,
+) {
+    // Per-block BALs use block_access_index = 0 for pre-execution writes
+    // (system contract calls before any tx), 1..tx_count for tx commits, and
+    // tx_count+1 for post-execution.
+    //
+    // Renumbering: each segment boundary reserves two distinct bal_indexes —
+    // one for the prior segment's `finish()` (post-execution withdrawals +
+    // EIP-7002/7251 system calls) and one for the new segment's
+    // `apply_pre_execution_changes()` (EIP-2935/EIP-4788). The renumbered
+    // bal_index for a block-local idx in segment `k` is
+    // `idx + tx_index_offset + 2*k`. This ensures BAL workers reading via
+    // `BalWrites::get` (strict less-than) see all prior segments' boundary
+    // writes.
+    let shift = tx_index_offset + 2 * segment_idx;
+    for slot_changes in &mut account_changes.storage_changes {
+        for change in &mut slot_changes.changes {
+            change.block_access_index += shift;
+        }
+    }
+    for change in &mut account_changes.balance_changes {
+        change.block_access_index += shift;
+    }
+    for change in &mut account_changes.nonce_changes {
+        change.block_access_index += shift;
+    }
+    for change in &mut account_changes.code_changes {
+        change.block_access_index += shift;
+    }
+}
+
+fn merge_account_changes(existing: &mut AccountChanges, incoming: AccountChanges) {
+    merge_slot_changes(&mut existing.storage_changes, incoming.storage_changes);
+    existing.storage_reads.extend(incoming.storage_reads);
+    existing.balance_changes.extend(incoming.balance_changes);
+    existing.nonce_changes.extend(incoming.nonce_changes);
+    existing.code_changes.extend(incoming.code_changes);
+
+    // EIP-7928 invariant: a slot must appear in either storage_changes or storage_reads,
+    // not both. Per-block BALs respect this, but merging blocks can produce a slot
+    // that is read in one block and changed in another. Without this normalization,
+    // an empty read entry can shadow the real writes during BAL deserialization,
+    // making reads of that slot fall through to stale snapshot state.
+    let written: HashSet<_> =
+        existing.storage_changes.iter().map(|slot_changes| slot_changes.slot).collect();
+    existing.storage_reads.retain(|slot| !written.contains(slot));
+    let mut seen = HashSet::with_capacity(existing.storage_reads.len());
+    existing.storage_reads.retain(|slot| seen.insert(*slot));
+}
+
+fn merge_slot_changes(existing: &mut Vec<SlotChanges>, incoming: Vec<SlotChanges>) {
+    let mut slot_positions = existing
+        .iter()
+        .enumerate()
+        .map(|(idx, slot_changes)| (slot_changes.slot, idx))
+        .collect::<HashMap<_, _>>();
+
+    for slot_changes in incoming {
+        if let Some(&idx) = slot_positions.get(&slot_changes.slot) {
+            existing[idx].changes.extend(slot_changes.changes);
+        } else {
+            slot_positions.insert(slot_changes.slot, existing.len());
+            existing.push(slot_changes);
+        }
+    }
+}
+
+/// Computes the block hash for an [`ExecutionData`] by converting it to a raw block
+/// and hashing the header.
+pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
+    let block = data
+        .payload
+        .clone()
+        .into_block_with_sidecar_raw(&data.sidecar)
+        .wrap_err("failed to convert payload to block for hash computation")?;
+    Ok(block.header.hash_slow())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip7928::{BalanceChange, CodeChange, NonceChange, StorageChange};
+    use alloy_primitives::{Address, U256};
+
+    #[test]
+    fn merge_block_access_list_offsets_and_merges_accounts() {
+        let shared = Address::repeat_byte(0x11);
+        let other = Address::repeat_byte(0x22);
+
+        let mut merged = vec![AccountChanges {
+            address: shared,
+            storage_changes: vec![SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(0, U256::from(10))],
+            )],
+            storage_reads: vec![U256::from(3)],
+            balance_changes: vec![BalanceChange::new(1, U256::from(100))],
+            nonce_changes: vec![NonceChange::new(2, 7)],
+            code_changes: vec![],
+        }];
+
+        let incoming = vec![
+            AccountChanges {
+                address: shared,
+                storage_changes: vec![
+                    SlotChanges::new(U256::from(1), vec![StorageChange::new(1, U256::from(20))]),
+                    SlotChanges::new(U256::from(2), vec![StorageChange::new(2, U256::from(30))]),
+                ],
+                storage_reads: vec![U256::from(4)],
+                balance_changes: vec![BalanceChange::new(0, U256::from(150))],
+                nonce_changes: vec![NonceChange::new(2, 8)],
+                code_changes: vec![CodeChange::new(1, Bytes::from_static(&[0xaa]))],
             },
-            transactions: transactions.to_vec(),
-            extra_data: None,
-        };
+            AccountChanges {
+                address: other,
+                storage_changes: vec![SlotChanges::new(
+                    U256::from(9),
+                    vec![StorageChange::new(0, U256::from(90))],
+                )],
+                storage_reads: vec![],
+                balance_changes: vec![],
+                nonce_changes: vec![],
+                code_changes: vec![],
+            },
+        ];
 
-        let total_tx_bytes: usize = transactions.iter().map(|tx| tx.len()).sum();
-        info!(
-            target: "reth-bench",
-            payload = index + 1,
-            tx_count = transactions.len(),
-            total_tx_bytes = total_tx_bytes,
-            parent_hash = %parent_hash,
-            "Sending to testing_buildBlockV1"
+        merge_block_access_list(&mut merged, incoming, 3, 0);
+
+        assert_eq!(merged.len(), 2);
+
+        let shared = &merged[0];
+        assert_eq!(shared.storage_reads, vec![U256::from(3), U256::from(4)]);
+        assert_eq!(
+            shared
+                .balance_changes
+                .iter()
+                .map(|change| change.block_access_index)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
         );
-        let envelope: ExecutionPayloadEnvelopeV5 =
-            testing_provider.client().request("testing_buildBlockV1", [request]).await?;
+        assert_eq!(
+            shared.nonce_changes.iter().map(|change| change.block_access_index).collect::<Vec<_>>(),
+            vec![2, 5]
+        );
+        assert_eq!(shared.code_changes[0].block_access_index, 4);
 
-        let v4_envelope = envelope.try_into_v4()?;
+        let slot_one = shared
+            .storage_changes
+            .iter()
+            .find(|slot_changes| slot_changes.slot == U256::from(1))
+            .unwrap();
+        assert_eq!(
+            slot_one.changes.iter().map(|change| change.block_access_index).collect::<Vec<_>>(),
+            vec![0, 4]
+        );
 
-        let inner = &v4_envelope.envelope_inner.execution_payload.payload_inner.payload_inner;
-        let block_hash = inner.block_hash;
-        let block_number = inner.block_number;
-        let timestamp = inner.timestamp;
-        let gas_used = inner.gas_used;
+        let slot_two = shared
+            .storage_changes
+            .iter()
+            .find(|slot_changes| slot_changes.slot == U256::from(2))
+            .unwrap();
+        assert_eq!(slot_two.changes[0].block_access_index, 5);
 
-        Ok(BuiltPayload { block_number, envelope: v4_envelope, block_hash, timestamp, gas_used })
+        let other = &merged[1];
+        assert_eq!(other.address, Address::repeat_byte(0x22));
+        assert_eq!(other.storage_changes[0].changes[0].block_access_index, 3);
     }
 
-    /// Save a payload to disk.
-    fn save_payload(&self, payload: &BuiltPayload) -> eyre::Result<()> {
-        let filename = format!("payload_block_{}.json", payload.block_number);
-        let filepath = self.output_dir.join(&filename);
-        let json = serde_json::to_string_pretty(&payload.envelope)?;
-        std::fs::write(&filepath, &json)
-            .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-        info!(target: "reth-bench", block_number = payload.block_number, block_hash = %payload.block_hash, path = %filepath.display(), "Payload saved");
-        Ok(())
-    }
+    #[test]
+    fn merge_account_changes_normalizes_storage_reads_after_cross_block_merge() {
+        let address = Address::repeat_byte(0x33);
+        const A: U256 = U256::from_limbs([1, 0, 0, 0]);
+        const B: U256 = U256::from_limbs([2, 0, 0, 0]);
+        const C: U256 = U256::from_limbs([3, 0, 0, 0]);
+        const D: U256 = U256::from_limbs([4, 0, 0, 0]);
 
-    async fn execute_payload_v4(
-        &self,
-        provider: &RootProvider<AnyNetwork>,
-        envelope: ExecutionPayloadEnvelopeV4,
-        parent_hash: B256,
-    ) -> eyre::Result<()> {
-        let block_hash =
-            envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
-
-        let status = provider
-            .new_payload_v4(
-                envelope.envelope_inner.execution_payload,
-                vec![],
-                B256::ZERO,
-                envelope.execution_requests.to_vec(),
-            )
-            .await?;
-
-        if !status.is_valid() {
-            return Err(eyre::eyre!("Payload rejected: {:?}", status));
-        }
-
-        let fcu_state = ForkchoiceState {
-            head_block_hash: block_hash,
-            safe_block_hash: parent_hash,
-            finalized_block_hash: parent_hash,
+        // Each AccountChanges value is valid on its own: storage slots only appear in
+        // either reads or changes. The invalid read/change overlap is introduced when
+        // these per-block BAL entries are merged for a standalone big block.
+        let mut existing = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges::new(A, vec![StorageChange::new(0, U256::from(10))])],
+            storage_reads: vec![B, C],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
         };
 
-        let fcu_result = provider.fork_choice_updated_v3(fcu_state, None).await?;
+        // B is read before it is written by the incoming block, and A is written before
+        // it appears as a read in the incoming block. C is read in both blocks, so the
+        // merge should also dedupe it. D remains read-only.
+        let incoming = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges::new(B, vec![StorageChange::new(1, U256::from(20))])],
+            storage_reads: vec![A, C, D],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
 
-        if !fcu_result.is_valid() {
-            return Err(eyre::eyre!("FCU rejected: {:?}", fcu_result));
-        }
+        merge_account_changes(&mut existing, incoming);
 
-        Ok(())
+        // Written slots remain represented by storage_changes, while storage_reads only
+        // keeps unique read-only slots in first-seen order.
+        assert_eq!(
+            existing
+                .storage_changes
+                .iter()
+                .map(|slot_changes| slot_changes.slot)
+                .collect::<Vec<_>>(),
+            vec![A, B]
+        );
+        assert_eq!(existing.storage_reads, vec![C, D]);
+        assert!(existing.storage_reads.iter().all(|read_slot| {
+            !existing.storage_changes.iter().any(|slot_changes| slot_changes.slot == *read_slot)
+        }));
     }
 }

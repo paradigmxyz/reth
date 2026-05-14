@@ -1,6 +1,6 @@
 //! Transaction submission functionality for the txpool tracing example
 #![allow(unused)]
-#![allow(clippy::too_many_arguments)]
+#![expect(clippy::too_many_arguments)]
 
 use alloy_network::{Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder};
 use alloy_primitives::{Address, TxHash, U256};

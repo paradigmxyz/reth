@@ -197,9 +197,14 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         self.historical.multiproof(input, targets)
     }
 
-    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        mut input: TrieInput,
+        target: HashedPostState,
+        mode: reth_trie::ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.witness(input, target)
+        self.historical.witness(input, target, mode)
     }
 }
 
@@ -222,26 +227,6 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
         }
 
         self.historical.storage(address, storage_key)
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        let hashed_address = keccak256(address);
-        let state = &self.trie_input().state;
-
-        if let Some(hs) = state.storages.get(&hashed_address) {
-            if let Some(value) = hs.storage.get(&hashed_storage_key) {
-                return Ok(Some(*value));
-            }
-            if hs.wiped {
-                return Ok(Some(StorageValue::ZERO));
-            }
-        }
-
-        self.historical.storage_by_hashed_key(address, hashed_storage_key)
     }
 }
 

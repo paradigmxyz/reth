@@ -91,6 +91,54 @@ impl Default for DefaultPruningValues {
     }
 }
 
+/// High-level pruning configuration profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneConfigKind {
+    /// Archive node with default pruning configuration.
+    Archive,
+    /// Full node pruning preset.
+    Full,
+    /// Minimal storage pruning preset.
+    Minimal,
+    /// Custom pruning configuration.
+    Custom,
+}
+
+impl PruneConfigKind {
+    /// Returns the string representation of the pruning profile.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Archive => "archive",
+            Self::Full => "full",
+            Self::Minimal => "minimal",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// Classifies an effective pruning configuration.
+    pub fn from_config<ChainSpec>(config: &PruneConfig, chain_spec: &ChainSpec) -> Self
+    where
+        ChainSpec: EthereumHardforks,
+    {
+        if config.is_default() {
+            return Self::Archive
+        }
+
+        let full_config = PruningArgs { full: true, ..Default::default() }.prune_config(chain_spec);
+        if full_config.as_ref() == Some(config) {
+            return Self::Full
+        }
+
+        let minimal_config =
+            PruningArgs { minimal: true, ..Default::default() }.prune_config(chain_spec);
+        if minimal_config.as_ref() == Some(config) {
+            return Self::Minimal
+        }
+
+        Self::Custom
+    }
+}
+
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Pruning")]
@@ -196,6 +244,11 @@ pub struct PruningArgs {
     /// pruned.
     #[arg(long = "prune.bodies.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
     pub bodies_before: Option<BlockNumber>,
+
+    /// Minimum pruning distance from the tip. This controls the safety margin for reorgs and
+    /// manual unwinds.
+    #[arg(long = "prune.minimum-distance", value_name = "BLOCKS")]
+    pub minimum_distance: Option<u64>,
 }
 
 impl PruningArgs {
@@ -220,7 +273,11 @@ impl PruningArgs {
                     .block_number()
                     .map(PruneMode::Before);
             }
-            config = PruneConfig { block_interval: config.block_interval, segments }
+            config = PruneConfig {
+                block_interval: config.block_interval,
+                segments,
+                minimum_pruning_distance: config.minimum_pruning_distance,
+            }
         }
 
         // If --minimal is set, use minimal storage mode with aggressive pruning.
@@ -228,12 +285,16 @@ impl PruningArgs {
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments: DefaultPruningValues::get_global().minimal_prune_modes.clone(),
+                minimum_pruning_distance: config.minimum_pruning_distance,
             }
         }
 
         // Override with any explicitly set prune.* flags.
         if let Some(block_interval) = self.block_interval {
             config.block_interval = block_interval as usize;
+        }
+        if let Some(distance) = self.minimum_distance {
+            config.minimum_pruning_distance = distance;
         }
         if let Some(mode) = self.sender_recovery_prune_mode() {
             config.segments.sender_recovery = Some(mode);
@@ -396,6 +457,7 @@ mod tests {
     use super::*;
     use alloy_primitives::address;
     use clap::Parser;
+    use reth_chainspec::MAINNET;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -418,6 +480,34 @@ mod tests {
             PruneMode::Before(5000000),
         );
         assert_eq!(args.receipts_log_filter, Some(config));
+    }
+
+    #[test]
+    fn pruning_config_kind_classifies_presets() {
+        let chain_spec = MAINNET.as_ref();
+
+        assert_eq!(
+            PruneConfigKind::from_config(&PruneConfig::default(), chain_spec),
+            PruneConfigKind::Archive
+        );
+
+        let full_config =
+            PruningArgs { full: true, ..Default::default() }.prune_config(chain_spec).unwrap();
+        assert_eq!(PruneConfigKind::from_config(&full_config, chain_spec), PruneConfigKind::Full);
+
+        let minimal_config =
+            PruningArgs { minimal: true, ..Default::default() }.prune_config(chain_spec).unwrap();
+        assert_eq!(
+            PruneConfigKind::from_config(&minimal_config, chain_spec),
+            PruneConfigKind::Minimal
+        );
+
+        let mut custom_config = full_config;
+        custom_config.block_interval += 1;
+        assert_eq!(
+            PruneConfigKind::from_config(&custom_config, chain_spec),
+            PruneConfigKind::Custom
+        );
     }
 
     #[test]

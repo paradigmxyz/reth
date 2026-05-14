@@ -11,10 +11,6 @@ use std::time::Duration;
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.proof_task")]
 pub struct ProofTaskTrieMetrics {
-    /// A histogram for the number of blinded account nodes fetched.
-    blinded_account_nodes: Histogram,
-    /// A histogram for the number of blinded storage nodes fetched.
-    blinded_storage_nodes: Histogram,
     /// Histogram for storage worker idle time in seconds (waiting for proof jobs).
     storage_worker_idle_time_seconds: Histogram,
     /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
@@ -28,19 +24,13 @@ pub struct ProofTaskTrieMetrics {
     deferred_encoder_sync: Histogram,
     /// Histogram for dispatched storage proofs that fell back to sync due to missing root.
     deferred_encoder_dispatched_missing_root: Histogram,
+    /// Histogram for time account workers spent blocked waiting for storage proof results
+    /// (seconds). This is the portion of account worker idle time attributable to storage
+    /// worker latency rather than queue wait.
+    account_worker_storage_wait_seconds: Histogram,
 }
 
 impl ProofTaskTrieMetrics {
-    /// Record account nodes fetched.
-    pub fn record_account_nodes(&self, count: usize) {
-        self.blinded_account_nodes.record(count as f64);
-    }
-
-    /// Record storage nodes fetched.
-    pub fn record_storage_nodes(&self, count: usize) {
-        self.blinded_storage_nodes.record(count as f64);
-    }
-
     /// Record storage worker idle time.
     pub fn record_storage_worker_idle_time(&self, duration: Duration) {
         self.storage_worker_idle_time_seconds.record(duration.as_secs_f64());
@@ -51,13 +41,14 @@ impl ProofTaskTrieMetrics {
         self.account_worker_idle_time_seconds.record(duration.as_secs_f64());
     }
 
-    /// Record value encoder stats (deferred encoder variant counts).
+    /// Record value encoder stats (deferred encoder variant counts and storage wait time).
     pub(crate) fn record_value_encoder_stats(&self, stats: &ValueEncoderStats) {
         self.deferred_encoder_dispatched.record(stats.dispatched_count as f64);
         self.deferred_encoder_from_cache.record(stats.from_cache_count as f64);
         self.deferred_encoder_sync.record(stats.sync_count as f64);
         self.deferred_encoder_dispatched_missing_root
             .record(stats.dispatched_missing_root_count as f64);
+        self.account_worker_storage_wait_seconds.record(stats.storage_wait_time.as_secs_f64());
     }
 }
 

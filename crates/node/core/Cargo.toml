@@ -41,7 +41,7 @@ reth-engine-primitives.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt"] }
+alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt-aws-lc-rs"] }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
@@ -59,7 +59,6 @@ url.workspace = true
 ipnet.workspace = true
 # io
 dirs-next.workspace = true
-shellexpand.workspace = true
 
 # obs
 tracing.workspace = true
@@ -92,13 +91,7 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 # Debug recording for sparse trie mutations
-trie-debug = []
-
-# Route supported tables to RocksDB instead of MDBX
-rocksdb = ["reth-storage-api/rocksdb"]
-
-# Marker feature for edge/unstable builds - enables rocksdb and sets v2 defaults
-edge = ["rocksdb"]
+trie-debug = ["reth-engine-primitives/trie-debug"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

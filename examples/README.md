@@ -28,9 +28,11 @@ See examples in a [dedicated repository](https://github.com/paradigmxyz/reth-exe
 
 ## RPC
 
-| Example                 | Description                                                                 |
-| ----------------------- | --------------------------------------------------------------------------- |
-| [DB over RPC](./rpc-db) | Illustrates how to run a standalone RPC server over a Reth database instance |
+| Example                                                             | Description                                                                                     |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [Custom auth HTTP middleware](./custom-auth-http-middleware)         | Illustrates how to add HTTP transport middleware to the auth server for path-based request proxy |
+| [Custom RPC middleware](./custom-rpc-middleware)                     | Illustrates how to add JSON-RPC layer middleware that alters RPC error responses                 |
+| [DB over RPC](./rpc-db)                                             | Illustrates how to run a standalone RPC server over a Reth database instance                    |
 
 ## Database
 

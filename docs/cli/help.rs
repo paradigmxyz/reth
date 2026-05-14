@@ -11,6 +11,7 @@ use clap::Parser;
 use regex::Regex;
 use std::{
     borrow::Cow,
+    collections::HashSet,
     fmt, fs, io,
     iter::once,
     path::{Path, PathBuf},
@@ -84,6 +85,41 @@ fn write_file(file_path: &Path, content: &str) -> io::Result<()> {
     fs::write(file_path, content)
 }
 
+/// Recursively collects all `.mdx` files in a directory.
+fn collect_mdx_files(dir: &Path) -> HashSet<PathBuf> {
+    let mut files = HashSet::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(collect_mdx_files(&path));
+            } else if path.extension().is_some_and(|ext| ext == "mdx") {
+                files.insert(path);
+            }
+        }
+    }
+    files
+}
+
+/// Recursively removes empty directories under `dir`.
+fn remove_empty_dirs(dir: &Path) -> io::Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            remove_empty_dirs(&path)?;
+            // Remove the directory if it's now empty.
+            if fs::read_dir(&path)?.next().is_none() {
+                println!("  Removing empty directory: {}", path.display());
+                fs::remove_dir(&path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     let args = Args::parse();
     debug_assert!(args.commands.len() >= 1);
@@ -114,25 +150,49 @@ fn main() -> io::Result<()> {
         output.push((cmd, stdout));
     }
 
+    // Collect existing .mdx files that were previously generated so we can detect stale ones.
+    // Only consider files within command subdirectories and known generated top-level files.
+    let mut existing_files = HashSet::new();
+    for (cmd, _) in &output {
+        let cmd_name = cmd.command_name();
+        // Collect the top-level command file (e.g. reth.mdx)
+        let top_level = out_dir.join(cmd_name).with_extension("mdx");
+        if top_level.exists() {
+            existing_files.insert(top_level);
+        }
+        // Collect all .mdx files in the command's subdirectory (e.g. reth/)
+        existing_files.extend(collect_mdx_files(&out_dir.join(cmd_name)));
+    }
+    // Also track SUMMARY.mdx
+    let summary_file = out_dir.join("SUMMARY.mdx");
+    if summary_file.exists() {
+        existing_files.insert(summary_file);
+    }
+    let mut written_files: HashSet<PathBuf> = HashSet::new();
+
     // Generate markdown files.
     for (cmd, stdout) in &output {
-        cmd_markdown(&out_dir, cmd, stdout)?;
+        let path = cmd_markdown(&out_dir, cmd, stdout)?;
+        written_files.insert(path);
     }
 
     // Generate SUMMARY.mdx.
     let summary: String =
         output.iter().map(|(cmd, _)| cmd_summary(cmd, 0)).chain(once("\n".to_string())).collect();
 
+    let summary_path = out_dir.join("SUMMARY.mdx");
     println!("Writing SUMMARY.mdx to \"{}\"", out_dir.to_string_lossy());
-    write_file(&out_dir.join("SUMMARY.mdx"), &summary)?;
+    write_file(&summary_path, &summary)?;
+    written_files.insert(summary_path);
 
     // Generate README.md.
     if args.readme {
-        let path = &out_dir.join("README.mdx");
+        let path = out_dir.join("README.mdx");
         if args.verbose {
-            println!("Writing README.mdx to \"{}\"", path.to_string_lossy());
+            println!("Writing README.mdx to \"{}\"", path.display());
         }
-        write_file(path, README)?;
+        write_file(&path, README)?;
+        written_files.insert(path);
     }
 
     // Generate root SUMMARY.mdx.
@@ -157,6 +217,17 @@ fn main() -> io::Result<()> {
             println!("Generating TypeScript sidebar files in \"{}\"", vocs_dir.display());
         }
         generate_sidebar_files(&vocs_dir, &output, args.verbose)?;
+    }
+
+    // Remove stale .mdx files that were not regenerated.
+    let stale_files: Vec<_> = existing_files.difference(&written_files).collect();
+    if !stale_files.is_empty() {
+        println!("Removing {} stale file(s):", stale_files.len());
+        for file in &stale_files {
+            println!("  - {}", file.display());
+            fs::remove_file(file)?;
+        }
+        remove_empty_dirs(&out_dir)?;
     }
 
     Ok(())
@@ -212,15 +283,16 @@ fn parse_sub_commands(s: &str) -> Vec<String> {
         .unwrap_or_default() // Return an empty Vec if "Commands:" was not found
 }
 
-/// Writes the markdown for a command to out_dir.
-fn cmd_markdown(out_dir: &Path, cmd: &Cmd, stdout: &str) -> io::Result<()> {
+/// Writes the markdown for a command to out_dir. Returns the path of the written file.
+fn cmd_markdown(out_dir: &Path, cmd: &Cmd, stdout: &str) -> io::Result<PathBuf> {
     let out = format!("# {}\n\n{}", cmd, help_markdown(cmd, stdout));
 
     let out_path = out_dir.join(cmd.to_string().replace(" ", "/"));
     fs::create_dir_all(out_path.parent().unwrap())?;
-    write_file(&out_path.with_extension("mdx"), &out)?;
+    let file_path = out_path.with_extension("mdx");
+    write_file(&file_path, &out)?;
 
-    Ok(())
+    Ok(file_path)
 }
 
 /// Returns the markdown for a command's help output.

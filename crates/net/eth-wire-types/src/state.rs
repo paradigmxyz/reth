@@ -3,12 +3,23 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -19,7 +30,17 @@ pub struct GetNodeData(pub Vec<B256>);
 ///
 /// Not all nodes are guaranteed to be returned by the peer.
 /// This message was removed in `eth/67`.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]

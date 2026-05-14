@@ -4,12 +4,12 @@
 //! the consensus client.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::RequestsOrHash,
     BlockId, BlockNumberOrTag,
 };
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, BlockHash, Bytes, B128, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
@@ -21,6 +21,7 @@ use alloy_rpc_types_eth::{
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+use serde_json::Value;
 
 /// Helper trait for the engine api server.
 ///
@@ -121,6 +122,20 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Post Amsterdam forkchoice update handler
+    ///
+    /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
+    /// `slotNumber` field in the `payloadAttributes`, if payload attributes
+    /// are provided.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    #[method(name = "forkchoiceUpdatedV4")]
+    async fn fork_choice_updated_v4(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
@@ -309,6 +324,20 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>>;
+
+    /// Fetch blob cells for the consensus layer from the blob store.
+    ///
+    /// Returns a response of the same length as the request. Missing blobs are returned as `null`
+    /// elements; missing requested cells within an available blob are returned as `null` cell and
+    /// proof entries.
+    ///
+    /// Returns `null` if syncing.
+    #[method(name = "getBlobsV4")]
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
@@ -378,4 +407,23 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
+
+    /// Returns the EIP-7928 block access list for a block by hash.
+    #[method(name = "getBlockAccessListByBlockHash")]
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a block by number.
+    #[method(name = "getBlockAccessListByBlockNumber")]
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a block by block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list bytes for a block by number.
+    #[method(name = "getBlockAccessListRaw")]
+    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }

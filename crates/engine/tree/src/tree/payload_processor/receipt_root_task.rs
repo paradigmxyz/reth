@@ -12,6 +12,9 @@ use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
+use tracing::debug_span;
+
+const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -65,9 +68,16 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
     pub fn run(self, receipts_len: usize) {
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor",
+            "receipt_root",
+            receipts_len,
+        )
+        .entered();
+
         let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
         let mut aggregated_bloom = Bloom::ZERO;
-        let mut encode_buf = Vec::new();
+        let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut received_count = 0usize;
 
         for indexed_receipt in self.receipt_rx {

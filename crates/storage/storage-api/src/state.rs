@@ -41,25 +41,10 @@ pub trait StateProvider:
     + HashedPostStateProvider
 {
     /// Get storage of given account.
-    ///
-    /// When `use_hashed_state` is enabled, the `account` and `storage_key` are hashed internally
-    /// before lookup. Callers must pass **unhashed** (plain) values.
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>>;
-
-    /// Get storage using a pre-hashed storage key.
-    ///
-    /// Unlike [`Self::storage`], `hashed_storage_key` must already be keccak256-hashed.
-    /// The `address` remains unhashed (plain) since history indices are keyed by plain address.
-    /// This is used when changeset keys are pre-hashed (e.g., `use_hashed_state` mode)
-    /// to avoid double-hashing.
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
     /// Get account code by its address.

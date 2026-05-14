@@ -1,9 +1,14 @@
-use super::helpers::{load_jwt_secret, read_input};
-use alloy_provider::network::AnyRpcBlock;
+use super::helpers::{fetch_block_access_list, load_jwt_secret, read_input};
+use alloy_consensus::TxEnvelope;
+use alloy_primitives::Bytes;
+use alloy_provider::{
+    network::{AnyNetwork, AnyRpcBlock},
+    RootProvider,
+};
+use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
-use op_alloy_consensus::OpTxEnvelope;
 use reth_cli_runner::CliContext;
 use std::io::Write;
 
@@ -64,11 +69,13 @@ impl Command {
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
             .into_inner()
             .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-            .try_map_transactions(|tx| {
-                // try to convert unknowns into op type so that we can also support optimism
-                tx.try_into_either::<OpTxEnvelope>()
+            .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
             })?
             .into_consensus();
+
+        let use_v4 = block.header.requests_hash.is_some();
+        let use_v5 = block.header.block_access_list_hash.is_some();
 
         // Extract parent beacon block root
         let parent_beacon_block_root = block.header.parent_beacon_block_root;
@@ -77,10 +84,14 @@ impl Command {
         let blob_versioned_hashes =
             block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
 
-        // Convert to execution payload
-        let execution_payload = ExecutionPayload::from_block_slow(&block).0;
-
-        let use_v4 = block.header.requests_hash.is_some();
+        // V5 payloads must carry the full RLP-encoded block access list, not just the hash stored
+        // in the header.
+        let execution_payload = if use_v5 {
+            let encoded_bal = self.fetch_encoded_block_access_list(block.header.number).await?;
+            ExecutionPayload::from_block_slow_with_bal(&block, encoded_bal).0
+        } else {
+            ExecutionPayload::from_block_slow(&block).0
+        };
 
         // Create JSON request data
         let json_request = if use_v4 {
@@ -103,7 +114,13 @@ impl Command {
             Mode::Execute => {
                 // Create cast command
                 let mut command = std::process::Command::new("cast");
-                let method = if use_v4 { "engine_newPayloadV4" } else { "engine_newPayloadV3" };
+                let method = if use_v5 {
+                    "engine_newPayloadV5"
+                } else if use_v4 {
+                    "engine_newPayloadV4"
+                } else {
+                    "engine_newPayloadV3"
+                };
                 command.arg("rpc").arg(method).arg("--raw");
                 if let Some(rpc_url) = self.rpc_url {
                     command.arg("--rpc-url").arg(rpc_url);
@@ -146,5 +163,18 @@ impl Command {
         }
 
         Ok(())
+    }
+
+    async fn fetch_encoded_block_access_list(&self, block_number: u64) -> Result<Bytes> {
+        let rpc_url = self
+            .rpc_url
+            .as_deref()
+            .ok_or_eyre("--rpc-url is required to fetch the block access list for V5 payloads")?;
+        let client = ClientBuilder::default()
+            .layer(alloy_transport::layers::RetryBackoffLayer::new(10, 800, u64::MAX))
+            .http(rpc_url.parse()?);
+        let provider = RootProvider::<AnyNetwork>::new(client);
+        let bal = fetch_block_access_list(&provider, block_number).await?;
+        Ok(alloy_rlp::encode(bal).into())
     }
 }

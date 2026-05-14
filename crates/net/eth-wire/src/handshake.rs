@@ -1,6 +1,6 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    ethstream::MAX_MESSAGE_SIZE,
+    message::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};

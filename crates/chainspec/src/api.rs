@@ -132,6 +132,6 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
     }
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
-        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+        self.get_final_paris_total_difficulty()
     }
 }

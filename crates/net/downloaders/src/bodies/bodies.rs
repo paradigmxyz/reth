@@ -14,7 +14,7 @@ use reth_network_p2p::{
     },
     error::{DownloadError, DownloadResult},
 };
-use reth_primitives_traits::{size::InMemorySize, Block, SealedHeader};
+use reth_primitives_traits::{Block, InMemorySize, SealedHeader};
 use reth_storage_api::HeaderProvider;
 use reth_tasks::Runtime;
 use std::{

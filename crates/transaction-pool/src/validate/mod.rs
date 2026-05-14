@@ -369,6 +369,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.max_fee_per_gas()
     }
 
+    /// Returns the EIP-1559 Max priority fee the caller is willing to pay, or `None` for
+    /// non-EIP-1559 transactions.
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.transaction.max_priority_fee_per_gas()
+    }
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
@@ -449,9 +455,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         //
         // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
         let price_bump = price_bumps.price_bump(self.tx_type());
+        let required_bumped_fee =
+            |existing_fee: u128| existing_fee.saturating_mul(100 + price_bump).div_ceil(100);
 
         // Check if the max fee per gas is underpriced.
-        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
+        if maybe_replacement.max_fee_per_gas() < required_bumped_fee(self.max_fee_per_gas()) {
             return true
         }
 
@@ -464,7 +472,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         if existing_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas <
-                existing_max_priority_fee_per_gas * (100 + price_bump) / 100
+                required_bumped_fee(existing_max_priority_fee_per_gas)
         {
             return true
         }
@@ -474,8 +482,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
             // This enforces that blob txs can only be replaced by blob txs
             let replacement_max_blob_fee_per_gas =
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
-            if replacement_max_blob_fee_per_gas <
-                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
+            if replacement_max_blob_fee_per_gas < required_bumped_fee(existing_max_blob_fee_per_gas)
             {
                 return true
             }

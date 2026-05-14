@@ -46,3 +46,6 @@ impl reth_codecs::Compact for StorageBeforeTx {
         (Self { address, key, value }, out)
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StorageBeforeTx);

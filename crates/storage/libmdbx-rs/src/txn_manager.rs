@@ -100,7 +100,7 @@ impl TxnManager {
                                 .send({
                                     let mut latency = CommitLatency::new();
                                     mdbx_result(unsafe {
-                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
+                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdbx_commit_latency())
                                     })
                                     .map(|v| (v, latency))
                                 })

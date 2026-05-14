@@ -3,8 +3,12 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
+// Required for "override_allocator_on_supported_platforms".
+#[cfg(all(feature = "jemalloc", unix))]
+use reth_cli_util::allocator::tikv_jemalloc_sys as _;
+
 #[cfg(all(feature = "jemalloc-prof", unix))]
-#[unsafe(export_name = "_rjem_malloc_conf")]
+#[unsafe(export_name = "malloc_conf")]
 static MALLOC_CONF: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
 use clap::Parser;

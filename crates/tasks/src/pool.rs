@@ -8,7 +8,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     task::{ready, Context, Poll},
     thread,
@@ -168,27 +168,52 @@ thread_local! {
 ///
 /// The pool supports multiple init/clear cycles, allowing reuse of the same threads with
 /// different state configurations.
+///
+/// The underlying rayon pool is created lazily on first access.
 #[derive(Debug)]
 pub struct WorkerPool {
-    pool: rayon::ThreadPool,
+    pool: OnceLock<rayon::ThreadPool>,
+    num_threads: usize,
+    thread_name_prefix: &'static str,
 }
 
 impl WorkerPool {
-    /// Creates a new `WorkerPool` with the given number of threads.
-    pub fn new(num_threads: usize) -> Result<Self, rayon::ThreadPoolBuildError> {
-        Self::from_builder(rayon::ThreadPoolBuilder::new().num_threads(num_threads))
+    /// Creates a new lazy `WorkerPool` with the given number of threads and a thread name prefix.
+    ///
+    /// The underlying rayon pool is not created until the first method that requires it is called.
+    /// Thread names follow the pattern `"{prefix}-{index:02}"`.
+    pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
+        Self { pool: OnceLock::new(), num_threads, thread_name_prefix }
     }
 
-    /// Creates a new `WorkerPool` from a [`rayon::ThreadPoolBuilder`].
-    pub fn from_builder(
-        builder: rayon::ThreadPoolBuilder,
-    ) -> Result<Self, rayon::ThreadPoolBuildError> {
-        Ok(Self { pool: builder.build()? })
+    /// Returns a reference to the underlying rayon pool, creating it on first access.
+    fn pool(&self) -> &rayon::ThreadPool {
+        self.pool.get_or_init(|| {
+            let prefix = self.thread_name_prefix;
+            build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(self.num_threads)
+                    .thread_name(move |i| format!("{prefix}-{i:02}")),
+            )
+            .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
+        })
+    }
+
+    /// Returns `true` if the underlying rayon pool has been initialized.
+    pub fn is_initialized(&self) -> bool {
+        self.pool.get().is_some()
     }
 
     /// Returns the total number of threads in the underlying rayon pool.
     pub fn current_num_threads(&self) -> usize {
-        self.pool.current_num_threads()
+        self.pool().current_num_threads()
+    }
+
+    /// Initializes per-thread [`Worker`] state on every thread in the pool.
+    pub fn init<T: 'static>(&self, f: impl Fn(Option<&mut T>) -> T + Sync) {
+        self.broadcast(self.pool().current_num_threads(), |worker| {
+            worker.init::<T>(&f);
+        });
     }
 
     /// Runs a closure on `num_threads` threads in the pool, giving mutable access to each
@@ -197,14 +222,14 @@ impl WorkerPool {
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
-        if num_threads >= self.pool.current_num_threads() {
+        if num_threads >= self.pool().current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
-            self.pool.broadcast(|_| {
+            self.pool().broadcast(|_| {
                 WORKER.with_borrow_mut(|worker| f(worker));
             });
         } else {
             let remaining = AtomicUsize::new(num_threads);
-            self.pool.broadcast(|_| {
+            self.pool().broadcast(|_| {
                 // Atomically claim a slot; threads that can't decrement skip the closure.
                 let mut current = remaining.load(Ordering::Relaxed);
                 loop {
@@ -228,7 +253,7 @@ impl WorkerPool {
 
     /// Clears the state on every thread in the pool.
     pub fn clear(&self) {
-        self.pool.broadcast(|_| {
+        self.pool().broadcast(|_| {
             WORKER.with_borrow_mut(Worker::clear);
         });
     }
@@ -239,7 +264,7 @@ impl WorkerPool {
     /// Each thread can access its own [`Worker`] via the provided reference or through additional
     /// [`WorkerPool::with_worker`] calls.
     pub fn install<R: Send>(&self, f: impl FnOnce(&Worker) -> R + Send) -> R {
-        self.pool.install(|| WORKER.with_borrow(|worker| f(worker)))
+        self.pool().install(|| WORKER.with_borrow(|worker| f(worker)))
     }
 
     /// Runs a closure on the pool without worker state access.
@@ -247,12 +272,19 @@ impl WorkerPool {
     /// Like [`install`](Self::install) but for closures that don't need per-thread [`Worker`]
     /// state.
     pub fn install_fn<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
-        self.pool.install(f)
+        self.pool().install(f)
     }
 
     /// Spawns a closure on the pool.
     pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
-        self.pool.spawn(f);
+        self.pool().spawn(f);
+    }
+
+    /// Executes `f` on this pool using [`rayon::in_place_scope`], which converts the calling
+    /// thread into a worker for the duration — tasks spawned inside the scope run on the pool
+    /// and the call blocks until all of them complete.
+    pub fn in_place_scope<'scope, R>(&self, f: impl FnOnce(&rayon::Scope<'scope>) -> R) -> R {
+        self.pool().in_place_scope(f)
     }
 
     /// Access the current thread's [`Worker`] from within an [`install`](Self::install) closure.
@@ -262,6 +294,21 @@ impl WorkerPool {
     pub fn with_worker<R>(f: impl FnOnce(&Worker) -> R) -> R {
         WORKER.with_borrow(|worker| f(worker))
     }
+
+    /// Mutably access the current thread's [`Worker`] from within a pool closure.
+    pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
+        WORKER.with_borrow_mut(|worker| f(worker))
+    }
+}
+
+/// Builds a rayon thread pool with a panic handler that prevents aborting the process.
+///
+/// Rust's default panic hook already logs the panic message and backtrace to stderr, so the handler
+/// itself is intentionally a no-op.
+pub fn build_pool_with_panic_handler(
+    builder: rayon::ThreadPoolBuilder,
+) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    builder.panic_handler(|_| {}).build()
 }
 
 /// Per-thread state container for a [`WorkerPool`].
@@ -312,6 +359,31 @@ impl Worker {
             .expect("worker state type mismatch")
     }
 
+    /// Returns a mutable reference to the state, downcasted to `T`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the worker has not been initialized or if the type does not match.
+    pub fn get_mut<T: 'static>(&mut self) -> &mut T {
+        self.state
+            .as_mut()
+            .expect("worker not initialized")
+            .downcast_mut::<T>()
+            .expect("worker state type mismatch")
+    }
+
+    /// Returns a mutable reference to the state, initializing it with `f` on first access.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the state was previously initialized with a different type.
+    pub fn get_or_init<T: 'static>(&mut self, f: impl FnOnce() -> T) -> &mut T {
+        self.state
+            .get_or_insert_with(|| Box::new(f()))
+            .downcast_mut::<T>()
+            .expect("worker state type mismatch")
+    }
+
     /// Clears the worker state, dropping the contained value.
     pub fn clear(&mut self) {
         self.state = None;
@@ -342,7 +414,7 @@ mod tests {
 
     #[test]
     fn worker_pool_init_and_access() {
-        let pool = WorkerPool::new(2).unwrap();
+        let pool = WorkerPool::new(2, "test");
 
         pool.broadcast(2, |worker| {
             worker.init::<Vec<u8>>(|_| vec![1, 2, 3]);
@@ -359,7 +431,7 @@ mod tests {
 
     #[test]
     fn worker_pool_reinit_reuses_resources() {
-        let pool = WorkerPool::new(1).unwrap();
+        let pool = WorkerPool::new(1, "test");
 
         pool.broadcast(1, |worker| {
             worker.init::<Vec<u8>>(|existing| {
@@ -385,7 +457,7 @@ mod tests {
 
     #[test]
     fn worker_pool_clear_and_reinit() {
-        let pool = WorkerPool::new(1).unwrap();
+        let pool = WorkerPool::new(1, "test");
 
         pool.broadcast(1, |worker| {
             worker.init::<u64>(|_| 42);
@@ -408,7 +480,7 @@ mod tests {
     fn worker_pool_par_iter_with_worker() {
         use rayon::prelude::*;
 
-        let pool = WorkerPool::new(2).unwrap();
+        let pool = WorkerPool::new(2, "test");
 
         pool.broadcast(2, |worker| {
             worker.init::<u64>(|_| 10);

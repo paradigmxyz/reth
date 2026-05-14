@@ -42,7 +42,9 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
+use reth_db_common::init::{
+    init_genesis_with_settings, init_genesis_with_settings_and_validate, InitStorageError,
+};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -51,7 +53,7 @@ use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::{
-    args::DefaultEraHost,
+    args::{DefaultEraHost, PruneConfigKind},
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::BlockHeader,
@@ -62,13 +64,14 @@ use reth_node_metrics::{
     hooks::Hooks,
     recorder::install_prometheus_recorder,
     server::{MetricServer, MetricServerConfig},
+    storage::StorageSettingsInfo,
     version::VersionInfo,
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, InMemoryBalStore, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -167,8 +170,9 @@ impl LaunchContext {
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
-        // Update the config with the command line arguments
-        toml_config.peers.trusted_nodes_only = config.network.trusted_only;
+        // Update the config with the command line arguments. Only override when the CLI flag is
+        // set, so the TOML value is preserved when the flag is not passed.
+        toml_config.peers.trusted_nodes_only |= config.network.trusted_only;
 
         // Merge static file CLI arguments with config file, giving priority to CLI
         toml_config.static_files =
@@ -195,7 +199,7 @@ impl LaunchContext {
                 should_save = true;
             }
         } else if !reth_config.prune.is_default() {
-            warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
+            info!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
 
         if should_save {
@@ -472,6 +476,7 @@ where
     pub async fn create_provider_factory<N, Evm>(
         &self,
         changeset_cache: ChangesetCache,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
@@ -489,13 +494,26 @@ where
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        // Initialize RocksDB provider with metrics, statistics, and default tables
-        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
-            .with_default_tables()
-            .with_metrics()
-            .with_statistics()
-            .build()?;
+        // Use the provided RocksDB provider or create a new one
+        let rocksdb_provider = if let Some(provider) = rocksdb_provider {
+            provider
+        } else {
+            RocksDBProvider::builder(self.data_dir().rocksdb())
+                .with_default_tables()
+                .with_metrics()
+                .with_statistics()
+                .build()?
+        };
 
+        let prune_config = self.prune_config();
+        let balstore_cache_size = self
+            .node_config()
+            .db
+            .balstore_cache_size
+            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
+        ));
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -503,8 +521,10 @@ where
             rocksdb_provider,
             self.task_executor().clone(),
         )?
-        .with_prune_modes(self.prune_modes())
-        .with_changeset_cache(changeset_cache);
+        .with_prune_modes(prune_config.segments)
+        .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
+        .with_changeset_cache(changeset_cache)
+        .with_bal_store(bal_store);
 
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
@@ -557,13 +577,10 @@ where
             let (tx, rx) = oneshot::channel();
 
             // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking_task(
-                "pipeline task",
-                Box::pin(async move {
-                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
-                    let _ = tx.send(result);
-                }),
-            );
+            self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
+                let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                let _ = tx.send(result);
+            });
             rx.await?.inspect_err(|err| {
                 error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
@@ -576,12 +593,14 @@ where
     pub async fn with_provider_factory<N, Evm>(
         self,
         changeset_cache: ChangesetCache,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory::<N, Evm>(changeset_cache).await?;
+        let factory =
+            self.create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -613,18 +632,36 @@ where
     /// This launches the prometheus endpoint.
     ///
     /// Convenience function to [`Self::start_prometheus_endpoint`]
-    pub async fn with_prometheus_server(self) -> eyre::Result<Self> {
+    pub async fn with_prometheus_server(self) -> eyre::Result<Self>
+    where
+        T::ChainSpec: EthereumHardforks,
+    {
         self.start_prometheus_endpoint().await?;
         Ok(self)
     }
 
     /// Starts the prometheus endpoint.
-    pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()> {
+    pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()>
+    where
+        T::ChainSpec: EthereumHardforks,
+    {
         // ensure recorder runs upkeep periodically
         install_prometheus_recorder().spawn_upkeep();
 
         let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
+            let prune_config = self.prune_config();
+            let pruning_mode =
+                PruneConfigKind::from_config(&prune_config, self.chain_spec().as_ref()).as_str();
+            // On existing databases, stored settings are authoritative and already cached by the
+            // provider factory. Fresh databases do not have storage metadata until genesis is
+            // initialized, so report the configured setting during this pre-genesis startup window.
+            let storage_settings =
+                if self.provider_factory().get_stage_checkpoint(StageId::Headers)?.is_some() {
+                    self.provider_factory().cached_storage_settings()
+                } else {
+                    self.node_config().storage_settings()
+                };
             let config = MetricServerConfig::new(
                 addr,
                 VersionInfo {
@@ -640,6 +677,12 @@ where
                 metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),
             )
+            .with_storage_settings_info(StorageSettingsInfo {
+                storage_v2: storage_settings.storage_v2,
+                pruning_mode,
+                prune_config: serde_json::to_string(&prune_config)
+                    .expect("serializing PruneConfig should not fail"),
+            })
             .with_push_gateway(
                 self.node_config().metrics.push_gateway_url.clone(),
                 self.node_config().metrics.push_gateway_interval,
@@ -653,7 +696,11 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())?;
+        init_genesis_with_settings_and_validate(
+            self.provider_factory(),
+            self.node_config().storage_settings(),
+            !self.node_config().debug.skip_genesis_validation,
+        )?;
         Ok(self)
     }
 
@@ -1006,7 +1053,7 @@ where
     }
 
     /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub async fn launch_exex(
         &self,
         installed_exex: Vec<(
@@ -1028,7 +1075,7 @@ where
     ///     .launch()
     ///     .await
     /// ```
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn exex_launcher(
         &self,
         installed_exex: Vec<(
@@ -1105,7 +1152,7 @@ where
         // If engine events are provided, spawn listener for new payload reporting
         let ethstats_for_events = ethstats.clone();
         let task_executor = self.task_executor().clone();
-        task_executor.spawn_task(Box::pin(async move {
+        task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
@@ -1128,10 +1175,10 @@ where
                     }
                 }
             }
-        }));
+        });
 
         // Spawn main ethstats service
-        task_executor.spawn_task(Box::pin(async move { ethstats.run().await }));
+        task_executor.spawn_task(async move { ethstats.run().await });
 
         Ok(())
     }
@@ -1306,6 +1353,7 @@ mod tests {
                     bodies_distance: None,
                     receipts_log_filter: None,
                     bodies_before: None,
+                    minimum_distance: None,
                 },
                 ..NodeConfig::test()
             };

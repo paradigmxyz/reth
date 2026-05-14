@@ -16,9 +16,9 @@ mod metrics;
 mod writer_tests;
 
 use reth_nippy_jar::NippyJar;
-use reth_static_file_types::{SegmentHeader, StaticFileSegment};
+use reth_static_file_types::{ChangesetOffsetReader, SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::{ops::Deref, sync::Arc};
+use std::{io, ops::Deref, sync::Arc};
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> =
@@ -29,6 +29,7 @@ type LoadedJarRef<'a> =
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
     mmap_handle: Arc<reth_nippy_jar::DataReader>,
+    csoff_reader: Option<ChangesetOffsetReader>,
 }
 
 impl LoadedJar {
@@ -36,7 +37,20 @@ impl LoadedJar {
         match jar.open_data_reader() {
             Ok(data_reader) => {
                 let mmap_handle = Arc::new(data_reader);
-                Ok(Self { jar, mmap_handle })
+
+                let csoff_reader = if jar.user_header().segment().is_change_based() {
+                    let csoff_path = jar.data_path().with_extension("csoff");
+                    let len = jar.user_header().changeset_offsets_len();
+                    match ChangesetOffsetReader::new(&csoff_path, len) {
+                        Ok(reader) => Some(reader),
+                        Err(err) if err.kind() == io::ErrorKind::NotFound && len == 0 => None,
+                        Err(err) => return Err(ProviderError::other(err)),
+                    }
+                } else {
+                    None
+                };
+
+                Ok(Self { jar, mmap_handle, csoff_reader })
             }
             Err(e) => Err(ProviderError::other(e)),
         }
@@ -54,6 +68,11 @@ impl LoadedJar {
     /// Returns the total size of the data and offsets files (from the in-memory mmap).
     fn size(&self) -> usize {
         self.mmap_handle.size() + self.mmap_handle.offsets_size()
+    }
+
+    /// Returns a reference to the cached changeset offset reader.
+    const fn csoff_reader(&self) -> Option<&ChangesetOffsetReader> {
+        self.csoff_reader.as_ref()
     }
 }
 
@@ -1170,13 +1189,13 @@ mod tests {
             let result = sf_rw.get_storage_before_block(0, test_address, test_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key.as_b256(), test_key);
+            assert_eq!(entry.key, test_key);
             assert_eq!(entry.value, U256::ZERO);
 
             let result = sf_rw.get_storage_before_block(2, test_address, test_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key.as_b256(), test_key);
+            assert_eq!(entry.key, test_key);
             assert_eq!(entry.value, U256::from(9));
 
             let result = sf_rw.get_storage_before_block(1, test_address, test_key).unwrap();
@@ -1188,7 +1207,7 @@ mod tests {
             let result = sf_rw.get_storage_before_block(1, other_address, other_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key.as_b256(), other_key);
+            assert_eq!(entry.key, other_key);
         }
     }
 
@@ -1334,20 +1353,20 @@ mod tests {
             let result = sf_rw.get_storage_before_block(block_num, address, keys[0]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key.as_b256(), keys[0]);
+            assert_eq!(entry.key, keys[0]);
             assert_eq!(entry.value, U256::from(0));
 
             let result =
                 sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key.as_b256(), keys[num_slots - 1]);
+            assert_eq!(entry.key, keys[num_slots - 1]);
 
             let mid = num_slots / 2;
             let result = sf_rw.get_storage_before_block(block_num, address, keys[mid]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key.as_b256(), keys[mid]);
+            assert_eq!(entry.key, keys[mid]);
 
             let missing_key = B256::with_last_byte(255);
             let result = sf_rw.get_storage_before_block(block_num, address, missing_key).unwrap();
@@ -1356,7 +1375,7 @@ mod tests {
             for i in (0..num_slots).step_by(10) {
                 let result = sf_rw.get_storage_before_block(block_num, address, keys[i]).unwrap();
                 assert!(result.is_some());
-                assert_eq!(result.unwrap().key.as_b256(), keys[i]);
+                assert_eq!(result.unwrap().key, keys[i]);
             }
         }
     }

@@ -56,3 +56,10 @@ pub trait StorageSettingsCache: Send {
     /// [`MetadataWriter::write_storage_settings`]
     fn set_storage_settings_cache(&self, settings: StorageSettings);
 }
+
+/// Trait for accessing the database directory path.
+#[cfg(feature = "std")]
+pub trait StoragePath: Send {
+    /// Returns the path to the database directory (e.g. `<datadir>/db`).
+    fn storage_path(&self) -> std::path::PathBuf;
+}

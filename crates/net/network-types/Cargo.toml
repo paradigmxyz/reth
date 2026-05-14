@@ -21,7 +21,7 @@ alloy-eip2124.workspace = true
 # misc
 serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"], optional = true }
 
 # misc
 tracing.workspace = true
@@ -30,6 +30,7 @@ tracing.workspace = true
 serde = [
     "dep:serde",
     "dep:humantime-serde",
+    "dep:serde_json",
     "alloy-eip2124/serde",
 ]
 test-utils = []

@@ -21,11 +21,9 @@ reth-payload-primitives.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
-alloy-rlp.workspace = true
 
 # misc
 serde.workspace = true
-sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -38,9 +36,7 @@ std = [
     "alloy-primitives/std",
     "alloy-eips/std",
     "alloy-rpc-types-engine/std",
-    "alloy-rlp/std",
     "serde/std",
-    "sha2/std",
     "serde_json/std",
     "thiserror/std",
     "reth-engine-primitives/std",

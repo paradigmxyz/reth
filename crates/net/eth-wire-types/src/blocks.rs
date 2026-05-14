@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 
 /// A request for a peer to return block headers starting at the requested block.
@@ -39,7 +40,17 @@ pub struct GetBlockHeaders {
 }
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct BlockHeaders<H = alloy_consensus::Header>(
@@ -56,7 +67,17 @@ impl<H> From<Vec<H>> for BlockHeaders<H> {
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -73,7 +94,17 @@ impl From<Vec<B256>> for GetBlockBodies {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct BlockBodies<B = reth_ethereum_primitives::BlockBody>(
@@ -265,6 +296,8 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
+                    block_access_list_hash: None,
+                    slot_number: None,
                 },
             ]),
         }.encode(&mut data);
@@ -302,6 +335,8 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
+                    block_access_list_hash: None,
+                    slot_number: None,
                 },
             ]),
         };
@@ -408,6 +443,8 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
+                            block_access_list_hash: None,
+                            slot_number: None,
                         },
                     ],
                     withdrawals: None,
@@ -485,6 +522,8 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
+                            block_access_list_hash: None,
+                            slot_number: None,
                         },
                     ],
                     withdrawals: None,

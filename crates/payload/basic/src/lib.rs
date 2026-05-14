@@ -14,13 +14,17 @@ use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
-use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
+use reth_execution_cache::SavedCache;
+use reth_payload_builder::{
+    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
+use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
     fmt,
     future::Future,
@@ -140,9 +144,10 @@ where
 
     fn new_payload_job(
         &self,
-        attributes: <Self::Job as PayloadJob>::PayloadAttributes,
+        input: BuildNewPayload<Builder::Attributes>,
+        id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if attributes.parent().is_zero() {
+        let parent_header = if input.parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -151,14 +156,14 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(attributes.parent())
+                .sealed_header_by_hash(input.parent_hash)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
         };
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
-        let config = PayloadConfig::new(Arc::new(parent_header), attributes);
+        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -172,6 +177,8 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
+            execution_cache: input.cache,
+            trie_handle: input.trie_handle,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -320,6 +327,10 @@ where
     /// This is used to avoid reading the same state over and over again when new attempts are
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     cached_reads: Option<CachedReads>,
+    /// Optional execution cache shared with the engine.
+    execution_cache: Option<SavedCache>,
+    /// Optional state root task handle, shared with the engine.
+    trie_handle: Option<StateRootHandle>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -345,12 +356,20 @@ where
         let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
+        let execution_cache = self.execution_cache.clone();
+        let trie_handle = self.trie_handle.take();
         let builder = self.builder.clone();
         self.executor.spawn_blocking_task(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+            let args = BuildArguments {
+                cached_reads,
+                execution_cache,
+                trie_handle,
+                config: payload_config,
+                cancel,
+                best_payload,
+            };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         });
@@ -376,48 +395,56 @@ where
             return Poll::Ready(Ok(()))
         }
 
-        // check if the interval is reached
-        while this.interval.poll_tick(cx).is_ready() {
-            // start a new job if there is no pending block, we haven't reached the deadline,
-            // and the payload isn't frozen
-            if this.pending_block.is_none() && !this.best_payload.is_frozen() {
-                this.spawn_build_job();
-            }
-        }
-
-        // poll the pending block
-        if let Some(mut fut) = this.pending_block.take() {
-            match fut.poll_unpin(cx) {
-                Poll::Ready(Ok(outcome)) => match outcome {
-                    BuildOutcome::Better { payload, cached_reads } => {
-                        this.cached_reads = Some(cached_reads);
-                        debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                        this.best_payload = PayloadState::Best(payload);
+        loop {
+            // Wait for any pending build to complete before polling the next tick.
+            //
+            // This avoids consuming interval ticks while a build is still in-flight,
+            // which would delay the follow-up build by a full interval even though
+            // the current attempt has already finished.
+            if let Some(mut fut) = this.pending_block.take() {
+                match fut.poll_unpin(cx) {
+                    Poll::Ready(Ok(outcome)) => match outcome {
+                        BuildOutcome::Better { payload, cached_reads } => {
+                            this.cached_reads = Some(cached_reads);
+                            debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                            this.best_payload = PayloadState::Best(payload);
+                        }
+                        BuildOutcome::Freeze(payload) => {
+                            debug!(target: "payload_builder", "payload frozen, no further building will occur");
+                            this.best_payload = PayloadState::Frozen(payload);
+                        }
+                        BuildOutcome::Aborted { fees, cached_reads } => {
+                            this.cached_reads = Some(cached_reads);
+                            trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
+                        }
+                        BuildOutcome::Cancelled => {
+                            unreachable!("the cancel signal never fired")
+                        }
+                    },
+                    Poll::Ready(Err(error)) => {
+                        // job failed, but we simply try again next interval
+                        debug!(target: "payload_builder", %error, "payload build attempt failed");
+                        this.metrics.inc_failed_payload_builds();
                     }
-                    BuildOutcome::Freeze(payload) => {
-                        debug!(target: "payload_builder", "payload frozen, no further building will occur");
-                        this.best_payload = PayloadState::Frozen(payload);
+                    Poll::Pending => {
+                        this.pending_block = Some(fut);
+                        return Poll::Pending
                     }
-                    BuildOutcome::Aborted { fees, cached_reads } => {
-                        this.cached_reads = Some(cached_reads);
-                        trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
-                    }
-                    BuildOutcome::Cancelled => {
-                        unreachable!("the cancel signal never fired")
-                    }
-                },
-                Poll::Ready(Err(error)) => {
-                    // job failed, but we simply try again next interval
-                    debug!(target: "payload_builder", %error, "payload build attempt failed");
-                    this.metrics.inc_failed_payload_builds();
-                }
-                Poll::Pending => {
-                    this.pending_block = Some(fut);
                 }
             }
-        }
 
-        Poll::Pending
+            if this.best_payload.is_frozen() {
+                return Poll::Pending
+            }
+
+            // Wait for the next build interval tick.
+            //
+            // The loop is needed because `poll_tick` does not register a waker
+            // when it returns `Ready`, so we must loop back after spawning a job
+            // to reach a point that *does* register one (the pending block poll above).
+            ready!(this.interval.poll_tick(cx));
+            this.spawn_build_job()
+        }
     }
 }
 
@@ -472,6 +499,8 @@ where
 
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
+                execution_cache: self.execution_cache.clone(),
+                trie_handle: None,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -659,20 +688,26 @@ pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     pub parent_header: Arc<SealedHeader<Header>>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
+    /// The payload id.
+    pub payload_id: PayloadId,
 }
 
 impl<Attributes, Header> PayloadConfig<Attributes, Header>
 where
-    Attributes: PayloadBuilderAttributes,
+    Attributes: PayloadAttributes,
 {
     /// Create new payload config.
-    pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes) -> Self {
-        Self { parent_header, attributes }
+    pub const fn new(
+        parent_header: Arc<SealedHeader<Header>>,
+        attributes: Attributes,
+        payload_id: PayloadId,
+    ) -> Self {
+        Self { parent_header, attributes, payload_id }
     }
 
     /// Returns the payload id.
-    pub fn payload_id(&self) -> PayloadId {
-        self.attributes.payload_id()
+    pub const fn payload_id(&self) -> PayloadId {
+        self.payload_id
     }
 }
 
@@ -793,6 +828,15 @@ impl<Payload> BuildOutcomeKind<Payload> {
 pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
+    /// Optional execution cache shared with the engine.
+    pub execution_cache: Option<SavedCache>,
+    /// Optional state root task handle, shared with the engine.
+    ///
+    /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
+    /// block until this task completes. The trie is anchored at the built block's state
+    /// root, so if the next `newPayload` is not on top of that block, the trie cache is
+    /// invalidated and cleared.
+    pub trie_handle: Option<StateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -805,11 +849,13 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
     pub const fn new(
         cached_reads: CachedReads,
+        execution_cache: Option<SavedCache>,
+        trie_handle: Option<StateRootHandle>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
     }
 }
 
@@ -823,7 +869,7 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
 /// Ethereum client types.
 pub trait PayloadBuilder: Send + Sync + Clone {
     /// The payload attributes type to accept for building.
-    type Attributes: PayloadBuilderAttributes;
+    type Attributes: PayloadAttributes;
     /// The type of the built payload.
     type BuiltPayload: BuiltPayload;
 

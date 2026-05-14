@@ -95,7 +95,7 @@ pub mod gas_oracle {
     pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
 
     /// The default minimum gas price, under which the sample will be ignored
-    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
+    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::ZERO;
 
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
@@ -122,6 +122,9 @@ pub mod cache {
 
     /// Default cache size for the header cache: 1000 headers.
     pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
+
+    /// Default cache size for the revm BAL cache: 1000 block access lists.
+    pub const DEFAULT_BAL_CACHE_MAX_LEN: u32 = 1000;
 
     /// Default number of concurrent database requests.
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;

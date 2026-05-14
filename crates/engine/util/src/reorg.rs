@@ -1,6 +1,7 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{BlockHeader, Transaction};
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
@@ -14,7 +15,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
@@ -158,7 +159,7 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let reorg_block = match create_reorg_head(
+                    let (reorg_block, encoded_bal) = match create_reorg_head(
                         this.provider,
                         this.evm_config,
                         this.payload_validator,
@@ -194,7 +195,7 @@ where
                         BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
-                            payload: T::block_to_payload(reorg_block),
+                            payload: T::block_to_payload(reorg_block, encoded_bal),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
@@ -202,32 +203,18 @@ where
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
-                            version: EngineApiMessageVersion::default(),
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        tx,
-                        version,
-                    }),
-                    _,
-                ) => {
+                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        tx,
-                        version,
-                    })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 (item, _) => item,
             };
@@ -236,13 +223,14 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn create_reorg_head<Provider, Evm, T, Validator>(
     provider: &Provider,
     evm_config: &Evm,
     payload_validator: &Validator,
     mut depth: usize,
     next_payload: T::ExecutionData,
-) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
+) -> RethResult<(SealedBlock<BlockTy<Evm::Primitives>>, Option<Bytes>)>
 where
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
@@ -279,10 +267,12 @@ where
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     // Configure state
+    let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
+        .with_bal_builder_if(has_bal)
         .build();
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
@@ -301,7 +291,7 @@ where
         let tx_recovered =
             tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
         let gas_used = match builder.execute_transaction(tx_recovered) {
-            Ok(gas_used) => gas_used,
+            Ok(gas_used) => gas_used.tx_gas_used(),
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 hash,
                 error,
@@ -316,7 +306,10 @@ where
         cumulative_gas_used += gas_used;
     }
 
-    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider)?;
+    let BlockBuilderOutcome { block, block_access_list, .. } =
+        builder.finish(&state_provider, None)?;
 
-    Ok(block.into_sealed_block())
+    let encoded_bal: Option<Bytes> = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
+
+    Ok((block.into_sealed_block(), encoded_bal))
 }

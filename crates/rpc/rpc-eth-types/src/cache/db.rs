@@ -101,8 +101,9 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper {
         &self,
         input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
+        mode: reth_trie::ExecutionWitnessMode,
     ) -> reth_errors::ProviderResult<Vec<alloy_primitives::Bytes>> {
-        self.0.witness(input, target)
+        self.0.witness(input, target, mode)
     }
 }
 
@@ -152,14 +153,6 @@ impl StateProvider for StateProviderTraitObjWrapper {
         storage_key: alloy_primitives::StorageKey,
     ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
         self.0.storage(account, storage_key)
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: alloy_primitives::StorageKey,
-    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
-        self.0.storage_by_hashed_key(address, hashed_storage_key)
     }
 
     fn account_code(

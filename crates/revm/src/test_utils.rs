@@ -141,7 +141,12 @@ impl StateProofProvider for StateProviderTest {
         unimplemented!("proof generation is not supported")
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: reth_trie::ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         unimplemented!("witness generation is not supported")
     }
 }
@@ -159,14 +164,6 @@ impl StateProvider for StateProviderTest {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
-        Ok(None)
     }
 }
 

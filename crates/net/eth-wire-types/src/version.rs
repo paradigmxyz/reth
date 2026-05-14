@@ -31,6 +31,8 @@ pub enum EthVersion {
     Eth70 = 70,
     /// The `eth` protocol version 71.
     Eth71 = 71,
+    /// The `eth` protocol version 72.
+    Eth72 = 72,
 }
 
 impl EthVersion {
@@ -70,9 +72,14 @@ impl EthVersion {
         matches!(self, Self::Eth71)
     }
 
+    /// Returns true if the version is eth/71
+    pub const fn is_eth72(&self) -> bool {
+        matches!(self, Self::Eth72)
+    }
+
     /// Returns true if the version is eth/69 or newer.
     pub const fn is_eth69_or_newer(&self) -> bool {
-        matches!(self, Self::Eth69 | Self::Eth70 | Self::Eth71)
+        matches!(self, Self::Eth69 | Self::Eth70 | Self::Eth71 | Self::Eth72)
     }
 }
 
@@ -117,6 +124,7 @@ impl TryFrom<&str> for EthVersion {
             "69" => Ok(Self::Eth69),
             "70" => Ok(Self::Eth70),
             "71" => Ok(Self::Eth71),
+            "72" => Ok(Self::Eth72),
             _ => Err(ParseVersionError(s.to_string())),
         }
     }
@@ -143,6 +151,7 @@ impl TryFrom<u8> for EthVersion {
             69 => Ok(Self::Eth69),
             70 => Ok(Self::Eth70),
             71 => Ok(Self::Eth71),
+            72 => Ok(Self::Eth72),
             _ => Err(ParseVersionError(u.to_string())),
         }
     }
@@ -174,6 +183,7 @@ impl From<EthVersion> for &'static str {
             EthVersion::Eth69 => "69",
             EthVersion::Eth70 => "70",
             EthVersion::Eth71 => "71",
+            EthVersion::Eth72 => "72",
         }
     }
 }
@@ -232,6 +242,7 @@ mod tests {
         assert_eq!(EthVersion::Eth69, EthVersion::try_from("69").unwrap());
         assert_eq!(EthVersion::Eth70, EthVersion::try_from("70").unwrap());
         assert_eq!(EthVersion::Eth71, EthVersion::try_from("71").unwrap());
+        assert_eq!(EthVersion::Eth72, EthVersion::try_from("72").unwrap());
     }
 
     #[test]
@@ -242,6 +253,7 @@ mod tests {
         assert_eq!(EthVersion::Eth69, "69".parse().unwrap());
         assert_eq!(EthVersion::Eth70, "70".parse().unwrap());
         assert_eq!(EthVersion::Eth71, "71".parse().unwrap());
+        assert_eq!(EthVersion::Eth72, "72".parse().unwrap());
     }
 
     #[test]
@@ -253,6 +265,7 @@ mod tests {
             EthVersion::Eth69,
             EthVersion::Eth70,
             EthVersion::Eth71,
+            EthVersion::Eth72,
         ];
 
         for version in versions {
@@ -272,6 +285,7 @@ mod tests {
             (69_u8, Ok(EthVersion::Eth69)),
             (70_u8, Ok(EthVersion::Eth70)),
             (71_u8, Ok(EthVersion::Eth71)),
+            (72_u8, Ok(EthVersion::Eth72)),
             (65_u8, Err(RlpError::Custom("invalid eth version"))),
         ];
 

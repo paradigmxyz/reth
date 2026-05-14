@@ -90,7 +90,7 @@ pub(crate) struct DatabaseProviderMetrics {
     /// Duration of `update_pipeline_stages` in `save_blocks`
     save_blocks_update_pipeline_stages: Histogram,
     /// Number of blocks per `save_blocks` call
-    save_blocks_block_count: Histogram,
+    save_blocks_batch_size: Histogram,
     /// Duration of MDBX commit in `save_blocks`
     save_blocks_commit_mdbx: Histogram,
     /// Duration of static file commit in `save_blocks`
@@ -118,7 +118,7 @@ pub(crate) struct DatabaseProviderMetrics {
     /// Last duration of `update_pipeline_stages` in `save_blocks`
     save_blocks_update_pipeline_stages_last: Gauge,
     /// Last number of blocks per `save_blocks` call
-    save_blocks_block_count_last: Gauge,
+    save_blocks_batch_size_last: Gauge,
     /// Last duration of MDBX commit in `save_blocks`
     save_blocks_commit_mdbx_last: Gauge,
     /// Last duration of static file commit in `save_blocks`
@@ -140,7 +140,7 @@ pub(crate) struct SaveBlocksTimings {
     pub write_trie_updates: Duration,
     pub update_history_indices: Duration,
     pub update_pipeline_stages: Duration,
-    pub block_count: u64,
+    pub batch_size: u64,
 }
 
 /// Timings collected during a `commit` call.
@@ -182,7 +182,7 @@ impl DatabaseProviderMetrics {
         self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
         self.save_blocks_update_history_indices.record(timings.update_history_indices);
         self.save_blocks_update_pipeline_stages.record(timings.update_pipeline_stages);
-        self.save_blocks_block_count.record(timings.block_count as f64);
+        self.save_blocks_batch_size.record(timings.batch_size as f64);
 
         self.save_blocks_total_last.set(timings.total.as_secs_f64());
         self.save_blocks_mdbx_last.set(timings.mdbx.as_secs_f64());
@@ -196,7 +196,7 @@ impl DatabaseProviderMetrics {
             .set(timings.update_history_indices.as_secs_f64());
         self.save_blocks_update_pipeline_stages_last
             .set(timings.update_pipeline_stages.as_secs_f64());
-        self.save_blocks_block_count_last.set(timings.block_count as f64);
+        self.save_blocks_batch_size_last.set(timings.batch_size as f64);
     }
 
     /// Records all commit timings.

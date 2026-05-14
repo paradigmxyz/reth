@@ -5,9 +5,27 @@ cd hivetests/
 
 sim="${1}"
 limit="${2}"
+fixture_variant="${3:-}"
+
+if [[ "${fixture_variant}" == "osaka" && "${sim}" == *"eels"* && "${limit}" == *"tests/amsterdam"* ]]; then
+    echo "osaka fixtures do not support amsterdam tests"
+    exit 1
+fi
+
+# Use lower parallelism for eels tests to avoid OOM-killing the runner
+parallelism=16
+if [[ "${sim}" == *"eels"* ]]; then
+    parallelism=4
+fi
 
 run_hive() {
-    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 16 --client reth 2>&1 | tee /tmp/log || true
+    hive \
+  --sim "${sim}" \
+  --sim.limit "${limit}" \
+  --sim.limit.exact=false \
+  --sim.parallelism "${parallelism}" \
+  --client reth \
+  2>&1 | tee /tmp/log || true
 }
 
 check_log() {

@@ -5,12 +5,12 @@ use crate::{
     PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
 use alloy_consensus::Transaction;
-use alloy_eips::Typed2718;
 use alloy_primitives::map::AddressSet;
 use core::fmt;
+use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    collections::{BTreeSet, HashSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -32,7 +32,7 @@ pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -68,7 +68,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             crate::traits::BestTransactions::mark_invalid(
                 self,
                 &best,
-                &InvalidPoolTransactionError::Underpriced,
+                InvalidPoolTransactionError::Underpriced,
             );
         }
     }
@@ -85,7 +85,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
 pub struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.
-    pub(crate) all: BTreeMap<TransactionId, PendingTransaction<T>>,
+    pub(crate) all: OrdMap<TransactionId, PendingTransaction<T>>,
     /// Transactions that can be executed right away: these have the expected nonce.
     ///
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
@@ -112,7 +112,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     pub(crate) fn mark_invalid(
         &mut self,
         tx: &Arc<ValidPoolTransaction<T::Transaction>>,
-        _kind: &InvalidPoolTransactionError,
+        _kind: InvalidPoolTransactionError,
     ) {
         self.invalid.insert(tx.sender_id());
     }
@@ -191,7 +191,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     }
 
     /// Returns the next best transaction and its priority value.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn next_tx_and_priority(
         &mut self,
     ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
@@ -216,12 +216,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 self.independent.insert(unlocked.clone());
             }
 
-            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
+            if self.skip_blobs && best.transaction.is_eip4844() {
                 // blobs should be skipped, marking them as invalid will ensure that no dependent
                 // transactions are returned
                 self.mark_invalid(
                     &best.transaction,
-                    &InvalidPoolTransactionError::Eip4844(
+                    InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::NoEip4844Blobs,
                     ),
                 )
@@ -263,7 +263,7 @@ enum IncomingTransaction<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         Self::mark_invalid(self, tx, kind)
     }
 
@@ -321,9 +321,7 @@ where
             }
             self.best.mark_invalid(
                 &best,
-                &InvalidPoolTransactionError::Consensus(
-                    InvalidTransactionError::TxTypeNotSupported,
-                ),
+                InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
             );
         }
     }
@@ -334,7 +332,7 @@ where
     I: crate::traits::BestTransactions,
     P: FnMut(&<I as Iterator>::Item) -> bool + Send,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         crate::traits::BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -423,7 +421,7 @@ where
     I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         self.inner.mark_invalid(tx, kind)
     }
 
@@ -494,7 +492,7 @@ mod tests {
         let invalid = best.independent.iter().next().unwrap();
         best.mark_invalid(
             &invalid.transaction.clone(),
-            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
 
         // iterator is empty
@@ -523,7 +521,7 @@ mod tests {
         crate::traits::BestTransactions::mark_invalid(
             &mut *best,
             &tx,
-            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
         assert!(Iterator::next(&mut best).is_none());
     }
@@ -1042,5 +1040,77 @@ mod tests {
             assert_eq!(tx.sender_id(), first.sender_id());
             assert_ne!(tx.sender_id(), valid_new_higher_fee_tx.sender_id());
         }
+    }
+
+    /// Reproduces the "Blob Transaction Ordering, Multiple Clients" Hive scenario.
+    ///
+    /// Sender A contributes 5-blob transactions while sender B contributes 1-blob transactions.
+    /// A single payload build should be able to fill the block with 6 blobs total (5+1).
+    #[test]
+    fn test_blob_transaction_ordering_multiple_clients_shape() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 1;
+        let max_blob_count: u64 = 6;
+
+        let sender_a = MockTransaction::eip4844()
+            .with_blob_hashes(5)
+            .with_max_fee(base_fee as u128 + 20)
+            .with_priority_fee(base_fee as u128 + 20)
+            .with_blob_fee(120);
+        for nonce in 0..5u64 {
+            let tx = sender_a.clone().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let sender_b = MockTransaction::eip4844()
+            .with_blob_hashes(1)
+            .with_max_fee(base_fee as u128 + 20)
+            .with_priority_fee(base_fee as u128 + 20)
+            .with_blob_fee(100);
+        for nonce in 0..5u64 {
+            let tx = sender_b.clone().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut block_blob_count = 0u64;
+        let mut included_txs = 0u64;
+
+        while let Some(tx) = best.next() {
+            if let Some(blob_hashes) = tx.transaction.blob_versioned_hashes() {
+                let tx_blob_count = blob_hashes.len() as u64;
+
+                if block_blob_count + tx_blob_count > max_blob_count {
+                    crate::traits::BestTransactions::mark_invalid(
+                        &mut best,
+                        &tx,
+                        InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                                have: block_blob_count + tx_blob_count,
+                                permitted: max_blob_count,
+                            },
+                        ),
+                    );
+                    continue;
+                }
+
+                block_blob_count += tx_blob_count;
+                included_txs += 1;
+
+                if block_blob_count == max_blob_count {
+                    best.skip_blobs();
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(
+            block_blob_count, max_blob_count,
+            "expected a full blob block (5+1 blobs across senders)"
+        );
+        assert_eq!(included_txs, 2, "expected one 5-blob tx and one 1-blob tx in the block");
     }
 }

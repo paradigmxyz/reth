@@ -36,8 +36,6 @@ tracing.workspace = true
 tempfile.workspace = true
 
 [features]
-default = []
-
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
 otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
 
@@ -89,6 +87,3 @@ min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-node-core/min-trace-logs",
 ]
-
-rocksdb = ["reth-cli-commands/rocksdb"]
-edge = ["rocksdb"]

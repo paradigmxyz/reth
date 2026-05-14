@@ -51,7 +51,7 @@ pub trait TrieCursorFactory {
 
 /// A cursor for traversing stored trie nodes. The cursor must iterate over keys in
 /// lexicographical order.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieCursor {
     /// Move the cursor to the key and return if it is an exact match.
     fn seek_exact(
@@ -79,7 +79,7 @@ pub trait TrieCursor {
 }
 
 /// A cursor for traversing storage trie nodes.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieStorageCursor: TrieCursor {
     /// Set the hashed address for the storage trie cursor.
     ///

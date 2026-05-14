@@ -36,7 +36,7 @@ use tower::Layer;
 
 fn main() {
     Cli::<EthereumChainSpecParser>::parse()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 .with_types::<EthereumNode>()
                 .with_components(EthereumNode::components())
@@ -86,7 +86,7 @@ where
     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
         tracing::info!("processed call {:?}", req);
         let service = self.service.clone();
-        Box::pin(async move {
+        async move {
             let resp = service.call(req).await;
 
             //we can modify the response with our own custom error
@@ -101,7 +101,7 @@ where
 
             //otherwise just return the original response
             resp
-        })
+        }
     }
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {

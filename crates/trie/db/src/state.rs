@@ -95,7 +95,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// use reth_db_api::database::Database;
     /// use reth_primitives_traits::Account;
     /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
-    /// use reth_trie_db::DatabaseStateRoot;
+    /// use reth_trie_db::{DatabaseStateRoot, LegacyKeyAdapter};
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
@@ -109,7 +109,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = StateRoot::overlay_root(&tx, &hashed_state.into_sorted());
+    /// let state_root = <StateRoot<
+    ///     reth_trie_db::DatabaseTrieCursorFactory<_, LegacyKeyAdapter>,
+    ///     reth_trie_db::DatabaseHashedCursorFactory<_>,
+    /// > as DatabaseStateRoot<_>>::overlay_root(&tx, &hashed_state.into_sorted());
     /// ```
     ///
     /// # Returns
@@ -142,19 +145,14 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
-    ///
-    /// Storage keys from changesets are tagged as
-    /// [`Plain`](reth_primitives_traits::StorageSlotKey::Plain) or
-    /// [`Hashed`](reth_primitives_traits::StorageSlotKey::Hashed) by the reader, so no
-    /// `use_hashed_state` flag is needed. Addresses are always hashed.
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
-impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
-    for StateRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
+    for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -211,7 +209,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
+            DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
         )
         .with_prefix_sets(prefix_sets)
@@ -224,7 +222,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
+            DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
         )
         .with_prefix_sets(prefix_sets)
@@ -234,7 +232,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
                 input.nodes.as_ref(),
             ),
             HashedPostStateCursorFactory::new(
@@ -252,7 +250,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
                 input.nodes.as_ref(),
             ),
             HashedPostStateCursorFactory::new(
@@ -266,9 +264,6 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 /// Calls [`HashedPostStateSorted::from_reverts`].
-///
-/// This is a convenience wrapper kept for backward compatibility. The storage
-/// key tagging is now handled internally by the changeset reader.
 pub fn from_reverts_auto(
     provider: &(impl ChangeSetReader
           + StorageChangeSetReader
@@ -288,8 +283,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Addresses are always keccak256-hashed.
-    /// - Storage keys are tagged by the changeset reader and hashed via
-    ///   [`StorageSlotKey::to_hashed`](reth_primitives_traits::StorageSlotKey::to_hashed).
+    /// - Storage keys are always plain and are hashed via `keccak256`.
     /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts(
@@ -330,12 +324,12 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             for (BlockNumberAddress((_, address)), storage) in
                 provider.storage_changesets_range(start..=end_inclusive)?
             {
-                if seen_storage_keys.insert((address, storage.key.as_b256())) {
+                if seen_storage_keys.insert((address, storage.key)) {
                     let hashed_address = keccak256(address);
                     storages
                         .entry(hashed_address)
                         .or_default()
-                        .push((storage.key.to_hashed(), storage.value));
+                        .push((keccak256(storage.key), storage.value));
                 }
             }
         }
@@ -357,24 +351,40 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 mod tests {
     use super::*;
     use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
-    use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::{
-        database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::DbTxMut,
     };
+    use reth_execution_errors::StateRootError;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
+    use reth_storage_api::StorageSettingsCache;
+    use reth_trie::{
+        HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
+    };
     use revm::state::AccountInfo;
     use revm_database::BundleState;
+
+    fn overlay_root_for_provider<TX: reth_db_api::transaction::DbTx>(
+        provider: &impl StorageSettingsCache,
+        tx: &TX,
+        sorted: &HashedPostStateSorted,
+    ) -> Result<B256, StateRootError> {
+        crate::with_adapter!(provider, |A| {
+            type S<'a, TX> = StateRoot<
+                crate::DatabaseTrieCursorFactory<&'a TX, A>,
+                crate::DatabaseHashedCursorFactory<&'a TX>,
+            >;
+            S::overlay_root(tx, sorted)
+        })
+    }
 
     /// Overlay root calculation works with sorted state.
     #[test]
     fn overlay_root_with_sorted_state() {
-        let db = create_test_rw_db();
-        let tx = db.tx().expect("failed to create transaction");
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
@@ -388,7 +398,8 @@ mod tests {
         );
 
         let sorted = hashed_state.into_sorted();
-        let overlay_root = StateRoot::overlay_root(&tx, &sorted).unwrap();
+        let overlay_root =
+            overlay_root_for_provider(&*provider, provider.tx_ref(), &sorted).unwrap();
 
         // Just verify it produces a valid root
         assert!(!overlay_root.is_zero());
@@ -417,10 +428,11 @@ mod tests {
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 
-        let db = create_test_rw_db();
-        let tx = db.tx().expect("failed to create transaction");
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let sorted = post_state.into_sorted();
         assert_eq!(
-            StateRoot::overlay_root(&tx, &post_state.into_sorted()).unwrap(),
+            overlay_root_for_provider(&*provider, provider.tx_ref(), &sorted).unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
     }
@@ -577,7 +589,7 @@ mod tests {
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
                         address: address1,
-                        key: hashed_slot2,
+                        key: plain_slot2,
                         value: U256::from(200),
                     }],
                     1,
@@ -587,7 +599,7 @@ mod tests {
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
                         address: address1,
-                        key: hashed_slot1,
+                        key: plain_slot1,
                         value: U256::from(100),
                     }],
                     2,
@@ -597,7 +609,7 @@ mod tests {
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
                         address: address1,
-                        key: hashed_slot1,
+                        key: plain_slot1,
                         value: U256::from(999),
                     }],
                     3,

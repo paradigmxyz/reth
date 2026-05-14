@@ -10,6 +10,8 @@
 
 #[cfg(feature = "tracy-allocator")]
 use reth_tracing as _;
+#[cfg(feature = "tracy-allocator")]
+use tracy_client as _;
 
 pub mod allocator;
 pub mod cancellation;

@@ -10,16 +10,12 @@ use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
 use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
-use std::{
-    env::VarError,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
-/// Parses a user-specified path with support for environment variables and common shorthands (e.g.
-/// ~ for the user's home directory).
-pub fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
-    shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
+/// Parses a user-specified path into a [`PathBuf`].
+pub fn parse_path(value: &str) -> PathBuf {
+    PathBuf::from(value)
 }
 
 /// Attempts to retrieve or create a JWT secret from the specified path.
