@@ -49,7 +49,8 @@ pub enum PrewarmMode<Tx> {
     Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<DecodedBal>),
-    /// Transaction prewarming is skipped. No workers are spawned.
+    /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
+    /// benefit). No workers are spawned.
     Skipped,
 }
 
