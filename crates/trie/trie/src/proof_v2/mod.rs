@@ -20,7 +20,7 @@ use reth_trie_common::{
     ProofV2Target, RlpNode, TrieNodeV2,
 };
 use std::cmp::Ordering;
-use tracing::{error, instrument, trace};
+use tracing::{error, trace};
 
 mod value;
 pub use value::*;
@@ -187,13 +187,6 @@ where
     ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(?path, ?check_min_len),
-        ret,
-    )]
     fn should_retain<'a>(
         &self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -355,12 +348,6 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(child_path = ?self.last_child_path()),
-    )]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -505,7 +492,6 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn pop_branch<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -679,12 +665,6 @@ where
     ///
     /// It is expected that this method is "driven" by `next_uncached_key_range`, which decides
     /// which ranges of keys need to be calculated based on what cached trie data is available.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(?lower_bound, ?upper_bound),
-    )]
     fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &mut VE,
@@ -1009,7 +989,6 @@ where
     ///
     /// Once returned the `branch_stack` will be in the correct state to start calculating leaves
     /// for the given range, if any.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -1301,12 +1280,6 @@ where
     /// Calculates trie nodes and retains proofs for targeted nodes within a sub-trie. The
     /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
     /// `upper_bound` is exclusive, None indicates unbounded.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(prefix=?sub_trie_targets.prefix),
-    )]
     fn proof_subtrie<'a>(
         &mut self,
         value_encoder: &mut VE,
@@ -1518,7 +1491,6 @@ where
     /// # Panics
     ///
     /// In debug builds, panics if the targets are not sorted lexicographically.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     pub fn proof(
         &mut self,
         value_encoder: &mut VE,
@@ -1558,7 +1530,6 @@ where
     ///
     /// This method does not accept targets nor retain proofs. Returns the root node which can
     /// be used to compute the root hash via [`Self::compute_root_hash`].
-    #[instrument(target = TRACE_TARGET, level = "trace", skip(self, value_encoder))]
     pub fn root_node(
         &mut self,
         value_encoder: &mut VE,
@@ -1626,7 +1597,6 @@ where
     /// # Panics
     ///
     /// In debug builds, panics if the targets are not sorted lexicographically.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip(self, targets))]
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
@@ -1657,7 +1627,6 @@ where
     ///
     /// This method does not accept targets nor retain proofs. Returns the root node which can
     /// be used to compute the root hash via [`Self::compute_root_hash`].
-    #[instrument(target = TRACE_TARGET, level = "trace", skip(self))]
     pub fn storage_root_node(
         &mut self,
         hashed_address: B256,
