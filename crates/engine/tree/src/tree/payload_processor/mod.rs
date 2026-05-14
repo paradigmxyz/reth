@@ -411,8 +411,9 @@ where
     /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
     /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
     /// a small head sequentially and sending it immediately, execution can start without
-    /// waiting for rayon scheduling.
-    const PARALLEL_PREFETCH_COUNT: usize = 4;
+    /// waiting for rayon scheduling. Eight transactions keeps the sequential head small relative
+    /// to typical benchmark blocks while covering more of the ordered-consumer startup window.
+    const PARALLEL_PREFETCH_COUNT: usize = 8;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
