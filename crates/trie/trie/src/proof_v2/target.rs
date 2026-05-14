@@ -62,9 +62,11 @@ pub(crate) fn iter_sub_trie_targets(
     // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
     // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
     // those which don't).
-    targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
-    });
+    if targets.len() > 1 {
+        targets.sort_unstable_by(|a, b| {
+            sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
+        });
+    }
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
     // sub-trie. We are taking advantage of the following properties:
@@ -103,7 +105,9 @@ pub(crate) fn iter_sub_trie_targets(
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
         let retain_root = targets[0].min_len == 0;
-        targets.sort_unstable_by_key(|target| target.key_nibbles);
+        if targets.len() > 1 {
+            targets.sort_unstable_by_key(|target| target.key_nibbles);
+        }
         SubTrieTargets { prefix, targets, retain_root }
     })
 }
