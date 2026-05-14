@@ -1277,6 +1277,7 @@ where
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
+        _custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
         Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
