@@ -82,7 +82,7 @@ on:
           - on-error
           - never
       run_pairs:
-        description: "Number of benchmark run pairs (1 = AB, 2 = ABBA)"
+        description: "Number of benchmark run pairs (1 = AB, 2 = ABBA, 3 = ABABAB)"
         required: false
         default: "2"
         type: string
@@ -197,14 +197,7 @@ jobs:
               if (!Number.isInteger(n) || n < 1) {
                 throw new Error('run pairs must be a positive integer');
               }
-              if (n === 1) return 'AB';
-              const start = n % 2 === 0 ? 'A' : 'B';
-              const other = start === 'A' ? 'B' : 'A';
-              const firstHalf = [];
-              for (let i = 0; i < n; i++) {
-                firstHalf.push(i % 2 === 0 ? start : other);
-              }
-              return firstHalf.join('') + firstHalf.slice().reverse().join('');
+              return n % 2 === 0 ? 'ABBA'.repeat(n / 2) : 'AB'.repeat(n);
             };
 
             if (context.eventName === 'workflow_dispatch') {
@@ -1056,31 +1049,12 @@ jobs:
               echo "run pairs must be a positive integer" >&2
               return 1
             fi
-            if [ "$run_pairs" -eq 1 ]; then
-              echo "AB"
-              return
-            fi
-
-            local start other first_half="" second_half=""
             if [ $((run_pairs % 2)) -eq 0 ]; then
-              start="A"
-              other="B"
+              printf 'ABBA%.0s' $(seq 1 $((run_pairs / 2)))
             else
-              start="B"
-              other="A"
+              printf 'AB%.0s' $(seq 1 "$run_pairs")
             fi
-
-            for ((j = 0; j < run_pairs; j++)); do
-              if [ $((j % 2)) -eq 0 ]; then
-                first_half="${first_half}${start}"
-              else
-                first_half="${first_half}${other}"
-              fi
-            done
-            for ((j = ${#first_half} - 1; j >= 0; j--)); do
-              second_half="${second_half}${first_half:j:1}"
-            done
-            echo "${first_half}${second_half}"
+            echo
           }
 
           RUN_ORDER="$(build_run_order "${BENCH_RUN_PAIRS:-2}")"
