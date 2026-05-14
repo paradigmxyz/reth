@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -156,6 +156,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
+        state_trie_overlay_worker_pool: Arc<WorkerPool>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -163,7 +164,11 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind),
+            tree_state: TreeState::new_with_state_trie_overlay_worker_pool(
+                canonical_block,
+                engine_kind,
+                state_trie_overlay_worker_pool,
+            ),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -445,6 +450,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
+            runtime.state_trie_overlay_worker_pool(),
         );
 
         let task = Self::new(

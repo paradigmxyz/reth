@@ -8,9 +8,11 @@ use alloy_primitives::{
 };
 use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlayManager};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
+use reth_tasks::WorkerPool;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
+    sync::Arc,
 };
 use tracing::debug;
 
@@ -45,19 +47,50 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
     pub fn new(current_canonical_head: BlockNumHash, engine_kind: EngineApiKind) -> Self {
+        Self::with_state_trie_overlay_manager(
+            current_canonical_head,
+            engine_kind,
+            StateTrieOverlayManager::default(),
+        )
+    }
+
+    /// Returns a new, empty tree state backed by the given state trie overlay worker pool.
+    pub(crate) fn new_with_state_trie_overlay_worker_pool(
+        current_canonical_head: BlockNumHash,
+        engine_kind: EngineApiKind,
+        state_trie_overlay_worker_pool: Arc<WorkerPool>,
+    ) -> Self {
+        Self::with_state_trie_overlay_manager(
+            current_canonical_head,
+            engine_kind,
+            StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
+        )
+    }
+
+    fn with_state_trie_overlay_manager(
+        current_canonical_head: BlockNumHash,
+        engine_kind: EngineApiKind,
+        state_trie_overlays: StateTrieOverlayManager<N>,
+    ) -> Self {
         Self {
             blocks_by_hash: B256Map::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
             parent_to_child: B256Map::default(),
             engine_kind,
-            state_trie_overlays: StateTrieOverlayManager::default(),
+            state_trie_overlays,
         }
     }
 
     /// Resets the state and points to the given canonical head.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        *self = Self::new(current_canonical_head, self.engine_kind);
+        let engine_kind = self.engine_kind;
+        self.blocks_by_hash.clear();
+        self.blocks_by_number.clear();
+        self.parent_to_child.clear();
+        self.current_canonical_head = current_canonical_head;
+        self.engine_kind = engine_kind;
+        self.state_trie_overlays.clear();
     }
 
     /// Returns the number of executed blocks stored.

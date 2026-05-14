@@ -20,6 +20,7 @@ reth-metrics.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["dashmap"] }
 reth-storage-api.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"], optional = true }
 reth-trie.workspace = true
 
 # ethereum
@@ -84,4 +85,4 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
-rayon = ["dep:rayon"]
+rayon = ["dep:rayon", "dep:reth-tasks"]

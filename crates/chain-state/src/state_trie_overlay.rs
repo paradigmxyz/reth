@@ -8,6 +8,8 @@ use crate::{EthPrimitives, ExecutedBlock};
 use alloy_primitives::{map::B256Map, B256};
 use parking_lot::RwLock;
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives};
+#[cfg(feature = "rayon")]
+use reth_tasks::{runtime::DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS, WorkerPool};
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{collections::HashMap, fmt, sync::Arc};
 use tracing::trace;
@@ -19,11 +21,20 @@ use tracing::trace;
 #[derive(Clone)]
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     inner: Arc<RwLock<StateTrieOverlayManagerInner<N>>>,
+    #[cfg(feature = "rayon")]
+    worker_pool: Arc<WorkerPool>,
 }
 
 impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
     fn default() -> Self {
-        Self { inner: Default::default() }
+        Self {
+            inner: Default::default(),
+            #[cfg(feature = "rayon")]
+            worker_pool: Arc::new(WorkerPool::new(
+                DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS,
+                "state-ovly",
+            )),
+        }
     }
 }
 
@@ -38,6 +49,12 @@ impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlayManager<N> {
 }
 
 impl<N: NodePrimitives> StateTrieOverlayManager<N> {
+    /// Create a new [`StateTrieOverlayManager`] backed by the given worker pool.
+    #[cfg(feature = "rayon")]
+    pub fn new(worker_pool: Arc<WorkerPool>) -> Self {
+        Self { inner: Default::default(), worker_pool }
+    }
+
     /// Inserts an executed in-memory block into the state trie overlay manager.
     pub fn insert_block(&self, block: ExecutedBlock<N>) {
         let hash = block.recovered_block().hash();
@@ -48,13 +65,46 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
     /// built from the remaining blocks.
     pub fn remove_blocks(&self, hashes: impl IntoIterator<Item = B256>) {
-        let mut inner = self.inner.write();
-        let mut removed = false;
-        for hash in hashes {
-            removed |= inner.blocks.remove(&hash).is_some();
-        }
+        let removed = {
+            let mut inner = self.inner.write();
+            let mut removed = false;
+            for hash in hashes {
+                removed |= inner.blocks.remove(&hash).is_some();
+            }
+            if removed {
+                inner.prune_epoch = inner.prune_epoch.wrapping_add(1);
+            }
+            removed
+        };
+
         if removed {
-            inner.prune_overlays();
+            self.prune_overlays();
+        }
+    }
+
+    /// Clears all managed blocks and cached overlays.
+    pub fn clear(&self) {
+        let mut inner = self.inner.write();
+        inner.blocks.clear();
+        inner.overlays.clear();
+        inner.prune_epoch = inner.prune_epoch.wrapping_add(1);
+    }
+
+    fn prune_overlays(&self)
+    where
+        N: Send + Sync + 'static,
+    {
+        #[cfg(feature = "rayon")]
+        {
+            let inner = Arc::clone(&self.inner);
+            self.worker_pool.spawn(move || {
+                inner.write().prune_overlays();
+            });
+        }
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            self.inner.write().prune_overlays();
         }
     }
 
@@ -74,13 +124,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         anchor_hash: B256,
     ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
-        if let Some(input) = self.inner.read().overlays.get(&key).cloned() {
-            return Ok(input)
-        }
 
-        let compute = {
+        loop {
             let inner = self.inner.read();
-            if let Some(input) = inner.overlays.get(&key).cloned() {
+            let prune_epoch = inner.prune_epoch;
+
+            if let Some(input) = inner.overlays.get(&key).and_then(|entry| {
+                (entry.prune_epoch == prune_epoch).then(|| Arc::clone(&entry.input))
+            }) {
                 return Ok(input)
             }
 
@@ -92,21 +143,54 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                     return None
                 }
 
-                inner
-                    .overlays
-                    .get(&OverlayCacheKey {
-                        anchor_hash,
-                        tip_hash: block.recovered_block().parent_hash(),
-                    })
-                    .cloned()
+                let key = OverlayCacheKey {
+                    anchor_hash,
+                    tip_hash: block.recovered_block().parent_hash(),
+                };
+                inner.overlays.get(&key).and_then(|entry| {
+                    (entry.prune_epoch == prune_epoch).then(|| Arc::clone(&entry.input))
+                })
             });
 
-            (blocks, parent_input)
-        };
+            drop(inner);
 
-        let input = Arc::new(compute_overlay(compute.0, compute.1, anchor_hash));
-        let mut inner = self.inner.write();
-        Ok(inner.overlays.entry(key).or_insert_with(|| Arc::clone(&input)).clone())
+            let input = Arc::new(self.compute_overlay(blocks, parent_input, anchor_hash));
+            let mut inner = self.inner.write();
+            if inner.prune_epoch != prune_epoch {
+                continue
+            }
+
+            if let Some(input) = inner.overlays.get(&key).and_then(|entry| {
+                (entry.prune_epoch == prune_epoch).then(|| Arc::clone(&entry.input))
+            }) {
+                return Ok(input)
+            }
+
+            inner
+                .overlays
+                .insert(key, OverlayCacheEntry { input: Arc::clone(&input), prune_epoch });
+            return Ok(input)
+        }
+    }
+
+    fn compute_overlay(
+        &self,
+        blocks: Vec<ExecutedBlock<N>>,
+        parent_input: Option<Arc<TrieInputSorted>>,
+        anchor_hash: B256,
+    ) -> TrieInputSorted
+    where
+        N: Send + Sync,
+    {
+        #[cfg(feature = "rayon")]
+        {
+            self.worker_pool.install_fn(|| compute_overlay(blocks, parent_input, anchor_hash))
+        }
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            compute_overlay(blocks, parent_input, anchor_hash)
+        }
     }
 }
 
@@ -134,7 +218,8 @@ impl std::error::Error for StateTrieOverlayError {}
 #[derive(Default)]
 struct StateTrieOverlayManagerInner<N: NodePrimitives = EthPrimitives> {
     blocks: B256Map<ExecutedBlock<N>>,
-    overlays: HashMap<OverlayCacheKey, Arc<TrieInputSorted>>,
+    overlays: HashMap<OverlayCacheKey, OverlayCacheEntry>,
+    prune_epoch: u64,
 }
 
 impl<N: NodePrimitives> StateTrieOverlayManagerInner<N> {
@@ -174,8 +259,21 @@ impl<N: NodePrimitives> StateTrieOverlayManagerInner<N> {
 
     fn prune_overlays(&mut self) {
         let blocks = &self.blocks;
-        self.overlays.retain(|key, _| Self::has_anchor_hash(blocks, key.tip_hash, key.anchor_hash));
+        let prune_epoch = self.prune_epoch;
+        self.overlays.retain(|key, entry| {
+            if Self::has_anchor_hash(blocks, key.tip_hash, key.anchor_hash) {
+                entry.prune_epoch = prune_epoch;
+                true
+            } else {
+                false
+            }
+        });
     }
+}
+
+struct OverlayCacheEntry {
+    input: Arc<TrieInputSorted>,
+    prune_epoch: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

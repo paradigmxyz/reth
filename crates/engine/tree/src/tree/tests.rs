@@ -188,6 +188,7 @@ impl TestHarness {
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let tree_config =
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+        let runtime = reth_tasks::Runtime::test();
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -197,6 +198,7 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
+            runtime.state_trie_overlay_worker_pool(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
@@ -213,7 +215,7 @@ impl TestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
-            reth_tasks::Runtime::test(),
+            runtime.clone(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -230,7 +232,7 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
-            reth_tasks::Runtime::test(),
+            runtime,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
