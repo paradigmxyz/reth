@@ -83,15 +83,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             })
             .collect::<Vec<_>>();
 
-        // Optimistically fill each missing child overlay through the normal cache path.
-        let cached_parent_overlays = cached_parent_overlays
-            .into_iter()
-            .filter(|anchor_hash| {
-                !self
-                    .overlays
-                    .contains_key(&OverlayCacheKey { anchor_hash: *anchor_hash, tip_hash: hash })
-            })
-            .collect::<Vec<_>>();
         if cached_parent_overlays.is_empty() {
             return
         }
@@ -200,19 +191,10 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                         }
                     };
 
-                if !Self::has_anchor_hash(self.blocks.as_ref(), tip_hash, anchor_hash) {
-                    return Err(StateTrieOverlayError { tip_hash, anchor_hash })
-                }
                 entry.insert(Arc::clone(&input));
                 input
             }
         };
-
-        // If the path was removed just after insertion, remove only this computed value.
-        if !Self::has_anchor_hash(self.blocks.as_ref(), tip_hash, anchor_hash) {
-            self.overlays.remove_if(&key, |_, cached| Arc::ptr_eq(cached, &input));
-            return Err(StateTrieOverlayError { tip_hash, anchor_hash })
-        }
 
         Ok(input)
     }
