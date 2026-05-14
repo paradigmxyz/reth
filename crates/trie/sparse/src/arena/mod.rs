@@ -241,9 +241,10 @@ impl ArenaSparseSubtrie {
         // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
+        let retained_node_capacity = retained_leaves.len().saturating_mul(2).max(1);
+        let mut new_arena = SlotMap::with_capacity(retained_node_capacity);
         // Queue: (new_idx, path TO the node — excluding its own short_key)
-        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::with_capacity(retained_node_capacity);
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
@@ -279,7 +280,7 @@ impl ArenaSparseSubtrie {
             for (child_pos, nibble, old_child_idx) in children {
                 // Child's path in the trie (edges to reach it, excluding its own short_key).
                 let mut child_path = branch_logical_path;
-                child_path.push(nibble);
+                child_path.push_unchecked(nibble);
 
                 // Child's full prefix for the retention check.
                 let child_short_key = match &self.arena[old_child_idx] {
