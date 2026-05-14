@@ -329,6 +329,11 @@ impl BlockingWorkerSet {
         })
     }
 
+    /// Returns `true` if the underlying blocking worker pool has been initialized.
+    pub fn is_initialized(&self) -> bool {
+        self.pool.get().is_some()
+    }
+
     /// Total number of worker threads.
     pub fn current_num_threads(&self) -> usize {
         self.pool().max_count()
