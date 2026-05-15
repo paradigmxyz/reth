@@ -3,8 +3,8 @@
 Prometheus metrics proxy that fetches from a local reth node and
 re-exposes with additional benchmark labels.
 
-Reads labels from a JSON file (updated by local-reth-bench.sh between runs)
-and injects them into every Prometheus metric line.
+Reads labels from a JSON file updated between benchmark runs and injects them
+into every Prometheus metric line.
 
 Returns empty 200 when reth is not running (clean Grafana gaps).
 """
