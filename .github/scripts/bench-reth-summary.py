@@ -30,12 +30,12 @@ import sys
 GIGAGAS = 1_000_000_000
 BOOTSTRAP_ITERATIONS = 10_000
 PRACTICAL_FLOOR_PCT = {
-    "mean": 1.0,
-    "p50": 1.0,
-    "p90": 2.0,
+    "mean": 0.70,
+    "p50": 0.70,
+    "p90": 1.35,
     "p99": 5.0,
-    "mgas_s": 1.0,
-    "wall_clock": 1.0,
+    "mgas_s": 0.45,
+    "wall_clock": 0.70,
     "persist_wait": 5.0,
 }
 PRACTICAL_FLOOR_ABS = {
