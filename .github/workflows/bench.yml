@@ -84,7 +84,7 @@ on:
       run_pairs:
         description: "Number of benchmark run pairs (1 = AB, 2 = ABBA, 3 = ABABAB)"
         required: false
-        default: "2"
+        default: "6"
         type: string
       otlp:
         description: "Export OTLP traces and logs"
@@ -218,7 +218,7 @@ jobs:
               bigBlocks = parsedBigBlocks.enabled;
               bigBlocksTargetGas = parsedBigBlocks.targetGas;
               bal = '${{ github.event.inputs.bal }}' || 'false';
-              var runPairs = '${{ github.event.inputs.run_pairs }}' || '2';
+              var runPairs = '${{ github.event.inputs.run_pairs }}' || '6';
               var otlp = '${{ github.event.inputs.otlp }}' === 'true' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
@@ -248,7 +248,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '2', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '6', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -496,7 +496,7 @@ jobs:
             const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '2';
+            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
             const runOrder = '${{ steps.args.outputs.run-order }}';
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
@@ -544,7 +544,7 @@ jobs:
             const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '2';
+            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
             const runOrder = '${{ steps.args.outputs.run-order }}';
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
@@ -705,7 +705,7 @@ jobs:
             const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const runPairs = process.env.BENCH_RUN_PAIRS || '2';
+            const runPairs = process.env.BENCH_RUN_PAIRS || '6';
             const runOrder = process.env.BENCH_RUN_ORDER || '';
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = (process.env.BENCH_OTLP || 'false') !== 'false';
@@ -1057,7 +1057,7 @@ jobs:
             echo
           }
 
-          RUN_ORDER="$(build_run_order "${BENCH_RUN_PAIRS:-2}")"
+          RUN_ORDER="$(build_run_order "${BENCH_RUN_PAIRS:-6}")"
           echo "BENCH_RUN_ORDER=${RUN_ORDER}" >> "$GITHUB_ENV"
           echo "${RUN_ORDER}" > "$BENCH_WORK_DIR/run_order.txt"
           echo "Run order: ${RUN_ORDER} (A=feature, B=baseline)"
@@ -1234,7 +1234,7 @@ jobs:
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv ${BASELINE_CSVS[*]}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv ${FEATURE_CSVS[*]}"
           SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs ${BENCH_RUN_PAIRS:-2}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs ${BENCH_RUN_PAIRS:-6}"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
