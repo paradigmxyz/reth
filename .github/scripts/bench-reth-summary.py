@@ -587,13 +587,8 @@ def generate_comparison_table(
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
     if run_pairs:
-        combinations = f", {run_combinations} combinations" if run_combinations else ""
+        combinations = f", {run_combinations} run combinations" if run_combinations else ""
         meta_parts.append(f"{run_pairs} run pairs{combinations}")
-    ci_method = paired.get("ci_method")
-    if ci_method == "run_cluster_bootstrap":
-        meta_parts.append("run-cluster CI")
-    elif ci_method == "block_bootstrap":
-        meta_parts.append("block bootstrap CI")
     if wait_time:
         meta_parts.append(f"wait time: {wait_time}")
     display_mode = display_bal_mode(bal_mode)
