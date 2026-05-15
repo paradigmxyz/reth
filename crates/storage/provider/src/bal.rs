@@ -2,6 +2,7 @@ use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
+use reth_metrics::{metrics::Histogram, Metrics};
 use reth_prune_types::PruneMode;
 use reth_storage_api::{
     BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, SealedBal,
@@ -11,6 +12,7 @@ use reth_tokio_util::EventSender;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
+    time::Instant,
 };
 
 /// Basic in-memory BAL store keyed by block hash.
@@ -19,6 +21,7 @@ pub struct InMemoryBalStore {
     config: BalConfig,
     inner: Arc<RwLock<InMemoryBalStoreInner>>,
     notifications: EventSender<BalNotification>,
+    metrics: InMemoryBalStoreMetrics,
 }
 
 impl InMemoryBalStore {
@@ -29,7 +32,16 @@ impl InMemoryBalStore {
             config,
             inner: Arc::new(RwLock::new(InMemoryBalStoreInner::default())),
             notifications,
+            metrics: InMemoryBalStoreMetrics::default(),
         }
+    }
+
+    /// Runs `inner.prune` while recording its duration in the prune metric.
+    fn timed_prune(&self, inner: &mut InMemoryBalStoreInner, tip: BlockNumber) -> usize {
+        let start = Instant::now();
+        let pruned = inner.prune(self.config.in_memory_retention, tip);
+        self.metrics.prune_duration_seconds.record(start.elapsed());
+        pruned
     }
 }
 
@@ -128,13 +140,23 @@ struct BalEntry {
     bal: Bytes,
 }
 
+/// Metrics for [`InMemoryBalStore`].
+#[derive(Metrics, Clone)]
+#[metrics(scope = "storage.bal.in_memory")]
+struct InMemoryBalStoreMetrics {
+    /// Time taken to prune expired BALs. Records all three prune paths:
+    /// explicit `BalStore::prune`, auto-prune in `insert`, and auto-prune
+    /// in `insert_many`.
+    prune_duration_seconds: Histogram,
+}
+
 impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
         inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
         if let Some(highest_block_number) = inner.highest_block_number {
             // This preserves insert-time cleanup based on the highest inserted BAL block.
-            inner.prune(self.config.in_memory_retention, highest_block_number);
+            self.timed_prune(&mut inner, highest_block_number);
         }
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
@@ -151,7 +173,7 @@ impl BalStore for InMemoryBalStore {
             inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
         }
         if let Some(highest_block_number) = inner.highest_block_number {
-            inner.prune(self.config.in_memory_retention, highest_block_number);
+            self.timed_prune(&mut inner, highest_block_number);
         }
         drop(inner);
 
@@ -166,7 +188,7 @@ impl BalStore for InMemoryBalStore {
     }
 
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
-        Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
+        Ok(self.timed_prune(&mut self.inner.write(), tip))
     }
 
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
