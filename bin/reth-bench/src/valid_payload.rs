@@ -85,7 +85,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV1 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV1: {status:?}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid forkchoiceUpdatedV1: {status:?}")),
+                )))
             }
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
@@ -124,7 +126,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV2 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV2: {status:?}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid forkchoiceUpdatedV2: {status:?}")),
+                )))
             }
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
@@ -163,7 +167,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV3 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV3: {status:?}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid forkchoiceUpdatedV3: {status:?}")),
+                )))
             }
             status =
                 self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
@@ -197,7 +203,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV4 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV4: {status:?}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid forkchoiceUpdatedV4: {status:?}")),
+                )))
             }
             status =
                 self.fork_choice_updated_v4(fork_choice_state, payload_attributes.clone()).await?;
