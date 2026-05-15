@@ -11,8 +11,8 @@ use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -381,21 +381,11 @@ where
         &mut self,
         mut nodes: Vec<ProofTrieNodeV2>,
     ) -> SparseStateTrieResult<()> {
-        let capacity = estimate_v2_proof_capacity(&nodes);
-
         #[cfg(feature = "metrics")]
         self.metrics.increment_total_account_nodes(nodes.len() as u64);
 
-        let root_node = nodes.iter().find(|n| n.path.is_empty());
-        let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-            self.state.reveal_root(root_node.node.clone(), root_node.masks, self.retain_updates)?
-        } else {
-            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
-        };
-        trie.reserve_nodes(capacity);
         trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
+        self.state.reveal_v2_proof_nodes(&mut nodes, self.retain_updates)?;
 
         self.deferred_drops.proof_nodes_bufs.push(nodes);
         Ok(())
@@ -436,19 +426,10 @@ where
         bufs: &mut Vec<Vec<ProofTrieNodeV2>>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<usize> {
-        let capacity = estimate_v2_proof_capacity(&nodes);
         let total_nodes = nodes.len();
 
-        let root_node = nodes.iter().find(|n| n.path.is_empty());
-        let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
-            trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
-        } else {
-            trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
-        };
-        trie.reserve_nodes(capacity);
         trace!(target: "trie::sparse", ?account, total_nodes, "Revealing storage nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
+        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)?;
 
         bufs.push(nodes);
         Ok(total_nodes)
@@ -1010,22 +991,6 @@ impl BucketedLfu<HotSlotKey> {
     }
 }
 
-/// Calculates capacity estimation for V2 proof nodes.
-///
-/// This counts nodes and their children (for branch and extension nodes) to provide
-/// proper capacity hints for `reserve_nodes`.
-fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
-    let mut capacity = nodes.len();
-
-    for node in nodes {
-        if let TrieNodeV2::Branch(branch) = &node.node {
-            capacity += branch.state_mask.count_ones() as usize;
-        }
-    }
-
-    capacity
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1043,7 +1008,7 @@ mod tests {
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask,
+        TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
