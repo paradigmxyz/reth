@@ -306,17 +306,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let retrieve_hashed_state_reverts_duration;
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
-        let anchor_hash = if matches!(&self.overlay_source, Some(OverlaySource::Managed { .. })) {
-            let parent_is_persisted = provider
-                .convert_hash_or_number(self.parent_hash.into())?
-                .is_some_and(|parent_number| parent_number <= db_tip_block.number);
-            if parent_is_persisted {
-                self.parent_hash
-            } else {
-                db_tip_block.hash
+        let anchor_hash = match &self.overlay_source {
+            Some(OverlaySource::Managed { manager, .. }) => {
+                let parent_is_persisted = provider
+                    .convert_hash_or_number(self.parent_hash.into())?
+                    .is_some_and(|parent_number| parent_number <= db_tip_block.number);
+                if parent_is_persisted {
+                    self.parent_hash
+                } else {
+                    manager
+                        .anchor_for_parent(self.parent_hash)
+                        .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?
+                }
             }
-        } else {
-            self.parent_hash
+            _ => self.parent_hash,
         };
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.

@@ -146,7 +146,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
         #[cfg(feature = "rayon")]
         {
-            let parent_span = span.clone();
+            let parent_span = span;
             for anchor_hash in cached_parent_overlays {
                 let manager = <Self as Clone>::clone(self);
                 let parent_span = parent_span.clone();
@@ -285,10 +285,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         });
         span.record("parent_overlay_reused", parent_input.is_some());
         let compute_input = match parent_input {
-            Some(parent_input) => ComputeOverlayInput::ExtendCached {
-                block: blocks.into_iter().next().expect("overlay block path is not empty"),
-                parent_input,
-            },
+            Some(parent_input) => {
+                ComputeOverlayInput::ExtendCached { block: blocks.swap_remove(0), parent_input }
+            }
             None => ComputeOverlayInput::MergeBlocks(blocks),
         };
 
@@ -305,7 +304,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                     #[cfg(feature = "rayon")]
                     {
                         if let Some(worker_pool) = &self.worker_pool {
-                            let compute_span = span.clone();
+                            let compute_span = span;
                             Arc::new(worker_pool.install_fn(|| {
                                 let _guard = compute_span.enter();
                                 compute_overlay(compute_input, anchor_hash)
@@ -328,6 +327,20 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
         Ok(input)
     }
+
+    /// Returns the persisted anchor hash for an in-memory parent block.
+    pub fn anchor_for_parent(&self, parent_hash: B256) -> Option<B256> {
+        let mut hash = parent_hash;
+
+        loop {
+            let parent_hash = self.blocks.get(&hash)?.recovered_block().parent_hash();
+            if !self.blocks.contains_key(&parent_hash) {
+                return Some(parent_hash)
+            }
+            hash = parent_hash;
+        }
+    }
+
     fn has_anchor_hash(
         blocks: &DashMap<B256, ExecutedBlock<N>>,
         tip_hash: B256,
@@ -572,6 +585,26 @@ mod tests {
         let (_, cached_short) =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert!(Arc::ptr_eq(&short, &cached_short));
+    }
+
+    #[test]
+    fn returns_anchor_for_in_memory_parent() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        assert_eq!(
+            manager.anchor_for_parent(blocks[2].recovered_block().hash()),
+            Some(blocks[0].recovered_block().parent_hash())
+        );
+
+        manager.remove_blocks([blocks[0].recovered_block().hash()]);
+        assert_eq!(
+            manager.anchor_for_parent(blocks[2].recovered_block().hash()),
+            Some(blocks[0].recovered_block().hash())
+        );
     }
 
     #[cfg(feature = "rayon")]
