@@ -158,14 +158,6 @@ impl ComputedTrieData {
     ) -> Self {
         Self { hashed_state, trie_updates }
     }
-
-    /// Construct sorted trie data for one block.
-    pub const fn without_trie_input(
-        hashed_state: Arc<HashedPostStateSorted>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-    ) -> Self {
-        Self::new(hashed_state, trie_updates)
-    }
 }
 
 #[cfg(test)]

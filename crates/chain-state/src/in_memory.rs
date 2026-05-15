@@ -803,10 +803,9 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
     /// after the block was validated.
     ///
-    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
-    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
-    /// outside the critical validation path. This can improve latency for time-sensitive
-    /// operations like block validation.
+    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state and
+    /// trie updates) to be performed outside the critical validation path. This can improve latency
+    /// for time-sensitive operations like block validation.
     ///
     /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
     /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.

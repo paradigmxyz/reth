@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain,
+    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -164,10 +164,10 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new_with_state_trie_overlay_worker_pool(
+            tree_state: TreeState::new(
                 canonical_block,
                 engine_kind,
-                state_trie_overlay_worker_pool,
+                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
             ),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -1513,28 +1513,9 @@ where
 
         self.on_new_persisted_block()?;
 
-        self.prepare_state_trie_overlay(
-            self.state.tree_state.canonical_block_hash(),
-            last_persisted_block_hash,
-        );
-
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
-    }
-
-    /// Prepares the state trie overlay from `anchor_hash` to `parent_hash` in the background.
-    fn prepare_state_trie_overlay(&self, parent_hash: B256, anchor_hash: B256) {
-        if parent_hash == anchor_hash {
-            return
-        }
-
-        let manager = self.state.tree_state.state_trie_overlays.clone();
-        self.runtime.spawn_blocking_named("prepare-overlay", move || {
-            if let Err(err) = manager.overlay_for_parent(parent_hash, anchor_hash) {
-                debug!(target: "engine::tree", %err, "Could not prepare state trie overlay");
-            }
-        });
     }
 
     /// Handles a message from the engine.
@@ -1599,10 +1580,6 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
-                        self.prepare_state_trie_overlay(
-                            block.recovered_block().hash(),
-                            self.persistence_state.last_persisted_block.hash,
-                        );
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -2206,9 +2183,7 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        // Skip building trie input and anchor for DB-loaded blocks.
-        let trie_data =
-            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
+        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
@@ -3039,10 +3014,6 @@ where
         }
 
         self.state.tree_state.insert_executed(executed.clone());
-        self.prepare_state_trie_overlay(
-            executed.recovered_block().hash(),
-            self.persistence_state.last_persisted_block.hash,
-        );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event

@@ -67,6 +67,9 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     /// Immediate overlay with already-computed data.
     Immediate {
         /// Trie updates overlay.
+        ///
+        /// This can be non-empty when a caller starts with an explicit `TrieInputSorted`, such
+        /// as historical providers.
         trie: Arc<TrieUpdatesSorted>,
         /// Hashed state overlay.
         state: Arc<HashedPostStateSorted>,
@@ -75,7 +78,9 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     Managed {
         /// Manager used to resolve in-memory parent state if the parent is not persisted.
         manager: StateTrieOverlayManager<N>,
-        /// Hashed state overlay.
+        /// Immediate hashed state overlay applied on top of any manager-produced overlay.
+        ///
+        /// This is populated by the `with_hashed_state_overlay` methods.
         state: Arc<HashedPostStateSorted>,
     },
 }
