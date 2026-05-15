@@ -133,7 +133,6 @@ jobs:
       otlp: ${{ steps.args.outputs.otlp }}
       driver: ${{ steps.args.outputs.driver }}
       node-bin: ${{ steps.args.outputs.node-bin }}
-      driver-reason: ${{ steps.args.outputs.driver-reason }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
       pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
       pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
@@ -394,7 +393,6 @@ jobs:
 
             const driver = 'txgen';
             const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
-            const driverReason = '';
 
             core.setOutput('pr', pr || '');
             core.setOutput('actor', actor);
@@ -417,7 +415,6 @@ jobs:
             core.setOutput('otlp', otlp);
             core.setOutput('driver', driver);
             core.setOutput('node-bin', nodeBin);
-            core.setOutput('driver-reason', driverReason);
 
       - name: Acknowledge request
         id: ack
@@ -493,9 +490,8 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
-            const driverReason = '${{ steps.args.outputs.driver-reason }}';
-            const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
+            const driver = '${{ steps.args.outputs.driver }}' || 'txgen';
+            const driverNote = `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
             const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
@@ -540,9 +536,8 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
-            const driverReason = '${{ steps.args.outputs.driver-reason }}';
-            const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
+            const driver = '${{ steps.args.outputs.driver }}' || 'txgen';
+            const driverNote = `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
             const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
@@ -626,7 +621,6 @@ jobs:
       BENCH_SLACK: ${{ needs.reth-bench-ack.outputs.slack }}
       BENCH_DRIVER: ${{ needs.reth-bench-ack.outputs.driver }}
       BENCH_NODE_BIN: ${{ needs.reth-bench-ack.outputs.node-bin }}
-      BENCH_DRIVER_REASON: ${{ needs.reth-bench-ack.outputs.driver-reason }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
       TXGEN_REV: 51e7dd935728b5d77c10ddac59ba327418271aab
@@ -699,9 +693,8 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const driver = process.env.BENCH_DRIVER || (bal !== 'false' ? 'reth-bench' : 'txgen');
-            const driverReason = process.env.BENCH_DRIVER_REASON || '';
-            const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
+            const driver = process.env.BENCH_DRIVER || 'txgen';
+            const driverNote = `, driver: \`${driver}\``;
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
             core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
@@ -1234,9 +1227,6 @@ jobs:
           fi
           if [ -n "${BENCH_DRIVER:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --driver $BENCH_DRIVER"
-          fi
-          if [ -n "${BENCH_DRIVER_REASON:-}" ]; then
-            SUMMARY_ARGS="$SUMMARY_ARGS --driver-reason $BENCH_DRIVER_REASON"
           fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then

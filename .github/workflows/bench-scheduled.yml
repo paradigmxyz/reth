@@ -310,7 +310,6 @@ jobs:
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
       BENCH_DRIVER: txgen
       BENCH_NODE_BIN: reth
-      BENCH_DRIVER_REASON: ""
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
       TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
@@ -696,9 +695,6 @@ jobs:
           fi
           if [ -n "${BENCH_DRIVER:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --driver $BENCH_DRIVER"
-          fi
-          if [ -n "${BENCH_DRIVER_REASON:-}" ]; then
-            SUMMARY_ARGS="$SUMMARY_ARGS --driver-reason $BENCH_DRIVER_REASON"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
