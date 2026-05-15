@@ -304,24 +304,19 @@ where
         let reth_trie_common::DecodedMultiProofV2 { account_proofs, mut storage_proofs, .. } =
             multiproof;
 
-        // Ensure a storage trie exists for every address whose proofs we're about to reveal
-        for &account in storage_proofs.keys() {
-            let _ = self.storage.get_or_create_trie_mut(account);
-        }
-
         // Collect `(trie, proof_nodes)` pairs for both the account trie and every storage trie
-        // touched by this multiproof. Account and storage tries can have different generic
-        // parameters, so `Either` is used to unify them in a single Vec.
-        //
-        // Skip account proofs entirely if empty: `reveal_v2_proof_nodes` returns an error when
-        // called with empty `nodes` before the trie's root has been revealed. This can happen
-        // when the first storage proof arrives before the first account proof.
+        // touched by this multiproof.
         let mut targets = Vec::with_capacity(storage_proofs.len() + 1);
 
         if !account_proofs.is_empty() {
             #[cfg(feature = "metrics")]
             self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
             targets.push((Either::Left(&mut self.state), account_proofs));
+        }
+
+        // Ensure a storage trie exists for every address whose proofs we're about to reveal
+        for &account in storage_proofs.keys() {
+            let _ = self.storage.get_or_create_trie_mut(account);
         }
 
         for (account, trie) in self.storage.tries.iter_mut() {
