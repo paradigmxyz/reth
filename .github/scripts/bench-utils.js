@@ -85,9 +85,7 @@ function blocksLabel(summary) {
   if (summary.wait_time) parts.push({ key: 'Wait time', value: summary.wait_time });
   const runPairs = summary.run_pairs || process.env.BENCH_RUN_PAIRS || '';
   if (runPairs) {
-    const counts = summary.run_counts || {};
-    const suffix = counts.pairings ? ` (${counts.pairings} run combinations)` : '';
-    parts.push({ key: 'Run pairs', value: `${runPairs}${suffix}` });
+    parts.push({ key: 'Run pairs', value: runPairs });
   }
   return parts;
 }

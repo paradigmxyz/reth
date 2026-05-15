@@ -515,7 +515,6 @@ SUMMARY_ARGS=(
   --feature-ref "$FEATURE_SHA"
   --baseline-csv "$BENCH_WORK_DIR/baseline-1/combined_latency.csv" "$BENCH_WORK_DIR/baseline-2/combined_latency.csv"
   --feature-csv "$BENCH_WORK_DIR/feature-1/combined_latency.csv" "$BENCH_WORK_DIR/feature-2/combined_latency.csv"
-  --gas-csv "$BENCH_WORK_DIR/feature-1/total_gas.csv"
   --run-pairs "2"
   --grafana-url "$GRAFANA_URL"
 )
