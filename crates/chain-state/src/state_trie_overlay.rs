@@ -195,7 +195,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             let overlays_before = self.overlays.len();
             let blocks = Arc::clone(&self.blocks);
             self.overlays.retain(|key, _| {
-                Self::has_anchor_hash(blocks.as_ref(), key.tip_hash, key.anchor_hash)
+                key.tip_hash != key.anchor_hash &&
+                    Self::anchor_for_parent_in(blocks.as_ref(), key.tip_hash, key.anchor_hash) ==
+                        Some(key.anchor_hash)
             });
             pruned_overlays = overlays_before.saturating_sub(self.overlays.len());
             span.record("pruned_overlays", pruned_overlays);
@@ -330,6 +332,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
     /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
     pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
+        Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
+    }
+
+    fn anchor_for_parent_in(
+        blocks: &DashMap<B256, ExecutedBlock<N>>,
+        parent_hash: B256,
+        preferred_anchor: B256,
+    ) -> Option<B256> {
         if parent_hash == preferred_anchor {
             return Some(preferred_anchor)
         }
@@ -337,33 +347,15 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let mut hash = parent_hash;
 
         loop {
-            let block_parent_hash = self.blocks.get(&hash)?.recovered_block().parent_hash();
+            let block_parent_hash = blocks.get(&hash)?.recovered_block().parent_hash();
             if block_parent_hash == preferred_anchor {
                 return Some(block_parent_hash)
             }
-            if !self.blocks.contains_key(&block_parent_hash) {
+            if !blocks.contains_key(&block_parent_hash) {
                 return Some(block_parent_hash)
             }
             hash = block_parent_hash;
         }
-    }
-
-    fn has_anchor_hash(
-        blocks: &DashMap<B256, ExecutedBlock<N>>,
-        tip_hash: B256,
-        anchor_hash: B256,
-    ) -> bool {
-        let mut hash = tip_hash;
-
-        while let Some(block) = blocks.get(&hash) {
-            let parent_hash = block.recovered_block().parent_hash();
-            if parent_hash == anchor_hash {
-                return true
-            }
-            hash = parent_hash;
-        }
-
-        false
     }
 }
 
