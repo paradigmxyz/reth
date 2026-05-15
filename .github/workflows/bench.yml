@@ -1103,6 +1103,8 @@ jobs:
             taskset -c 0 "$RUN_SCRIPT" "$run_type" "$binary" "$BENCH_WORK_DIR/${run_label}"
           done
 
+          .github/scripts/bench-update-status.sh "Finalizing results..."
+
       - name: Stop metrics proxy & generate Grafana URL
         id: metrics
         if: "!cancelled()"
