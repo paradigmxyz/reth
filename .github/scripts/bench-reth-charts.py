@@ -4,16 +4,22 @@
 Usage:
     bench-engine-charts.py <combined_csv> --output-dir <dir> [--baseline <baseline_csv>]
 
-Generates three PNG charts:
+Generates PNG charts:
   1. newPayload latency + Ggas/s per block (+ latency diff when baseline present)
   2. Wait breakdown (persistence, execution cache, sparse trie) per block
   3. Scatter plot of gas used vs latency
+  4. Prometheus phase p95s when summary JSON contains scraped metrics
+  5. Cache/trie metrics when summary JSON contains scraped metrics
+  6. BAL metrics when summary JSON contains scraped metrics
 
 When --baseline is provided, charts overlay both datasets for comparison.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -190,6 +196,107 @@ def plot_gas_vs_latency(
     plt.close(fig)
 
 
+def _unit_scale(unit: str) -> tuple[float, str]:
+    if unit == "seconds_ms":
+        return 1_000.0, "ms"
+    if unit == "bytes":
+        return 1 / (1024 * 1024), "MiB"
+    if unit == "percent":
+        return 100.0, "%"
+    return 1.0, ""
+
+
+def plot_prometheus_rows(rows: list[dict], out: Path, title: str):
+    """Plot baseline/feature bars for summarized Prometheus rows."""
+    rows = [r for r in rows if r.get("baseline") is not None or r.get("feature") is not None]
+    if not rows:
+        return False
+
+    by_unit: dict[str, list[dict]] = {}
+    for row in rows:
+        by_unit.setdefault(row.get("unit", ""), []).append(row)
+
+    fig, axes = plt.subplots(len(by_unit), 1, figsize=(10, max(4, len(rows) * 0.55)))
+    if len(by_unit) == 1:
+        axes = [axes]
+
+    for ax, (unit, subset) in zip(axes, by_unit.items()):
+        labels = [r["label"] for r in subset]
+        scale, ylabel = _unit_scale(unit)
+        baseline = [(r.get("baseline") or 0) * scale for r in subset]
+        feature = [(r.get("feature") or 0) * scale for r in subset]
+
+        y = np.arange(len(subset))
+        height = 0.35
+        ax.barh(y - height / 2, baseline, height, label="baseline", alpha=0.75)
+        ax.barh(y + height / 2, feature, height, label="feature", alpha=0.75)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel(ylabel or "value")
+        ax.set_title(title if len(by_unit) == 1 else f"{title} ({ylabel or unit})")
+        ax.grid(True, alpha=0.3, axis="x")
+        ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return True
+
+
+def plot_cache_trie_rows(rows: list[dict], out: Path):
+    rows = [r for r in rows if r.get("baseline") is not None or r.get("feature") is not None]
+    if not rows:
+        return False
+    hit_rows = [r for r in rows if r.get("unit") == "percent"]
+    other_rows = [r for r in rows if r.get("unit") != "percent"]
+    nplots = 2 if hit_rows and other_rows else 1
+    fig, axes = plt.subplots(nplots, 1, figsize=(10, 4 * nplots))
+    if nplots == 1:
+        axes = [axes]
+
+    def barh(ax, subset, title):
+        labels = [r["label"] for r in subset]
+        scale, ylabel = _unit_scale(subset[0].get("unit", ""))
+        y = np.arange(len(subset))
+        height = 0.35
+        ax.barh(y - height / 2, [(r.get("baseline") or 0) * scale for r in subset], height, label="baseline", alpha=0.75)
+        ax.barh(y + height / 2, [(r.get("feature") or 0) * scale for r in subset], height, label="feature", alpha=0.75)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel(ylabel or "value")
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3, axis="x")
+        ax.legend()
+
+    idx = 0
+    if hit_rows:
+        barh(axes[idx], hit_rows, "Cache hit rates")
+        idx += 1
+    if other_rows:
+        barh(axes[idx], other_rows, "Trie/cache details")
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return True
+
+
+def plot_summary_charts(summary_path: str | None, out_dir: Path):
+    if not summary_path:
+        return
+    path = Path(summary_path)
+    if not path.exists():
+        return
+    with path.open() as f:
+        summary = json.load(f)
+    prom = summary.get("prometheus") or {}
+    phase_rows = [r for r in prom.get("phases", []) if summary.get("bal_mode") or r.get("key") != "bal_validation"]
+    plot_prometheus_rows(phase_rows, out_dir / "prometheus_phases.png", "Prometheus execution phase p95")
+    plot_cache_trie_rows(prom.get("cache_trie", []), out_dir / "cache_trie.png")
+    plot_prometheus_rows(prom.get("bal", []), out_dir / "bal.png", "BAL metrics")
+
+
 def merge_csvs(paths: list[str]) -> list[dict]:
     """Parse and merge multiple CSVs, averaging values for duplicate blocks."""
     by_block: dict[int, list[dict]] = {}
@@ -227,6 +334,7 @@ def main():
     )
     parser.add_argument("--baseline-name", default="baseline", help="Label for baseline")
     parser.add_argument("--feature-name", "--branch-name", default="feature", help="Label for feature")
+    parser.add_argument("--summary", help="Path to summary.json for Prometheus charts")
     args = parser.parse_args()
 
     feature = merge_csvs(args.feature)
@@ -252,6 +360,7 @@ def main():
     plot_latency_and_throughput(feature, baseline, out_dir / "latency_throughput.png", bname, fname)
     plot_wait_breakdown(feature, baseline, out_dir / "wait_breakdown.png", bname, fname)
     plot_gas_vs_latency(feature, baseline, out_dir / "gas_vs_latency.png", bname, fname)
+    plot_summary_charts(args.summary, out_dir)
 
     print(f"Charts written to {out_dir}")
 

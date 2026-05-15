@@ -16,12 +16,15 @@ Matches blocks by number and computes per-block diffs to cancel out gas
 variance. Fails if baseline or feature CSV is missing or empty.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
 import math
 import random
 import sys
+from pathlib import Path
 
 GIGAGAS = 1_000_000_000
 BOOTSTRAP_ITERATIONS = 10_000
@@ -123,6 +126,8 @@ def compute_stats(combined: list[dict]) -> dict:
 
     return {
         "n": n,
+        "total_gas": sum(r["gas_used"] for r in combined),
+        "total_txs": sum(r["transaction_count"] for r in combined),
         "mean_ms": mean_lat,
         "stddev_ms": std_lat,
         "p50_ms": percentile(sorted_lat, 50),
@@ -151,6 +156,382 @@ def compute_wait_stats(combined: list[dict], field: str) -> dict:
         "mean_ms": mean_val,
         "p50_ms": percentile(sorted_vals, 50),
         "p95_ms": percentile(sorted_vals, 95),
+    }
+
+
+def load_reports(paths: list[str] | None) -> list[dict]:
+    """Load txgen JSON reports, ignoring missing optional paths."""
+    reports = []
+    for path in paths or []:
+        p = Path(path)
+        if not p.exists():
+            continue
+        with p.open() as f:
+            reports.append(json.load(f))
+    return reports
+
+
+def _metric_aliases(name: str) -> set[str]:
+    """Return accepted Prometheus sample names for a logical metric name."""
+    normalized = name.replace(".", "_")
+    aliases = {name, normalized}
+    if not normalized.startswith("reth_"):
+        aliases.add(f"reth_{normalized}")
+    return aliases
+
+
+def _samples_for_metric(report: dict, name: str, suffix: str = "") -> list[dict]:
+    aliases = {f"{alias}{suffix}" for alias in _metric_aliases(name)}
+    return [s for s in report.get("samples", []) if s.get("name") in aliases]
+
+
+def _finite_float(value) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _bucket_le(value) -> float | None:
+    if value in ("+Inf", "Inf", "inf"):
+        return math.inf
+    return _finite_float(value)
+
+
+def _histogram_quantile(report: dict, name: str, q: float) -> float | None:
+    """Compute a quantile from Prometheus histogram bucket deltas for one report."""
+    buckets: dict[float, float] = {}
+    grouped: dict[tuple[tuple[str, str], ...], list[dict]] = {}
+    for sample in _samples_for_metric(report, name, "_bucket"):
+        labels = sample.get("labels") or {}
+        le = _bucket_le(labels.get("le"))
+        if le is None:
+            continue
+        key = tuple(sorted(labels.items()))
+        grouped.setdefault(key, []).append(sample)
+
+    for samples in grouped.values():
+        samples.sort(key=lambda s: s.get("offset_ms", 0))
+        if len(samples) < 2:
+            continue
+        le = _bucket_le((samples[-1].get("labels") or {}).get("le"))
+        if le is None:
+            continue
+        delta = samples[-1].get("value", 0) - samples[0].get("value", 0)
+        if delta > 0:
+            buckets[le] = buckets.get(le, 0.0) + delta
+
+    if not buckets:
+        samples = []
+        for sample in _samples_for_metric(report, name):
+            quantile = _finite_float((sample.get("labels") or {}).get("quantile"))
+            if quantile is not None and abs(quantile - q) < 1e-9:
+                samples.append(sample)
+        if not samples:
+            return None
+        samples.sort(key=lambda s: s.get("offset_ms", 0))
+        return samples[-1].get("value")
+
+    ordered = sorted(buckets.items())
+    total = ordered[-1][1]
+    if total <= 0:
+        return None
+    wanted = total * q
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in ordered:
+        if count >= wanted:
+            bucket_count = count - prev_count
+            if bucket_count <= 0:
+                return le
+            pos = (wanted - prev_count) / bucket_count
+            return prev_le if math.isinf(le) else prev_le + (le - prev_le) * pos
+        prev_le = le
+        prev_count = count
+    return ordered[-1][0]
+
+
+def _counter_delta(report: dict, name: str) -> float | None:
+    samples = _samples_for_metric(report, name)
+    if len(samples) < 2:
+        return None
+    samples.sort(key=lambda s: s.get("offset_ms", 0))
+    return max(0.0, samples[-1].get("value", 0) - samples[0].get("value", 0))
+
+
+def _gauge_values(report: dict, name: str) -> list[float]:
+    return [s.get("value", 0.0) for s in _samples_for_metric(report, name)]
+
+
+def _avg(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _max(values: list[float]) -> float | None:
+    return max(values) if values else None
+
+
+def _report_metric_value(report: dict, metric: dict) -> float | None:
+    kind = metric["kind"]
+    name = metric["name"]
+    if kind == "hist_p95":
+        value = _histogram_quantile(report, name, 0.95)
+    elif kind == "hist_p50":
+        value = _histogram_quantile(report, name, 0.50)
+    elif kind == "counter_delta":
+        value = _counter_delta(report, name)
+    elif kind == "gauge_avg":
+        value = _avg(_gauge_values(report, name))
+    elif kind == "gauge_max":
+        value = _max(_gauge_values(report, name))
+    else:
+        value = None
+    if value is None or not math.isfinite(value):
+        return None
+    return value
+
+
+def _report_metric_values(reports: list[dict], metric: dict) -> list[float]:
+    values = []
+    for report in reports:
+        value = _report_metric_value(report, metric)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _summarize_report_metric(reports: list[dict], metric: dict) -> float | None:
+    return _avg(_report_metric_values(reports, metric))
+
+
+def _ratio(num: float | None, den: float | None) -> float | None:
+    if num is None or den is None or den <= 0:
+        return None
+    return num / den
+
+
+def _format_metric_value(value: float | None, unit: str) -> str:
+    if value is None:
+        return "—"
+    if unit == "seconds_ms":
+        return fmt_ms(value * 1_000)
+    if unit == "bytes":
+        return format_bytes(value)
+    if unit == "percent":
+        return f"{value * 100:.1f}%"
+    if unit == "count":
+        return f"{value:,.0f}"
+    if unit == "float":
+        return f"{value:.2f}"
+    return str(value)
+
+
+def _format_simple_change(base: float | None, feat: float | None, unit: str = "") -> str:
+    if base is None or feat is None:
+        return "—"
+    if unit == "percent":
+        return f"{(feat - base) * 100:+.1f}pp"
+    if base == 0:
+        return "same" if feat == 0 else "n/a"
+    return f"{(feat - base) / base * 100:+.2f}%"
+
+
+def _metric_diffs(values_a: list[float], values_b: list[float]) -> list[float]:
+    return [b - a for a in values_a for b in values_b]
+
+
+def _metric_ci(values_a: list[float], values_b: list[float]) -> float:
+    diffs = _metric_diffs(values_a, values_b)
+    if not diffs:
+        return 0.0
+    return _between_pairing_ci(diffs)
+
+
+def _directions_agree(diffs: list[float]) -> bool:
+    nonzero = [d for d in diffs if d != 0]
+    if not nonzero:
+        return True
+    return all(d > 0 for d in nonzero) or all(d < 0 for d in nonzero)
+
+
+def _signal_icon(
+    base: float | None,
+    feat: float | None,
+    ci: float,
+    values_a: list[float],
+    values_b: list[float],
+    lower_is_better: bool | None,
+) -> str:
+    if base is None or feat is None or lower_is_better is None:
+        return "⚪"
+    diff = feat - base
+    diffs = _metric_diffs(values_a, values_b)
+    significant = len(values_a) >= 2 and len(values_b) >= 2 and abs(diff) > ci and _directions_agree(diffs)
+    if not significant:
+        return "⚪"
+    return "✅" if (diff < 0) == lower_is_better else "❌"
+
+
+def _format_delta(value: float, unit: str) -> str:
+    sign = "+" if value >= 0 else ""
+    if unit == "ms":
+        return f"{sign}{value:.2f}ms"
+    if unit == "seconds_ms":
+        return f"{sign}{value * 1_000:.2f}ms"
+    if unit == "bytes":
+        return f"{sign}{format_bytes(value)}"
+    if unit == "percent":
+        return f"{sign}{value * 100:.1f}pp"
+    if unit == "count":
+        return f"{sign}{value:,.0f}"
+    return f"{sign}{value:.2f}"
+
+
+def _format_ci(value: float, unit: str) -> str:
+    if unit == "ms":
+        return f"±{value:.2f}ms"
+    if unit == "seconds_ms":
+        return f"±{value * 1_000:.2f}ms"
+    if unit == "bytes":
+        return f"±{format_bytes(value)}"
+    if unit == "percent":
+        return f"±{value * 100:.1f}pp"
+    if unit == "count":
+        return f"±{value:,.0f}"
+    return f"±{value:.2f}"
+
+
+def _format_change_with_ci(
+    base: float | None,
+    feat: float | None,
+    ci: float,
+    values_a: list[float],
+    values_b: list[float],
+    unit: str = "",
+    lower_is_better: bool | None = True,
+) -> str:
+    if base is None or feat is None:
+        return "—"
+    icon = _signal_icon(base, feat, ci, values_a, values_b, lower_is_better)
+    diff = feat - base
+    display_zero = diff == 0 or \
+        (unit == "seconds_ms" and abs(diff * 1_000) < 0.005) or \
+        (unit == "ms" and abs(diff) < 0.005) or \
+        (unit == "percent" and abs(diff * 100) < 0.05)
+    if display_zero:
+        return f"{icon} same ({_format_ci(ci, unit)})"
+    pct = "" if unit == "percent" or abs(base) < 1e-12 else f" ({diff / base * 100:+.2f}%)"
+    return f"{icon} {_format_delta(diff, unit)} ({_format_ci(ci, unit)}){pct}"
+
+
+def format_bytes(value: float) -> str:
+    units = ["B", "KiB", "MiB", "GiB"]
+    v = float(value)
+    for unit in units:
+        if abs(v) < 1024 or unit == units[-1]:
+            return f"{v:.1f}{unit}" if unit != "B" else f"{v:.0f}B"
+        v /= 1024
+    return f"{v:.1f}GiB"
+
+
+def summarize_prometheus_metrics(baseline_reports: list[dict], feature_reports: list[dict]) -> dict:
+    """Summarize selected reth Prometheus metrics from txgen report samples."""
+    phase_defs = [
+        {"key": "evm_execution", "label": "EVM execution", "name": "sync_execution_execution_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "pre_execution", "label": "Pre-execution", "name": "sync_execution_pre_execution_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "transaction_execution", "label": "Transaction execution", "name": "sync_execution_transaction_execution_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "post_execution", "label": "Post-execution", "name": "sync_execution_post_execution_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "payload_validation", "label": "Payload validation", "name": "sync_block_validation_payload_validation_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "state_root", "label": "State root", "name": "sync_block_validation_state_root_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "bal_validation", "label": "BAL validation", "name": "execution_block_access_list_validation_time_seconds", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "persistence", "label": "Persistence task", "name": "consensus_engine_beacon_persistence_duration", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "db_commit", "label": "DB commit", "name": "database_transaction_commit_whole_duration_seconds", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+    ]
+    cache_defs = [
+        {"key": "execution_cache_wait", "label": "Execution cache wait p95", "name": "consensus_engine_beacon_execution_cache_wait_duration", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "sparse_trie_total", "label": "Sparse trie total p95", "name": "tree_root_sparse_trie_total_duration_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "sparse_trie_cache_wait", "label": "Sparse trie cache wait p95", "name": "tree_root_sparse_trie_cache_wait_duration_histogram", "kind": "hist_p95", "unit": "seconds_ms", "lower_is_better": True},
+        {"key": "sparse_trie_retained_memory", "label": "Retained sparse trie memory", "name": "tree_root_sparse_trie_retained_memory_bytes", "kind": "gauge_max", "unit": "bytes", "lower_is_better": True},
+        {"key": "multiproof_account_nodes", "label": "Multiproof account nodes", "name": "sparse_state_trie_multiproof_total_account_nodes", "kind": "hist_p95", "unit": "count", "lower_is_better": True},
+        {"key": "multiproof_storage_nodes", "label": "Multiproof storage nodes", "name": "sparse_state_trie_multiproof_total_storage_nodes", "kind": "hist_p95", "unit": "count", "lower_is_better": True},
+    ]
+    bal_defs = [
+        {"key": "bal_valid", "label": "Valid BALs", "name": "execution_block_access_list_valid_total", "kind": "counter_delta", "unit": "count", "lower_is_better": None},
+        {"key": "bal_invalid", "label": "Invalid BALs", "name": "execution_block_access_list_invalid_total", "kind": "counter_delta", "unit": "count", "lower_is_better": True},
+        {"key": "bal_size", "label": "BAL size p95", "name": "execution_block_access_list_size_bytes", "kind": "hist_p95", "unit": "bytes", "lower_is_better": None},
+        {"key": "bal_account_changes", "label": "Account changes p95", "name": "execution_block_access_list_account_changes", "kind": "hist_p95", "unit": "count", "lower_is_better": None},
+        {"key": "bal_storage_changes", "label": "Storage changes p95", "name": "execution_block_access_list_storage_changes", "kind": "hist_p95", "unit": "count", "lower_is_better": None},
+        {"key": "bal_balance_changes", "label": "Balance changes p95", "name": "execution_block_access_list_balance_changes", "kind": "hist_p95", "unit": "count", "lower_is_better": None},
+        {"key": "bal_nonce_changes", "label": "Nonce changes p95", "name": "execution_block_access_list_nonce_changes", "kind": "hist_p95", "unit": "count", "lower_is_better": None},
+        {"key": "bal_code_changes", "label": "Code changes p95", "name": "execution_block_access_list_code_changes", "kind": "hist_p95", "unit": "count", "lower_is_better": None},
+    ]
+
+    def make_rows(defs: list[dict]) -> list[dict]:
+        rows = []
+        for d in defs:
+            b_values = _report_metric_values(baseline_reports, d)
+            f_values = _report_metric_values(feature_reports, d)
+            b = _avg(b_values)
+            f = _avg(f_values)
+            if b is None and f is None:
+                continue
+            if (b or 0) == 0 and (f or 0) == 0 and not d.get("keep_zero", False):
+                continue
+            unit = d["unit"]
+            ci = _metric_ci(b_values, f_values)
+            rows.append({
+                "key": d["key"],
+                "label": d["label"],
+                "unit": unit,
+                "baseline": b,
+                "feature": f,
+                "ci": ci,
+                "baseline_fmt": _format_metric_value(b, unit),
+                "feature_fmt": _format_metric_value(f, unit),
+                "change": _format_change_with_ci(b, f, ci, b_values, f_values, unit, d.get("lower_is_better", True)),
+            })
+        return rows
+
+    # Cache hit rates from avg hit/miss gauges.
+    cache_rows = make_rows(cache_defs)
+    for prefix, label in [("account", "Account cache hit rate"), ("storage", "Storage cache hit rate"), ("code", "Code cache hit rate")]:
+        hits_metric = {"name": f"sync_caching_{prefix}_cache_hits", "kind": "gauge_avg"}
+        miss_metric = {"name": f"sync_caching_{prefix}_cache_misses", "kind": "gauge_avg"}
+
+        def rates(reports: list[dict]) -> list[float]:
+            out = []
+            for report in reports:
+                hits = _report_metric_value(report, hits_metric)
+                misses = _report_metric_value(report, miss_metric)
+                rate = _ratio(hits, (hits or 0) + (misses or 0))
+                if rate is not None:
+                    out.append(rate)
+            return out
+
+        b_rates = rates(baseline_reports)
+        f_rates = rates(feature_reports)
+        b_rate = _avg(b_rates)
+        f_rate = _avg(f_rates)
+        if b_rate is not None or f_rate is not None:
+            ci = _metric_ci(b_rates, f_rates)
+            cache_rows.insert(0, {
+                "key": f"{prefix}_cache_hit_rate",
+                "label": label,
+                "unit": "percent",
+                "baseline": b_rate,
+                "feature": f_rate,
+                "ci": ci,
+                "baseline_fmt": _format_metric_value(b_rate, "percent"),
+                "feature_fmt": _format_metric_value(f_rate, "percent"),
+                "change": _format_change_with_ci(b_rate, f_rate, ci, b_rates, f_rates, "percent", False),
+            })
+
+    return {
+        "available": bool(baseline_reports and feature_reports),
+        "phases": make_rows(phase_defs),
+        "cache_trie": cache_rows,
+        "bal": make_rows(bal_defs),
     }
 
 
@@ -487,6 +868,7 @@ def compute_changes(
     dirs = paired_stats.get("directions_agree", {})
 
     metrics = [
+        ("mean", "mean_ms", "ci_ms", "mean_ms", True, dirs.get("lat", True)),
         ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True, dirs.get("lat", True)),
         ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True, dirs.get("lat", True)),
         ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True, dirs.get("lat", True)),
@@ -520,6 +902,7 @@ def generate_comparison_table(
     warmup_blocks: str | None = None,
     wait_time: str | None = None,
     bal_mode: str | None = None,
+    prometheus: dict | None = None,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
     n = paired["blocks"]
@@ -557,16 +940,27 @@ def generate_comparison_table(
     feature_label = f"[`{feature_name}`]({base_url}/{feature_sha})"
 
     lines = [
-        f"| Metric | {baseline_label} | {feature_label} | Change |",
+        f"| Headline metric | {baseline_label} | {feature_label} | Change |",
         "|--------|------|--------|--------|",
-        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False, directions_agree=mgas_agree)} |",
-        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True, directions_agree=total_agree)} |",
-        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, lower_is_better=True, directions_agree=persist_agree)} |",
-        "",
+        f"| Mean newPayload | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(pct(run1['mean_ms'], run2['mean_ms']), paired['ci_ms'] / run1['mean_ms'] * 100.0 if run1['mean_ms'] > 0 else 0.0, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| P50 newPayload | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| P90 newPayload | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| P99 newPayload | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
+        f"| Throughput | {fmt_mgas(run1['mean_mgas_s'])} Mgas/s | {fmt_mgas(run2['mean_mgas_s'])} Mgas/s | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False, directions_agree=mgas_agree)} |",
+        f"| Wall clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True, directions_agree=total_agree)} |",
     ]
+    prom_by_key = {r["key"]: r for r in (prometheus or {}).get("phases", [])}
+    for key, label in (("evm_execution", "EVM execution p95"), ("state_root", "State root p95"), ("bal_validation", "BAL validation p95")):
+        row = prom_by_key.get(key)
+        if row and (key != "bal_validation" or display_bal_mode(bal_mode)):
+            lines.append(f"| {label} | {row['baseline_fmt']} | {row['feature_fmt']} | {row['change']} |")
+    lines.extend([
+        "",
+        "<!-- BENCH_CHART:latency_throughput.png:Latency, throughput & diff:open -->",
+        "",
+        "> Noise: `±` is the 95% CI half-width. ⚪ means the change is within noise or ABBA cross-pairings disagree. Detailed rows show absolute deltas first so tiny baselines do not produce misleading percentages.",
+        "",
+    ])
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
@@ -585,6 +979,7 @@ def generate_wait_time_table(
     feature_stats: dict,
     baseline_label: str,
     feature_label: str,
+    mean_change: str = "",
 ) -> str:
     """Generate a markdown table for a wait time metric."""
     if not baseline_stats or not feature_stats:
@@ -592,13 +987,59 @@ def generate_wait_time_table(
     lines = [
         f"### {title}",
         "",
-        f"| Metric | {baseline_label} | {feature_label} |",
-        "|--------|------|--------|",
-        f"| Mean | {fmt_ms(baseline_stats['mean_ms'])} | {fmt_ms(feature_stats['mean_ms'])} |",
-        f"| P50 | {fmt_ms(baseline_stats['p50_ms'])} | {fmt_ms(feature_stats['p50_ms'])} |",
-        f"| P95 | {fmt_ms(baseline_stats['p95_ms'])} | {fmt_ms(feature_stats['p95_ms'])} |",
+        f"| Metric | {baseline_label} | {feature_label} | Change |",
+        "|--------|------|--------|--------|",
+        f"| Mean | {fmt_ms(baseline_stats['mean_ms'])} | {fmt_ms(feature_stats['mean_ms'])} | {mean_change} |",
+        f"| P50 | {fmt_ms(baseline_stats['p50_ms'])} | {fmt_ms(feature_stats['p50_ms'])} |  |",
+        f"| P95 | {fmt_ms(baseline_stats['p95_ms'])} | {fmt_ms(feature_stats['p95_ms'])} |  |",
     ]
     return "\n".join(lines)
+
+
+def _markdown_rows(title: str, rows: list[dict], chart: str | None = None) -> list[str]:
+    if not rows:
+        return []
+    lines = ["", "<details>", f"<summary>{title}</summary>", ""]
+    if rows:
+        lines.extend([
+            "| Metric | Baseline | Feature | Change |",
+            "|---|---:|---:|---:|",
+        ])
+        for row in rows:
+            lines.append(f"| {row['label']} | {row['baseline_fmt']} | {row['feature_fmt']} | {row['change']} |")
+        lines.append("")
+    if chart:
+        lines.append(chart)
+        lines.append("")
+    lines.append("</details>")
+    return lines
+
+
+def _workload_section(summary: dict) -> list[str]:
+    workload = summary.get("workload") or {}
+    lines = [
+        "",
+        "<details>",
+        "<summary>Workload and gas</summary>",
+        "",
+        "| Workload metric | Value |",
+        "|---|---:|",
+        f"| Measured payloads | {summary['blocks']} |",
+    ]
+    warmup = summary.get("warmup_blocks")
+    if warmup:
+        lines.append(f"| Warmup payloads | {warmup} |")
+    lines.extend([
+        f"| Total gas | {format_gas(int(workload.get('total_gas', 0))) if workload.get('total_gas') else '—'} |",
+        f"| Total txs | {int(workload.get('total_txs', 0)):,} |" if workload.get("total_txs") else "| Total txs | — |",
+    ])
+    if summary.get("big_blocks"):
+        lines.append(f"| Target gas / big block | {summary.get('big_block_target_gas') or '1G'} |")
+    lines.append("")
+    lines.append("<!-- BENCH_CHART:gas_vs_latency.png:Gas vs latency -->")
+    lines.append("")
+    lines.append("</details>")
+    return lines
 
 
 def generate_markdown(
@@ -615,6 +1056,15 @@ def generate_markdown(
         lines.append(f"> ⚠️ Feature is [**{behind_baseline} commit{s} behind `{baseline_name}`**]({diff_link}). Consider rebasing for accurate results.")
         lines.append("")
     lines.append(comparison_table)
+
+    prom = summary.get("prometheus") or {}
+    if summary.get("bal_mode") and prom.get("bal"):
+        lines.extend(_markdown_rows("BAL metrics", prom["bal"], "<!-- BENCH_CHART:bal.png:BAL metrics -->"))
+    lines.extend(_workload_section(summary))
+    phase_rows = [r for r in prom.get("phases", []) if summary.get("bal_mode") or r.get("key") != "bal_validation"]
+    lines.extend(_markdown_rows("Execution phase breakdown", phase_rows, "<!-- BENCH_CHART:prometheus_phases.png:Prometheus execution phases -->"))
+    lines.extend(_markdown_rows("Cache and trie metrics", prom.get("cache_trie", []), "<!-- BENCH_CHART:cache_trie.png:Cache and trie -->"))
+
     if wait_time_tables:
         lines.append("")
         lines.append("<details>")
@@ -624,6 +1074,8 @@ def generate_markdown(
             if table:
                 lines.append(table)
                 lines.append("")
+        lines.append("<!-- BENCH_CHART:wait_breakdown.png:Wait time breakdown -->")
+        lines.append("")
         lines.append("</details>")
     if grafana_url:
         lines.append("")
@@ -642,6 +1094,12 @@ def main():
         help="Feature combined_latency.csv files (B1, B2)",
     )
     parser.add_argument("--gas-csv", required=True, help="Path to total_gas.csv")
+    parser.add_argument(
+        "--baseline-report", nargs="+", help="Baseline txgen JSON report files"
+    )
+    parser.add_argument(
+        "--feature-report", nargs="+", help="Feature txgen JSON report files"
+    )
     parser.add_argument(
         "--output-summary", required=True, help="Output JSON summary path"
     )
@@ -698,6 +1156,10 @@ def main():
     feature_name = args.feature_name or "feature"
     feature_sha = args.feature_ref or "unknown"
     bal_mode = display_bal_mode(args.bal_mode)
+    prometheus = summarize_prometheus_metrics(
+        load_reports(args.baseline_report),
+        load_reports(args.feature_report),
+    )
 
     comparison_table = generate_comparison_table(
         baseline_stats,
@@ -712,6 +1174,7 @@ def main():
         warmup_blocks=args.warmup_blocks,
         wait_time=args.wait_time,
         bal_mode=bal_mode,
+        prometheus=prometheus,
     )
     print(f"Generated comparison ({paired_stats['n']} paired blocks, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
@@ -725,23 +1188,43 @@ def main():
         ("sparse_trie_wait_us", "Trie Cache Update Wait"),
         ("execution_cache_wait_us", "Execution Cache Update Wait"),
     ]
+    changes = compute_changes(baseline_stats, feature_stats, paired_stats)
     wait_time_tables = []
     wait_time_data = {}
     for field, title in wait_fields:
         b_stats = compute_wait_stats(all_baseline, field)
         f_stats = compute_wait_stats(all_feature, field)
+        mean_change = ""
+        if b_stats and f_stats:
+            b_values = [s["mean_ms"] for run in baseline_runs if (s := compute_wait_stats(run, field))]
+            f_values = [s["mean_ms"] for run in feature_runs if (s := compute_wait_stats(run, field))]
+            mean_change = _format_change_with_ci(
+                b_stats["mean_ms"],
+                f_stats["mean_ms"],
+                _metric_ci(b_values, f_values),
+                b_values,
+                f_values,
+                "ms",
+                True,
+            )
         if b_stats and f_stats:
             wait_time_data[field] = {
                 "title": title,
                 "baseline": b_stats,
                 "feature": f_stats,
+                "change": mean_change,
             }
-        table = generate_wait_time_table(title, b_stats, f_stats, baseline_label, feature_label)
+        table = generate_wait_time_table(title, b_stats, f_stats, baseline_label, feature_label, mean_change)
         if table:
             wait_time_tables.append(table)
 
+    first_feature_run = feature_runs[0]
     summary = {
         "blocks": paired_stats["blocks"],
+        "workload": {
+            "total_gas": sum(r["gas_used"] for r in first_feature_run),
+            "total_txs": sum(r["transaction_count"] for r in first_feature_run),
+        },
         "big_blocks": args.big_blocks,
         "warmup_blocks": args.warmup_blocks,
         "wait_time": args.wait_time,
@@ -757,8 +1240,10 @@ def main():
             "stats": feature_stats,
         },
         "paired": paired_stats,
-        "changes": compute_changes(baseline_stats, feature_stats, paired_stats),
+        "changes": changes,
         "wait_times": wait_time_data,
+        "prometheus": prometheus,
+        "big_block_target_gas": "1G" if args.big_blocks else None,
     }
     with open(args.output_summary, "w") as f:
         json.dump(summary, f, indent=2)

@@ -46,42 +46,73 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
   md += `**Feature:** ${featureLink} ([diff](${diffUrl}))\n`;
   md += blocksLabel(summary).map(p => `**${p.key}:** ${p.value}`).join(' · ') + '\n\n';
 
+  const chartUrl = (file) => {
+    if (!chartSha) return '';
+    const prNum = prNumber || '0';
+    return `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/pr/${prNum}/${runId}/${file}`;
+  };
+
   // Main comparison table
   const rows = metricRows(summary);
-  md += `| Metric | Baseline | Feature | Change |\n`;
+  md += `| Headline metric | Baseline | Feature | Change |\n`;
   md += `|--------|----------|---------|--------|\n`;
   for (const r of rows) {
     md += `| ${r.label} | ${r.baseline} | ${r.feature} | ${r.change} |\n`;
   }
   md += '\n';
+  if (chartSha) {
+    md += `<details open><summary>Latency, throughput & diff</summary>\n\n`;
+    md += `![Latency, throughput & diff](${chartUrl('latency_throughput.png')})\n\n`;
+    md += `</details>\n\n`;
+  }
+  md += '> Noise: `±` is the 95% CI half-width. ⚪ means the change is within noise or ABBA cross-pairings disagree. Detailed rows show absolute deltas first so tiny baselines do not produce misleading percentages.\n\n';
+
+  const prom = summary.prometheus || {};
+  if (summary.bal_mode && prom.bal && prom.bal.length > 0) {
+    md += `<details><summary>BAL metrics</summary>\n\n`;
+    md += `| Metric | Baseline | Feature | Change |\n`;
+    md += `|--------|----------|---------|--------|\n`;
+    for (const r of prom.bal) md += `| ${r.label} | ${r.baseline_fmt} | ${r.feature_fmt} | ${r.change} |\n`;
+    if (chartSha) md += `\n![BAL metrics](${chartUrl('bal.png')})\n`;
+    md += `\n</details>\n\n`;
+  }
+
+  const phaseRows = (prom.phases || []).filter(r => summary.bal_mode || r.key !== 'bal_validation');
+  if (phaseRows.length > 0) {
+    md += `<details><summary>Execution phase breakdown</summary>\n\n`;
+    md += `| Metric | Baseline | Feature | Change |\n`;
+    md += `|--------|----------|---------|--------|\n`;
+    for (const r of phaseRows) md += `| ${r.label} | ${r.baseline_fmt} | ${r.feature_fmt} | ${r.change} |\n`;
+    if (chartSha) md += `\n![Prometheus execution phases](${chartUrl('prometheus_phases.png')})\n`;
+    md += `\n</details>\n\n`;
+  }
+
+  if (prom.cache_trie && prom.cache_trie.length > 0) {
+    md += `<details><summary>Cache and trie metrics</summary>\n\n`;
+    md += `| Metric | Baseline | Feature | Change |\n`;
+    md += `|--------|----------|---------|--------|\n`;
+    for (const r of prom.cache_trie) md += `| ${r.label} | ${r.baseline_fmt} | ${r.feature_fmt} | ${r.change} |\n`;
+    if (chartSha) md += `\n![Cache and trie](${chartUrl('cache_trie.png')})\n`;
+    md += `\n</details>\n\n`;
+  }
 
   // Wait time breakdown
   const wtRows = waitTimeRows(summary);
   if (wtRows.length > 0) {
     md += `### Wait Time Breakdown\n\n`;
-    md += `| Metric | Baseline | Feature |\n`;
-    md += `|--------|----------|--------|\n`;
+    md += `| Metric | Baseline | Feature | Change |\n`;
+    md += `|--------|----------|--------|--------|\n`;
     for (const r of wtRows) {
-      md += `| ${r.title} | ${r.baseline} | ${r.feature} |\n`;
+      md += `| ${r.title} | ${r.baseline} | ${r.feature} | ${r.change || ''} |\n`;
     }
+    if (chartSha) md += `\n![Wait time breakdown](${chartUrl('wait_breakdown.png')})\n`;
     md += '\n';
   }
 
-  // Charts
   if (chartSha) {
-    const prNum = prNumber || '0';
-    const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/pr/${prNum}/${runId}`;
-    const charts = [
-      { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-      { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-      { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-    ];
-    md += `### Charts\n\n`;
-    for (const chart of charts) {
-      md += `<details><summary>${chart.label}</summary>\n\n`;
-      md += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-      md += `</details>\n\n`;
-    }
+    md += `<details><summary>Gas vs latency</summary>\n\n`;
+    md += `![Gas vs latency](${chartUrl('gas_vs_latency.png')})\n\n`;
+    md += `</details>\n\n`;
   }
 
   // Samply profiles

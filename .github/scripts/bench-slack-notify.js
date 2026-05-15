@@ -157,18 +157,44 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
     },
   ];
 
-  // Wait times as a separate table block (sent as threaded reply due to Slack one-table limit)
+  // Detailed tables as threaded replies due to Slack one-table limit.
   const threadBlocks = [];
+  function addDetailTable(title, rows) {
+    if (!rows || rows.length === 0) return;
+    threadBlocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${title}*` } });
+    threadBlocks.push({
+      type: 'table',
+      column_settings: [
+        { align: 'left' },
+        { align: 'right' },
+        { align: 'right' },
+        { align: 'right' },
+      ],
+      rows: [
+        [cell('Metric'), cell('Baseline'), cell('Feature'), cell('Change')],
+        ...rows.map(r => [cell(r.label), cell(r.baseline_fmt), cell(r.feature_fmt), cell(r.change || ' ')]),
+      ],
+    });
+  }
+
+  const prom = summary.prometheus || {};
+  const phaseRows = (prom.phases || []).filter(r => summary.bal_mode || r.key !== 'bal_validation');
+  addDetailTable('Execution phase breakdown', phaseRows);
+  addDetailTable('Cache and trie metrics', prom.cache_trie);
+  if (summary.bal_mode) addDetailTable('BAL metrics', prom.bal);
+
   const wtRows = waitTimeRows(summary);
   if (wtRows.length > 0) {
+    threadBlocks.push({ type: 'section', text: { type: 'mrkdwn', text: '*Wait time breakdown*' } });
     const waitTableRows = [
-      [cell('Wait Time'), cell('Baseline'), cell('Feature')],
-      ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature)]),
+      [cell('Wait Time'), cell('Baseline'), cell('Feature'), cell('Change')],
+      ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature), cell(r.change || ' ')]),
     ];
     threadBlocks.push({
       type: 'table',
       column_settings: [
         { align: 'left' },
+        { align: 'right' },
         { align: 'right' },
         { align: 'right' },
       ],

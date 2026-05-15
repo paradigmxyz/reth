@@ -1177,6 +1177,14 @@ jobs:
           fi
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BASELINE_CSVS"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
+          BASELINE_REPORTS="$BENCH_WORK_DIR/baseline-1/report.json"
+          FEATURE_REPORTS="$BENCH_WORK_DIR/feature-1/report.json"
+          if [ "${BENCH_ABBA:-true}" = "true" ]; then
+            BASELINE_REPORTS="$BASELINE_REPORTS $BENCH_WORK_DIR/baseline-2/report.json"
+            FEATURE_REPORTS="$FEATURE_REPORTS $BENCH_WORK_DIR/feature-2/report.json"
+          fi
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-report $BASELINE_REPORTS"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-report $FEATURE_REPORTS"
           SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
@@ -1217,6 +1225,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline $BASELINE_CSVS"
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
+          CHART_ARGS="$CHART_ARGS --summary $BENCH_WORK_DIR/summary.json"
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
@@ -1294,20 +1303,12 @@ jobs:
             const prNumber = process.env.BENCH_PR || '0';
             const runId = '${{ github.run_id }}';
 
+            const chartMarker = /<!-- BENCH_CHART:([^:]+):([^:]+)(?::open)? -->/g;
             if (sha) {
               const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${sha}/pr/${prNumber}/${runId}`;
-              const charts = [
-                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-              ];
-              let chartMarkdown = '\n\n### Charts\n\n';
-              for (const chart of charts) {
-                chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
-                chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-                chartMarkdown += `</details>\n\n`;
-              }
-              comment += chartMarkdown;
+              comment = comment.replace(chartMarker, (_m, file, label) => `![${label}](${baseUrl}/${file})`);
+            } else {
+              comment = comment.replace(chartMarker, '');
             }
 
             // Samply profile links (URLs point directly to Firefox Profiler)
@@ -1326,12 +1327,6 @@ jobs:
               if (links.length > 0) {
                 comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
               }
-            }
-
-            // Grafana dashboard link
-            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
-            if (grafanaUrl) {
-              comment += `\n\n### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n`;
             }
 
             // Node errors (panics / ERROR logs)

@@ -12,7 +12,7 @@ function fmtMgas(v) { return v.toFixed(2); }
 function fmtS(v) { return v.toFixed(2) + 's'; }
 
 function fmtChange(ch) {
-  if (!ch || (!ch.pct && !ch.ci_pct)) return '';
+  if (!ch || (ch.pct === undefined && ch.ci_pct === undefined)) return '';
   const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
   const ciStr = ch.ci_pct ? ` (±${ch.ci_pct.toFixed(2)}%)` : '';
   return `${pctStr}${ciStr} ${SIG_EMOJI[ch.sig]}`;
@@ -69,22 +69,32 @@ function blocksLabel(summary) {
   return parts;
 }
 
-// The 7 metric rows shared by all renderers.
+function promRow(summary, key) {
+  const rows = (summary.prometheus && summary.prometheus.phases) || [];
+  return rows.find(r => r.key === key);
+}
+
+// Headline metric rows shared by renderers.
 // Returns an array of { label, baseline, feature, change } objects.
 function metricRows(summary) {
   const b = summary.baseline.stats;
   const f = summary.feature.stats;
   const c = summary.changes;
-  return [
-    { label: 'Mean',       baseline: fmtMs(b.mean_ms),       feature: fmtMs(f.mean_ms),       change: fmtChange(c.mean) },
-    { label: 'StdDev',     baseline: fmtMs(b.stddev_ms),     feature: fmtMs(f.stddev_ms),     change: '' },
-    { label: 'P50',        baseline: fmtMs(b.p50_ms),        feature: fmtMs(f.p50_ms),        change: fmtChange(c.p50) },
-    { label: 'P90',        baseline: fmtMs(b.p90_ms),        feature: fmtMs(f.p90_ms),        change: fmtChange(c.p90) },
-    { label: 'P99',        baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
-    { label: 'Mgas/s',     baseline: fmtMgas(b.mean_mgas_s), feature: fmtMgas(f.mean_mgas_s), change: fmtChange(c.mgas_s) },
-    { label: 'Wall Clock', baseline: fmtS(b.wall_clock_s),   feature: fmtS(f.wall_clock_s),   change: fmtChange(c.wall_clock) },
-    { label: 'Persist Wait', baseline: fmtMs(b.mean_persist_ms || 0), feature: fmtMs(f.mean_persist_ms || 0), change: fmtChange(c.persist_wait) },
+  const rows = [
+    { label: 'Mean newPayload', baseline: fmtMs(b.mean_ms),       feature: fmtMs(f.mean_ms),       change: fmtChange(c.mean) },
+    { label: 'P50 newPayload',  baseline: fmtMs(b.p50_ms),        feature: fmtMs(f.p50_ms),        change: fmtChange(c.p50) },
+    { label: 'P90 newPayload',  baseline: fmtMs(b.p90_ms),        feature: fmtMs(f.p90_ms),        change: fmtChange(c.p90) },
+    { label: 'P99 newPayload',  baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
+    { label: 'Throughput',      baseline: `${fmtMgas(b.mean_mgas_s)} Mgas/s`, feature: `${fmtMgas(f.mean_mgas_s)} Mgas/s`, change: fmtChange(c.mgas_s) },
+    { label: 'Wall clock',      baseline: fmtS(b.wall_clock_s),   feature: fmtS(f.wall_clock_s),   change: fmtChange(c.wall_clock) },
   ];
+  for (const [key, label] of [['evm_execution', 'EVM execution p95'], ['state_root', 'State root p95'], ['bal_validation', 'BAL validation p95']]) {
+    const row = promRow(summary, key);
+    if (row && (key !== 'bal_validation' || summary.bal_mode)) {
+      rows.push({ label, baseline: row.baseline_fmt, feature: row.feature_fmt, change: row.change });
+    }
+  }
+  return rows;
 }
 
 // Wait time rows: one row per metric showing mean values.
@@ -93,7 +103,7 @@ function waitTimeRows(summary) {
   const rows = [];
   for (const key of Object.keys(waitTimes)) {
     const wt = waitTimes[key];
-    rows.push({ title: wt.title, baseline: fmtMs(wt.baseline.mean_ms), feature: fmtMs(wt.feature.mean_ms) });
+    rows.push({ title: wt.title, baseline: fmtMs(wt.baseline.mean_ms), feature: fmtMs(wt.feature.mean_ms), change: wt.change || '' });
   }
   return rows;
 }

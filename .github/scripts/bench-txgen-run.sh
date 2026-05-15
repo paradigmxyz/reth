@@ -12,7 +12,8 @@
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
-#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
+#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
+#               BENCH_SCRAPE_INTERVAL_MS
 set -euxo pipefail
 
 LABEL="$1"
@@ -267,6 +268,12 @@ if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   TXGEN_SEND_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
 
+TXGEN_METRICS_ARGS=()
+if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+  TXGEN_METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/")
+  TXGEN_METRICS_ARGS+=(--scrape-interval-ms "${BENCH_SCRAPE_INTERVAL_MS:-500}")
+fi
+
 WARMUP="${BENCH_WARMUP_BLOCKS:-0}"
 BLOCKS="${BENCH_BLOCKS:?BENCH_BLOCKS must be set}"
 TOTAL=$(( WARMUP + BLOCKS ))
@@ -384,6 +391,7 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
   --wait-for-persistence never \
+  "${TXGEN_METRICS_ARGS[@]}" \
   --report json:"$OUTPUT_DIR/report.json" \
   "${CLICKHOUSE_REPORT[@]}" \
   -m "git-sha=$GIT_SHA" \
