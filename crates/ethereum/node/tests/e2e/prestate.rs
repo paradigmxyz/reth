@@ -1,10 +1,11 @@
 use alloy_eips::BlockId;
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::address;
-use alloy_provider::ext::DebugApi;
-use alloy_rpc_types_eth::{Transaction, TransactionRequest};
+use alloy_primitives::{address, Address, U256};
+use alloy_provider::{ext::DebugApi, Provider};
+use alloy_rpc_types_eth::{Bundle, StateContext, Transaction, TransactionRequest};
 use alloy_rpc_types_trace::geth::{
-    AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame,
+    AccountState, DiffMode, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    PreStateConfig, PreStateFrame,
 };
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -108,6 +109,46 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     Ok(())
 }
 
+// <https://github.com/paradigmxyz/reth/issues/23475>
+#[tokio::test]
+async fn trace_call_prestate_diff_mode_has_no_phantom_gas_credit() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let caller = address!("0x3213213213213213213213213213213213213213");
+    let beneficiary = address!("0xb20cb55edf81bacfd271f5468e7fc56a3ea4510b");
+    let NodeHandle { node, node_exit_future: _ } =
+        NodeBuilder::new(prestate_node_config(beneficiary))
+            .testing_node(Runtime::test())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+    let provider = node.rpc_server_handle().eth_http_provider().unwrap();
+    let opts = prestate_diff_options();
+    let request = phantom_gas_credit_call(caller);
+
+    let trace =
+        provider.debug_trace_call_prestate(request, BlockId::latest(), opts.clone().into()).await?;
+    assert_no_phantom_gas_credit(&trace, caller, beneficiary)?;
+
+    let bundles = vec![Bundle::from(vec![phantom_gas_credit_call(caller)])];
+    let state_context =
+        StateContext { block_number: Some(BlockId::latest()), ..Default::default() };
+    let call_many_opts: GethDebugTracingCallOptions = opts.into();
+
+    let traces: Vec<Vec<GethTrace>> = provider
+        .raw_request("debug_traceCallMany".into(), (bundles, state_context, call_many_opts))
+        .await?;
+    let trace = traces
+        .into_iter()
+        .next()
+        .and_then(|bundle| bundle.into_iter().next())
+        .ok_or_else(|| eyre!("debug_traceCallMany must return one trace"))?;
+    let frame = trace.try_into_pre_state_frame()?;
+    assert_no_phantom_gas_credit(&frame, caller, beneficiary)?;
+
+    Ok(())
+}
+
 fn expected_snapshot_frame() -> Result<PreStateFrame> {
     #[derive(Deserialize)]
     struct Snapshot {
@@ -128,4 +169,63 @@ fn account_state_to_genesis(value: AccountState) -> GenesisAccount {
         .with_nonce(value.nonce)
         .with_code(code)
         .with_storage(storage)
+}
+
+fn prestate_node_config(beneficiary: Address) -> NodeConfig<reth_chainspec::ChainSpec> {
+    let mut genesis: Genesis = MAINNET.genesis().clone();
+    genesis.coinbase = beneficiary;
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    NodeConfig::test().with_chain(chain_spec).with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_http_api(RpcModuleSelection::all_modules().into()),
+    )
+}
+
+fn prestate_diff_options() -> GethDebugTracingOptions {
+    GethDebugTracingOptions::prestate_tracer(PreStateConfig {
+        diff_mode: Some(true),
+        ..Default::default()
+    })
+}
+
+fn phantom_gas_credit_call(caller: Address) -> TransactionRequest {
+    TransactionRequest::default()
+        .from(caller)
+        .to(caller)
+        .gas_limit(0xac6be)
+        .gas_price(0xe8d4a51000)
+        .value(U256::ZERO)
+}
+
+fn assert_no_phantom_gas_credit(
+    frame: &PreStateFrame,
+    caller: Address,
+    beneficiary: Address,
+) -> Result<()> {
+    let diff = frame.as_diff().ok_or_else(|| eyre!("prestate tracer must return a diff frame"))?;
+    assert_no_balance_increase(diff, caller, "caller");
+    assert_no_balance_increase(diff, beneficiary, "beneficiary");
+    Ok(())
+}
+
+fn assert_no_balance_increase(diff: &DiffMode, address: Address, label: &str) {
+    let pre_balance = diff.pre.get(&address).and_then(|state| state.balance).unwrap_or_default();
+    let post_balance =
+        diff.post.get(&address).and_then(|state| state.balance).unwrap_or(pre_balance);
+
+    assert!(
+        post_balance <= pre_balance,
+        "{label} balance unexpectedly increased in prestate diff: pre={pre_balance}, post={post_balance}"
+    );
 }
