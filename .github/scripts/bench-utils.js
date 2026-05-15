@@ -14,8 +14,11 @@ function fmtS(v) { return v.toFixed(2) + 's'; }
 function fmtChange(ch) {
   if (!ch || (!ch.pct && !ch.ci_pct)) return '';
   const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
-  const ciStr = ch.ci_pct ? ` (±${ch.ci_pct.toFixed(2)}%)` : '';
-  return `${pctStr}${ciStr} ${SIG_EMOJI[ch.sig]}`;
+  const details = [];
+  if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
+  if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  const detailStr = details.length ? ` (${details.join(', ')})` : '';
+  return `${pctStr}${detailStr} ${SIG_EMOJI[ch.sig]}`;
 }
 
 function verdict(changes) {

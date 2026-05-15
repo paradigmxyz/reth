@@ -29,6 +29,18 @@ import sys
 
 GIGAGAS = 1_000_000_000
 BOOTSTRAP_ITERATIONS = 10_000
+PRACTICAL_FLOOR_PCT = {
+    "mean": 1.0,
+    "p50": 1.0,
+    "p90": 2.0,
+    "p99": 5.0,
+    "mgas_s": 1.0,
+    "wall_clock": 1.0,
+    "persist_wait": 5.0,
+}
+PRACTICAL_FLOOR_ABS = {
+    "persist_wait": 1.0,
+}
 
 
 def _opt_int(row: dict, key: str) -> int | None:
@@ -488,32 +500,37 @@ def display_bal_mode(bal_mode: str | None) -> str | None:
     return bal_mode
 
 
-def significance(pct: float, ci_pct: float, lower_is_better: bool, directions_agree: bool = True) -> str:
+def practical_floor_pct(metric: str, baseline_value: float) -> float:
+    """Return the practical significance floor as a percent of baseline."""
+    pct_floor = PRACTICAL_FLOOR_PCT.get(metric, 0.0)
+    abs_floor = PRACTICAL_FLOOR_ABS.get(metric, 0.0)
+    abs_pct = abs_floor / baseline_value * 100.0 if baseline_value > 0 else 0.0
+    return max(pct_floor, abs_pct)
+
+
+def significance(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
     """Return significance label: 'good', 'bad', or 'neutral'.
 
-    A result is only significant if:
-    1. The CI doesn't cross zero (|pct| > ci_pct), AND
-    2. All cross-pairings agree on direction (directions_agree=True).
+    A result is only significant if the whole confidence interval clears a
+    practical significance floor. The floor is the same for every run shape;
+    higher run counts only tighten the CI.
     """
-    significant = abs(pct) > ci_pct and directions_agree
-    if not significant:
-        return "neutral"
-    elif (pct < 0) == lower_is_better:
+    improvement_pct = -pct if lower_is_better else pct
+    if improvement_pct - ci_pct > floor_pct:
         return "good"
-    else:
+    if improvement_pct + ci_pct < -floor_pct:
         return "bad"
+    return "neutral"
 
 
-def change_str(pct: float, ci_pct: float, lower_is_better: bool, directions_agree: bool = True) -> str:
+def change_str(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
     """Format change% with paired CI significance.
 
-    Significant if the CI doesn't cross zero (i.e. |pct| > ci_pct)
-    AND all cross-pairings agree on direction.
+    Significant if the confidence interval clears the practical floor.
     """
-    sig = significance(pct, ci_pct, lower_is_better, directions_agree)
+    sig = significance(pct, ci_pct, floor_pct, lower_is_better)
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
-    qualifier = "" if directions_agree else " ↕"
-    return f"{pct:+.2f}% {emoji}{qualifier} (±{ci_pct:.2f}%)"
+    return f"{pct:+.2f}% {emoji} (±{ci_pct:.2f}%, floor {floor_pct:.2f}%)"
 
 
 def compute_changes(
@@ -541,10 +558,12 @@ def compute_changes(
     for name, stat_key, ci_key, base_key, lower_is_better, dir_agree in metrics:
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
         c = ci_pct(paired_stats[ci_key], baseline_stats[base_key])
+        floor = practical_floor_pct(name, baseline_stats[base_key])
         changes[name] = {
             "pct": round(p, 4),
             "ci_pct": round(c, 4),
-            "sig": significance(p, c, lower_is_better, dir_agree),
+            "floor_pct": round(floor, 4),
+            "sig": significance(p, c, floor, lower_is_better),
             "directions_agree": dir_agree,
         }
     return changes
@@ -595,11 +614,13 @@ def generate_comparison_table(
     wall_ci_pct = paired["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
     persist_ci_pct = paired["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
 
-    dirs = paired.get("directions_agree", {})
-    lat_agree = dirs.get("lat", True)
-    mgas_agree = dirs.get("mgas", True)
-    total_agree = dirs.get("total_lat", True)
-    persist_agree = dirs.get("persist", True)
+    mean_floor = practical_floor_pct("mean", run1["mean_ms"])
+    p50_floor = practical_floor_pct("p50", run1["p50_ms"])
+    p90_floor = practical_floor_pct("p90", run1["p90_ms"])
+    p99_floor = practical_floor_pct("p99", run1["p99_ms"])
+    mgas_floor = practical_floor_pct("mgas_s", run1["mean_mgas_s"])
+    wall_floor = practical_floor_pct("wall_clock", run1["mean_total_lat_ms"])
+    persist_floor = practical_floor_pct("persist_wait", run1["mean_persist_ms"])
 
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -608,13 +629,13 @@ def generate_comparison_table(
     lines = [
         f"| Metric | {baseline_label} | {feature_label} | Change |",
         "|--------|------|--------|--------|",
-        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False, directions_agree=mgas_agree)} |",
-        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True, directions_agree=total_agree)} |",
-        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, lower_is_better=True, directions_agree=persist_agree)} |",
+        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, mean_floor, lower_is_better=True)} |",
+        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, p50_floor, lower_is_better=True)} |",
+        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, p90_floor, lower_is_better=True)} |",
+        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True)} |",
+        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
+        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, wall_floor, lower_is_better=True)} |",
+        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True)} |",
         "",
     ]
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
