@@ -315,7 +315,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     self.parent_hash
                 } else {
                     manager
-                        .anchor_for_parent(self.parent_hash)
+                        .anchor_for_parent(self.parent_hash, db_tip_block.hash)
                         .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?
                 }
             }

@@ -328,16 +328,23 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Ok(input)
     }
 
-    /// Returns the persisted anchor hash for an in-memory parent block.
-    pub fn anchor_for_parent(&self, parent_hash: B256) -> Option<B256> {
+    /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
+    pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
+        if parent_hash == preferred_anchor {
+            return Some(preferred_anchor)
+        }
+
         let mut hash = parent_hash;
 
         loop {
-            let parent_hash = self.blocks.get(&hash)?.recovered_block().parent_hash();
-            if !self.blocks.contains_key(&parent_hash) {
-                return Some(parent_hash)
+            let block_parent_hash = self.blocks.get(&hash)?.recovered_block().parent_hash();
+            if block_parent_hash == preferred_anchor {
+                return Some(block_parent_hash)
             }
-            hash = parent_hash;
+            if !self.blocks.contains_key(&block_parent_hash) {
+                return Some(block_parent_hash)
+            }
+            hash = block_parent_hash;
         }
     }
 
@@ -596,14 +603,32 @@ mod tests {
         }
 
         assert_eq!(
-            manager.anchor_for_parent(blocks[2].recovered_block().hash()),
+            manager.anchor_for_parent(blocks[2].recovered_block().hash(), B256::random()),
             Some(blocks[0].recovered_block().parent_hash())
         );
 
         manager.remove_blocks([blocks[0].recovered_block().hash()]);
         assert_eq!(
-            manager.anchor_for_parent(blocks[2].recovered_block().hash()),
+            manager.anchor_for_parent(
+                blocks[2].recovered_block().hash(),
+                blocks[0].recovered_block().hash()
+            ),
             Some(blocks[0].recovered_block().hash())
+        );
+    }
+
+    #[test]
+    fn prefers_anchor_in_parent_chain() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let db_tip_hash = blocks[1].recovered_block().hash();
+        assert_eq!(
+            manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
+            Some(db_tip_hash)
         );
     }
 
