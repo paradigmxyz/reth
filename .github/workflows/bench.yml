@@ -392,11 +392,9 @@ jobs:
               if (!featureName) featureName = '${{ github.ref_name }}';
             }
 
-            const fallbackReasons = [];
-            if (bal !== 'false') fallbackReasons.push('BAL');
-            const driver = fallbackReasons.length ? 'reth-bench' : 'txgen';
+            const driver = 'txgen';
             const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
-            const driverReason = fallbackReasons.join(',');
+            const driverReason = '';
 
             core.setOutput('pr', pr || '');
             core.setOutput('actor', actor);
@@ -631,7 +629,7 @@ jobs:
       BENCH_DRIVER_REASON: ${{ needs.reth-bench-ack.outputs.driver-reason }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      TXGEN_REV: 64826ac816380586e4856e2d1d2d20f4d4e66198
+      TXGEN_REV: 51e7dd935728b5d77c10ddac59ba327418271aab
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
     steps:

@@ -12,11 +12,6 @@ MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"
 
-if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
-  echo "::error::txgen path does not support BAL replay yet; use big-blocks with the reth-bench driver"
-  exit 1
-fi
-
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 if [ "$BIG_BLOCKS" = "true" ]; then
   NODE_BIN="reth-bb"
