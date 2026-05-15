@@ -1,4 +1,4 @@
-// Sends Slack notifications for reth-bench results.
+// Sends Slack notifications for benchmark results.
 //
 // Reads from environment:
 //   SLACK_BENCH_BOT_TOKEN  – Slack Bot User OAuth Token (xoxb-...)

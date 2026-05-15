@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Builds the node binary for the txgen-backed PR benchmark path.
+# Builds the node binary used by benchmark workflows.
 #
 # Usage: bench-txgen-build.sh <baseline|feature> <source-dir> <commit>
 #
-# This intentionally does not build or install reth-bench. Big-block benchmarks
-# build reth-bb because txgen replays reth-bb's extended payload format.
+# Big-block benchmarks build reth-bb because txgen replays reth-bb's extended
+# payload format.
 set -euxo pipefail
 
 MODE="$1"
