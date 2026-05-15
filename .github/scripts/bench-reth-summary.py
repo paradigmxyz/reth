@@ -38,9 +38,6 @@ PRACTICAL_FLOOR_PCT = {
     "wall_clock": 0.70,
     "persist_wait": 5.0,
 }
-PRACTICAL_FLOOR_ABS = {
-    "persist_wait": 1.0,
-}
 
 
 def _opt_int(row: dict, key: str) -> int | None:
@@ -449,12 +446,9 @@ def display_bal_mode(bal_mode: str | None) -> str | None:
     return bal_mode
 
 
-def practical_floor_pct(metric: str, baseline_value: float) -> float:
+def practical_floor_pct(metric: str, _baseline_value: float) -> float:
     """Return the practical significance floor as a percent of baseline."""
-    pct_floor = PRACTICAL_FLOOR_PCT.get(metric, 0.0)
-    abs_floor = PRACTICAL_FLOOR_ABS.get(metric, 0.0)
-    abs_pct = abs_floor / baseline_value * 100.0 if baseline_value > 0 else 0.0
-    return max(pct_floor, abs_pct)
+    return PRACTICAL_FLOOR_PCT.get(metric, 0.0)
 
 
 def significance(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
