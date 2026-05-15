@@ -42,10 +42,10 @@ pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
 struct StateTrieOverlayMetrics {
     /// Duration of overlay computation in seconds.
     overlay_computation_duration_seconds: Histogram,
-    /// Number of overlay cache hits.
-    overlay_cache_hits: Counter,
-    /// Number of overlay cache misses.
-    overlay_cache_misses: Counter,
+    /// Number of requests satisfied by an existing overlay cache entry.
+    overlay_cache_reuses: Counter,
+    /// Number of overlay cache entries populated by computing an overlay.
+    overlay_cache_fills: Counter,
 }
 
 static STATE_TRIE_OVERLAY_METRICS: LazyLock<StateTrieOverlayMetrics> =
@@ -241,9 +241,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         fields(
             tip_hash = %tip_hash,
             anchor_hash = %anchor_hash,
-            cache_hit = tracing::field::Empty,
+            cache_reused = tracing::field::Empty,
             block_count = tracing::field::Empty,
-            parent_overlay_hit = tracing::field::Empty,
+            parent_overlay_reused = tracing::field::Empty,
         )
     )]
     fn get_overlay(
@@ -255,11 +255,11 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let span = tracing::Span::current();
 
         if let Some(input) = self.overlays.get(&key).map(|entry| Arc::clone(entry.value())) {
-            STATE_TRIE_OVERLAY_METRICS.overlay_cache_hits.increment(1);
-            span.record("cache_hit", true);
+            STATE_TRIE_OVERLAY_METRICS.overlay_cache_reuses.increment(1);
+            span.record("cache_reused", true);
             return Ok(input)
         }
-        span.record("cache_hit", false);
+        span.record("cache_reused", false);
 
         // Resolve the block path and any cached parent overlay before locking the child entry.
         let mut hash = tip_hash;
@@ -286,17 +286,17 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 })
                 .flatten()
         });
-        span.record("parent_overlay_hit", parent_input.is_some());
+        span.record("parent_overlay_reused", parent_input.is_some());
 
         // The vacant entry is the cache-fill gate: racing callers block instead of recomputing.
         let input = match self.overlays.entry(key) {
             Entry::Occupied(entry) => {
-                STATE_TRIE_OVERLAY_METRICS.overlay_cache_hits.increment(1);
-                span.record("cache_hit", true);
+                STATE_TRIE_OVERLAY_METRICS.overlay_cache_reuses.increment(1);
+                span.record("cache_reused", true);
                 return Ok(Arc::clone(entry.get()))
             }
             Entry::Vacant(entry) => {
-                STATE_TRIE_OVERLAY_METRICS.overlay_cache_misses.increment(1);
+                STATE_TRIE_OVERLAY_METRICS.overlay_cache_fills.increment(1);
                 let input = {
                     #[cfg(feature = "rayon")]
                     {
