@@ -49,11 +49,11 @@ pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
 /// Minimum default number of trie storage proof worker threads.
 #[cfg(feature = "rayon")]
-pub const DEFAULT_PROOF_STORAGE_WORKER_THREADS_FLOOR: usize = 24;
+pub const DEFAULT_PROOF_STORAGE_WORKER_THREADS_FLOOR: usize = 128;
 
 /// Minimum default number of trie account proof worker threads.
 #[cfg(feature = "rayon")]
-pub const DEFAULT_PROOF_ACCOUNT_WORKER_THREADS_FLOOR: usize = 24;
+pub const DEFAULT_PROOF_ACCOUNT_WORKER_THREADS_FLOOR: usize = 128;
 
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
