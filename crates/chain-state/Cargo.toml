@@ -84,5 +84,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-tasks?/test-utils",
 ]
 rayon = ["dep:rayon", "dep:reth-tasks"]

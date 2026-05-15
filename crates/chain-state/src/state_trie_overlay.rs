@@ -151,7 +151,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         {
             let parent_span = tracing::Span::current();
             for anchor_hash in cached_parent_overlays {
-                let manager = <StateTrieOverlayManager<N> as Clone>::clone(self);
+                let manager = <Self as Clone>::clone(self);
                 let parent_span = parent_span.clone();
                 worker_pool.spawn(move || {
                     let _span = tracing::trace_span!(
