@@ -139,11 +139,6 @@ pub trait BalStore: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Fetch BALs for the requested range.
-    ///
-    /// Implementations may stop at the first gap and return the contiguous prefix.
-    fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>>;
-
     /// Returns a stream of BAL insert notifications.
     ///
     /// Notifications are emitted only after a BAL has been successfully inserted into the store.
@@ -262,12 +257,6 @@ impl BalStoreHandle {
         self.inner.append_by_hashes_with_limit(block_hashes, limit, out)
     }
 
-    /// Fetch BALs for the requested range.
-    #[inline]
-    pub fn get_by_range(&self, start: BlockNumber, count: u64) -> ProviderResult<Vec<Bytes>> {
-        self.inner.get_by_range(start, count)
-    }
-
     /// Returns a stream of BAL insert notifications.
     #[cfg(feature = "std")]
     #[inline]
@@ -334,10 +323,6 @@ impl BalStore for NoopBalStore {
         Ok(())
     }
 
-    fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
-    }
-
     #[cfg(feature = "std")]
     fn bal_stream(&self) -> BalNotificationStream {
         reth_tokio_util::EventSender::new(1).new_listener()
@@ -359,11 +344,9 @@ mod tests {
         let hashes = [B256::random(), B256::random()];
 
         let by_hash = store.get_by_hashes(&hashes).unwrap();
-        let by_range = store.get_by_range(1, 10).unwrap();
 
         assert_eq!(by_hash, vec![None, None]);
         assert!(store.get_by_hash(B256::random()).unwrap().is_none());
-        assert!(by_range.is_empty());
         assert_eq!(store.prune(10).unwrap(), 0);
     }
 
@@ -451,10 +434,6 @@ mod tests {
                 .iter()
                 .map(|hash| (*hash == self.hash).then(|| self.raw_bal.clone()))
                 .collect())
-        }
-
-        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-            Ok(Vec::new())
         }
 
         #[cfg(feature = "std")]

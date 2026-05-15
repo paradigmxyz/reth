@@ -725,10 +725,6 @@ impl BalStore for FailingLookupBalStore {
         Err(ProviderError::other(std::io::Error::other("BAL lookup failed")))
     }
 
-    fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
-    }
-
     fn bal_stream(&self) -> BalNotificationStream {
         BalStoreHandle::noop().bal_stream()
     }
