@@ -1,0 +1,724 @@
+# Runs benchmarkoor-replay fixtures against a PR/branch and compares them with main.
+#
+# Unlike the normal reth benchmark workflow, this prepares a post gas-bump/funding
+# baseline with benchmarkoor-replay. Each selected test then resets to that
+# baseline, runs setup outside the measured window, restarts Reth, drops Linux
+# page cache, and measures only the testing fixture replay.
+
+on:
+  # Temporary test trigger for branch-only workflow validation.
+  # Remove before merging this workflow.
+  push:
+    branches:
+      - dan/create-benchmarkoor-replay-workflow
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to benchmark"
+        required: false
+        default: ""
+        type: string
+      feature:
+        description: "Feature git ref (default: dispatched ref, ignored when pr is set)"
+        required: false
+        default: ""
+        type: string
+      baseline:
+        description: "Baseline git ref"
+        required: false
+        default: "main"
+        type: string
+      download_ref:
+        description: "Reth git ref used only for snapshot download"
+        required: false
+        default: "pull/24027/head"
+        type: string
+      suite:
+        description: "benchmarkoor-replay suite"
+        required: false
+        default: "perf-devnet-3/24358000"
+        type: string
+      context:
+        description: "benchmarkoor context"
+        required: false
+        default: "repricing"
+        type: string
+      fork:
+        description: "benchmarkoor fork"
+        required: false
+        default: "amsterdam"
+        type: string
+      test_type:
+        description: "benchmarkoor test type"
+        required: false
+        default: "stateful"
+        type: string
+      snapshot:
+        description: "Snapshot manifest URL, MinIO manifest path, or MinIO prefix"
+        required: false
+        default: "minio/reth-snapshots/perfnet-24358000-full/"
+        type: string
+      fixture_url:
+        description: "Fixture archive URL/path override (empty uses suite default)"
+        required: false
+        default: ""
+        type: string
+      exact_test:
+        description: "Exact benchmarkoor test filename"
+        required: false
+        default: ""
+        type: string
+      contains:
+        description: "Substring test selector"
+        required: false
+        default: "test_account_access"
+        type: string
+      pattern:
+        description: "Regex test selector"
+        required: false
+        default: ""
+        type: string
+      opcode:
+        description: "Opcode selector"
+        required: false
+        default: ""
+        type: string
+      gas_bucket:
+        description: "Gas bucket selector, for example 210M"
+        required: false
+        default: ""
+        type: string
+      cache_strategy:
+        description: "Cache strategy selector, for example NO_CACHE"
+        required: false
+        default: ""
+        type: string
+      account_mode:
+        description: "Account mode selector, for example EXISTING_EOA"
+        required: false
+        default: ""
+        type: string
+      limit:
+        description: "Maximum matching tests to run (0 = all)"
+        required: false
+        default: "20"
+        type: string
+      repetitions:
+        description: "Runs per side: 1 or 2"
+        required: false
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
+      cores:
+        description: "Limit reth to N CPU cores (0 = all available)"
+        required: false
+        default: "6"
+        type: string
+      reset_strategy:
+        description: "Reset state between tests"
+        required: false
+        default: "schelk"
+        type: choice
+        options:
+          - "schelk"
+          - "unwind"
+      baseline_args:
+        description: "Extra CLI args for the baseline reth node"
+        required: false
+        default: ""
+        type: string
+      feature_args:
+        description: "Extra CLI args for the feature reth node"
+        required: false
+        default: ""
+        type: string
+      benchmarkoor_replay_path:
+        description: "Optional local benchmarkoor-replay checkout on the runner"
+        required: false
+        default: "~/projects/benchmarkoor-replay"
+        type: string
+      metadata_root:
+        description: "Optional local benchmarkoor-tests config root"
+        required: false
+        default: "~/projects/benchmarkoor-tests/configs"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
+
+name: bench-benchmarkoor
+
+permissions: {}
+
+jobs:
+  benchmarkoor:
+    name: bench-benchmarkoor
+    runs-on: [self-hosted, Linux, X64, available]
+    permissions:
+      contents: read
+    timeout-minutes: 180
+    env:
+      SCHELK_MOUNT: /reth-bench
+      RETH_SCOPE: reth-benchmarkoor.scope
+      BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
+      BENCH_CORES: ${{ inputs.cores || '6' }}
+      BENCH_MEMORY_MAX: "32G"
+      BENCH_RESET_STRATEGY: ${{ inputs.reset_strategy || 'schelk' }}
+      BENCH_BASELINE_ARGS: ${{ inputs.baseline_args || '' }}
+      BENCH_FEATURE_ARGS: ${{ inputs.feature_args || '' }}
+      BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCHMARKOOR_SUITE: ${{ inputs.suite || 'perf-devnet-3/24358000' }}
+      BENCHMARKOOR_CONTEXT: ${{ inputs.context || 'repricing' }}
+      BENCHMARKOOR_FORK: ${{ inputs.fork || 'amsterdam' }}
+      BENCHMARKOOR_TEST_TYPE: ${{ inputs.test_type || 'stateful' }}
+      BENCHMARKOOR_METADATA_ROOT: ${{ inputs.metadata_root || '~/projects/benchmarkoor-tests/configs' }}
+      BENCHMARKOOR_SNAPSHOT: ${{ inputs.snapshot || 'minio/reth-snapshots/perfnet-24358000-full/' }}
+      BENCHMARKOOR_SNAPSHOT_MC_ROOT: "minio"
+      BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '~/projects/benchmarkoor-replay' }}
+      BENCHMARKOOR_CACHE: ${{ github.workspace }}/bench-work/benchmarkoor-cache
+    steps:
+      - name: Clean up previous bench-work
+        run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
+
+      - name: Print runner OS and kernel
+        run: |
+          set -euo pipefail
+          echo "::group::Runner OS"
+          uname -a
+          echo "kernel=$(uname -r)"
+          if [ -f /etc/os-release ]; then
+            cat /etc/os-release
+          fi
+          lsb_release -a 2>/dev/null || true
+          echo "::endgroup::"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          submodules: true
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        continue-on-error: true
+
+      - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup \
+            linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
+
+          if [ -n "${DEREK_TOKEN:-}" ]; then
+            git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
+
+          if ! command -v era_invalidate &>/dev/null; then
+            git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
+            sudo make -C /tmp/tpt install
+            rm -rf /tmp/tpt
+          fi
+
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
+            cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
+          fi
+
+      - name: Check dependencies
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          missing=()
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make jq cargo; do
+            command -v "$cmd" &>/dev/null || missing+=("$cmd")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required tools: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Install benchmarkoor-replay
+        env:
+          BENCHMARKOOR_REPLAY_DEPLOY_KEY: ${{ secrets.BENCHMARKOOR_REPLAY_DEPLOY_KEY }}
+          BENCHMARKOOR_REPLAY_TOKEN: ${{ secrets.BENCHMARKOOR_REPLAY_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          replay_path="$BENCHMARKOOR_REPLAY_PATH"
+          case "$replay_path" in
+            "~") replay_path="$HOME" ;;
+            "~/"*) replay_path="$HOME/${replay_path#"~/"}" ;;
+          esac
+          if [ -d "$replay_path" ]; then
+            if git -C "$replay_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              git -C "$replay_path" fetch origin main --quiet
+              git -C "$replay_path" checkout --force origin/main
+            fi
+          else
+            replay_path="${RUNNER_TEMP:-/tmp}/benchmarkoor-replay"
+            rm -rf "$replay_path"
+
+            if [ -n "${BENCHMARKOOR_REPLAY_DEPLOY_KEY:-}" ]; then
+              mkdir -p "$HOME/.ssh"
+              printf '%s\n' "$BENCHMARKOOR_REPLAY_DEPLOY_KEY" > "$HOME/.ssh/benchmarkoor_replay_deploy_key"
+              chmod 600 "$HOME/.ssh/benchmarkoor_replay_deploy_key"
+              ssh-keyscan github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+              GIT_SSH_COMMAND="ssh -i $HOME/.ssh/benchmarkoor_replay_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+                git clone --depth 1 git@github.com:tempoxyz/benchmarkoor-replay.git "$replay_path" || rm -rf "$replay_path"
+            fi
+
+            auth_token="${BENCHMARKOOR_REPLAY_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_TOKEN:-}}}"
+            if [ ! -d "$replay_path" ] && [ -n "$auth_token" ]; then
+              git clone --depth 1 "https://x-access-token:${auth_token}@github.com/tempoxyz/benchmarkoor-replay" "$replay_path" || rm -rf "$replay_path"
+            fi
+
+            if [ ! -d "$replay_path" ]; then
+              rm -rf "$replay_path"
+              GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+                git clone --depth 1 git@github.com:tempoxyz/benchmarkoor-replay.git "$replay_path" || {
+                  echo "::error::benchmarkoor-replay was not found at ${BENCHMARKOOR_REPLAY_PATH} and could not be cloned. Install it under ~/projects/benchmarkoor-replay on the runner, grant GH_PROJECT_TOKEN/DEREK_TOKEN read access to tempoxyz/benchmarkoor-replay, or add BENCHMARKOOR_REPLAY_DEPLOY_KEY/BENCHMARKOOR_REPLAY_TOKEN."
+                  exit 1
+                }
+            fi
+          fi
+
+          cargo install --path "$replay_path" --locked --force
+          BENCHMARKOOR_BIN="$(command -v benchmarkoor-replay)"
+          "$BENCHMARKOOR_BIN" run-many --help | grep -q -- 'setup-then-testing'
+          echo "BENCHMARKOOR_BIN=${BENCHMARKOOR_BIN}" >> "$GITHUB_ENV"
+
+      - name: Prepare benchmarkoor metadata
+        run: |
+          set -euo pipefail
+
+          metadata_root="$BENCHMARKOOR_METADATA_ROOT"
+          case "$metadata_root" in
+            "~") metadata_root="$HOME" ;;
+            "~/"*) metadata_root="$HOME/${metadata_root#"~/"}" ;;
+          esac
+          if [ ! -d "$metadata_root" ]; then
+            tests_path="$BENCH_WORK_DIR/benchmarkoor-tests"
+            rm -rf "$tests_path"
+            git clone --depth 1 https://github.com/ethpandaops/benchmarkoor-tests "$tests_path"
+            metadata_root="$tests_path/configs"
+          fi
+
+          if [ ! -d "$metadata_root" ]; then
+            echo "::error::benchmarkoor metadata root not found at ${metadata_root}"
+            exit 1
+          fi
+
+          echo "BENCHMARKOOR_METADATA_ROOT=${metadata_root}" >> "$GITHUB_ENV"
+
+      - name: Resolve refs
+        id: refs
+        env:
+          INPUT_PR: ${{ inputs.pr || '' }}
+          INPUT_FEATURE: ${{ inputs.feature || '' }}
+          INPUT_BASELINE: ${{ inputs.baseline || 'main' }}
+          INPUT_DOWNLOAD: ${{ inputs.download_ref || 'pull/24027/head' }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+
+          resolve_ref() {
+            local ref="$1"
+            if [[ "$ref" =~ ^pull/[0-9]+/(head|merge)$ ]]; then
+              git fetch origin "$ref" --quiet
+              git rev-parse --verify "FETCH_HEAD^{commit}"
+              return 0
+            fi
+            git fetch origin "$ref" --quiet 2>/dev/null || true
+            if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
+              git rev-parse --verify "${ref}^{commit}"
+            else
+              git rev-parse --verify "origin/${ref}^{commit}"
+            fi
+          }
+
+          if [ -n "$INPUT_PR" ]; then
+            git fetch origin "pull/${INPUT_PR}/head:refs/remotes/pr/${INPUT_PR}" --quiet
+            FEATURE_REF="$(git rev-parse "refs/remotes/pr/${INPUT_PR}")"
+            FEATURE_NAME="pr-${INPUT_PR}"
+          elif [ -n "$INPUT_FEATURE" ]; then
+            FEATURE_REF="$(resolve_ref "$INPUT_FEATURE")"
+            FEATURE_NAME="$INPUT_FEATURE"
+          else
+            FEATURE_REF="$(git rev-parse HEAD)"
+            FEATURE_NAME="${GITHUB_REF_NAME}"
+          fi
+
+          BASELINE_NAME="${INPUT_BASELINE:-main}"
+          BASELINE_REF="$(resolve_ref "$BASELINE_NAME")"
+          DOWNLOAD_NAME="${INPUT_DOWNLOAD:-pull/24027/head}"
+          DOWNLOAD_REF="$(resolve_ref "$DOWNLOAD_NAME")"
+
+          {
+            printf 'feature-ref=%s\n' "$FEATURE_REF"
+            printf 'feature-name=%s\n' "$FEATURE_NAME"
+            printf 'baseline-ref=%s\n' "$BASELINE_REF"
+            printf 'baseline-name=%s\n' "$BASELINE_NAME"
+            printf 'download-ref=%s\n' "$DOWNLOAD_REF"
+            printf 'download-name=%s\n' "$DOWNLOAD_NAME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare source dirs
+        run: |
+          set -euo pipefail
+          prepare_source_dir() {
+            local dir="$1"
+            local ref="$2"
+            local fetch_ref="${3:-}"
+
+            if [ -d "$dir" ]; then
+              git -C "$dir" reset --hard HEAD
+              git -C "$dir" clean -fdx
+            else
+              git clone . "$dir"
+            fi
+            if [ -n "$fetch_ref" ]; then
+              git -C "$dir" fetch origin "$fetch_ref" --quiet || true
+            else
+              git -C "$dir" fetch origin "$ref" --quiet || true
+            fi
+
+            git -C "$dir" checkout --force "$ref"
+            git -C "$dir" submodule update --init --recursive
+          }
+
+          prepare_source_dir ../reth-baseline "${{ steps.refs.outputs.baseline-ref }}"
+          prepare_source_dir ../reth-feature "${{ steps.refs.outputs.feature-ref }}"
+          prepare_source_dir ../reth-download "${{ steps.refs.outputs.download-ref }}" "${{ steps.refs.outputs.download-name }}"
+
+      - name: Build binaries
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEREK_PAT: ${{ secrets.DEREK_PAT }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          BENCH_BIG_BLOCKS: "false"
+        run: |
+          set -euo pipefail
+          BASELINE_DIR="$(cd ../reth-baseline && pwd)"
+          FEATURE_DIR="$(cd ../reth-feature && pwd)"
+          DOWNLOAD_DIR="$(cd ../reth-download && pwd)"
+
+          .github/scripts/bench-reth-build.sh baseline "$BASELINE_DIR" "${{ steps.refs.outputs.baseline-ref }}" &
+          PID_BASELINE=$!
+          .github/scripts/bench-reth-build.sh feature "$FEATURE_DIR" "${{ steps.refs.outputs.feature-ref }}" &
+          PID_FEATURE=$!
+          .github/scripts/bench-reth-build.sh baseline "$DOWNLOAD_DIR" "${{ steps.refs.outputs.download-ref }}" &
+          PID_DOWNLOAD=$!
+
+          FAIL=0
+          wait $PID_BASELINE || FAIL=1
+          wait $PID_FEATURE || FAIL=1
+          wait $PID_DOWNLOAD || FAIL=1
+          if [ $FAIL -ne 0 ]; then
+            echo "::error::One or more build tasks failed"
+            exit 1
+          fi
+
+      - name: Download fixtures
+        env:
+          FIXTURE_URL: ${{ inputs.fixture_url || '' }}
+        run: |
+          set -euo pipefail
+          args=(
+            --suite "$BENCHMARKOOR_SUITE"
+            --context "$BENCHMARKOOR_CONTEXT"
+            --fork "$BENCHMARKOOR_FORK"
+            --test-type "$BENCHMARKOOR_TEST_TYPE"
+            --metadata-root "$BENCHMARKOOR_METADATA_ROOT"
+            --cache-dir "$BENCHMARKOOR_CACHE"
+            fixtures download
+          )
+          if [ -n "$FIXTURE_URL" ]; then
+            args+=(--url "$FIXTURE_URL")
+          fi
+          "$BENCHMARKOOR_BIN" "${args[@]}"
+
+      - name: Resolve test set
+        id: tests
+        env:
+          EXACT_TEST: ${{ inputs.exact_test || '' }}
+          CONTAINS: ${{ inputs.contains || 'test_account_access' }}
+          PATTERN: ${{ inputs.pattern || '' }}
+          OPCODE: ${{ inputs.opcode || '' }}
+          GAS_BUCKET: ${{ inputs.gas_bucket || '' }}
+          CACHE_STRATEGY: ${{ inputs.cache_strategy || '' }}
+          ACCOUNT_MODE: ${{ inputs.account_mode || '' }}
+          LIMIT: ${{ inputs.limit || '20' }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::limit must be a non-negative integer"
+            exit 1
+          fi
+
+          INDEX="$(find "$BENCHMARKOOR_CACHE/fixtures" -name index.json -print -quit)"
+          if [ -z "$INDEX" ]; then
+            echo "::error::benchmarkoor fixture index not found"
+            exit 1
+          fi
+          TESTS_FILE="$BENCH_WORK_DIR/tests.jsonl"
+          mkdir -p "$BENCH_WORK_DIR"
+
+          jq -c \
+            --arg exact "$EXACT_TEST" \
+            --arg contains "$CONTAINS" \
+            --arg pattern "$PATTERN" \
+            --arg opcode "$OPCODE" \
+            --arg gas_bucket "$GAS_BUCKET" \
+            --arg cache_strategy "$CACHE_STRATEGY" \
+            --arg account_mode "$ACCOUNT_MODE" \
+            --argjson limit "$LIMIT" '
+            def searchable:
+              [.name, (.setup.rel_path // ""), (.testing.rel_path // ""), (.cleanup.rel_path // "")]
+              | join(" ");
+            def matches_exact($v):
+              .name == $v or (.setup.name // "") == $v or (.setup.rel_path // "") == $v or
+              (.testing.name // "") == $v or (.testing.rel_path // "") == $v or
+              (.cleanup.name // "") == $v or (.cleanup.rel_path // "") == $v;
+            def norm: ascii_downcase;
+            [
+              .tests[]
+              | select(.setup != null and .testing != null)
+              | select($exact == "" or matches_exact($exact))
+              | select($contains == "" or (searchable | contains($contains)))
+              | select($pattern == "" or (searchable | test($pattern)))
+              | select($opcode == "" or ((.metadata.opcode // "" | norm) == ($opcode | norm)))
+              | select($gas_bucket == "" or ((.metadata.gas_bucket // "" | norm) == ($gas_bucket | norm)))
+              | select($cache_strategy == "" or ((.metadata.cache_strategy // "" | norm) == ($cache_strategy | norm)))
+              | select($account_mode == "" or ((.metadata.account_mode // "" | norm) == ($account_mode | norm)))
+            ] | if $limit > 0 then .[: $limit] else . end
+            | .[]
+            | {name, gas_bucket: .metadata.gas_bucket, opcode: .metadata.opcode, cache_strategy: .metadata.cache_strategy, account_mode: .metadata.account_mode}
+            ' "$INDEX" > "$TESTS_FILE"
+
+          COUNT="$(wc -l < "$TESTS_FILE" | tr -d ' ')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No benchmarkoor tests matched the requested selectors"
+            exit 1
+          fi
+          echo "Selected ${COUNT} test(s):"
+          jq -r '.name' "$TESTS_FILE"
+
+          {
+            echo "index=$INDEX"
+            echo "tests-file=$TESTS_FILE"
+            echo "count=$COUNT"
+          } >> "$GITHUB_OUTPUT"
+          echo "BENCHMARKOOR_INDEX=$INDEX" >> "$GITHUB_ENV"
+          echo "BENCHMARKOOR_TESTS_FILE=$TESTS_FILE" >> "$GITHUB_ENV"
+
+      - name: Check block discard support
+        run: |
+          set -euo pipefail
+          echo "::group::Block discard capabilities"
+          lsblk -D -o NAME,TYPE,SIZE,DISC-GRAN,DISC-MAX,DISC-ZERO,MOUNTPOINTS || true
+          echo
+
+          if sudo test -f /var/lib/schelk/state.json; then
+            echo "schelk state:"
+            sudo jq . /var/lib/schelk/state.json || true
+            echo
+          fi
+
+          found=0
+          for queue in /sys/block/{ram*,brd*,loop*,nvme*,dm-*}/queue; do
+            [ -d "$queue" ] || continue
+            found=1
+            dev="$(basename "$(dirname "$queue")")"
+            max="$(cat "$queue/discard_max_bytes" 2>/dev/null || printf 'missing')"
+            gran="$(cat "$queue/discard_granularity" 2>/dev/null || printf 'missing')"
+            zeroes="$(cat "$queue/discard_zeroes_data" 2>/dev/null || printf 'missing')"
+            printf '%s: discard_max_bytes=%s discard_granularity=%s discard_zeroes_data=%s\n' \
+              "$dev" "$max" "$gran" "$zeroes"
+            if [[ "$dev" == ram* || "$dev" == brd* ]]; then
+              if [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ]; then
+                echo "::notice::/dev/${dev} advertises discard support with discard_max_bytes=${max}"
+              else
+                echo "::notice::/dev/${dev} does not advertise discard support; discard_max_bytes=${max}"
+              fi
+            fi
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo "::notice::No matching sysfs block queues found for discard diagnostics"
+          fi
+          echo "::endgroup::"
+
+      - name: Import snapshot into schelk
+        id: snapshot
+        run: |
+          set -euo pipefail
+          DOWNLOAD_RETH_BINARY="$(pwd)/../reth-download/target/profiling/reth"
+          echo "Using download reth from ${{ steps.refs.outputs.download-name }} (${{ steps.refs.outputs.download-ref }})"
+          "$DOWNLOAD_RETH_BINARY" --version
+          BENCH_RETH_BINARY="$DOWNLOAD_RETH_BINARY" \
+            .github/scripts/bench-benchmarkoor-snapshot.sh
+
+      - name: System setup
+        run: |
+          set -euo pipefail
+          echo passive | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
+          sudo cpupower frequency-set -g performance || true
+          sudo swapoff -a || true
+          echo 0 | sudo tee /proc/sys/kernel/randomize_va_space || true
+          for cpu in /sys/devices/system/cpu/cpu*/topology/thread_siblings_list; do
+            first=$(cut -d, -f1 < "$cpu" | cut -d- -f1)
+            current=$(echo "$cpu" | grep -o 'cpu[0-9]*' | grep -o '[0-9]*')
+            if [ "$current" != "$first" ]; then
+              echo 0 | sudo tee "/sys/devices/system/cpu/cpu${current}/online" || true
+            fi
+          done
+          for p in /sys/kernel/mm/transparent_hugepage /sys/kernel/mm/transparent_hugepages; do
+            [ -d "$p" ] && echo never | sudo tee "$p/enabled" && echo never | sudo tee "$p/defrag" && break
+          done || true
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
+          sudo bash -c 'exec 3<>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; exec -a bench-cpu-dma-latency sleep infinity' &
+          echo "BENCH_CPU_DMA_LATENCY_PID=$!" >> "$GITHUB_ENV"
+          for irq in /proc/irq/*/smp_affinity_list; do
+            echo 0 | sudo tee "$irq" 2>/dev/null || true
+          done
+          sudo systemctl stop \
+            irqbalance cron atd unattended-upgrades snapd \
+            prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+            prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+            prometheus-node-exporter-ipmitool-sensor.timer prometheus-node-exporter-ipmitool-sensor.service \
+            sysstat-collect.timer sysstat-collect.service \
+            sysstat-summary.timer sysstat-summary.service \
+            2>/dev/null || true
+          uname -r
+          lscpu | grep -E 'Model name|CPU\(s\)|MHz|NUMA'
+          free -h
+
+      - name: Checkpoint after gas bump and funding
+        run: |
+          set -euo pipefail
+          taskset -c 0 .github/scripts/bench-benchmarkoor-run.sh \
+            prepare \
+            "$(pwd)/../reth-feature/target/profiling/reth" \
+            "$BENCH_WORK_DIR/prerun"
+
+      - name: Run benchmarkoor comparison
+        env:
+          BENCHMARKOOR_REPETITIONS: ${{ inputs.repetitions || '1' }}
+        run: |
+          set -euo pipefail
+          BASELINE_BIN="$(pwd)/../reth-baseline/target/profiling/reth"
+          FEATURE_BIN="$(pwd)/../reth-feature/target/profiling/reth"
+
+          if [ "$BENCHMARKOOR_REPETITIONS" = "2" ]; then
+            RUNS=(
+              "feature-1:$FEATURE_BIN"
+              "baseline-1:$BASELINE_BIN"
+              "baseline-2:$BASELINE_BIN"
+              "feature-2:$FEATURE_BIN"
+            )
+          else
+            RUNS=(
+              "baseline-1:$BASELINE_BIN"
+              "feature-1:$FEATURE_BIN"
+            )
+          fi
+
+          for item in "${RUNS[@]}"; do
+            label="${item%%:*}"
+            binary="${item#*:}"
+            taskset -c 0 .github/scripts/bench-benchmarkoor-run.sh \
+              run "$label" "$binary" "$BENCH_WORK_DIR/$label" "$BENCHMARKOOR_TESTS_FILE"
+          done
+
+      - name: Parse results
+        id: results
+        if: success()
+        run: |
+          set -euo pipefail
+          RESULTS="$BENCH_WORK_DIR/results.jsonl"
+          TMP_RESULTS="$BENCH_WORK_DIR/results.merged.jsonl"
+          rm -f "$RESULTS" "$TMP_RESULTS"
+          mapfile -d '' RESULT_FILES < <(find "$BENCH_WORK_DIR" -path '*/results.jsonl' -print0)
+          if [ "${#RESULT_FILES[@]}" -eq 0 ]; then
+            echo "::error::No per-run benchmarkoor results found"
+            exit 1
+          fi
+          cat "${RESULT_FILES[@]}" > "$TMP_RESULTS"
+          mv "$TMP_RESULTS" "$RESULTS"
+          python3 .github/scripts/bench-benchmarkoor-summary.py \
+            --results "$RESULTS" \
+            --output-json "$BENCH_WORK_DIR/summary.json" \
+            --output-markdown "$BENCH_WORK_DIR/summary.md" \
+            --repo "${{ github.repository }}" \
+            --baseline-name "${{ steps.refs.outputs.baseline-name }}" \
+            --baseline-ref "${{ steps.refs.outputs.baseline-ref }}" \
+            --feature-name "${{ steps.refs.outputs.feature-name }}" \
+            --feature-ref "${{ steps.refs.outputs.feature-ref }}"
+
+      - name: Write job summary
+        if: success()
+        run: cat "$BENCH_WORK_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scan logs for errors
+        if: "!cancelled()"
+        run: |
+          set -euo pipefail
+          ERRORS_FILE="$BENCH_WORK_DIR/errors.md"
+          found=false
+          while IFS= read -r -d '' log; do
+            panics=$(grep -c -E 'panicked at' "$log" || true)
+            errors=$(grep -c ' ERROR ' "$log" || true)
+            if [ "$panics" -gt 0 ] || [ "$errors" -gt 0 ]; then
+              if [ "$found" = false ]; then
+                printf '### Node Errors\n\n' >> "$ERRORS_FILE"
+                found=true
+              fi
+              printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$log" "$panics" "$errors" >> "$ERRORS_FILE"
+              grep -E 'panicked at| ERROR ' "$log" | head -30 >> "$ERRORS_FILE" || true
+              printf '\n</details>\n\n' >> "$ERRORS_FILE"
+            fi
+          done < <(find "$BENCH_WORK_DIR" -name '*.log' -print0)
+
+      - name: Upload results
+        if: "!cancelled()"
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: benchmarkoor-results
+          path: ${{ env.BENCH_WORK_DIR }}
+
+      - name: Clean build outputs
+        if: always()
+        run: sudo rm -rf ../reth-baseline/target ../reth-feature/target "$BENCH_WORK_DIR" 2>/dev/null || true
+
+      - name: Restore system settings
+        if: always()
+        run: |
+          if [ -n "${BENCH_CPU_DMA_LATENCY_PID:-}" ]; then
+            sudo kill "$BENCH_CPU_DMA_LATENCY_PID" 2>/dev/null || true
+          fi
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
+          sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
+          sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
+          sudo schelk recover -y --kill || true
+          sudo systemctl start irqbalance cron atd 2>/dev/null || true

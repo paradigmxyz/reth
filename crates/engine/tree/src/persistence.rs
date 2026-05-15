@@ -536,10 +536,6 @@ mod tests {
             Ok(vec![None; block_hashes.len()])
         }
 
-        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-            Ok(Vec::new())
-        }
-
         fn bal_stream(&self) -> BalNotificationStream {
             BalStoreHandle::noop().bal_stream()
         }

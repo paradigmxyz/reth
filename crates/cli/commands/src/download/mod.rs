@@ -114,6 +114,7 @@ use source::{
 use std::{
     borrow::Cow,
     collections::BTreeMap,
+    ffi::OsStr,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
 };
@@ -124,6 +125,7 @@ const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
 const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
 const SNAPSHOT_API_PATH: &str = "/api/snapshots";
+const FORCE_PRESERVED_DATADIR_FILES: &[&str] = &["discovery-secret", "known-peers.json"];
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -419,6 +421,10 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
+    /// Overwrite existing snapshot data while preserving discovery-secret and known-peers.json.
+    #[arg(long, conflicts_with = "list")]
+    force: bool,
+
     /// Enable resumable two-phase downloads (download to disk first, then extract).
     ///
     /// Archives are downloaded to a `.part` file with HTTP Range resume support
@@ -448,11 +454,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     pub async fn execute<N>(self) -> Result<()> {
         let chain = self.env.chain.chain();
         let chain_id = chain.id();
-        let data_dir = self.env.datadir.clone().resolve_datadir(chain);
-        fs::create_dir_all(&data_dir)?;
-
-        let cancel_token = CancellationToken::new();
-        let _cancel_guard = cancel_token.drop_guard();
 
         // --list: print available snapshots and exit
         if self.list {
@@ -461,8 +462,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
+        let data_dir = self.env.datadir.clone().resolve_datadir(chain);
+
+        let cancel_token = CancellationToken::new();
+        let _cancel_guard = cancel_token.drop_guard();
+
         // Legacy single-URL mode: download one archive and extract it
         if let Some(ref url) = self.url {
+            let target_dir = data_dir.data_dir();
+            if self.force {
+                clear_existing_datadir(target_dir)?;
+            }
+            fs::create_dir_all(target_dir)?;
+
             let request_limiter = DownloadRequestLimiter::new(self.download_concurrency.max(1));
             info!(target: "reth::cli",
                 dir = ?data_dir.data_dir(),
@@ -493,6 +505,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let target_dir = data_dir.data_dir();
         let planned_downloads = collect_planned_archives(&manifest, &selections)?;
+        if self.force {
+            clear_existing_datadir(target_dir)?;
+        }
+        fs::create_dir_all(target_dir)?;
         let startup_summary = summarize_download_startup(&planned_downloads.archives, target_dir)?;
         info!(target: "reth::cli",
             reusable = startup_summary.reusable,
@@ -845,6 +861,33 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
             }
         }
     }
+}
+
+/// Removes existing snapshot data while preserving files listed in
+/// [`FORCE_PRESERVED_DATADIR_FILES`].
+fn clear_existing_datadir(target_dir: &Path) -> Result<()> {
+    if !target_dir.try_exists()? {
+        return Ok(());
+    }
+
+    info!(target: "reth::cli", dir = ?target_dir, "Clearing existing data directory");
+    for entry in fs::read_dir(target_dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if FORCE_PRESERVED_DATADIR_FILES.iter().any(|preserved| file_name == OsStr::new(preserved))
+        {
+            continue;
+        }
+
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
