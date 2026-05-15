@@ -13,9 +13,9 @@ Usage:
 
 Generates a paired statistical comparison between baseline and feature.
 Matches blocks by number for every baseline-run x feature-run combination for
-point estimates and direction checks. Confidence intervals use whole-run
-cluster bootstrapping when multiple runs are available. Fails if baseline or
-feature CSV is missing or empty.
+point estimates. Confidence intervals use whole-run cluster bootstrapping when
+multiple runs are available. Fails if baseline or feature CSV is missing or
+empty.
 """
 
 from __future__ import annotations
@@ -318,51 +318,6 @@ def _cluster_bootstrap_ci(
     return {metric: _ci_half_width(samples[metric], n_iter) for metric in metrics}
 
 
-def _cross_pair_directions(
-    baseline_runs: list[list[dict]],
-    feature_runs: list[list[dict]],
-) -> dict[str, bool]:
-    """Check if the direction of change agrees across all cross-pairings.
-
-    Generates every baseline-run x feature-run pairing. For each metric,
-    returns True only if the mean diff has the same sign across all pairings.
-
-    With a single run pair, always returns True (no cross-check possible).
-    """
-    if len(baseline_runs) < 2 or len(feature_runs) < 2:
-        return {
-            "lat": True, "mgas": True, "total_lat": True, "persist": True,
-        }
-
-    lat_diffs_per_pair = []
-    mgas_diffs_per_pair = []
-    total_lat_diffs_per_pair = []
-    persist_diffs_per_pair = []
-    for b in baseline_runs:
-        for f in feature_runs:
-            _, lat_diffs, mgas_diffs, total_lat_diffs, persist_diffs = _paired_data(b, f)
-            lat_diffs_per_pair.append(lat_diffs)
-            mgas_diffs_per_pair.append(mgas_diffs)
-            total_lat_diffs_per_pair.append(total_lat_diffs)
-            persist_diffs_per_pair.append(persist_diffs)
-
-    def _signs_agree(diffs_per_pair: list[list[float]]) -> bool:
-        means = []
-        for diffs in diffs_per_pair:
-            if diffs:
-                means.append(sum(diffs) / len(diffs))
-        if len(means) < 2:
-            return True
-        return all(m > 0 for m in means) or all(m < 0 for m in means) or all(m == 0 for m in means)
-
-    return {
-        "lat": _signs_agree(lat_diffs_per_pair),
-        "mgas": _signs_agree(mgas_diffs_per_pair),
-        "total_lat": _signs_agree(total_lat_diffs_per_pair),
-        "persist": _signs_agree(persist_diffs_per_pair),
-    }
-
-
 def compute_paired_stats(
     baseline_runs: list[list[dict]],
     feature_runs: list[list[dict]],
@@ -372,8 +327,6 @@ def compute_paired_stats(
     Uses all baseline-run x feature-run cross-pairings for pooled point
     estimates and whole-run cluster bootstrapping for CIs. This keeps reused
     runs from being treated as independent observations.
-
-    Also checks that the direction of change agrees across all pairings.
     """
     # Generate all cross-pairings for pooled stats
     all_pairs = []
@@ -439,9 +392,6 @@ def compute_paired_stats(
 
     mean_mgas_diff = sum(all_mgas_diffs) / len(all_mgas_diffs) if all_mgas_diffs else 0.0
 
-    # Cross-pair direction agreement
-    directions = _cross_pair_directions(baseline_runs, feature_runs)
-
     return {
         "n": n,
         "mean_diff_ms": mean_diff,
@@ -460,7 +410,6 @@ def compute_paired_stats(
         "pairings": len(blocks_per_pair),
         "ci_method": ci_method,
         "ci_sources": ci_sources,
-        "directions_agree": directions,
     }
 
 
@@ -543,19 +492,17 @@ def compute_changes(
     def ci_pct(ci_ms: float, base_ms: float) -> float:
         return ci_ms / base_ms * 100.0 if base_ms > 0 else 0.0
 
-    dirs = paired_stats.get("directions_agree", {})
-
     metrics = [
-        ("mean", "mean_ms", "ci_ms", "mean_ms", True, dirs.get("lat", True)),
-        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True, dirs.get("lat", True)),
-        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True, dirs.get("lat", True)),
-        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True, dirs.get("lat", True)),
-        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False, dirs.get("mgas", True)),
-        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True, dirs.get("total_lat", True)),
-        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True, dirs.get("persist", True)),
+        ("mean", "mean_ms", "ci_ms", "mean_ms", True),
+        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True),
+        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True),
+        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
+        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
+        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True),
+        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True),
     ]
     changes = {}
-    for name, stat_key, ci_key, base_key, lower_is_better, dir_agree in metrics:
+    for name, stat_key, ci_key, base_key, lower_is_better in metrics:
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
         c = ci_pct(paired_stats[ci_key], baseline_stats[base_key])
         floor = practical_floor_pct(name, baseline_stats[base_key])
@@ -564,7 +511,6 @@ def compute_changes(
             "ci_pct": round(c, 4),
             "floor_pct": round(floor, 4),
             "sig": significance(p, c, floor, lower_is_better),
-            "directions_agree": dir_agree,
         }
     return changes
 
