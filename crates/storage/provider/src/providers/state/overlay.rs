@@ -903,10 +903,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::clone(&block.execution_output),
-            ComputedTrieData::without_trie_input(
-                Arc::new(hashed_state),
-                Arc::new(TrieUpdatesSorted::default()),
-            ),
+            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
         )
     }
 
@@ -988,10 +985,9 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let anchor = blocks[1].recovered_block().hash();
-        let error =
-            OverlayBuilder::<EthPrimitives>::new(anchor, ChangesetCache::new())
-                .build_overlay(&provider)
-                .unwrap_err();
+        let error = OverlayBuilder::<EthPrimitives>::new(anchor, ChangesetCache::new())
+            .build_overlay(&provider)
+            .unwrap_err();
 
         assert!(
             error.to_string().contains("is after partial state trie frontier"),

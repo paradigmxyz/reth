@@ -233,6 +233,69 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
     }
 
+    /// Prepares the flattened overlay for `parent_hash` in the background if possible.
+    ///
+    /// The returned hash is the actual anchor used for the parent chain. It can differ from
+    /// `preferred_anchor` if the preferred anchor has already been dropped from the in-memory
+    /// graph.
+    pub fn prepare_overlay_for_parent(
+        &self,
+        parent_hash: B256,
+        preferred_anchor: B256,
+    ) -> Option<B256> {
+        let anchor_hash = self.anchor_for_parent(parent_hash, preferred_anchor)?;
+        if anchor_hash == parent_hash {
+            return Some(anchor_hash)
+        }
+        if self.overlays.contains_key(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash }) {
+            return Some(anchor_hash)
+        }
+
+        debug!(
+            target: "chain_state::state_trie_overlay",
+            tip_hash = %parent_hash,
+            %anchor_hash,
+            %preferred_anchor,
+            "preparing state trie overlay for parent"
+        );
+
+        #[cfg(feature = "rayon")]
+        if let Some(worker_pool) = self.worker_pool.clone() {
+            let manager = <Self as Clone>::clone(self);
+            worker_pool.spawn(move || {
+                let _span = tracing::trace_span!(
+                    target: "chain_state::state_trie_overlay",
+                    "prepare_state_trie_overlay",
+                    tip_hash = %parent_hash,
+                    anchor_hash = %anchor_hash,
+                )
+                .entered();
+                if let Err(err) = manager.get_overlay(parent_hash, anchor_hash) {
+                    debug!(
+                        target: "chain_state::state_trie_overlay",
+                        %err,
+                        tip_hash = %parent_hash,
+                        %anchor_hash,
+                        "failed to prepare state trie overlay"
+                    );
+                }
+            });
+            return Some(anchor_hash)
+        }
+
+        if let Err(err) = self.get_overlay(parent_hash, anchor_hash) {
+            debug!(
+                target: "chain_state::state_trie_overlay",
+                %err,
+                tip_hash = %parent_hash,
+                %anchor_hash,
+                "failed to prepare state trie overlay"
+            );
+        }
+
+        Some(anchor_hash)
+    }
+
     #[tracing::instrument(
         level = "trace",
         target = "chain_state::state_trie_overlay",
@@ -622,6 +685,24 @@ mod tests {
             manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
             Some(db_tip_hash)
         );
+    }
+
+    #[test]
+    fn prepare_overlay_for_parent_populates_cache() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let tip_hash = blocks[2].recovered_block().hash();
+
+        assert_eq!(manager.prepare_overlay_for_parent(tip_hash, anchor_hash), Some(anchor_hash));
+        assert!(manager.overlays.contains_key(&OverlayCacheKey { anchor_hash, tip_hash }));
+
+        let (_, state) = manager.overlay_for_parent(tip_hash, anchor_hash).unwrap();
+        assert_eq!(state.accounts.len(), 3);
     }
 
     #[cfg(feature = "rayon")]
