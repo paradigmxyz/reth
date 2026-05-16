@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Updates the reth-bench PR comment with current status via the GitHub API.
+# Updates the benchmark PR comment with current status via the GitHub API.
 #
 # Usage: bench-update-status.sh "Running benchmark: feature (1/2)..."
 #

@@ -2,7 +2,7 @@
 #
 # Runs a single txgen-backed Engine API benchmark cycle:
 # mount snapshot → start node → extract source blocks → warmup → send-blocks →
-# convert txgen JSON report into the legacy reth-bench CSVs.
+# convert txgen JSON report into legacy benchmark CSVs.
 #
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
