@@ -1,5 +1,13 @@
 //! Block sealing: sign and verify block headers with ML-DSA-65.
+//!
+//! The seal covers the full RLP encoding of the header with `extra_data`
+//! cleared (set to empty bytes). This binds the seal to ALL header fields
+//! (parent hash, state root, transactions root, receipts root, etc.)
+//! while excluding the seal itself (which lives in `extra_data`).
 
+use alloy_consensus::Header;
+use alloy_primitives::Bytes;
+use alloy_rlp::Encodable;
 use dilithium::{
     EncodedSignature, EncodedVerifyingKey, MlDsa65, Signature, SigningKey, VerifyingKey,
     dilithium65,
@@ -27,9 +35,21 @@ pub enum SealError {
     InvalidPublicKey,
 }
 
-/// Compute the seal hash of a block header (SHAKE-256 of the header fields).
-/// In production this would RLP-encode the header without the seal field.
-/// For now, we hash the raw header bytes passed in.
+/// Compute the seal hash of a block header.
+///
+/// The seal hash is `SHAKE-256(RLP(header_with_empty_extra_data))`.
+/// This ensures the seal binds to every header field (parent hash, state root,
+/// transactions root, block number, timestamp, gas limit, etc.) while
+/// excluding the seal itself (which occupies `extra_data`).
+pub fn header_seal_hash(header: &Header) -> [u8; 32] {
+    let mut h = header.clone();
+    h.extra_data = Bytes::new();
+    let mut rlp_buf = Vec::with_capacity(h.length());
+    h.encode(&mut rlp_buf);
+    header_hash(&rlp_buf)
+}
+
+/// Compute a SHAKE-256 hash of arbitrary bytes (32-byte output).
 pub fn header_hash(header_bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Shake256::default();
     hasher.update(header_bytes);
@@ -88,6 +108,59 @@ mod tests {
     }
 
     #[test]
+    fn seal_and_verify_with_real_header() {
+        let sk = dilithium65::keygen();
+        let vk = sk.verifying_key();
+
+        // Build a realistic header
+        let mut header = Header::default();
+        header.number = 42;
+        header.gas_limit = 30_000_000;
+        header.timestamp = 1_700_000_000;
+        header.parent_hash = alloy_primitives::B256::repeat_byte(0xAB);
+
+        // Compute seal hash (RLP of header with empty extra_data)
+        let hash = header_seal_hash(&header);
+
+        // Sign the hash
+        let seal = seal_header(&sk, &hash);
+        assert_eq!(seal.len(), 3309);
+
+        // Verify using the same hash
+        let vk_bytes = vk.encode();
+        verify_seal(vk_bytes.as_slice(), &hash, &seal)
+            .expect("valid seal over real header must verify");
+    }
+
+    #[test]
+    fn header_seal_hash_excludes_extra_data() {
+        let mut h1 = Header::default();
+        h1.number = 10;
+        h1.extra_data = Bytes::from(vec![0xDE, 0xAD]);
+
+        let mut h2 = Header::default();
+        h2.number = 10;
+        h2.extra_data = Bytes::from(vec![0xBE, 0xEF, 0xFF]);
+
+        // Different extra_data must produce the same seal hash
+        assert_eq!(header_seal_hash(&h1), header_seal_hash(&h2));
+    }
+
+    #[test]
+    fn header_seal_hash_changes_with_fields() {
+        let mut h1 = Header::default();
+        h1.number = 10;
+        h1.parent_hash = alloy_primitives::B256::repeat_byte(0x01);
+
+        let mut h2 = Header::default();
+        h2.number = 10;
+        h2.parent_hash = alloy_primitives::B256::repeat_byte(0x02);
+
+        // Different parent_hash must produce different seal hashes
+        assert_ne!(header_seal_hash(&h1), header_seal_hash(&h2));
+    }
+
+    #[test]
     fn tampered_header_fails() {
         let sk = dilithium65::keygen();
         let vk = sk.verifying_key();
@@ -112,5 +185,29 @@ mod tests {
 
         let result = verify_seal(wrong_vk_bytes.as_slice(), header, &seal);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tampered_real_header_fails_seal() {
+        let sk = dilithium65::keygen();
+        let vk = sk.verifying_key();
+
+        let mut header = Header::default();
+        header.number = 100;
+        header.gas_limit = 30_000_000;
+        header.parent_hash = alloy_primitives::B256::repeat_byte(0xAA);
+
+        // Seal the original header
+        let hash = header_seal_hash(&header);
+        let seal = seal_header(&sk, &hash);
+
+        // Tamper: change the state root
+        header.state_root = alloy_primitives::B256::repeat_byte(0xFF);
+        let tampered_hash = header_seal_hash(&header);
+
+        // Verify against tampered hash must fail
+        let vk_bytes = vk.encode();
+        let result = verify_seal(vk_bytes.as_slice(), &tampered_hash, &seal);
+        assert!(result.is_err(), "seal must fail after state_root tamper");
     }
 }

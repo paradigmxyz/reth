@@ -5,7 +5,7 @@
 //! payload builder but without blob handling.
 
 use alloy_consensus::Transaction;
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
@@ -20,6 +20,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_pq_node_primitives::PqPrimitives;
 use reth_pq_primitives::PqSignedTransaction;
+use reth_primitives_traits::SealedBlock;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -150,6 +151,10 @@ where
 
     let effective_gas_limit = gas_limit.unwrap_or(parent_header.gas_limit);
 
+    // Build with empty extra_data; the ML-DSA-65 seal will be injected
+    // AFTER the block is finalized (state root, receipts root, etc. are known).
+    let block_number = parent_header.number + 1;
+
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
@@ -161,7 +166,7 @@ where
                 gas_limit: effective_gas_limit,
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: Some(attributes.withdrawals().clone()),
-                extra_data: Default::default(),
+                extra_data: Bytes::default(),
             },
         )
         .map_err(PayloadBuilderError::other)?;
@@ -263,12 +268,38 @@ where
     let BlockBuilderOutcome { execution_result, block, .. } =
         builder.finish(state_provider.as_ref())?;
 
+    // PoA block sealing: inject ML-DSA-65 signature into extra_data.
+    //
+    // The seal covers SHAKE-256(RLP(header_with_empty_extra_data)), binding
+    // it to every header field (parent hash, state root, transactions root,
+    // receipts root, gas used, etc.) while excluding the seal itself.
+    let sealed_block = if let Some(sk) = reth_pq_poa::get_signing_key() {
+        let sealed = block.sealed_block().clone();
+        let mut raw_block = sealed.unseal();
+
+        // The header has empty extra_data (we set it to default above).
+        // Compute the seal hash from the full RLP-encoded header.
+        let seal_hash = reth_pq_poa::header_seal_hash(&raw_block.header);
+        let seal = reth_pq_poa::seal_header(sk, &seal_hash);
+        debug!(
+            target: "payload_builder",
+            block_number,
+            seal_len = seal.len(),
+            "PoA: sealed block with ML-DSA-65 (full header RLP)"
+        );
+
+        // Inject the seal and re-seal the block (recomputes block hash)
+        raw_block.header.extra_data = Bytes::from(seal);
+        Arc::new(SealedBlock::seal_slow(raw_block))
+    } else {
+        Arc::new(block.sealed_block().clone())
+    };
+
     let chain_spec = client.chain_spec();
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
 
-    let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(
         target: "payload_builder",
         id=%attributes.id,
