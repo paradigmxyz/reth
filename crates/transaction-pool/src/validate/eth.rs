@@ -1414,6 +1414,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         SpecId::MERGE
     };
 
+    // Cap intrinsic gas check at pre-Amsterdam specs; EIP-8037 `cpsb` does not apply here.
+    let cpsb = 0;
     let gas = revm_interpreter::gas::calculate_initial_tx_gas(
         spec_id,
         transaction.input(),
@@ -1424,10 +1426,11 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
             .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
             .unwrap_or_default() as u64,
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        cpsb,
     );
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas.initial_total_gas || gas_limit < gas.floor_gas {
+    if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())

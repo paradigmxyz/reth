@@ -89,6 +89,7 @@ impl Command {
                     }
                 };
 
+                #[allow(clippy::if_then_some_else_none)]
                 let rlp = if rlp_blocks {
                     let Ok(rlp) = block_provider.debug_get_raw_block(next_block.into()).await
                     else {

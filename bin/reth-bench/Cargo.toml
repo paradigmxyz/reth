@@ -58,9 +58,6 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# url parsing
-url.workspace = true
-
 # async
 async-trait.workspace = true
 futures.workspace = true

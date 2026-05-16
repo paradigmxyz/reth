@@ -1,6 +1,6 @@
 //! Helpers for `eth_blockAccessList` RPC method.
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::BlockAccessList;
+use alloy_eip7928::BlockAccessList;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};

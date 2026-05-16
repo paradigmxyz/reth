@@ -24,6 +24,7 @@ revm.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
@@ -42,6 +43,7 @@ default = ["std"]
 std = [
     "dep:rayon",
     "reth-primitives-traits/std",
+    "alloy-eip7928/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",

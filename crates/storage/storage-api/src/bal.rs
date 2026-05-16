@@ -1,5 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::state::bal::Bal as RevmBal;
@@ -92,14 +93,13 @@ pub trait BalStore: Send + Sync + 'static {
         &self,
         block_hash: BlockHash,
     ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
-        self.get_decoded_by_hash(block_hash)?
-            .map(|decoded| {
-                decoded.try_map(|bal| {
-                    RevmBal::try_from(Vec::from(bal))
-                        .map_err(reth_storage_errors::provider::ProviderError::other)
-                })
-            })
-            .transpose()
+        let Some(raw) = self.get_by_hash(block_hash)? else { return Ok(None) };
+        let alloy_bal =
+            <alloy_eip7928::BlockAccessList as alloy_rlp::Decodable>::decode(&mut raw.as_ref())
+                .map_err(reth_storage_errors::provider::ProviderError::other)?;
+        let revm_bal = RevmBal::try_from(alloy_bal)
+            .map_err(reth_storage_errors::provider::ProviderError::other)?;
+        Ok(Some(DecodedBal::new(revm_bal, raw)))
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is

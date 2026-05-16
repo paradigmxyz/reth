@@ -27,8 +27,10 @@ reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
@@ -45,8 +47,10 @@ default = ["std"]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",
+    "alloy-eip7928/std",
     "alloy-eips/std",
     "alloy-primitives/std",
+    "alloy-rlp/std",
     "alloy-rpc-types-engine/std",
     "reth-primitives-traits/std",
     "reth-stages-types/std",
@@ -75,6 +79,7 @@ serde = [
     "reth-stages-types/serde",
     "reth-trie-common/serde",
     "revm-database/serde",
+    "alloy-eip7928/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",

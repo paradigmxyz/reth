@@ -3,7 +3,7 @@
 //! before sending additional calls.
 
 use alloy_consensus::TxEnvelope;
-use alloy_eips::eip7928::BlockAccessList;
+use alloy_eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
