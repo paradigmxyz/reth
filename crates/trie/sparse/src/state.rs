@@ -319,7 +319,7 @@ where
             let _ = self.storage.get_or_create_trie_mut(account);
         }
 
-        for (account, trie) in self.storage.tries.iter_mut() {
+        for (account, trie) in &mut self.storage.tries {
             if let Some(nodes) = storage_proofs.remove(account) {
                 #[cfg(feature = "metrics")]
                 self.metrics.increment_total_storage_nodes(nodes.len() as u64);
