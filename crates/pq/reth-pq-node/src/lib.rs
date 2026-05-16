@@ -469,8 +469,11 @@ where
 
 /// Consensus builder for the PQ node.
 ///
-/// Uses `EthBeaconConsensus` which validates block-level rules (gas, timestamp,
-/// etc.) without depending on transaction signature type.
+/// Wraps `EthBeaconConsensus` with [`PqPoaConsensus`] for ML-DSA-65 seal
+/// verification. When `PoA` is configured (via [`reth_pq_poa::set_validator_set`]),
+/// the consensus validates seals in `extra_data`. Otherwise, it passes through.
+///
+/// Sets `max_extra_data_size = 3309` to accommodate the ML-DSA-65 seal.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct PqConsensusBuilder;
@@ -484,10 +487,22 @@ where
         >,
     >,
 {
-    type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
+    type Consensus = Arc<reth_pq_poa::PqPoaConsensus<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        // Allow 3309-byte extra_data for ML-DSA-65 seals
+        let eth_consensus = EthBeaconConsensus::new(ctx.chain_spec())
+            .with_max_extra_data_size(3309);
+
+        let poa_consensus = if let Some(vs) = reth_pq_poa::get_validator_set() {
+            info!(target: "reth::cli", validators = vs.len(), "PQ PoA consensus enabled — verifying ML-DSA-65 seals");
+            reth_pq_poa::PqPoaConsensus::new(eth_consensus, vs.clone())
+        } else {
+            info!(target: "reth::cli", "PQ consensus initialized (no PoA seal verification)");
+            reth_pq_poa::PqPoaConsensus::passthrough(eth_consensus)
+        };
+
+        Ok(Arc::new(poa_consensus))
     }
 }
 

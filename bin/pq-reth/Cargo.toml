@@ -36,6 +36,8 @@ eyre.workspace = true
 serde_json.workspace = true
 serde = { workspace = true, features = ["derive"] }
 hex = "0.4"
+sha3 = "0.11"
+dilithium.workspace = true
 
 [features]
 default = [

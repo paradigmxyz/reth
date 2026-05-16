@@ -13,12 +13,17 @@ workspace = true
 [dependencies]
 # PQ crypto
 dilithium.workspace = true
+hybrid-array = { version = "0.4", features = ["extra-sizes"] }
+typenum = "1"
 # Hashing (SHAKE-256 for header hash)
 sha3 = "0.11"
 # reth consensus
 reth-consensus = { workspace = true }
+reth-execution-types = { workspace = true }
 reth-primitives-traits = { workspace = true }
 alloy-consensus = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
