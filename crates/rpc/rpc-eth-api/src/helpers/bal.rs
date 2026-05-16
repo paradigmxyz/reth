@@ -23,9 +23,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
 
             self.spawn_blocking_io(move |eth_api| {
                 let timestamp = block.timestamp();
-                if !eth_api.provider().chain_spec().is_amsterdam_active_at_timestamp(timestamp) {
-                    return Ok(None)
-                }
+                ensure_block_access_list_available(eth_api.provider().chain_spec(), timestamp)?;
 
                 if let Some(bal) = eth_api
                     .provider()
@@ -42,5 +40,33 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
             })
             .await
         }
+    }
+}
+
+fn ensure_block_access_list_available(
+    chain_spec: impl EthereumHardforks,
+    timestamp: u64,
+) -> Result<(), EthApiError> {
+    if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+        return Ok(())
+    }
+
+    Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_chainspec::ChainSpecBuilder;
+
+    #[test]
+    fn block_access_list_is_unavailable_before_amsterdam() {
+        let chain_spec = ChainSpecBuilder::mainnet().with_amsterdam_at(10).build();
+
+        assert!(matches!(
+            ensure_block_access_list_available(&chain_spec, 9),
+            Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam)
+        ));
+        assert!(ensure_block_access_list_available(&chain_spec, 10).is_ok());
     }
 }
