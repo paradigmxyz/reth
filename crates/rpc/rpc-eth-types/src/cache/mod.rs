@@ -1276,10 +1276,6 @@ mod tests {
             Ok(Some(test_decoded_revm_bal()))
         }
 
-        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-            Ok(Vec::new())
-        }
-
         fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {
             reth_storage_api::NoopBalStore.bal_stream()
         }

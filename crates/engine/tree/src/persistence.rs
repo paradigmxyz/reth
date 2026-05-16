@@ -179,6 +179,9 @@ where
             }
 
             provider_rw.commit()?;
+            let _ = self.provider.bal_store().flush().inspect_err(|err| {
+                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+            });
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
         }
 
@@ -485,10 +488,6 @@ mod tests {
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
             Ok(vec![None; block_hashes.len()])
-        }
-
-        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-            Ok(Vec::new())
         }
 
         fn bal_stream(&self) -> BalNotificationStream {

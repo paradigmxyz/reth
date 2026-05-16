@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 #
-# Installs the txgen tools used by the txgen-backed PR benchmark path.
-# Keep this separate from bench-reth-build.sh so scheduled benchmarks can keep
-# using the legacy reth-bench runner until they are migrated explicitly.
+# Installs the txgen tools used by the benchmark workflows.
 #
 # Required env:
 #   TXGEN_REV   – pinned txgen git revision

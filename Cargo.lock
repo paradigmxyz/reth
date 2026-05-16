@@ -250,9 +250,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72bc95fd73591644f0022065bef3c027d1a5ed875a53cb19a898d71a00818c1d"
+checksum = "6b827a6d7784fe3eb3489d40699407a4cdcce74271421a01bdffe60cf573bb16"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -3695,6 +3695,22 @@ dependencies = [
  "reth-ethereum",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "example-custom-state-root"
+version = "0.0.0"
+dependencies = [
+ "alloy-genesis",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "reth-engine-tree",
+ "reth-ethereum",
+ "reth-trie",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -7500,10 +7516,12 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "serde_json",
+ "tar",
  "tempfile",
  "tokio",
  "toml",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
@@ -7893,6 +7911,7 @@ dependencies = [
 name = "reth-consensus-debug-client"
 version = "2.2.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips 2.0.4",
  "alloy-json-rpc",
  "alloy-primitives",
@@ -8347,6 +8366,8 @@ name = "reth-engine-util"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "eyre",
  "futures",
@@ -9082,7 +9103,6 @@ name = "reth-network-p2p"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
  "alloy-eips 2.0.4",
  "alloy-primitives",
  "auto_impl",

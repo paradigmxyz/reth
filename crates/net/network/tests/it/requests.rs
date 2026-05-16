@@ -3,7 +3,7 @@
 
 use alloy_consensus::Header;
 use alloy_eips::NumHash;
-use alloy_primitives::{keccak256, Bytes, Sealed, B256};
+use alloy_primitives::{keccak256, BlockHash, BlockNumber, Bytes, Sealed, B256};
 use rand::Rng;
 use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::Block;
@@ -17,9 +17,12 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     error::RequestError,
     headers::client::{HeadersClient, HeadersRequest},
-    BalRequirement, BlockAccessListsClient,
+    BlockAccessListsClient,
 };
-use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, SealedBal};
+use reth_provider::{
+    test_utils::MockEthProvider, BalNotificationStream, BalStore, BalStoreHandle, InMemoryBalStore,
+    ProviderError, ProviderResult, SealedBal,
+};
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -549,10 +552,7 @@ async fn test_eth71_get_block_access_lists() {
     bal_store.insert(NumHash::new(3, hash2), sealed_bal(bal2.clone())).unwrap();
 
     let response = request_block_access_lists(&net, vec![hash0, hash1, hash2]).await;
-    assert_eq!(
-        response,
-        BlockAccessLists(vec![bal0, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]), bal2,])
-    );
+    assert_eq!(response, BlockAccessLists(vec![Some(bal0), None, Some(bal2)]));
 }
 
 // Ensures BAL responses stop at the soft response limit while keeping the item that crosses it.
@@ -575,7 +575,7 @@ async fn test_eth71_get_block_access_lists_respects_response_soft_limit() {
 
     let response = request_block_access_lists(&net, vec![hash0, hash1, hash2]).await;
 
-    assert_eq!(response, BlockAccessLists(vec![bal0, bal1]));
+    assert_eq!(response, BlockAccessLists(vec![Some(bal0), Some(bal1)]));
 }
 
 // Ensures a single BAL larger than the soft limit is still returned.
@@ -594,7 +594,7 @@ async fn test_eth71_get_block_access_lists_returns_single_oversized_bal() {
 
     let response = request_block_access_lists(&net, vec![hash0, hash1]).await;
 
-    assert_eq!(response, BlockAccessLists(vec![bal0]));
+    assert_eq!(response, BlockAccessLists(vec![Some(bal0)]));
 }
 
 // Ensures an empty BAL request roundtrips to an empty response.
@@ -643,23 +643,33 @@ async fn test_eth71_fetch_client_get_block_access_lists() {
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
     let response = fetch.get_block_access_lists(vec![hash0, hash1]).await.unwrap().into_data();
 
-    assert_eq!(
-        response,
-        BlockAccessLists(vec![bal0, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])])
-    );
+    assert_eq!(response, BlockAccessLists(vec![Some(bal0), None]));
 }
 
-// Ensures fetch client BAL requests are rejected when no eth/71 peer is available.
+// Ensures store errors produce a valid empty BAL response instead of synthesizing unavailable
+// entries.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth70_fetch_client_rejects_optional_block_access_lists_request() {
+async fn test_eth71_get_block_access_lists_returns_empty_on_store_error() {
+    reth_tracing::init_test_tracing();
+    let (net, _) = spawn_bal_testnet_with_store(
+        [EthVersion::Eth71, EthVersion::Eth71],
+        BalStoreHandle::new(FailingLookupBalStore),
+    )
+    .await;
+
+    let response = request_block_access_lists(&net, vec![B256::random(), B256::random()]).await;
+
+    assert_eq!(response, BlockAccessLists(Vec::new()));
+}
+
+// Ensures default fetch client BAL requests are rejected when no eth/71 peer is available.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth70_fetch_client_rejects_default_block_access_lists_request() {
     reth_tracing::init_test_tracing();
     let (net, _) = spawn_bal_testnet([EthVersion::Eth70, EthVersion::Eth70]).await;
 
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
-    let err = fetch
-        .get_block_access_lists_with_requirement(vec![B256::random()], BalRequirement::Optional)
-        .await
-        .unwrap_err();
+    let err = fetch.get_block_access_lists(vec![B256::random()]).await.unwrap_err();
 
     assert_eq!(err, RequestError::UnsupportedCapability);
 }
@@ -672,8 +682,15 @@ async fn spawn_eth71_bal_testnet() -> (BalTestnetHandle, BalStoreHandle) {
 async fn spawn_bal_testnet(
     versions: impl IntoIterator<Item = EthVersion>,
 ) -> (BalTestnetHandle, BalStoreHandle) {
+    spawn_bal_testnet_with_store(versions, BalStoreHandle::new(InMemoryBalStore::default())).await
+}
+
+// Spawns a BAL testnet with one peer per requested eth protocol version and the given BAL store.
+async fn spawn_bal_testnet_with_store(
+    versions: impl IntoIterator<Item = EthVersion>,
+    bal_store: BalStoreHandle,
+) -> (BalTestnetHandle, BalStoreHandle) {
     let mut mock_provider = MockEthProvider::default();
-    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
     mock_provider.bal_store = bal_store.clone();
     let mock_provider = Arc::new(mock_provider);
 
@@ -690,6 +707,27 @@ async fn spawn_bal_testnet(
     net.connect_peers().await;
 
     (net, bal_store)
+}
+
+#[derive(Debug)]
+struct FailingLookupBalStore;
+
+impl BalStore for FailingLookupBalStore {
+    fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+        Ok(0)
+    }
+
+    fn get_by_hashes(&self, _block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        Err(ProviderError::other(std::io::Error::other("BAL lookup failed")))
+    }
+
+    fn bal_stream(&self) -> BalNotificationStream {
+        BalStoreHandle::noop().bal_stream()
+    }
 }
 
 // Sends a GetBlockAccessLists request from peer 0 to peer 1.

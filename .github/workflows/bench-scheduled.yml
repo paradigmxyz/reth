@@ -47,6 +47,16 @@ on:
           - nightly
           - hourly
           - release
+      blocks:
+        description: "Number of blocks to benchmark"
+        required: false
+        default: "2000"
+        type: string
+      warmup:
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
+        required: false
+        default: ""
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -76,6 +86,8 @@ jobs:
       nightly-created: ${{ steps.refs.outputs.nightly-created }}
       long-running: ${{ steps.refs.outputs.long-running }}
       release-tag: ${{ steps.refs.outputs.release-tag }}
+      blocks: ${{ steps.bench-config.outputs.blocks }}
+      warmup: ${{ steps.bench-config.outputs.warmup }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -103,6 +115,30 @@ jobs:
           fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "Detected mode: $MODE"
+
+      - name: Resolve benchmark config
+        id: bench-config
+        env:
+          INPUT_BLOCKS: ${{ inputs.blocks || '2000' }}
+          INPUT_WARMUP: ${{ inputs.warmup || '' }}
+        run: |
+          if ! [[ "$INPUT_BLOCKS" =~ ^[0-9]+$ ]]; then
+            echo "::error::blocks must be a non-negative integer"
+            exit 1
+          fi
+          if [ -n "$INPUT_WARMUP" ] && ! [[ "$INPUT_WARMUP" =~ ^[0-9]+$ ]]; then
+            echo "::error::warmup must be a non-negative integer"
+            exit 1
+          fi
+
+          if [ -z "$INPUT_WARMUP" ]; then
+            INPUT_WARMUP=$(( INPUT_BLOCKS / 4 ))
+          fi
+
+          {
+            echo "blocks=$INPUT_BLOCKS"
+            echo "warmup=$INPUT_WARMUP"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve refs
         id: refs
@@ -261,8 +297,8 @@ jobs:
       BENCH_PR: ""
       BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
       BENCH_ACTOR: "${{ needs.resolve-refs.outputs.mode }}-regression"
-      BENCH_BLOCKS: "2000"
-      BENCH_WARMUP_BLOCKS: "500"
+      BENCH_BLOCKS: ${{ needs.resolve-refs.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.resolve-refs.outputs.warmup }}
       BENCH_SAMPLY: "false"
       BENCH_CORES: "0"
       BENCH_BIG_BLOCKS: "false"
@@ -272,11 +308,16 @@ jobs:
       BENCH_ABBA: "true"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
+      BENCH_NODE_BIN: reth
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
       BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
+      CLICKHOUSE_URL: ${{ secrets.CLICKHOUSE_URL }}
+      CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+      CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -404,14 +445,22 @@ jobs:
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
+          TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
+          DEREK_PAT: ${{ secrets.DEREK_PAT }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
 
-          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "$BASELINE_REF" &
+          .github/scripts/bench-txgen-install.sh
+          BUILD_SCRIPT=.github/scripts/bench-txgen-build.sh
+
+          "$BUILD_SCRIPT" baseline "${BASELINE_DIR}" "$BASELINE_REF" &
           PID_BASELINE=$!
-          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "$FEATURE_REF" &
+          "$BUILD_SCRIPT" feature "${FEATURE_DIR}" "$FEATURE_REF" &
           PID_FEATURE=$!
 
           FAIL=0
@@ -425,7 +474,7 @@ jobs:
       - name: Sync snapshot
         id: snapshot-check
         run: |
-          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/reth" \
+          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
             .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
@@ -450,14 +499,24 @@ jobs:
           for p in /sys/kernel/mm/transparent_hugepage /sys/kernel/mm/transparent_hugepages; do
             [ -d "$p" ] && echo never | sudo tee "$p/enabled" && echo never | sudo tee "$p/defrag" && break
           done || true
+          # Replace any stale PM QoS holders left behind by earlier benchmark jobs.
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
           # Prevent deep C-states
-          sudo sh -c 'exec 3<>/dev/cpu_dma_latency; echo -ne "\x00\x00\x00\x00" >&3; sleep infinity' &
+          sudo bash -c 'exec 3<>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; exec -a bench-cpu-dma-latency sleep infinity' &
+          echo "BENCH_CPU_DMA_LATENCY_PID=$!" >> "$GITHUB_ENV"
           # Move all IRQs to core 0
           for irq in /proc/irq/*/smp_affinity_list; do
             echo 0 | sudo tee "$irq" 2>/dev/null || true
           done
           # Stop noisy background services
-          sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+          sudo systemctl stop \
+            irqbalance cron atd unattended-upgrades snapd \
+            prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+            prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+            prometheus-node-exporter-ipmitool-sensor.timer prometheus-node-exporter-ipmitool-sensor.service \
+            sysstat-collect.timer sysstat-collect.service \
+            sysstat-summary.timer sysstat-summary.service \
+            2>/dev/null || true
           echo "=== Benchmark environment ==="
           uname -r
           lscpu | grep -E 'Model name|CPU\(s\)|MHz|NUMA'
@@ -494,6 +553,16 @@ jobs:
           echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
           echo "Metrics proxy started (PID $PROXY_PID)"
 
+      # Extract txgen payloads once so they are reused across all benchmark
+      # runs instead of re-fetching from the remote RPC four times.
+      - name: Extract txgen payloads
+        run: |
+          PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
+          .github/scripts/bench-txgen-extract.sh \
+            "../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            "$PAYLOADS_DIR"
+          echo "TXGEN_PAYLOADS_DIR=${PAYLOADS_DIR}" >> "$GITHUB_ENV"
+
       # Interleaved run order (B-F-F-B) to reduce systematic bias
       - name: "Run benchmark: baseline (1/2)"
         id: run-baseline-1
@@ -501,7 +570,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
 
       - name: "Run benchmark: feature (1/2)"
         id: run-feature-1
@@ -509,7 +578,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
 
       - name: "Run benchmark: feature (2/2)"
         id: run-feature-2
@@ -517,7 +586,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
 
       - name: "Run benchmark: baseline (2/2)"
         id: run-baseline-2
@@ -527,7 +596,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
 
       - name: Stop metrics proxy & generate Grafana URL
         id: metrics
@@ -538,7 +607,7 @@ jobs:
           LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 
@@ -986,6 +1055,10 @@ jobs:
       - name: Restore system settings
         if: always()
         run: |
+          if [ -n "${BENCH_CPU_DMA_LATENCY_PID:-}" ]; then
+            sudo kill "$BENCH_CPU_DMA_LATENCY_PID" 2>/dev/null || true
+          fi
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
           sudo systemctl start irqbalance cron atd 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
@@ -997,6 +1070,12 @@ jobs:
     name: save-state
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+
       - name: Push state to charts repo
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}

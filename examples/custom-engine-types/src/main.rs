@@ -18,7 +18,7 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -118,6 +118,7 @@ impl PayloadTypes for CustomEngineTypes {
         block: SealedBlock<
                 <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
             >,
+        _bal: Option<Bytes>,
     ) -> ExecutionData {
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());

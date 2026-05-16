@@ -6,10 +6,13 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_rpc_eth_types::{bal::build_bal_for_block, error::FromEthApiError, EthApiError};
 use reth_storage_api::BalProvider;
 
-use crate::helpers::{Call, LoadBlock, Trace};
+use crate::{
+    helpers::{Call, LoadBlock, Trace},
+    RpcNodeCoreExt,
+};
 
 /// Helper trait for `eth_blockAccessList` RPC method.
-pub trait GetBlockAccessList: Trace + Call + LoadBlock {
+pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
     /// Retrieves the block access list for a block identified by its hash.
     fn get_block_access_list(
         &self,
@@ -21,10 +24,16 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
 
-            self.spawn_blocking_io(move |eth_api| {
-                let timestamp = block.timestamp();
-                ensure_block_access_list_available(eth_api.provider().chain_spec(), timestamp)?;
+            ensure_block_access_list_available(self.provider().chain_spec(), block.timestamp())
+                .map_err(Self::Error::from_eth_err)?;
 
+            if let Some(cached_bal) =
+                self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
+            {
+                return Ok(Some(cached_bal.as_bal().clone().into_alloy_bal()))
+            }
+
+            self.spawn_blocking_io(move |eth_api| {
                 if let Some(bal) = eth_api
                     .provider()
                     .bal_store()
