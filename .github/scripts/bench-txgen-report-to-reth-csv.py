@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Convert txgen `bench send-blocks` JSON into the legacy reth-bench CSVs.
+"""Convert txgen `bench send-blocks` JSON into legacy benchmark CSVs.
 
-The PR benchmark rendering pipeline still consumes `combined_latency.csv` and
-`total_gas.csv`. This adapter lets the txgen-backed runner reuse the existing
+The benchmark rendering pipeline still consumes `combined_latency.csv` and
+`total_gas.csv`. This adapter lets the txgen runner reuse the existing
 summary/charts/slack code while we migrate those consumers to txgen JSON.
 """
 
@@ -29,7 +29,7 @@ def block_latency_us(block: dict) -> tuple[int, int, int]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert txgen JSON report to reth-bench CSVs")
+    parser = argparse.ArgumentParser(description="Convert txgen JSON report to benchmark CSVs")
     parser.add_argument("report", help="txgen JSON report path")
     parser.add_argument("output_dir", help="directory for combined_latency.csv and total_gas.csv")
     args = parser.parse_args()
