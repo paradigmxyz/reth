@@ -662,6 +662,20 @@ where
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
+        let new_balance = account_changes.balance_changes.last().map(|change| change.post_balance);
+        let new_nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
+        let new_code_hash = account_changes.code_changes.last().map(|code_change| {
+            if code_change.new_code.is_empty() {
+                alloy_consensus::constants::KECCAK_EMPTY
+            } else {
+                keccak256(&code_change.new_code)
+            }
+        });
+
+        if new_balance.is_none() && new_nonce.is_none() && new_code_hash.is_none() {
+            return;
+        }
+
         if provider.is_none() {
             let _span = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
@@ -700,35 +714,17 @@ where
 
         let existing_account = account_reader.basic_account(&address).ok().flatten();
 
-        let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
-        let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
-        let code_hash = account_changes.code_changes.last().map(|code_change| {
-            if code_change.new_code.is_empty() {
-                alloy_consensus::constants::KECCAK_EMPTY
-            } else {
-                keccak256(&code_change.new_code)
-            }
-        });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
-
         let account = reth_primitives_traits::Account {
-            balance: balance.unwrap_or_else(|| {
+            balance: new_balance.unwrap_or_else(|| {
                 existing_account
                     .as_ref()
                     .map(|account| account.balance)
                     .unwrap_or(alloy_primitives::U256::ZERO)
             }),
-            nonce: nonce.unwrap_or_else(|| {
+            nonce: new_nonce.unwrap_or_else(|| {
                 existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)
             }),
-            bytecode_hash: code_hash.or_else(|| {
+            bytecode_hash: new_code_hash.or_else(|| {
                 existing_account
                     .as_ref()
                     .and_then(|account| account.bytecode_hash)
