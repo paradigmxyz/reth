@@ -1,0 +1,130 @@
+[package]
+name = "alloy-consensus"
+description = "Ethereum consensus interface"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = [
+    "-Zunstable-options",
+    "--generate-link-to-definition",
+    "--show-type-layout",
+]
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-eips = { workspace = true, features = ["kzg-sidecar"] }
+alloy-primitives = { workspace = true, features = ["rlp"] }
+alloy-rlp.workspace = true
+alloy-trie = { workspace = true, features = ["ethereum"] }
+alloy-serde = { workspace = true, optional = true }
+alloy-tx-macros.workspace = true
+
+# k256
+k256 = { workspace = true, features = ["ecdsa"], optional = true }
+
+# kzg
+c-kzg = { workspace = true, features = ["serde"], optional = true }
+
+# arbitrary
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+rand = { workspace = true, optional = true }
+
+# borsh
+borsh = { workspace = true, optional = true, features = ["derive"] }
+
+# serde
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_with = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+# misc
+derive_more = { workspace = true, features = [
+    "from",
+    "deref",
+    "deref_mut",
+    "into_iterator",
+], default-features = false }
+auto_impl.workspace = true
+thiserror.workspace = true
+either.workspace = true
+once_cell = { workspace = true, features = ["race", "alloc"] }
+secp256k1 = { workspace = true, optional = true, features = ["recovery", "global-context", "std"] }
+
+[dev-dependencies]
+alloy-eips = { workspace = true, features = ["arbitrary", "kzg", "serde"] }
+alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
+secp256k1 = { workspace = true, features = ["recovery", "global-context", "std", "rand"] }
+
+arbitrary = { workspace = true, features = ["derive"] }
+bincode = { workspace = true, features = ["serde"] }
+k256.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+assert_matches.workspace = true
+
+[features]
+default = ["std"]
+std = [
+	"alloy-eips/std",
+	"c-kzg?/std",
+	"alloy-serde?/std",
+	"alloy-primitives/std",
+	"alloy-rlp/std",
+	"alloy-trie/std",
+	"derive_more/std",
+	"k256?/std",
+	"serde?/std",
+	"serde_json?/std",
+	"serde_with?/std",
+	"thiserror/std",
+	"either/std",
+	"once_cell/std",
+	"secp256k1?/std",
+	"borsh?/std"
+]
+k256 = ["dep:k256", "alloy-primitives/k256", "alloy-eips/k256"]
+secp256k1 = ["dep:secp256k1"]
+crypto-backend = []
+kzg = ["dep:c-kzg", "alloy-eips/kzg", "std"]
+arbitrary = [
+	"std",
+	"dep:rand",
+	"dep:arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-serde?/arbitrary",
+	"alloy-trie/arbitrary",
+	"c-kzg?/arbitrary",
+	"alloy-tx-macros/arbitrary"
+]
+serde = [
+	"dep:serde",
+	"alloy-primitives/serde",
+	"dep:alloy-serde",
+    "dep:serde_json",
+	"alloy-eips/serde",
+	"alloy-trie/serde",
+	"c-kzg?/serde",
+	"either/serde",
+	"k256?/serde",
+	"rand?/serde",
+	"secp256k1?/serde",
+	"alloy-tx-macros/serde"
+]
+serde-bincode-compat = ["alloy-eips/serde-bincode-compat", "serde_with"]
+borsh = [
+	"dep:borsh",
+	"alloy-primitives/borsh",
+	"alloy-eips/borsh",
+]

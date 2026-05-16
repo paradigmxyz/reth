@@ -122,8 +122,6 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c0dc44157867da82c469c13186015b86abef209bf0e41625e4b68bac61d728"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -7006,6 +7004,7 @@ name = "pq-reth"
 version = "1.11.1"
 dependencies = [
  "clap",
+ "dilithium",
  "eyre",
  "hex",
  "reth-chainspec",
@@ -7020,6 +7019,7 @@ dependencies = [
  "reth-provider",
  "serde",
  "serde_json",
+ "sha3 0.11.0",
  "tracing",
 ]
 
@@ -9783,11 +9783,15 @@ name = "reth-pq-poa"
 version = "1.11.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
  "dilithium",
  "eyre",
  "futures-util",
  "hex",
+ "hybrid-array",
  "reth-consensus",
+ "reth-execution-types",
  "reth-primitives-traits",
  "serde",
  "serde_json",
@@ -9795,6 +9799,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "typenum",
 ]
 
 [[package]]
