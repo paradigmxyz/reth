@@ -66,6 +66,8 @@ pub mod execute {
 }
 
 mod build;
+pub mod externevm;
+pub use externevm::ExternEvmFactory;
 pub use build::EthBlockAssembler;
 
 mod receipt;
