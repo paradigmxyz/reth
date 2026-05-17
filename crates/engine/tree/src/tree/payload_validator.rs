@@ -500,6 +500,32 @@ where
             &strategy,
         ));
 
+        // Prepare the provider used later for trie changeset computation while state root work is
+        // still running. This pins the overlay to the same early parent view used by proof workers
+        // instead of asking for a fresh view after persistence may have advanced the frontiers.
+        let prepared_changeset_provider = {
+            let overlay_factory = overlay_factory.clone();
+            self.payload_processor.executor().spawn_blocking_named(
+                "changeset-provider",
+                move || {
+                    let _span = debug_span!(
+                        target: "engine::tree::payload_validator",
+                        "prepare_changeset_provider",
+                    )
+                    .entered();
+                    let start = Instant::now();
+                    let result = overlay_factory.database_provider_ro();
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        elapsed = ?start.elapsed(),
+                        success = result.is_ok(),
+                        "Prepared changeset provider"
+                    );
+                    result
+                },
+            )
+        };
+
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
@@ -794,12 +820,12 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        // Create the overlay provider NOW, while we're on the engine loop thread and trie changeset
-        // eviction cannot race with us. If we deferred this to the background task, persistence
-        // could advance and evict changeset cache entries between factory creation and the task
-        // actually running, causing expensive DB fallback computations when building the overlay.
-        let changeset_provider =
-            ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
+        let changeset_provider = ensure_ok_post_block!(
+            prepared_changeset_provider.try_into_inner().unwrap_or_else(|_| {
+                unreachable!("prepared changeset provider handle should not be shared")
+            }),
+            block
+        );
 
         let executed_block = self.spawn_deferred_trie_task(
             Arc::new(block),
