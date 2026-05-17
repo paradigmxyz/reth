@@ -2171,9 +2171,9 @@ mod tests {
             _ => unreachable!(),
         }
 
-        assert_eq!(peers.peers.get_mut(&peer).unwrap().state, PeerConnectionState::PendingOut);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::PendingOut);
         peers.on_active_outgoing_established(peer);
-        assert_eq!(peers.peers.get_mut(&peer).unwrap().state, PeerConnectionState::Out);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::Out);
 
         peers.apply_reputation_change(&peer, ReputationChangeKind::BadMessage);
 
@@ -2689,7 +2689,7 @@ mod tests {
         peer_manager.tick();
 
         // still unconnected
-        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
+        assert_eq!(peer_manager.peers.get(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
 
         // mark as connected
         peer_manager.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::Out;
@@ -2698,7 +2698,7 @@ mod tests {
         peer_manager.tick();
 
         // still at default reputation
-        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
+        assert_eq!(peer_manager.peers.get(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
 
         peer_manager.peers.get_mut(&peer_id).unwrap().reputation -= 1;
 
