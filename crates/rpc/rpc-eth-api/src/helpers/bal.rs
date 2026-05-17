@@ -1,14 +1,15 @@
-//! Helpers for `eth_blockAccessList` RPC method.
+//! Helpers for block access lists.
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::BlockAccessList;
+use alloy_eips::eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, State};
+use reth_revm::{database::StateProviderDatabase, state::bal::Bal as RevmBal, State};
 use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
+    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
 };
 use reth_storage_api::StateProviderFactory;
+use std::sync::Arc;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
@@ -54,7 +55,8 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 executor.evm_mut().db_mut().bump_bal_index();
 
-                // replay all transactions prior to the targeted transaction
+                // Advance the BAL index after each transaction so writes are recorded at the
+                // matching block access index.
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                     executor.evm_mut().db_mut().bump_bal_index();
@@ -70,4 +72,23 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             .await
         }
     }
+}
+
+/// Loads the cached block BAL into `db` when it is available.
+pub fn attach_cached_block_bal(db: &mut StateCacheDb, bal: Option<Arc<DecodedBal<RevmBal>>>) {
+    if let Some(bal) = bal {
+        db.set_bal(Some(Arc::new(bal.as_bal().clone())));
+    }
+}
+
+/// Positions `db` at the state before the transaction at `target_tx_index` if a BAL is attached.
+///
+/// Returns `true` if the state was positioned with BAL data.
+pub fn position_before_transaction(db: &mut StateCacheDb, target_tx_index: u64) -> bool {
+    if db.bal_state.bal.is_none() {
+        return false
+    }
+
+    db.set_bal_index(target_tx_index + 1);
+    true
 }

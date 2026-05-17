@@ -34,7 +34,8 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
             ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
+        > + BalProvider
+        + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
         + BalProvider
@@ -128,7 +129,8 @@ where
             ChainSpec: EthChainSpec<Header = HeaderTy<Evm::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
+        > + BalProvider
+        + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
         + BalProvider

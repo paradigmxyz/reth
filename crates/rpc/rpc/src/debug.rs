@@ -25,7 +25,7 @@ use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{bal, EthTransactions, TraceExt},
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
@@ -226,21 +226,25 @@ where
         let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
+            .spawn_with_state_at_block_and_bal(state_at, block_hash, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
-                let tx = transaction.into_recovered();
+                let (tx, tx_info) = transaction.split();
+                let tx_index = tx_info.index.unwrap_or_default();
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
+                let tx_index = if bal::position_before_transaction(&mut db, tx_index) {
+                    tx_index as usize
+                } else {
+                    eth_api.replay_transactions_until(
+                        &mut db,
+                        evm_env.clone(),
+                        block_txs,
+                        *tx.tx_hash(),
+                    )?
+                };
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
@@ -251,7 +255,7 @@ where
                     .get_result(
                         Some(TransactionContext {
                             block_hash: Some(block_hash),
-                            tx_index: Some(index),
+                            tx_index: Some(tx_index as usize),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
                         &tx_env,
@@ -348,19 +352,22 @@ where
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
+        let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
+            .spawn_with_state_at_block_and_bal(state_at, block_hash, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // 2. replay the required number of transactions
-                eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block.transactions_recovered(),
-                    *block.body().transactions()[tx_index].tx_hash(),
-                )?;
+                if !bal::position_before_transaction(&mut db, tx_index as u64) {
+                    eth_api.replay_transactions_until(
+                        &mut db,
+                        evm_env.clone(),
+                        block.transactions_recovered(),
+                        *block.body().transactions()[tx_index].tx_hash(),
+                    )?;
+                }
 
                 // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =
