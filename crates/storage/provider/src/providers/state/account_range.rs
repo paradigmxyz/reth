@@ -25,6 +25,8 @@ where
 
     let trie_cursor = trie_cursor_factory.account_trie_cursor()?;
     let hashed_account_cursor = hashed_cursor_factory.hashed_account_cursor()?;
+    // State-root walkers normally skip unchanged branches, but range iteration must visit every
+    // leaf in order, including leaves under branches that have no pending trie changes.
     let walker =
         TrieWalker::<_>::state_trie(trie_cursor, PrefixSet::default()).with_branch_skips_disabled();
     let mut iter =

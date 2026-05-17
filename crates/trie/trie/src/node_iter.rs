@@ -266,6 +266,8 @@ where
                         None => break, // no more keys
                     };
                     if let Some(start_hashed_key) = self.start_hashed_key {
+                        // The walker may later advance to another branch with a lower seek key, so
+                        // preserve the inclusive lower bound for the entire iteration.
                         seek_key = seek_key.max(start_hashed_key);
                     }
 
