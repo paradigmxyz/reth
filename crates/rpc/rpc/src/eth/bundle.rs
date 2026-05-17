@@ -160,9 +160,9 @@ where
                 let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
 
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut transactions = transactions.into_iter().peekable();
+                let mut transactions = transactions.into_iter().enumerate().peekable();
 
-                while let Some(tx) = transactions.next() {
+                while let Some((tx_index, tx)) = transactions.next() {
                     let signer = tx.signer();
                     let tx = {
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
@@ -183,7 +183,7 @@ where
                     hasher.update(*tx.tx_hash());
                     let ResultAndState { result, state } = evm
                         .transact(eth_api.evm_config().tx_env(&tx))
-                        .map_err(Eth::Error::from_evm_err)?;
+                        .map_err(|e| Eth::Error::from_evm_err_at_index(e, tx_index))?;
 
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
