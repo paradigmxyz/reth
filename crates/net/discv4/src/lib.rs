@@ -1603,8 +1603,7 @@ impl Discv4Service {
         let key = kad_key(target);
         let expire = self.send_neighbours_expiration();
 
-        let enforce_eip868 =
-            self.config.enable_eip868 && self.config.enforce_eip868_neighbours;
+        let enforce_eip868 = self.config.enable_eip868 && self.config.enforce_eip868_neighbours;
 
         // get the MAX_NODES_PER_BUCKET closest nodes to the target, optionally filtering out
         // entries that have no EIP-868 fork ID
