@@ -20,7 +20,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, StorageKey, B256};
+use alloy_primitives::{keccak256, Address, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -375,6 +375,22 @@ where
                 let _span = branch_span.entered();
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                    let storage_changes = account_changes.storage_changes.len();
+                    let storage_reads = account_changes.storage_reads.len();
+                    let storage_slots = storage_changes + storage_reads;
+                    let worker = std::thread::current();
+                    let _account_span = debug_span!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        parent: &parent_span,
+                        "bal_hashed_state_account",
+                        worker = ?worker.name(),
+                        address = %account_changes.address,
+                        storage_slots,
+                        storage_changes,
+                        storage_reads,
+                    )
+                    .entered();
+
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
@@ -405,18 +421,53 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                prefetch_bal.as_bal().par_iter().for_each(|account| {
+                let bal = prefetch_bal.as_bal();
+
+                bal.par_iter().for_each(|account| {
+                    let storage_changes = account.storage_changes.len();
+                    let storage_reads = account.storage_reads.len();
+                    let storage_slots = storage_changes + storage_reads;
+                    let worker = std::thread::current();
+                    let _account_span = debug_span!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        parent: &parent_span,
+                        "bal_prefetch_storage_account",
+                        worker = ?worker.name(),
+                        address = %account.address,
+                        storage_slots,
+                        storage_changes,
+                        storage_reads,
+                    )
+                    .entered();
+
                     if ctx.should_stop() {
                         return;
                     }
                     WorkerPool::with_worker_mut(|worker| {
-                        let provider = worker
-                            .get_or_init::<Option<CachedStateProvider<StateProviderBox, true>>>(
-                                || None,
-                            );
-                        ctx.prefetch_bal_storage(&parent_span, provider, account);
+                        let provider = worker.get_or_init::<BalPrefetchProvider>(|| None);
+                        ctx.prefetch_bal_account(&parent_span, provider, account);
                     });
                 });
+
+                let storage_targets = bal_storage_targets(bal);
+                if !storage_targets.is_empty() {
+                    let start = Instant::now();
+                    storage_targets.par_iter().for_each(|&(address, storage_key)| {
+                        if ctx.should_stop() {
+                            return;
+                        }
+                        WorkerPool::with_worker_mut(|worker| {
+                            let provider = worker.get_or_init::<BalPrefetchProvider>(|| None);
+                            ctx.prefetch_bal_storage_slot(
+                                &parent_span,
+                                provider,
+                                address,
+                                storage_key,
+                            );
+                        });
+                    });
+                    ctx.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
+                }
 
                 let _ = prefetch_tx.send(());
             });
@@ -551,6 +602,9 @@ where
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
     Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+
+/// Per-thread provider used by BAL prefetch workers.
+type BalPrefetchProvider = Option<CachedStateProvider<StateProviderBox, true>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -739,26 +793,58 @@ where
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
     }
 
-    /// Prefetches storage slots for a single BAL account into the cache.
+    /// Prefetches a BAL account with no account-level state changes into the cache.
     ///
-    /// Account reads are handled separately by [`Self::send_bal_hashed_state`], so this method
-    /// only
-    /// warms storage.
+    /// Accounts with balance, nonce, or code changes are read by [`Self::send_bal_hashed_state`].
+    /// Storage-only and read-only BAL entries still need an account cache entry for execution.
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
-    fn prefetch_bal_storage(
+    fn prefetch_bal_account(
         &self,
         parent_span: &Span,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
+        provider: &mut BalPrefetchProvider,
         account: &alloy_eip7928::AccountChanges,
     ) {
-        if self.disable_bal_batch_io ||
-            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
-        {
+        if self.disable_bal_batch_io || has_bal_account_state_changes(account) {
             return;
         }
 
+        let Some(state_provider) = self.bal_prefetch_provider(parent_span, provider) else {
+            return;
+        };
+
+        let _ = state_provider.basic_account(&account.address);
+    }
+
+    /// Prefetches a single BAL storage slot into the cache.
+    ///
+    /// The `provider` is lazily initialized on first call and reused across slots on the same
+    /// thread.
+    fn prefetch_bal_storage_slot(
+        &self,
+        parent_span: &Span,
+        provider: &mut BalPrefetchProvider,
+        address: Address,
+        storage_key: StorageKey,
+    ) {
+        if self.disable_bal_batch_io {
+            return;
+        }
+
+        let Some(state_provider) = self.bal_prefetch_provider(parent_span, provider) else {
+            return;
+        };
+
+        let _ = state_provider.storage(address, storage_key);
+    }
+
+    /// Returns the per-thread provider used by BAL prefetching, initializing it if needed.
+    fn bal_prefetch_provider<'a>(
+        &self,
+        parent_span: &Span,
+        provider: &'a mut BalPrefetchProvider,
+    ) -> Option<&'a CachedStateProvider<StateProviderBox, true>> {
         let state_provider = match provider {
             Some(p) => p,
             slot @ None => {
@@ -777,7 +863,7 @@ where
                             %err,
                             "Failed to build state provider in BAL prewarm thread"
                         );
-                        return;
+                        return None;
                     }
                 };
                 let saved_cache =
@@ -790,17 +876,75 @@ where
                 ))
             }
         };
+        Some(&*state_provider)
+    }
+}
 
-        let start = Instant::now();
+/// Returns true when a BAL account has account-level state changes.
+fn has_bal_account_state_changes(account: &alloy_eip7928::AccountChanges) -> bool {
+    !account.balance_changes.is_empty() ||
+        !account.nonce_changes.is_empty() ||
+        !account.code_changes.is_empty()
+}
 
-        for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
-        }
-        for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
-        }
+/// Flattens BAL storage reads and changes into slot targets so reads can be distributed by slot.
+fn bal_storage_targets(bal: &[alloy_eip7928::AccountChanges]) -> Vec<(Address, StorageKey)> {
+    bal.iter()
+        .flat_map(|account| {
+            let address = account.address;
+            account
+                .storage_changes
+                .iter()
+                .map(move |slot| (address, StorageKey::from(slot.slot)))
+                .chain(
+                    account
+                        .storage_reads
+                        .iter()
+                        .copied()
+                        .map(move |slot| (address, StorageKey::from(slot))),
+                )
+        })
+        .collect()
+}
 
-        self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{AccountChanges, BalanceChange, SlotChanges};
+    use alloy_primitives::U256;
+
+    #[test]
+    fn bal_account_state_changes_ignore_storage_only_entries() {
+        let mut account = AccountChanges::new(Address::repeat_byte(0x01));
+        account.storage_changes.push(SlotChanges::new(U256::from(1), Vec::new()));
+        account.storage_reads.push(U256::from(2));
+
+        assert!(!has_bal_account_state_changes(&account));
+
+        account.balance_changes.push(BalanceChange::new(0, U256::from(1)));
+
+        assert!(has_bal_account_state_changes(&account));
+    }
+
+    #[test]
+    fn bal_storage_targets_flatten_storage_changes_and_reads() {
+        let address_a = Address::repeat_byte(0x01);
+        let address_b = Address::repeat_byte(0x02);
+        let mut account_a = AccountChanges::new(address_a);
+        account_a.storage_changes.push(SlotChanges::new(U256::from(1), Vec::new()));
+        account_a.storage_reads.push(U256::from(2));
+
+        let mut account_b = AccountChanges::new(address_b);
+        account_b.storage_reads.push(U256::from(3));
+
+        assert_eq!(
+            bal_storage_targets(&[account_a, account_b]),
+            vec![
+                (address_a, StorageKey::from(U256::from(1))),
+                (address_a, StorageKey::from(U256::from(2))),
+                (address_b, StorageKey::from(U256::from(3))),
+            ]
+        );
     }
 }
 
