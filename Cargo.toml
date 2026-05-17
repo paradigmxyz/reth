@@ -444,9 +444,9 @@ revm-database-interface = { version = "11.0.0", default-features = false }
 revm-inspectors = "0.39.0"
 
 # eth
-alloy-dyn-abi = "1.5.6"
-alloy-primitives = { version = "1.5.6", default-features = false, features = ["map-foldhash"] }
-alloy-sol-types = { version = "1.5.6", default-features = false }
+alloy-dyn-abi = "1.6.0"
+alloy-primitives = { version = "1.6.0", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.6.0", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
