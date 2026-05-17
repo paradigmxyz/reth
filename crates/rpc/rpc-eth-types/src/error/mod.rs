@@ -207,6 +207,19 @@ pub enum EthApiError {
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
+    /// Wraps an error with the index of the transaction that produced it in a multi-tx
+    /// execution context (block replay, bundle simulation, trace).
+    ///
+    /// Preserves the inner error's RPC code and data so JSON-RPC clients keep the original
+    /// typed information; only prepends index context to the message at the wire boundary.
+    #[error("transaction index {tx_index}: {source}")]
+    IndexedTxError {
+        /// Index of the failing transaction in the executed sequence.
+        tx_index: usize,
+        /// The underlying error produced by EVM execution.
+        #[source]
+        source: Box<Self>,
+    },
     /// Error thrown when trying to access block access list for blocks before Amsterdam
     #[error("Block access list not available for pre-Amsterdam blocks")]
     BlockAccessListNotAvailablePreAmsterdam,
@@ -228,6 +241,12 @@ impl EthApiError {
         error: jsonrpsee_types::ErrorObject<'static>,
     ) -> Self {
         Self::CallManyError { bundle_index, tx_index, error }
+    }
+
+    /// Wraps this error in a [`EthApiError::IndexedTxError`] variant tagged with the failing
+    /// transaction's index.
+    pub fn with_tx_index(self, tx_index: usize) -> Self {
+        Self::IndexedTxError { tx_index, source: Box::new(self) }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -346,6 +365,14 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         error.message()
                     ),
                     error.data(),
+                )
+            }
+            EthApiError::IndexedTxError { tx_index, source } => {
+                let inner: jsonrpsee_types::error::ErrorObject<'static> = (*source).into();
+                jsonrpsee_types::error::ErrorObject::owned(
+                    inner.code(),
+                    format!("transaction index {tx_index}: {}", inner.message()),
+                    inner.data().map(|d| d.to_owned()),
                 )
             }
             EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
@@ -1220,5 +1247,39 @@ mod tests {
         let err = RevertError::new(revert.abi_encode().into());
         let msg = err.to_string();
         assert_eq!(msg, "execution reverted: test_revert_reason");
+    }
+
+    #[test]
+    fn indexed_tx_error_message() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
+                tx: 5,
+                state: 10,
+            })
+            .with_tx_index(3)
+            .into();
+        assert_eq!(err.code(), EthRpcErrorCode::InvalidInput.code());
+        assert_eq!(err.message(), "transaction index 3: nonce too low: next nonce 10, tx nonce 5");
+    }
+
+    #[test]
+    fn indexed_tx_error_revert_data() {
+        let revert_bytes: Bytes = Revert::from("liquidity_too_low").abi_encode().into();
+
+        let unwrapped: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::InvalidTransaction(RpcInvalidTransactionError::Revert(RevertError::new(
+                revert_bytes.clone(),
+            )))
+            .into();
+        let wrapped: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::InvalidTransaction(RpcInvalidTransactionError::Revert(RevertError::new(
+                revert_bytes,
+            )))
+            .with_tx_index(7)
+            .into();
+
+        assert_eq!(wrapped.code(), unwrapped.code());
+        assert_eq!(wrapped.data().map(|d| d.to_string()), unwrapped.data().map(|d| d.to_string()));
+        assert_eq!(wrapped.message(), format!("transaction index 7: {}", unwrapped.message()));
     }
 }
