@@ -117,6 +117,7 @@ pub use alloy_evm::{
 ///     gas_limit: 30_000_000,
 ///     withdrawals: Some(withdrawals),
 ///     parent_beacon_block_root: Some(beacon_root),
+///     slot_number: None,
 /// };
 ///
 /// // Build a new block on top of parent
@@ -311,10 +312,23 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
+    ) -> BlockExecutorForEvm<'a, Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        self.block_executor_factory().create_executor(evm, ctx)
+    }
+
+    /// Creates a strategy with a DB state borrow that can be shorter than the execution context.
+    fn create_executor_with_state<'a, 'db, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'db mut State<DB>, I>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>, I>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'db mut State<DB>>,
     {
         self.block_executor_factory().create_executor(evm, ctx)
     }
@@ -324,8 +338,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>, Self::Error>
-    {
+    ) -> Result<BlockExecutorForEvm<'a, Self, DB>, Self::Error> {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
         Ok(self.create_executor(evm, ctx))
@@ -351,10 +364,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockBuilder<
-        Primitives = Self::Primitives,
-        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>,
-    >
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB, I>>
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
@@ -403,10 +413,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<
-        impl BlockBuilder<
-            Primitives = Self::Primitives,
-            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>,
-        >,
+        impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB>>,
         Self::Error,
     > {
         let evm_env = self.next_evm_env(parent, &attributes)?;
@@ -501,4 +508,6 @@ pub struct NextBlockEnvAttributes {
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,
+    /// Optional slot number for post-Amsterdam payloads.
+    pub slot_number: Option<u64>,
 }

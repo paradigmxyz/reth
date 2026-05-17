@@ -348,7 +348,7 @@ where
                         .into());
                     }
 
-                    let gas_used = result.gas_used();
+                    let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
 
                     // coinbase is always present in the result state

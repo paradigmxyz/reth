@@ -100,7 +100,7 @@ impl<K: TransactionKind> Tx<K> {
 
         Ok(Cursor::new_with_metrics(
             inner,
-            self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
         ))
     }
 

@@ -1,5 +1,7 @@
 //! Common helpers for reth-bench commands.
 
+use alloy_eips::{eip7928::BlockAccessList, BlockNumberOrTag};
+use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use eyre::Result;
 use std::{
     io::{BufReader, Read},
@@ -67,6 +69,21 @@ pub(crate) fn parse_duration(s: &str) -> eyre::Result<Duration> {
             Ok(Duration::from_millis(millis))
         }
     }
+}
+
+/// Fetches the block access list for a given block number using the provided provider.
+pub(crate) async fn fetch_block_access_list(
+    provider: &RootProvider<AnyNetwork>,
+    block_number: u64,
+) -> eyre::Result<BlockAccessList> {
+    provider
+        .client()
+        .request("eth_getBlockAccessListByBlockNumber", (BlockNumberOrTag::Number(block_number),))
+        .await
+        .map_err(Into::into)
+        .and_then(|block_access_list: Option<BlockAccessList>| {
+            block_access_list.ok_or_else(|| eyre::eyre!("BAL not found for block {block_number}"))
+        })
 }
 
 #[cfg(test)]

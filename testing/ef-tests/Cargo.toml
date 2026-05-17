@@ -31,7 +31,7 @@ reth-revm.workspace = true
 reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
 
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true

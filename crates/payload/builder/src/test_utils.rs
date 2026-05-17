@@ -89,6 +89,7 @@ impl PayloadJob for TestPayloadJob {
             Arc::new(Block::<_>::default().seal_slow()),
             U256::ZERO,
             Some(Default::default()),
+            None,
         ))
     }
 

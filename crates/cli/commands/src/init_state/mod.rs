@@ -78,9 +78,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             self.env.init::<N>(AccessRights::RW, runtime)?;
 
         let static_file_provider = provider_factory.static_file_provider();
-        let provider_rw = provider_factory.database_provider_rw()?;
 
         if self.without_evm {
+            let provider_rw = provider_factory.database_provider_rw()?;
+
             // ensure header, total difficulty and header hash are provided
             let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
             let header = without_evm::read_header_from_file::<
@@ -106,23 +107,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they
                 // will be unwound according to database checkpoints.
                 //
-                // Necessary to commit, so the header is accessible to provider_rw and
-                // init_state_dump
+                // Necessary to commit, so the header is accessible to init_from_state_dump
                 static_file_provider.commit()?;
             } else if last_block_number > 0 && last_block_number < header.number() {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-evm."
                 ));
             }
+
+            provider_rw.commit()?;
         }
 
         info!(target: "reth::cli", "Initiating state dump");
 
         let reader = BufReader::new(reth_fs_util::open(self.state)?);
 
-        let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
-
-        provider_rw.commit()?;
+        let hash = init_from_state_dump(reader, &provider_factory, config.stages.etl)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

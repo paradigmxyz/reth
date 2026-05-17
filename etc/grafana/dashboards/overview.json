@@ -43,12 +43,6 @@
       "version": ""
     },
     {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "12.2.1"
-    },
-    {
       "type": "panel",
       "id": "heatmap",
       "name": "Heatmap",
@@ -59,12 +53,6 @@
       "id": "piechart",
       "name": "Pie chart",
       "version": ""
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
     },
     {
       "type": "panel",
@@ -83,6 +71,18 @@
       "id": "timeseries",
       "name": "Time series",
       "version": ""
+    },
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "13.1.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
     }
   ],
   "annotations": {
@@ -107,10 +107,25 @@
       }
     ]
   },
+  "description": "",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Source (GitHub)",
+      "tooltip": "View source file in repository",
+      "type": "link",
+      "url": "https://github.com/paradigmxyz/reth/tree/main/etc/grafana/dashboards"
+    }
+  ],
+  "liveNow": false,
   "panels": [
     {
       "collapsed": false,
@@ -120,8 +135,7 @@
         "x": 0,
         "y": 0
       },
-      "id": 96,
-      "panels": [],
+      "id": 1021,
       "repeat": "instance",
       "title": "Overview",
       "type": "row"
@@ -136,7 +150,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -146,8 +159,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 3,
@@ -176,7 +188,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -206,7 +218,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -216,8 +227,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 3,
@@ -246,7 +256,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -276,7 +286,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -286,8 +295,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 3,
@@ -316,7 +324,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -346,7 +354,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -356,8 +363,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 3,
@@ -386,7 +392,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -416,7 +422,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -426,8 +431,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 3,
@@ -456,7 +460,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -486,7 +490,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -496,8 +499,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 3,
@@ -526,7 +528,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -556,7 +558,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "max": 100,
           "min": 0,
           "thresholds": {
@@ -580,8 +581,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 9,
@@ -591,6 +591,14 @@
       },
       "id": 194,
       "options": {
+        "barShape": "flat",
+        "barWidthFactor": 0.5,
+        "effects": {
+          "barGlow": false,
+          "centerGlow": false,
+          "gradient": false
+        },
+        "endpointMarker": "point",
         "minVizHeight": 75,
         "minVizWidth": 75,
         "orientation": "auto",
@@ -601,11 +609,16 @@
           "fields": "",
           "values": false
         },
+        "segmentCount": 1,
+        "segmentSpacing": 0.3,
+        "shape": "gauge",
         "showThresholdLabels": false,
         "showThresholdMarkers": true,
-        "sizing": "auto"
+        "sizing": "auto",
+        "sparkline": false,
+        "textMode": "auto"
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -636,7 +649,6 @@
           "color": {
             "mode": "continuous-RdYlGr"
           },
-          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -647,8 +659,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 9,
@@ -681,7 +692,7 @@
         "sizing": "auto",
         "valueMode": "color"
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -745,7 +756,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -756,8 +766,7 @@
             ]
           },
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 9,
@@ -783,7 +792,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -893,7 +902,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "max": 1,
           "min": 0,
           "thresholds": {
@@ -906,8 +914,7 @@
             ]
           },
           "unit": "percentunit"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -917,6 +924,10 @@
       },
       "id": 69,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -929,7 +940,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -990,7 +1001,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1004,8 +1014,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -1015,6 +1024,10 @@
       },
       "id": 12,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -1027,7 +1040,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -1089,7 +1102,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1136,6 +1148,10 @@
       },
       "id": 211,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -1148,7 +1164,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -1274,7 +1290,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1321,6 +1336,10 @@
       },
       "id": 210,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -1333,7 +1352,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -1459,7 +1478,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1470,8 +1488,7 @@
             ]
           },
           "unit": "sishort"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -1481,6 +1498,10 @@
       },
       "id": 1004,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -1493,7 +1514,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -1588,7 +1609,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1599,8 +1619,7 @@
             ]
           },
           "unit": "si: gas/s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -1610,6 +1629,10 @@
       },
       "id": 1003,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -1622,7 +1645,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -1717,7 +1740,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1728,8 +1750,7 @@
             ]
           },
           "unit": "si: gas/s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -1902,7 +1923,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1917,8 +1937,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -1986,8 +2005,7 @@
         "x": 0,
         "y": 45
       },
-      "id": 87,
-      "panels": [],
+      "id": 1022,
       "repeat": "instance",
       "title": "Engine API",
       "type": "row"
@@ -2037,7 +2055,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2051,8 +2068,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2147,7 +2163,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2162,8 +2177,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2258,7 +2272,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2273,8 +2286,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2358,7 +2370,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2373,8 +2384,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2596,7 +2606,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2607,8 +2616,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2702,7 +2710,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2717,8 +2724,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2866,7 +2872,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2880,8 +2885,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -2964,7 +2968,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2978,8 +2981,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3026,8 +3028,7 @@
         "x": 0,
         "y": 78
       },
-      "id": 46,
-      "panels": [],
+      "id": 1023,
       "repeat": "instance",
       "title": "Execution",
       "type": "row"
@@ -3076,7 +3077,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3091,8 +3091,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3196,7 +3195,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3211,8 +3209,7 @@
             ]
           },
           "unit": "percentunit"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3333,7 +3330,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3348,8 +3344,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3437,7 +3432,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "max": 1,
           "thresholds": {
             "mode": "absolute",
@@ -3531,8 +3525,7 @@
         "x": 0,
         "y": 95
       },
-      "id": 214,
-      "panels": [],
+      "id": 1024,
       "title": "State Root Task",
       "type": "row"
     },
@@ -3581,7 +3574,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3596,8 +3588,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 9,
@@ -3607,6 +3598,10 @@
       },
       "id": 1006,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -3619,7 +3614,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -3682,7 +3677,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -3698,8 +3692,7 @@
             ]
           },
           "unit": "percentunit"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3709,6 +3702,10 @@
       },
       "id": 255,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -3721,7 +3718,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -3784,7 +3781,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -3800,8 +3796,7 @@
             ]
           },
           "unit": "percentunit"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3811,6 +3806,10 @@
       },
       "id": 1018,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -3823,7 +3822,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24556818486",
       "targets": [
         {
           "datasource": {
@@ -3886,7 +3885,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3901,8 +3899,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -3912,6 +3909,10 @@
       },
       "id": 257,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -3924,7 +3925,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -3987,7 +3988,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4002,8 +4002,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4013,6 +4012,10 @@
       },
       "id": 256,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -4025,7 +4028,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -4088,7 +4091,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4103,8 +4105,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4114,6 +4115,10 @@
       },
       "id": 1019,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -4126,7 +4131,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -4189,7 +4194,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4204,8 +4208,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4215,6 +4218,10 @@
       },
       "id": 1020,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -4227,7 +4234,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -4289,7 +4296,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4304,8 +4310,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4315,6 +4320,10 @@
       },
       "id": 260,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -4327,7 +4336,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -4389,7 +4398,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4404,8 +4412,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4415,6 +4422,10 @@
       },
       "id": 259,
       "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
         "legend": {
           "calcs": [],
           "displayMode": "list",
@@ -4427,7 +4438,7 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.4.2",
+      "pluginVersion": "13.1.0-24251769778",
       "targets": [
         {
           "datasource": {
@@ -4453,8 +4464,7 @@
         "x": 0,
         "y": 129
       },
-      "id": 38,
-      "panels": [],
+      "id": 1025,
       "repeat": "instance",
       "title": "Database",
       "type": "row"
@@ -4505,7 +4515,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4516,8 +4525,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4576,8 +4584,7 @@
               "type": "linear"
             }
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4607,7 +4614,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -4694,7 +4701,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4705,8 +4711,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4793,7 +4798,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -4804,8 +4808,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -4849,8 +4852,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
+        "type": "mixed",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -4894,7 +4897,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -5008,8 +5010,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
+        "type": "mixed",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -5053,7 +5055,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -5162,7 +5163,6 @@
             "uid": "${DS_EXPRESSION}"
           },
           "expression": "${A} - ${B}",
-          "hide": false,
           "refId": "Diff(opened, closed)",
           "type": "math"
         }
@@ -5188,10 +5188,8 @@
               "viz": false
             }
           },
-          "mappings": [],
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -5290,7 +5288,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -5305,8 +5302,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -5366,10 +5362,8 @@
               "viz": false
             }
           },
-          "mappings": [],
           "unit": "short"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -5465,7 +5459,6 @@
             }
           },
           "decimals": 4,
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -5480,8 +5473,7 @@
             ]
           },
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -5565,7 +5557,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -5580,8 +5571,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -5640,7 +5630,6 @@
             },
             "inspect": false
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -5785,8 +5774,7 @@
         "x": 0,
         "y": 178
       },
-      "id": 203,
-      "panels": [],
+      "id": 1026,
       "title": "Static Files",
       "type": "row"
     },
@@ -5808,10 +5796,8 @@
               "viz": false
             }
           },
-          "mappings": [],
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -5885,7 +5871,6 @@
             },
             "inspect": false
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6030,7 +6015,6 @@
             },
             "inspect": false
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6200,7 +6184,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6215,8 +6198,7 @@
             ]
           },
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6300,7 +6282,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6315,8 +6296,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6363,8 +6343,7 @@
         "x": 0,
         "y": 195
       },
-      "id": 1008,
-      "panels": [],
+      "id": 1027,
       "title": "RocksDB",
       "type": "row"
     },
@@ -6386,10 +6365,8 @@
               "viz": false
             }
           },
-          "mappings": [],
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6470,7 +6447,6 @@
             },
             "inspect": false
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6481,8 +6457,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6559,8 +6534,8 @@
           "id": "organize",
           "options": {
             "renameByName": {
-              "table": "Table",
-              "Value (lastNotNull)": "Entries"
+              "Value (lastNotNull)": "Entries",
+              "table": "Table"
             }
           }
         }
@@ -6585,7 +6560,6 @@
             },
             "inspect": false
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6596,8 +6570,7 @@
             ]
           },
           "unit": "decbytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6674,8 +6647,157 @@
           "id": "organize",
           "options": {
             "renameByName": {
-              "table": "Table",
-              "Value (lastNotNull)": "Pending Bytes"
+              "Value (lastNotNull)": "Pending Bytes",
+              "table": "Table"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "SST file size and memtable size per RocksDB table",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "decbytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 204
+      },
+      "id": 1017,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_rocksdb_sst_size{$instance_label=\"$instance\"}",
+          "format": "table",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_rocksdb_memtable_size{$instance_label=\"$instance\"}",
+          "format": "table",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(reth_rocksdb_wal_size{$instance_label=\"$instance\"}, \"table\", \"WAL\", \"\", \"\")",
+          "format": "table",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "RocksDB Storage Breakdown",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value #A": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #B": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #C": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "table": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Value #A (lastNotNull)"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A (lastNotNull)": "SST Size",
+              "Value #B (lastNotNull)": "Memtable Size",
+              "Value #C (lastNotNull)": "WAL Size",
+              "table": "Table"
             }
           }
         }
@@ -6726,7 +6848,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6737,8 +6858,7 @@
             ]
           },
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6822,7 +6942,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6833,8 +6952,7 @@
             ]
           },
           "unit": "bytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -6881,8 +6999,7 @@
         "x": 0,
         "y": 212
       },
-      "id": 79,
-      "panels": [],
+      "id": 1028,
       "repeat": "instance",
       "title": "Blockchain Tree",
       "type": "row"
@@ -6932,7 +7049,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -6946,8 +7062,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7031,7 +7146,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -7045,8 +7159,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7129,7 +7242,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -7144,8 +7256,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7229,7 +7340,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -7244,8 +7354,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7293,8 +7402,7 @@
         "x": 0,
         "y": 229
       },
-      "id": 108,
-      "panels": [],
+      "id": 1029,
       "title": "RPC server",
       "type": "row"
     },
@@ -7342,7 +7450,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -7444,8 +7551,7 @@
               "type": "linear"
             }
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7475,7 +7581,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -7560,7 +7666,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -7575,8 +7680,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7633,8 +7737,7 @@
               "type": "linear"
             }
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -7664,7 +7767,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -7749,7 +7852,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8001,7 +8103,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8016,8 +8117,7 @@
             ]
           },
           "unit": "reqps"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -8065,8 +8165,7 @@
         "x": 0,
         "y": 254
       },
-      "id": 24,
-      "panels": [],
+      "id": 1030,
       "repeat": "instance",
       "title": "Downloader: Headers",
       "type": "row"
@@ -8115,7 +8214,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8273,7 +8371,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8288,8 +8385,7 @@
             ]
           },
           "unit": "cps"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -8395,7 +8491,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8409,8 +8504,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -8468,8 +8562,7 @@
         "x": 0,
         "y": 271
       },
-      "id": 32,
-      "panels": [],
+      "id": 1031,
       "repeat": "instance",
       "title": "Downloader: Bodies",
       "type": "row"
@@ -8519,7 +8612,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8718,7 +8810,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -8730,8 +8821,7 @@
             ]
           },
           "unit": "cps"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -8837,7 +8927,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -8851,8 +8940,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -8947,7 +9035,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9075,7 +9162,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9178,8 +9264,7 @@
         "x": 0,
         "y": 296
       },
-      "id": 226,
-      "panels": [],
+      "id": 1032,
       "title": "Eth Requests",
       "type": "row"
     },
@@ -9227,7 +9312,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9357,7 +9441,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9487,7 +9570,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9617,7 +9699,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9711,8 +9792,7 @@
         "x": 0,
         "y": 313
       },
-      "id": 68,
-      "panels": [],
+      "id": 1033,
       "repeat": "instance",
       "title": "Payload Builder",
       "type": "row"
@@ -9762,7 +9842,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9776,8 +9855,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -9861,7 +9939,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9875,8 +9952,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -9960,7 +10036,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -9974,8 +10049,7 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10022,8 +10096,7 @@
         "x": 0,
         "y": 330
       },
-      "id": 105,
-      "panels": [],
+      "id": 1034,
       "title": "Pruning",
       "type": "row"
     },
@@ -10071,7 +10144,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -10087,8 +10159,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10172,7 +10243,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -10188,8 +10258,7 @@
             ]
           },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10273,7 +10342,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -10288,8 +10356,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10338,8 +10405,7 @@
         "x": 0,
         "y": 347
       },
-      "id": 97,
-      "panels": [],
+      "id": 1035,
       "title": "Process",
       "type": "row"
     },
@@ -10387,7 +10453,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -10560,7 +10625,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -10575,8 +10639,7 @@
             ]
           },
           "unit": "decbytes"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10661,7 +10724,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -10676,8 +10738,7 @@
             ]
           },
           "unit": "percentunit"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10761,7 +10822,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -10776,8 +10836,7 @@
             ]
           },
           "unit": "none"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10862,7 +10921,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -10877,8 +10935,7 @@
             ]
           },
           "unit": "tasks"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
@@ -10963,7 +11020,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -11094,7 +11150,6 @@
               "mode": "off"
             }
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -11188,7 +11243,7 @@
         "x": 0,
         "y": 380
       },
-      "id": 236,
+      "id": 1036,
       "panels": [
         {
           "datasource": {
@@ -11233,12 +11288,12 @@
                   "mode": "off"
                 }
               },
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11246,14 +11301,13 @@
                   }
                 ]
               }
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 387
+            "y": 381
           },
           "id": 237,
           "options": {
@@ -11328,12 +11382,12 @@
                   "mode": "off"
                 }
               },
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11341,14 +11395,13 @@
                   }
                 ]
               }
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 387
+            "y": 381
           },
           "id": 238,
           "options": {
@@ -11423,12 +11476,12 @@
                   "mode": "off"
                 }
               },
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11436,14 +11489,13 @@
                   }
                 ]
               }
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 395
+            "y": 389
           },
           "id": 239,
           "options": {
@@ -11529,12 +11581,12 @@
                   "mode": "off"
                 }
               },
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11542,14 +11594,13 @@
                   }
                 ]
               }
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 395
+            "y": 389
           },
           "id": 219,
           "options": {
@@ -11592,12 +11643,12 @@
               "color": {
                 "mode": "palette-classic"
               },
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11606,14 +11657,13 @@
                 ]
               },
               "unit": "none"
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 403
+            "y": 397
           },
           "id": 220,
           "options": {
@@ -11662,7 +11712,7 @@
         "x": 0,
         "y": 381
       },
-      "id": 241,
+      "id": 1037,
       "panels": [
         {
           "datasource": {
@@ -11706,13 +11756,12 @@
                   "mode": "off"
                 }
               },
-              "fieldMinMax": false,
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11720,14 +11769,13 @@
                   }
                 ]
               }
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 388
+            "y": 382
           },
           "id": 243,
           "options": {
@@ -11814,13 +11862,12 @@
                   "mode": "off"
                 }
               },
-              "fieldMinMax": false,
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11828,14 +11875,13 @@
                   }
                 ]
               }
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 388
+            "y": 382
           },
           "id": 244,
           "options": {
@@ -11922,13 +11968,12 @@
                   "mode": "off"
                 }
               },
-              "fieldMinMax": false,
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -11937,14 +11982,13 @@
                 ]
               },
               "unit": "bytes"
-            },
-            "overrides": []
+            }
           },
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 396
+            "y": 390
           },
           "id": 245,
           "options": {
@@ -11980,162 +12024,14 @@
       ],
       "title": "Execution Extensions Write-Ahead Log",
       "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "SST file size and memtable size per RocksDB table",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "left",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "decbytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 211
-      },
-      "id": 1017,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "reth_rocksdb_sst_size{$instance_label=\"$instance\"}",
-          "format": "table",
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "reth_rocksdb_memtable_size{$instance_label=\"$instance\"}",
-          "format": "table",
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "label_replace(reth_rocksdb_wal_size{$instance_label=\"$instance\"}, \"table\", \"WAL\", \"\", \"\")",
-          "format": "table",
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "groupBy",
-          "options": {
-            "fields": {
-              "Value #A": {
-                "aggregations": [
-                  "lastNotNull"
-                ],
-                "operation": "aggregate"
-              },
-              "Value #B": {
-                "aggregations": [
-                  "lastNotNull"
-                ],
-                "operation": "aggregate"
-              },
-              "Value #C": {
-                "aggregations": [
-                  "lastNotNull"
-                ],
-                "operation": "aggregate"
-              },
-              "table": {
-                "aggregations": [],
-                "operation": "groupby"
-              }
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "desc": true,
-                "field": "Value #A (lastNotNull)"
-              }
-            ]
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "renameByName": {
-              "table": "Table",
-              "Value #A (lastNotNull)": "SST Size",
-              "Value #B (lastNotNull)": "Memtable Size",
-              "Value #C (lastNotNull)": "WAL Size"
-            }
-          }
-        }
-      ],
-      "title": "RocksDB Storage Breakdown",
-      "type": "table"
     }
   ],
-  "refresh": "5s",
+  "preload": false,
+  "refresh": "30s",
   "schemaVersion": 42,
-  "tags": [],
+  "tags": [
+    "reth"
+  ],
   "templating": {
     "list": [
       {
@@ -12171,17 +12067,17 @@
         "type": "datasource"
       },
       {
+        "current": {
+          "value": "${VAR_INSTANCE_LABEL}",
+          "text": "${VAR_INSTANCE_LABEL}",
+          "selected": false
+        },
         "hide": 2,
         "label": "Instance Label",
         "name": "instance_label",
         "query": "${VAR_INSTANCE_LABEL}",
         "skipUrlSync": true,
         "type": "constant",
-        "current": {
-          "value": "${VAR_INSTANCE_LABEL}",
-          "text": "${VAR_INSTANCE_LABEL}",
-          "selected": false
-        },
         "options": [
           {
             "value": "${VAR_INSTANCE_LABEL}",
@@ -12196,10 +12092,22 @@
     "from": "now-12h",
     "to": "now"
   },
-  "timepicker": {},
-  "timezone": "",
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  },
+  "timezone": "browser",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 9,
-  "weekStart": ""
+  "version": 8
 }
