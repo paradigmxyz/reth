@@ -59,6 +59,8 @@ pub struct TrieNodeIter<C, H: HashedCursor, K> {
     /// The previous hashed key. If the iteration was previously interrupted, this value can be
     /// used to resume iterating from the last returned leaf node.
     previous_hashed_key: Option<B256>,
+    /// The first hashed key to return when starting a fresh iteration.
+    start_hashed_key: Option<B256>,
 
     /// Current hashed  entry.
     current_hashed_entry: Option<(B256, H::Value)>,
@@ -100,6 +102,7 @@ where
             hashed_cursor,
             trie_type,
             previous_hashed_key: None,
+            start_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
             last_seeked_hashed_entry: None,
@@ -113,6 +116,14 @@ where
     /// This is used to resume iteration from the last checkpoint.
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
+        self
+    }
+
+    /// Sets the first hashed key to return and returns the modified [`TrieNodeIter`].
+    ///
+    /// Unlike [`Self::with_last_hashed_key`], this key is inclusive.
+    pub const fn with_start_hashed_key(mut self, start_hashed_key: B256) -> Self {
+        self.start_hashed_key = Some(start_hashed_key);
         self
     }
 
@@ -250,10 +261,13 @@ where
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
                     // unprocessed key
-                    let (seek_key, seek_prefix) = match self.walker.next_unprocessed_key() {
+                    let (mut seek_key, seek_prefix) = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
                     };
+                    if let Some(start_hashed_key) = self.start_hashed_key {
+                        seek_key = seek_key.max(start_hashed_key);
+                    }
 
                     trace!(
                         target: "trie::node_iter",
@@ -535,5 +549,84 @@ mod tests {
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
+    }
+
+    #[test]
+    fn trie_node_iter_starts_from_inclusive_hashed_key() {
+        let accounts = [
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000003"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
+        ];
+        let trie_cursor_factory =
+            MockTrieCursorFactory::new(BTreeMap::default(), B256Map::default());
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
+            accounts.into_iter().map(|account| (account, Account::default())).collect(),
+            B256Map::default(),
+        );
+        let walker = TrieWalker::<_>::state_trie(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            PrefixSetMut::default().freeze(),
+        );
+        let mut iter = TrieNodeIter::state_trie(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+        )
+        .with_start_hashed_key(accounts[1]);
+
+        assert!(matches!(
+            iter.try_next().unwrap(),
+            Some(TrieElement::Leaf(key, _)) if key == accounts[1]
+        ));
+        pretty_assertions::assert_eq!(
+            *hashed_cursor_factory.visited_account_keys(),
+            vec![
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(accounts[1]),
+                    visited_key: Some(accounts[1]),
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(accounts[2]) },
+            ],
+        );
+    }
+
+    #[test]
+    fn trie_node_iter_walks_unchanged_branches_when_skips_are_disabled() {
+        let accounts = [
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000010"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000100"),
+        ];
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            get_hash_builder_branch_nodes(
+                accounts.into_iter().map(|account| (Nibbles::unpack(account), Account::default())),
+            )
+            .into_iter()
+            .collect(),
+            B256Map::default(),
+        );
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
+            accounts.into_iter().map(|account| (account, Account::default())).collect(),
+            B256Map::default(),
+        );
+        let walker = TrieWalker::<_>::state_trie(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            PrefixSetMut::default().freeze(),
+        )
+        .with_branch_skips_disabled();
+        let mut iter = TrieNodeIter::state_trie(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+        )
+        .with_start_hashed_key(accounts[1]);
+
+        let mut leaves = Vec::new();
+        while let Some(node) = iter.try_next().unwrap() {
+            if let TrieElement::Leaf(key, _) = node {
+                leaves.push(key);
+            }
+        }
+
+        assert_eq!(leaves, vec![accounts[1], accounts[2]]);
     }
 }

@@ -14,9 +14,9 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    AccountRangeProvider, BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StorageChangeSetReader,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -648,6 +648,44 @@ where
     }
 }
 
+impl<Provider, N> AccountRangeProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>
+        + Sync,
+    N: NodePrimitives,
+{
+    fn account_range(
+        &self,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<reth_storage_api::AccountRangeResult> {
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let TrieInputSorted { nodes, state, .. } =
+                self.build_overlay(TrieInputSorted::default())?;
+            super::account_range::account_range(
+                &InMemoryTrieCursorFactory::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                    nodes.as_ref(),
+                ),
+                &HashedPostStateCursorFactory::new(
+                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                    state.as_ref(),
+                ),
+                start,
+                limit,
+            )
+        })
+    }
+}
+
 impl<Provider, N> StateProvider for HistoricalStateProviderRef<'_, Provider, N>
 where
     Provider: DBProvider
@@ -873,9 +911,10 @@ mod tests {
     use super::needs_prev_shard_check;
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
-        test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
-        StateProvider,
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, OriginalValuesKnown,
+        ProviderFactory, RocksDBProviderFactory, StateProvider, StateWriteConfig,
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
     use reth_db_api::{
@@ -886,17 +925,85 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
-        BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        NodePrimitivesProvider, PruneCheckpointReader, StageCheckpointReader,
-        StorageChangeSetReader, StorageSettingsCache,
+        AccountRangeProvider, BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider,
+        DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader,
+        StageCheckpointReader, StageCheckpointWriter, StateWriter, StorageChangeSetReader,
+        StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
     use reth_trie_db::ChangesetCache;
 
     const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
+    const DELETED_ADDRESS: Address = address!("0x0000000000000000000000000000000000000009");
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+    fn historical_account_range_factory() -> ProviderFactory<MockNodeTypesWithDB> {
+        use reth_execution_types::ExecutionOutcome;
+        use reth_stages_types::{StageCheckpoint, StageId};
+        use revm_database::BundleState;
+        use revm_state::AccountInfo;
+
+        let factory = create_test_provider_factory();
+        {
+            let sf = factory.static_file_provider();
+            let mut hw = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+            for number in 0..=1 {
+                let header = alloy_consensus::Header { number, ..Default::default() };
+                hw.append_header(&header, &B256::with_last_byte(number as u8 + 10)).unwrap();
+            }
+            hw.commit().unwrap();
+        }
+
+        let provider = factory.provider_rw().unwrap();
+        for number in 0..=1 {
+            provider
+                .tx_ref()
+                .put::<tables::HeaderNumbers>(B256::with_last_byte(number as u8 + 10), number)
+                .unwrap();
+        }
+        let old_account = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
+        let changed_account =
+            AccountInfo { nonce: 2, balance: U256::from(20), ..Default::default() };
+        let deleted_account =
+            AccountInfo { nonce: 3, balance: U256::from(30), ..Default::default() };
+        let created_account =
+            AccountInfo { nonce: 4, balance: U256::from(40), ..Default::default() };
+        let bundle = BundleState::builder(1..=1)
+            .state_original_account_info(ADDRESS, old_account.clone())
+            .state_present_account_info(ADDRESS, changed_account)
+            .revert_account_info(1, ADDRESS, Some(Some(old_account)))
+            .state_present_account_info(HIGHER_ADDRESS, created_account)
+            .revert_account_info(1, HIGHER_ADDRESS, Some(None))
+            .state_original_account_info(DELETED_ADDRESS, deleted_account.clone())
+            .revert_account_info(1, DELETED_ADDRESS, Some(Some(deleted_account)))
+            .build();
+        let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
+        provider
+            .write_state(
+                &execution_outcome,
+                OriginalValuesKnown::Yes,
+                StateWriteConfig {
+                    write_receipts: false,
+                    write_account_changesets: true,
+                    write_storage_changesets: true,
+                },
+            )
+            .unwrap();
+        provider
+            .write_hashed_state(
+                &reth_trie::HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(
+                    bundle.state(),
+                )
+                .into_sorted(),
+            )
+            .unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+        provider.static_file_provider().commit().unwrap();
+        provider.commit().unwrap();
+        factory
+    }
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -1027,6 +1134,49 @@ mod tests {
             HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).basic_account(&HIGHER_ADDRESS),
             Ok(Some(acc)) if acc == higher_acc_plain
         ));
+    }
+
+    #[test]
+    fn historical_account_range_reflects_target_block_state() {
+        let factory = historical_account_range_factory();
+        let provider = factory.provider().unwrap();
+
+        let historical = HistoricalStateProviderRef::new(&provider, 2, ChangesetCache::new());
+        let first_page = historical.account_range(B256::ZERO, 1).unwrap();
+        let second_page = historical.account_range(first_page.next_key.unwrap(), 1).unwrap();
+        assert!(first_page.accounts[0].hash < second_page.accounts[0].hash);
+        assert_eq!(second_page.next_key, None);
+
+        let mut pages = [first_page.accounts, second_page.accounts].concat();
+        pages.sort_unstable_by_key(|entry| entry.hash);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(
+            pages
+                .iter()
+                .map(|entry| (entry.account.nonce, entry.account.balance))
+                .collect::<Vec<_>>(),
+            vec![(2, U256::from(20)), (4, U256::from(40))]
+        );
+        assert!(!pages.iter().any(|entry| entry.account.nonce == 3));
+    }
+
+    #[test]
+    fn historical_account_range_reflects_changed_deleted_and_later_created_accounts() {
+        let factory = historical_account_range_factory();
+        let provider = factory.provider().unwrap();
+
+        let page = HistoricalStateProviderRef::new(&provider, 1, ChangesetCache::new())
+            .account_range(B256::ZERO, 10)
+            .unwrap();
+
+        let mut accounts = page
+            .accounts
+            .iter()
+            .map(|entry| (entry.account.nonce, entry.account.balance))
+            .collect::<Vec<_>>();
+        accounts.sort_unstable();
+        assert_eq!(accounts, vec![(1, U256::from(10)), (3, U256::from(30))]);
+        assert!(!page.accounts.iter().any(|entry| entry.account.nonce == 4));
     }
 
     #[test]
