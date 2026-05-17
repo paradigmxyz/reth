@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
+    transaction::{DatabasePageOps, DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
@@ -335,6 +335,29 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             .db_stat_with_dbi(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::Stats(e.into()))?
             .entries())
+    }
+
+    fn page_ops(&self) -> Result<Option<DatabasePageOps>, DatabaseError> {
+        let ops = self
+            .inner
+            .env()
+            .info()
+            .map_err(|error| DatabaseError::Other(error.to_string()))?
+            .page_ops();
+        Ok(Some(DatabasePageOps {
+            newly: ops.newly,
+            cow: ops.cow,
+            clone: ops.clone,
+            split: ops.split,
+            merge: ops.merge,
+            spill: ops.spill,
+            unspill: ops.unspill,
+            wops: ops.wops,
+            prefault: ops.prefault,
+            mincore: ops.mincore,
+            msync: ops.msync,
+            fsync: ops.fsync,
+        }))
     }
 
     /// Disables long-lived read transaction safety guarantees, such as backtrace recording and

@@ -46,7 +46,7 @@ use reth_db_api::{
     },
     table::Table,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::{DatabasePageOps, DbTx, DbTxMut},
     BlockNumberList,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
@@ -82,7 +82,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, Level};
 
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -602,11 +602,35 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let persist_rest_range = plan.persist_rest_range();
         let persist_rest_blocks =
             persist_rest_range.as_ref().map(|range| &blocks[range.clone()]).unwrap_or(&[]);
+        let state_trie_ranges = plan.coalesced_state_trie_ranges();
 
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
         let first_number = blocks.first().unwrap().recovered_block().number();
         let last_block_number = plan.last_block().expect("checked non-empty block range").number;
+
+        if tracing::enabled!(target: "providers::db", Level::DEBUG) {
+            let steps = plan
+                .steps
+                .iter()
+                .map(|step| {
+                    (
+                        step.block_range.clone(),
+                        step.state_trie_masking_range.clone(),
+                        step.persist_rest,
+                    )
+                })
+                .collect::<Vec<_>>();
+            debug!(
+                target: "providers::db",
+                block_count,
+                persist_rest_blocks = persist_rest_blocks.len(),
+                state_trie_steps = plan.steps.iter().filter(|step| step.persists_state_trie()).count(),
+                coalesced_state_trie_steps = state_trie_ranges.len(),
+                ?steps,
+                "Prepared save_blocks plan"
+            );
+        }
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
         let tx_nums: Vec<TxNumber> = if persist_rest_blocks.is_empty() {
@@ -713,6 +737,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // MDBX writes
             let mdbx_start = Instant::now();
+            let mdbx_page_ops_before = if tracing::enabled!(target: "providers::db", Level::DEBUG) {
+                self.tx_ref().page_ops().ok().flatten()
+            } else {
+                None
+            };
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
             if has_persist_rest_blocks &&
@@ -787,38 +816,73 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         }
                     }
                 }
+            }
 
-                if !save_mode.with_state() {
-                    continue
+            if save_mode.with_state() {
+                for (state_trie_range, masking_range) in &state_trie_ranges {
+                    let step_trie_data = blocks[state_trie_range.clone()]
+                        .iter()
+                        .map(|block| block.trie_data())
+                        .collect::<Vec<_>>();
+                    let masking_trie_data = blocks[masking_range.clone()]
+                        .iter()
+                        .map(|block| block.trie_data())
+                        .collect::<Vec<_>>();
+
+                    let start = Instant::now();
+                    let merge_start = Instant::now();
+                    let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
+                        step_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                        masking_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                    );
+                    let merge_elapsed = merge_start.elapsed();
+                    let write_start = Instant::now();
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
+                    let write_elapsed = write_start.elapsed();
+                    if tracing::enabled!(target: "providers::db", Level::DEBUG) {
+                        debug!(
+                            target: "providers::db",
+                            ?state_trie_range,
+                            ?masking_range,
+                            merged_accounts = merged_hashed_state.accounts().len(),
+                            merged_storages = merged_hashed_state.account_storages().len(),
+                            merged_hashed_updates = merged_hashed_state.total_len(),
+                            ?merge_elapsed,
+                            ?write_elapsed,
+                            "Writing masked hashed state"
+                        );
+                    }
+                    timings.write_hashed_state += start.elapsed();
+
+                    let start = Instant::now();
+                    let merge_start = Instant::now();
+                    let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
+                        step_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                        masking_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                    );
+                    let merge_elapsed = merge_start.elapsed();
+                    let write_start = Instant::now();
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                    let write_elapsed = write_start.elapsed();
+                    if tracing::enabled!(target: "providers::db", Level::DEBUG) {
+                        debug!(
+                            target: "providers::db",
+                            ?state_trie_range,
+                            ?masking_range,
+                            merged_account_nodes = merged_trie.account_nodes_ref().len(),
+                            merged_storage_tries = merged_trie.storage_tries_ref().len(),
+                            merged_trie_updates = merged_trie.total_len(),
+                            ?merge_elapsed,
+                            ?write_elapsed,
+                            "Writing masked trie updates"
+                        );
+                    }
+                    timings.write_trie_updates += start.elapsed();
                 }
-
-                let Some(masking_range) = step.state_trie_masking_range.as_ref() else { continue };
-
-                let step_trie_data =
-                    step_blocks.iter().map(|block| block.trie_data()).collect::<Vec<_>>();
-                let masking_trie_data = blocks[masking_range.clone()]
-                    .iter()
-                    .map(|block| block.trie_data())
-                    .collect::<Vec<_>>();
-                let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                    step_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
-                    masking_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
-                timings.write_hashed_state += start.elapsed();
-
-                let start = Instant::now();
-                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                    step_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
-                    masking_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
-                );
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
-                }
-                timings.write_trie_updates += start.elapsed();
             }
 
             debug_assert_eq!(next_persist_rest_tx_num, tx_nums.len());
@@ -857,6 +921,26 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             timings.update_pipeline_stages = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
+            if tracing::enabled!(target: "providers::db", Level::DEBUG) {
+                let mdbx_page_ops_delta =
+                    self.tx_ref().page_ops().ok().flatten().zip(mdbx_page_ops_before).map(
+                        |(after, before): (DatabasePageOps, DatabasePageOps)| {
+                            after.saturating_sub(before)
+                        },
+                    );
+                debug!(
+                    target: "providers::db",
+                    mdbx_elapsed = ?timings.mdbx,
+                    insert_block_elapsed = ?timings.insert_block,
+                    write_state_elapsed = ?timings.write_state,
+                    write_hashed_state_elapsed = ?timings.write_hashed_state,
+                    write_trie_updates_elapsed = ?timings.write_trie_updates,
+                    update_history_indices_elapsed = ?timings.update_history_indices,
+                    update_pipeline_stages_elapsed = ?timings.update_pipeline_stages,
+                    ?mdbx_page_ops_delta,
+                    "Finished save_blocks MDBX writes"
+                );
+            }
 
             Ok::<_, ProviderError>(())
         })?;
@@ -877,9 +961,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         timings.total = total_start.elapsed();
 
         self.metrics.record_save_blocks(&timings);
+        let persist_rest_block_range =
+            persist_rest_blocks.first().zip(persist_rest_blocks.last()).map(|(first, last)| {
+                first.recovered_block().number()..=last.recovered_block().number()
+            });
         debug!(
             target: "providers::db",
-            range = ?first_number..=last_block_number,
+            plan_range = ?first_number..=last_block_number,
+            ?persist_rest_block_range,
             "Appended block data"
         );
 
@@ -2793,40 +2882,89 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
+        let total_start = Instant::now();
+
         // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
+        let accounts_start = Instant::now();
+        let mut account_upserts = 0usize;
+        let mut account_deletes = 0usize;
+        {
+            let mut hashed_accounts_cursor =
+                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            for (hashed_address, account) in hashed_state.accounts() {
+                if let Some(account) = account {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                    account_upserts += 1;
+                } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
+                    account_deletes += 1;
+                }
             }
         }
+        let accounts_elapsed = accounts_start.elapsed();
 
         // Write hashed storage changes.
+        let storage_sort_start = Instant::now();
         let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
+        let storage_sort_elapsed = storage_sort_start.elapsed();
+        let storage_write_start = Instant::now();
+        let mut wiped_storages = 0usize;
+        let mut storage_slots = 0usize;
+        let mut storage_deletes = 0usize;
+        let mut storage_upserts = 0usize;
+        let mut storage_zeroes = 0usize;
+        {
+            let mut hashed_storage_cursor =
+                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+            for (hashed_address, storage) in sorted_storages {
+                if storage.is_wiped() &&
+                    hashed_storage_cursor.seek_exact(*hashed_address)?.is_some()
                 {
-                    hashed_storage_cursor.delete_current()?;
+                    hashed_storage_cursor.delete_current_duplicates()?;
+                    wiped_storages += 1;
                 }
 
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                for (hashed_slot, value) in storage.storage_slots_ref() {
+                    storage_slots += 1;
+                    let entry = StorageEntry { key: *hashed_slot, value: *value };
+                    let found = hashed_storage_cursor
+                        .seek_by_key_subkey(*hashed_address, *hashed_slot)?
+                        .is_some_and(|s| s.key == *hashed_slot);
+                    if found {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+
+                    if value.is_zero() {
+                        storage_zeroes += 1;
+                        if found {
+                            storage_deletes += 1;
+                        }
+                    } else {
+                        hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                        storage_upserts += 1;
+                    }
                 }
             }
         }
+        let storage_write_elapsed = storage_write_start.elapsed();
+
+        debug!(
+            target: "providers::db",
+            accounts = hashed_state.accounts().len(),
+            storages = hashed_state.account_storages().len(),
+            storage_slots,
+            account_upserts,
+            account_deletes,
+            wiped_storages,
+            storage_deletes,
+            storage_upserts,
+            storage_zeroes,
+            ?accounts_elapsed,
+            ?storage_sort_elapsed,
+            ?storage_write_elapsed,
+            total_elapsed = ?total_start.elapsed(),
+            "Wrote hashed state"
+        );
 
         Ok(())
     }
@@ -3244,15 +3382,38 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             return Ok(0)
         }
 
+        let total_start = Instant::now();
         // Track the number of inserted entries.
         let mut num_entries = 0;
 
+        let account_start = Instant::now();
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
         });
+        let account_elapsed = account_start.elapsed();
 
+        let storage_start = Instant::now();
+        let storage_trie_count = trie_updates.storage_tries_ref().len();
+        let storage_node_count = trie_updates
+            .storage_tries_ref()
+            .iter()
+            .map(|(_, storage_trie)| storage_trie.storage_nodes.len())
+            .sum::<usize>();
         num_entries +=
             self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        let storage_elapsed = storage_start.elapsed();
+
+        debug!(
+            target: "providers::db",
+            account_nodes = trie_updates.account_nodes_ref().len(),
+            storage_tries = storage_trie_count,
+            storage_nodes = storage_node_count,
+            num_entries,
+            ?account_elapsed,
+            ?storage_elapsed,
+            total_elapsed = ?total_start.elapsed(),
+            "Wrote trie updates"
+        );
 
         Ok(num_entries)
     }
@@ -3268,12 +3429,65 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         &self,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
+        let total_start = Instant::now();
         let mut num_entries = 0;
         let mut storage_tries = storage_tries.collect::<Vec<_>>();
+        let collect_elapsed = total_start.elapsed();
+        let sort_start = Instant::now();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let sort_elapsed = sort_start.elapsed();
+        let storage_trie_count = storage_tries.len();
+        let deleted_storage_tries =
+            storage_tries.iter().filter(|(_, storage_trie)| storage_trie.is_deleted()).count();
+        let storage_node_count = storage_tries
+            .iter()
+            .map(|(_, storage_trie)| storage_trie.storage_nodes.len())
+            .sum::<usize>();
+        let max_storage_nodes_per_trie = storage_tries
+            .iter()
+            .map(|(_, storage_trie)| storage_trie.storage_nodes.len())
+            .max()
+            .unwrap_or_default();
+        let storage_tries_ge_64 = storage_tries
+            .iter()
+            .filter(|(_, storage_trie)| storage_trie.storage_nodes.len() >= 64)
+            .count();
+        let storage_nodes_ge_64 = storage_tries
+            .iter()
+            .filter(|(_, storage_trie)| storage_trie.storage_nodes.len() >= 64)
+            .map(|(_, storage_trie)| storage_trie.storage_nodes.len())
+            .sum::<usize>();
+        let storage_tries_ge_128 = storage_tries
+            .iter()
+            .filter(|(_, storage_trie)| storage_trie.storage_nodes.len() >= 128)
+            .count();
+        let storage_nodes_ge_128 = storage_tries
+            .iter()
+            .filter(|(_, storage_trie)| storage_trie.storage_nodes.len() >= 128)
+            .map(|(_, storage_trie)| storage_trie.storage_nodes.len())
+            .sum::<usize>();
+        let write_start = Instant::now();
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
         });
+        let write_elapsed = write_start.elapsed();
+        debug!(
+            target: "providers::db",
+            storage_tries = storage_trie_count,
+            deleted_storage_tries,
+            storage_nodes = storage_node_count,
+            num_entries,
+            max_storage_nodes_per_trie,
+            storage_tries_ge_64,
+            storage_nodes_ge_64,
+            storage_tries_ge_128,
+            storage_nodes_ge_128,
+            ?collect_elapsed,
+            ?sort_elapsed,
+            ?write_elapsed,
+            total_elapsed = ?total_start.elapsed(),
+            "Wrote storage trie updates"
+        );
         Ok(num_entries)
     }
 }

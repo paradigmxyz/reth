@@ -971,9 +971,9 @@ Engine:
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
-          This value must be greater than `--engine.persistence-threshold`.
+          Defaults to max(16, 2 * (persistence-threshold + memory-block-buffer-target)).
 
-          [default: 16]
+          This value must be greater than `--engine.persistence-threshold`.
 
       --engine.num-state-masking-blocks <NUM_STATE_MASKING_BLOCKS>
           Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle

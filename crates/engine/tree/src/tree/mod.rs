@@ -1377,9 +1377,6 @@ where
         }
 
         let last_block = plan.last_block().expect("checked non-empty persisting blocks");
-        if let Some(last_state_trie_block) = plan.last_state_trie_block() {
-            self.prepare_canonical_state_trie_overlay(last_state_trie_block);
-        }
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(plan, tx);
 
@@ -2203,38 +2200,6 @@ where
             in_memory_persisted_block.number,
         );
         Ok(())
-    }
-
-    /// Prepares the state trie overlay for the current canonical head and the expected persisted
-    /// trie anchor.
-    fn prepare_canonical_state_trie_overlay(&self, state_trie_anchor: BlockNumHash) {
-        let canonical_head = *self.state.tree_state.canonical_head();
-        if canonical_head.number <= state_trie_anchor.number {
-            return
-        }
-
-        let Some(anchor_hash) = self
-            .state
-            .tree_state
-            .state_trie_overlays
-            .prepare_overlay_for_parent(canonical_head.hash, state_trie_anchor.hash)
-        else {
-            debug!(
-                target: "engine::tree",
-                canonical_head = ?canonical_head,
-                state_trie_anchor = ?state_trie_anchor,
-                "skipping canonical state trie overlay preparation"
-            );
-            return
-        };
-
-        debug!(
-            target: "engine::tree",
-            canonical_head = ?canonical_head,
-            %anchor_hash,
-            preferred_anchor = %state_trie_anchor.hash,
-            "scheduled canonical state trie overlay preparation"
-        );
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.

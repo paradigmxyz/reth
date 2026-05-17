@@ -87,4 +87,60 @@ impl<N: NodePrimitives> SaveBlocksPlan<N> {
         });
         Some(merged)
     }
+
+    /// Returns adjacent state/trie persistence ranges coalesced when they use the same masking
+    /// range.
+    pub fn coalesced_state_trie_ranges(&self) -> Vec<(Range<usize>, Range<usize>)> {
+        let mut ranges: Vec<(Range<usize>, Range<usize>)> = Vec::new();
+
+        for step in self.steps.iter().filter(|step| step.persists_state_trie()) {
+            let masking_range =
+                step.state_trie_masking_range.clone().expect("checked state/trie persistence step");
+
+            if let Some((block_range, existing_masking_range)) = ranges.last_mut() &&
+                block_range.end == step.block_range.start &&
+                existing_masking_range.start == masking_range.start &&
+                existing_masking_range.end == masking_range.end
+            {
+                block_range.end = step.block_range.end;
+            } else {
+                ranges.push((step.block_range.clone(), masking_range));
+            }
+        }
+
+        ranges
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SaveBlocksPlan, SaveBlocksPlanStep};
+    use reth_ethereum_primitives::EthPrimitives;
+
+    #[test]
+    fn coalesces_adjacent_state_trie_ranges_with_same_mask() {
+        let plan = SaveBlocksPlan::<EthPrimitives>::new(
+            Vec::new(),
+            vec![
+                SaveBlocksPlanStep::new(0..10, Some(11..21), false),
+                SaveBlocksPlanStep::new(10..11, Some(11..21), true),
+                SaveBlocksPlanStep::new(11..21, None, true),
+            ],
+        );
+
+        assert_eq!(plan.coalesced_state_trie_ranges(), vec![(0..11, 11..21)]);
+    }
+
+    #[test]
+    fn keeps_state_trie_ranges_with_different_masks_separate() {
+        let plan = SaveBlocksPlan::<EthPrimitives>::new(
+            Vec::new(),
+            vec![
+                SaveBlocksPlanStep::new(0..2, Some(3..5), false),
+                SaveBlocksPlanStep::new(2..3, Some(4..5), true),
+            ],
+        );
+
+        assert_eq!(plan.coalesced_state_trie_ranges(), vec![(0..2, 3..5), (2..3, 4..5)]);
+    }
 }

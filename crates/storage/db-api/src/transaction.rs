@@ -5,6 +5,55 @@ use crate::{
 };
 use std::fmt::Debug;
 
+/// Database page-operation counters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DatabasePageOps {
+    /// Quantity of new pages added.
+    pub newly: u64,
+    /// Quantity of pages copied for update.
+    pub cow: u64,
+    /// Quantity of parent's dirty pages clones for nested transactions.
+    pub clone: u64,
+    /// Page splits.
+    pub split: u64,
+    /// Page merges.
+    pub merge: u64,
+    /// Quantity of spilled dirty pages.
+    pub spill: u64,
+    /// Quantity of unspilled/reloaded pages.
+    pub unspill: u64,
+    /// Number of explicit write operations to disk.
+    pub wops: u64,
+    /// Number of prefault write operations.
+    pub prefault: u64,
+    /// Number of `mincore()` calls.
+    pub mincore: u64,
+    /// Number of explicit msync operations.
+    pub msync: u64,
+    /// Number of explicit fsync operations.
+    pub fsync: u64,
+}
+
+impl DatabasePageOps {
+    /// Returns a saturating field-wise difference.
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        Self {
+            newly: self.newly.saturating_sub(rhs.newly),
+            cow: self.cow.saturating_sub(rhs.cow),
+            clone: self.clone.saturating_sub(rhs.clone),
+            split: self.split.saturating_sub(rhs.split),
+            merge: self.merge.saturating_sub(rhs.merge),
+            spill: self.spill.saturating_sub(rhs.spill),
+            unspill: self.unspill.saturating_sub(rhs.unspill),
+            wops: self.wops.saturating_sub(rhs.wops),
+            prefault: self.prefault.saturating_sub(rhs.prefault),
+            mincore: self.mincore.saturating_sub(rhs.mincore),
+            msync: self.msync.saturating_sub(rhs.msync),
+            fsync: self.fsync.saturating_sub(rhs.fsync),
+        }
+    }
+}
+
 /// Helper adapter type for accessing [`DbTx`] cursor.
 pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 
@@ -44,6 +93,10 @@ pub trait DbTx: Debug + Send {
     fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError>;
     /// Returns number of entries in the table.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
+    /// Returns database page-operation counters if the backend exposes them.
+    fn page_ops(&self) -> Result<Option<DatabasePageOps>, DatabaseError> {
+        Ok(None)
+    }
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
 }

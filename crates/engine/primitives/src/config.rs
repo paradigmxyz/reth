@@ -864,6 +864,14 @@ mod tests {
     }
 
     #[test]
+    fn default_backpressure_uses_persistence_threshold_and_memory_buffer() {
+        assert_eq!(default_persistence_backpressure_threshold(13, 0), 26);
+        assert_eq!(default_persistence_backpressure_threshold(21, 0), 42);
+        assert_eq!(default_persistence_backpressure_threshold(13, 3), 32);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(
         expected = "persistence_backpressure_threshold must be greater than persistence_threshold"
     )]
