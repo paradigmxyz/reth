@@ -1603,9 +1603,23 @@ impl Discv4Service {
         let key = kad_key(target);
         let expire = self.send_neighbours_expiration();
 
-        // get the MAX_NODES_PER_BUCKET closest nodes to the target
-        let closest_nodes =
-            self.kbuckets.closest_values(&key).take(MAX_NODES_PER_BUCKET).collect::<Vec<_>>();
+        let enforce_eip868 = self.config.enable_eip868 && self.config.enforce_eip868_neighbours;
+
+        // get the MAX_NODES_PER_BUCKET closest nodes to the target, optionally filtering out
+        // entries that have no EIP-868 fork ID
+        let closest_nodes = self
+            .kbuckets
+            .closest_values(&key)
+            .filter(|entry| !enforce_eip868 || entry.value.fork_id.is_some())
+            .take(MAX_NODES_PER_BUCKET)
+            .collect::<Vec<_>>();
+
+        if closest_nodes.is_empty() {
+            // always respond so the requester does not treat this as a timeout
+            let msg = Message::Neighbours(Neighbours { nodes: Vec::new(), expire });
+            self.send_packet(msg, to);
+            return;
+        }
 
         for nodes in closest_nodes.chunks(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS) {
             let nodes = nodes.iter().map(|node| node.value.record).collect::<Vec<NodeRecord>>();
