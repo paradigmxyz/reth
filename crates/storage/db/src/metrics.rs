@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use std::{array, sync::Arc, time::Duration};
 use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
-const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
+pub(crate) const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
 /// Caches metric handles for database environment to make sure handles are not re-created
 /// on every operation.

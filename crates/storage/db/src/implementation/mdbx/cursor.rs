@@ -2,7 +2,7 @@
 
 use super::utils::*;
 use crate::{
-    metrics::{Operation, TableOperationMetrics},
+    metrics::{Operation, TableOperationMetrics, LARGE_VALUE_THRESHOLD_BYTES},
     DatabaseError,
 };
 use reth_db_api::{
@@ -53,7 +53,10 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if let Some(metrics) = self.metrics.clone() {
+        if self.metrics.is_some() &&
+            value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES)
+        {
+            let metrics = self.metrics.clone().expect("checked above");
             metrics[operation.index()].record(value_size, || f(self))
         } else {
             f(self)
