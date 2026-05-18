@@ -305,7 +305,7 @@ jobs:
       BENCH_WAIT_TIME: ""
       BENCH_BASELINE_ARGS: ""
       BENCH_FEATURE_ARGS: ""
-      BENCH_ABBA: "true"
+      BENCH_RUN_PAIRS: "2"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
       BENCH_NODE_BIN: reth
@@ -550,7 +550,7 @@ jobs:
           echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
 
       # Extract txgen payloads once so they are reused across all benchmark
-      # runs instead of re-fetching from the remote RPC four times.
+      # runs instead of re-fetching from the remote RPC for every run.
       - name: Extract txgen payloads
         run: |
           PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
@@ -659,7 +659,7 @@ jobs:
           FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BASELINE_CSVS"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
-          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs $BENCH_RUN_PAIRS"
 
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then

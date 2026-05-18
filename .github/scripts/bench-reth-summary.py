@@ -2,19 +2,22 @@
 """Parse benchmark CSV output and generate a summary JSON + markdown comparison.
 
 Usage:
-    bench-reth-summary.py <combined_csv> <gas_csv> \
+    bench-reth-summary.py \
         --output-summary <summary.json> \
         --output-markdown <comment.md> \
-        --baseline-csv <baseline_combined.csv> \
+        --baseline-csv <baseline_combined.csv> [<baseline_combined.csv> ...] \
         [--repo <owner/repo>] \
         [--baseline-ref <sha>] \
         [--feature-name <name>] \
         [--feature-sha <sha>]
 
-Generates a paired statistical comparison between baseline and feature.
-Matches blocks by number and computes per-block diffs to cancel out gas
-variance. Fails if baseline or feature CSV is missing or empty.
+Generates a statistical comparison between baseline and feature. Point estimates
+use pooled baseline and feature rows. Confidence intervals use whole-run cluster
+bootstrapping when multiple runs are available. Fails if baseline or feature CSV
+is missing or empty.
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
@@ -23,11 +26,16 @@ import math
 import random
 import sys
 
-GIGAGAS = 1_000_000_000
 BOOTSTRAP_ITERATIONS = 10_000
-# t-critical for between-pairing CI (df=3, 4 cross-pairings).
-# Set conservatively to reduce false positives from run-level bias.
-T_BETWEEN_PAIRINGS = 4.5
+PRACTICAL_FLOOR_PCT = {
+    "mean": 0.70,
+    "p50": 0.70,
+    "p90": 1.35,
+    "p99": 5.0,
+    "mgas_s": 0.45,
+    "wall_clock": 0.70,
+    "persist_wait": 5.0,
+}
 
 
 def _opt_int(row: dict, key: str) -> int | None:
@@ -48,30 +56,11 @@ def parse_combined_csv(path: str) -> list[dict]:
                 {
                     "block_number": int(row["block_number"]),
                     "gas_used": int(row["gas_used"]),
-                    "gas_limit": int(row["gas_limit"]),
-                    "transaction_count": int(row["transaction_count"]),
                     "new_payload_latency_us": int(row["new_payload_latency"]),
-                    "fcu_latency_us": int(row["fcu_latency"]),
                     "total_latency_us": int(row["total_latency"]),
                     "persistence_wait_us": _opt_int(row, "persistence_wait"),
                     "execution_cache_wait_us": _opt_int(row, "execution_cache_wait"),
                     "sparse_trie_wait_us": _opt_int(row, "sparse_trie_wait"),
-                }
-            )
-    return rows
-
-
-def parse_gas_csv(path: str) -> list[dict]:
-    """Parse total_gas.csv into a list of per-block dicts."""
-    rows = []
-    with open(path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(
-                {
-                    "block_number": int(row["block_number"]),
-                    "gas_used": int(row["gas_used"]),
-                    "time_us": int(row["time"]),
                 }
             )
     return rows
@@ -233,197 +222,127 @@ def _bootstrap_percentile_ci(
     return (boot_diffs[hi] - boot_diffs[lo]) / 2
 
 
-def _between_pairing_ci(pairing_means: list[float]) -> float:
-    """Compute CI half-width from the variance between pairing means.
-
-    This captures run-level bias (thermal drift, background load) that
-    per-block pooling cannot detect. Uses T_BETWEEN_PAIRINGS as the
-    t-critical value (conservative for df=3).
-    """
-    n = len(pairing_means)
-    if n < 2:
+def _ci_half_width(samples: list[float]) -> float:
+    """Return the 95% CI half-width from sorted bootstrap samples."""
+    if len(samples) < 2:
         return 0.0
-    mean = sum(pairing_means) / n
-    sd = math.sqrt(sum((x - mean) ** 2 for x in pairing_means) / (n - 1))
-    se = sd / math.sqrt(n)
-    return T_BETWEEN_PAIRINGS * se
+    samples.sort()
+    n = len(samples)
+    lo = int(n * 0.025)
+    hi = int(n * 0.975)
+    return (samples[hi] - samples[lo]) / 2
 
 
-def _cross_pair_directions(
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _per_run_metric_values(runs: list[list[dict]]) -> dict[str, list[float]]:
+    """Compute one metric value per benchmark run for cluster bootstrap."""
+    values = {
+        "mean_ms": [],
+        "p50_ms": [],
+        "p90_ms": [],
+        "p99_ms": [],
+        "mgas": [],
+        "wall_clock_ms": [],
+        "persist_ms": [],
+    }
+    for run in runs:
+        stats = compute_stats(run)
+        values["mean_ms"].append(stats["mean_ms"])
+        values["p50_ms"].append(stats["p50_ms"])
+        values["p90_ms"].append(stats["p90_ms"])
+        values["p99_ms"].append(stats["p99_ms"])
+        values["mgas"].append(stats["mean_mgas_s"])
+        values["wall_clock_ms"].append(stats["mean_total_lat_ms"])
+        values["persist_ms"].append(stats["mean_persist_ms"])
+    return values
+
+
+def _cluster_bootstrap_ci(
+    rng: random.Random,
     baseline_runs: list[list[dict]],
     feature_runs: list[list[dict]],
-) -> dict[str, bool]:
-    """Check if the direction of change agrees across all cross-pairings.
+    n_iter: int = BOOTSTRAP_ITERATIONS,
+) -> dict[str, float]:
+    """Compute run-cluster bootstrap CIs.
 
-    With ABBA runs [B1, B2] and [F1, F2], generates all 4 pairings:
-    (B1,F1), (B2,F2), (B1,F2), (B2,F1). For each metric, returns True
-    only if the mean diff has the same sign across all pairings.
-
-    With a single run pair, always returns True (no cross-check possible).
+    Each bootstrap sample resamples whole baseline and feature runs with
+    replacement. This estimates run-to-run noise without expanding reused
+    baseline/feature runs into independent block-level datapoints.
     """
+    metrics = ("mean_ms", "p50_ms", "p90_ms", "p99_ms", "mgas", "wall_clock_ms", "persist_ms")
+    empty = {metric: 0.0 for metric in metrics}
     if len(baseline_runs) < 2 or len(feature_runs) < 2:
-        return {
-            "lat": True, "mgas": True, "total_lat": True, "persist": True,
-        }
+        return empty
 
-    cross_pairs = []
-    for b in baseline_runs:
-        for f in feature_runs:
-            cross_pairs.append(_paired_data(b, f))
+    baseline_values = _per_run_metric_values(baseline_runs)
+    feature_values = _per_run_metric_values(feature_runs)
+    samples = {metric: [] for metric in metrics}
+    baseline_count = len(baseline_runs)
+    feature_count = len(feature_runs)
 
-    def _signs_agree(diffs_per_pair: list[list[float]]) -> bool:
-        means = []
-        for diffs in diffs_per_pair:
-            if diffs:
-                means.append(sum(diffs) / len(diffs))
-        if len(means) < 2:
-            return True
-        return all(m > 0 for m in means) or all(m < 0 for m in means) or all(m == 0 for m in means)
+    for _ in range(n_iter):
+        baseline_indexes = [rng.randrange(baseline_count) for _ in range(baseline_count)]
+        feature_indexes = [rng.randrange(feature_count) for _ in range(feature_count)]
+        for metric in metrics:
+            baseline_sample = [baseline_values[metric][i] for i in baseline_indexes]
+            feature_sample = [feature_values[metric][i] for i in feature_indexes]
+            samples[metric].append(_mean(feature_sample) - _mean(baseline_sample))
 
-    return {
-        "lat": _signs_agree([cp[1] for cp in cross_pairs]),
-        "mgas": _signs_agree([cp[2] for cp in cross_pairs]),
-        "total_lat": _signs_agree([cp[3] for cp in cross_pairs]),
-        "persist": _signs_agree([cp[4] for cp in cross_pairs]),
-    }
+    return {metric: _ci_half_width(samples[metric]) for metric in metrics}
 
 
-def compute_paired_stats(
+def compute_ci_stats(
     baseline_runs: list[list[dict]],
     feature_runs: list[list[dict]],
 ) -> dict:
-    """Compute paired statistics between baseline and feature runs.
+    """Compute confidence interval half-widths for displayed changes.
 
-    Uses all cross-pairings (B1-F1, B2-F2, B1-F2, B2-F1) for pooled
-    diffs and CIs. The final CI for each metric is the max of:
-    - Within-block bootstrap CI (captures per-block variance)
-    - Between-pairing CI (captures run-level bias)
-
-    Also checks that the direction of change agrees across all pairings.
+    Multiple-run comparisons resample whole runs so reused blocks are not
+    treated as independent observations. Single-run comparisons fall back to
+    block-level bootstrap over matched block numbers.
     """
-    # Generate all cross-pairings for pooled stats
-    all_pairs = []
-    all_lat_diffs = []
-    all_mgas_diffs = []
-    all_total_lat_diffs = []
-    all_persist_diffs = []
-    blocks_per_pair = []
-    # Per-pairing means for between-pairing CI
-    per_pairing_lat_means = []
-    per_pairing_mgas_means = []
-    per_pairing_total_lat_means = []
-    per_pairing_persist_means = []
-    for baseline in baseline_runs:
-        for feature in feature_runs:
-            pairs, lat_diffs, mgas_diffs, total_lat_diffs, persist_diffs = _paired_data(baseline, feature)
-            all_pairs.extend(pairs)
-            all_lat_diffs.extend(lat_diffs)
-            all_mgas_diffs.extend(mgas_diffs)
-            all_total_lat_diffs.extend(total_lat_diffs)
-            all_persist_diffs.extend(persist_diffs)
-            blocks_per_pair.append(len(pairs))
-            if lat_diffs:
-                per_pairing_lat_means.append(sum(lat_diffs) / len(lat_diffs))
-            if mgas_diffs:
-                per_pairing_mgas_means.append(sum(mgas_diffs) / len(mgas_diffs))
-            if total_lat_diffs:
-                per_pairing_total_lat_means.append(sum(total_lat_diffs) / len(total_lat_diffs))
-            if persist_diffs:
-                per_pairing_persist_means.append(sum(persist_diffs) / len(persist_diffs))
-
-    if not all_lat_diffs:
+    if not baseline_runs or not feature_runs:
         return {}
 
-    n = len(all_lat_diffs)
-    mean_diff = sum(all_lat_diffs) / n
-
+    blocks = max(len(run) for run in baseline_runs + feature_runs)
     rng = random.Random(42)
 
-    # Within-block bootstrap CI
-    ci_within = _bootstrap_ci(rng, all_lat_diffs)
-    mgas_ci_within = _bootstrap_ci(rng, all_mgas_diffs) if all_mgas_diffs else 0.0
-    wall_ci_within = _bootstrap_ci(rng, all_total_lat_diffs) if all_total_lat_diffs else 0.0
-    persist_ci_within = _bootstrap_ci(rng, all_persist_diffs) if all_persist_diffs else 0.0
-
-    # Between-pairing CI (run-level variance floor)
-    ci_between = _between_pairing_ci(per_pairing_lat_means)
-    mgas_ci_between = _between_pairing_ci(per_pairing_mgas_means)
-    wall_ci_between = _between_pairing_ci(per_pairing_total_lat_means)
-    persist_ci_between = _between_pairing_ci(per_pairing_persist_means)
-
-    # Final CI = max(within, between)
-    ci = max(ci_within, ci_between)
-    mgas_ci = max(mgas_ci_within, mgas_ci_between)
-    wall_clock_ci_ms = max(wall_ci_within, wall_ci_between)
-    persist_ci_ms = max(persist_ci_within, persist_ci_between)
-
-    # Bootstrap CI for percentile diffs
-    base_lats = sorted([p[0] for p in all_pairs])
-    feature_lats = sorted([p[1] for p in all_pairs])
-    p50_diff = percentile(feature_lats, 50) - percentile(base_lats, 50)
-    p90_diff = percentile(feature_lats, 90) - percentile(base_lats, 90)
-    p99_diff = percentile(feature_lats, 99) - percentile(base_lats, 99)
-
-    p50_ci_within = _bootstrap_percentile_ci(rng, all_pairs, 50)
-    p90_ci_within = _bootstrap_percentile_ci(rng, all_pairs, 90)
-    p99_ci_within = _bootstrap_percentile_ci(rng, all_pairs, 99)
-
-    # Between-pairing CI for percentile diffs
-    per_pairing_p50_diffs = []
-    per_pairing_p90_diffs = []
-    per_pairing_p99_diffs = []
-    for baseline in baseline_runs:
-        for feature in feature_runs:
-            pairs_i, _, _, _, _ = _paired_data(baseline, feature)
-            if pairs_i:
-                b_sorted = sorted(p[0] for p in pairs_i)
-                f_sorted = sorted(p[1] for p in pairs_i)
-                per_pairing_p50_diffs.append(percentile(f_sorted, 50) - percentile(b_sorted, 50))
-                per_pairing_p90_diffs.append(percentile(f_sorted, 90) - percentile(b_sorted, 90))
-                per_pairing_p99_diffs.append(percentile(f_sorted, 99) - percentile(b_sorted, 99))
-
-    p50_ci = max(p50_ci_within, _between_pairing_ci(per_pairing_p50_diffs))
-    p90_ci = max(p90_ci_within, _between_pairing_ci(per_pairing_p90_diffs))
-    p99_ci = max(p99_ci_within, _between_pairing_ci(per_pairing_p99_diffs))
-
-    mean_mgas_diff = sum(all_mgas_diffs) / len(all_mgas_diffs) if all_mgas_diffs else 0.0
-
-    # Cross-pair direction agreement
-    directions = _cross_pair_directions(baseline_runs, feature_runs)
+    if len(baseline_runs) >= 2 and len(feature_runs) >= 2:
+        cluster_ci = _cluster_bootstrap_ci(rng, baseline_runs, feature_runs)
+        ci = cluster_ci["mean_ms"]
+        p50_ci = cluster_ci["p50_ms"]
+        p90_ci = cluster_ci["p90_ms"]
+        p99_ci = cluster_ci["p99_ms"]
+        mgas_ci = cluster_ci["mgas"]
+        wall_clock_ci_ms = cluster_ci["wall_clock_ms"]
+        persist_ci_ms = cluster_ci["persist_ms"]
+    else:
+        pairs, all_lat_diffs, all_mgas_diffs, all_total_lat_diffs, all_persist_diffs = (
+            _paired_data(baseline_runs[0], feature_runs[0])
+        )
+        if not all_lat_diffs:
+            return {}
+        ci = _bootstrap_ci(rng, all_lat_diffs)
+        p50_ci = _bootstrap_percentile_ci(rng, pairs, 50)
+        p90_ci = _bootstrap_percentile_ci(rng, pairs, 90)
+        p99_ci = _bootstrap_percentile_ci(rng, pairs, 99)
+        mgas_ci = _bootstrap_ci(rng, all_mgas_diffs) if all_mgas_diffs else 0.0
+        wall_clock_ci_ms = _bootstrap_ci(rng, all_total_lat_diffs) if all_total_lat_diffs else 0.0
+        persist_ci_ms = _bootstrap_ci(rng, all_persist_diffs) if all_persist_diffs else 0.0
 
     return {
-        "n": n,
-        "mean_diff_ms": mean_diff,
         "ci_ms": ci,
-        "p50_diff_ms": p50_diff,
         "p50_ci_ms": p50_ci,
-        "p90_diff_ms": p90_diff,
         "p90_ci_ms": p90_ci,
-        "p99_diff_ms": p99_diff,
         "p99_ci_ms": p99_ci,
-        "mean_mgas_diff": mean_mgas_diff,
         "mgas_ci": mgas_ci,
         "wall_clock_ci_ms": wall_clock_ci_ms,
         "persist_ci_ms": persist_ci_ms,
-        "blocks": max(blocks_per_pair),
-        "directions_agree": directions,
+        "blocks": blocks,
     }
-
-
-
-def format_duration(seconds: float) -> str:
-    if seconds >= 60:
-        return f"{seconds / 60:.1f}min"
-    return f"{seconds}s"
-
-
-def format_gas(gas: int) -> str:
-    if gas >= GIGAGAS:
-        return f"{gas / GIGAGAS:.1f}G"
-    if gas >= 1_000_000:
-        return f"{gas / 1_000_000:.1f}M"
-    return f"{gas:,}"
-
 
 
 def fmt_ms(v: float) -> str:
@@ -446,36 +365,38 @@ def display_bal_mode(bal_mode: str | None) -> str | None:
     return bal_mode
 
 
-def significance(pct: float, ci_pct: float, lower_is_better: bool, directions_agree: bool = True) -> str:
+def practical_floor_pct(metric: str, _baseline_value: float) -> float:
+    """Return the practical significance floor as a percent of baseline."""
+    return PRACTICAL_FLOOR_PCT.get(metric, 0.0)
+
+
+def significance(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
     """Return significance label: 'good', 'bad', or 'neutral'.
 
-    A result is only significant if:
-    1. The CI doesn't cross zero (|pct| > ci_pct), AND
-    2. All cross-pairings agree on direction (directions_agree=True).
+    A result is only significant if the whole confidence interval clears a
+    practical significance floor. The floor is the same for every run shape;
+    higher run counts only tighten the CI.
     """
-    significant = abs(pct) > ci_pct and directions_agree
-    if not significant:
-        return "neutral"
-    elif (pct < 0) == lower_is_better:
+    improvement_pct = -pct if lower_is_better else pct
+    if improvement_pct - ci_pct > floor_pct:
         return "good"
-    else:
+    if improvement_pct + ci_pct < -floor_pct:
         return "bad"
+    return "neutral"
 
 
-def change_str(pct: float, ci_pct: float, lower_is_better: bool, directions_agree: bool = True) -> str:
-    """Format change% with paired CI significance.
+def change_str(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
+    """Format change% with CI significance.
 
-    Significant if the CI doesn't cross zero (i.e. |pct| > ci_pct)
-    AND all cross-pairings agree on direction.
+    Significant if the confidence interval clears the practical floor.
     """
-    sig = significance(pct, ci_pct, lower_is_better, directions_agree)
+    sig = significance(pct, ci_pct, floor_pct, lower_is_better)
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
-    qualifier = "" if directions_agree else " ↕"
-    return f"{pct:+.2f}% {emoji}{qualifier} (±{ci_pct:.2f}%)"
+    return f"{pct:+.2f}% {emoji} (±{ci_pct:.2f}%, floor {floor_pct:.2f}%)"
 
 
 def compute_changes(
-    baseline_stats: dict, feature_stats: dict, paired_stats: dict
+    baseline_stats: dict, feature_stats: dict, ci_stats: dict
 ) -> dict:
     """Pre-compute change percentages and significance for each metric."""
     def pct(base: float, feat: float) -> float:
@@ -484,25 +405,25 @@ def compute_changes(
     def ci_pct(ci_ms: float, base_ms: float) -> float:
         return ci_ms / base_ms * 100.0 if base_ms > 0 else 0.0
 
-    dirs = paired_stats.get("directions_agree", {})
-
     metrics = [
-        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True, dirs.get("lat", True)),
-        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True, dirs.get("lat", True)),
-        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True, dirs.get("lat", True)),
-        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False, dirs.get("mgas", True)),
-        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True, dirs.get("total_lat", True)),
-        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True, dirs.get("persist", True)),
+        ("mean", "mean_ms", "ci_ms", "mean_ms", True),
+        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True),
+        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True),
+        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
+        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
+        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True),
+        ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True),
     ]
     changes = {}
-    for name, stat_key, ci_key, base_key, lower_is_better, dir_agree in metrics:
+    for name, stat_key, ci_key, base_key, lower_is_better in metrics:
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
-        c = ci_pct(paired_stats[ci_key], baseline_stats[base_key])
+        c = ci_pct(ci_stats[ci_key], baseline_stats[base_key])
+        floor = practical_floor_pct(name, baseline_stats[base_key])
         changes[name] = {
             "pct": round(p, 4),
             "ci_pct": round(c, 4),
-            "sig": significance(p, c, lower_is_better, dir_agree),
-            "directions_agree": dir_agree,
+            "floor_pct": round(floor, 4),
+            "sig": significance(p, c, floor, lower_is_better),
         }
     return changes
 
@@ -510,7 +431,7 @@ def compute_changes(
 def generate_comparison_table(
     run1: dict,
     run2: dict,
-    paired: dict,
+    ci_stats: dict,
     repo: str,
     baseline_ref: str,
     baseline_name: str,
@@ -520,9 +441,10 @@ def generate_comparison_table(
     warmup_blocks: str | None = None,
     wait_time: str | None = None,
     bal_mode: str | None = None,
+    run_pairs: int | None = None,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
-    n = paired["blocks"]
+    n = ci_stats["blocks"]
 
     def pct(base: float, feat: float) -> float:
         return (feat - base) / base * 100.0 if base > 0 else 0.0
@@ -530,6 +452,7 @@ def generate_comparison_table(
     gas_pct = pct(run1["mean_mgas_s"], run2["mean_mgas_s"])
     wall_pct = pct(run1["wall_clock_s"], run2["wall_clock_s"])
 
+    mean_pct = pct(run1["mean_ms"], run2["mean_ms"])
     p50_pct = pct(run1["p50_ms"], run2["p50_ms"])
     p90_pct = pct(run1["p90_ms"], run2["p90_ms"])
     p99_pct = pct(run1["p99_ms"], run2["p99_ms"])
@@ -537,20 +460,23 @@ def generate_comparison_table(
     persist_pct = pct(run1["mean_persist_ms"], run2["mean_persist_ms"])
 
     # Bootstrap CIs as % of baseline percentile
-    p50_ci_pct = paired["p50_ci_ms"] / run1["p50_ms"] * 100.0 if run1["p50_ms"] > 0 else 0.0
-    p90_ci_pct = paired["p90_ci_ms"] / run1["p90_ms"] * 100.0 if run1["p90_ms"] > 0 else 0.0
-    p99_ci_pct = paired["p99_ci_ms"] / run1["p99_ms"] * 100.0 if run1["p99_ms"] > 0 else 0.0
+    mean_ci_pct = ci_stats["ci_ms"] / run1["mean_ms"] * 100.0 if run1["mean_ms"] > 0 else 0.0
+    p50_ci_pct = ci_stats["p50_ci_ms"] / run1["p50_ms"] * 100.0 if run1["p50_ms"] > 0 else 0.0
+    p90_ci_pct = ci_stats["p90_ci_ms"] / run1["p90_ms"] * 100.0 if run1["p90_ms"] > 0 else 0.0
+    p99_ci_pct = ci_stats["p99_ci_ms"] / run1["p99_ms"] * 100.0 if run1["p99_ms"] > 0 else 0.0
 
     # CI as a percentage of baseline
-    mgas_ci_pct = paired["mgas_ci"] / run1["mean_mgas_s"] * 100.0 if run1["mean_mgas_s"] > 0 else 0.0
-    wall_ci_pct = paired["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
-    persist_ci_pct = paired["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
+    mgas_ci_pct = ci_stats["mgas_ci"] / run1["mean_mgas_s"] * 100.0 if run1["mean_mgas_s"] > 0 else 0.0
+    wall_ci_pct = ci_stats["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
+    persist_ci_pct = ci_stats["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
 
-    dirs = paired.get("directions_agree", {})
-    lat_agree = dirs.get("lat", True)
-    mgas_agree = dirs.get("mgas", True)
-    total_agree = dirs.get("total_lat", True)
-    persist_agree = dirs.get("persist", True)
+    mean_floor = practical_floor_pct("mean", run1["mean_ms"])
+    p50_floor = practical_floor_pct("p50", run1["p50_ms"])
+    p90_floor = practical_floor_pct("p90", run1["p90_ms"])
+    p99_floor = practical_floor_pct("p99", run1["p99_ms"])
+    mgas_floor = practical_floor_pct("mgas_s", run1["mean_mgas_s"])
+    wall_floor = practical_floor_pct("wall_clock", run1["mean_total_lat_ms"])
+    persist_floor = practical_floor_pct("persist_wait", run1["mean_persist_ms"])
 
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -559,17 +485,20 @@ def generate_comparison_table(
     lines = [
         f"| Metric | {baseline_label} | {feature_label} | Change |",
         "|--------|------|--------|--------|",
-        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True, directions_agree=lat_agree)} |",
-        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False, directions_agree=mgas_agree)} |",
-        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True, directions_agree=total_agree)} |",
-        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, lower_is_better=True, directions_agree=persist_agree)} |",
+        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, mean_floor, lower_is_better=True)} |",
+        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, p50_floor, lower_is_better=True)} |",
+        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, p90_floor, lower_is_better=True)} |",
+        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True)} |",
+        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
+        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, wall_floor, lower_is_better=True)} |",
+        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True)} |",
         "",
     ]
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
+    if run_pairs:
+        meta_parts.append(f"{run_pairs} run pairs")
     if wait_time:
         meta_parts.append(f"wait time: {wait_time}")
     display_mode = display_bal_mode(bal_mode)
@@ -632,16 +561,16 @@ def generate_markdown(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse benchmark ABBA results")
+    parser = argparse.ArgumentParser(description="Parse benchmark run-pair results")
     parser.add_argument(
         "--baseline-csv", nargs="+", required=True,
-        help="Baseline combined_latency.csv files (A1, A2)",
+        help="Baseline combined_latency.csv files",
     )
     parser.add_argument(
         "--feature-csv", "--branch-csv", nargs="+", required=True,
-        help="Feature combined_latency.csv files (B1, B2)",
+        help="Feature combined_latency.csv files",
     )
-    parser.add_argument("--gas-csv", required=True, help="Path to total_gas.csv")
+    parser.add_argument("--gas-csv", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--output-summary", required=True, help="Output JSON summary path"
     )
@@ -659,10 +588,11 @@ def main():
     parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
     parser.add_argument("--bal-mode", default=None, help="BAL mode (true, feature, baseline)")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
+    parser.add_argument("--run-pairs", type=int, default=None, help="Configured number of benchmark run pairs")
     args = parser.parse_args()
 
-    if len(args.baseline_csv) != len(args.feature_csv):
-        print("Must provide equal number of baseline and feature CSVs", file=sys.stderr)
+    if args.run_pairs is not None and args.run_pairs < 1:
+        print("--run-pairs must be greater than zero", file=sys.stderr)
         sys.exit(1)
 
     baseline_runs = []
@@ -680,17 +610,15 @@ def main():
             sys.exit(1)
         feature_runs.append(data)
 
-    gas = parse_gas_csv(args.gas_csv)
-
     all_baseline = [r for run in baseline_runs for r in run]
     all_feature = [r for run in feature_runs for r in run]
 
     baseline_stats = compute_stats(all_baseline)
     feature_stats = compute_stats(all_feature)
-    paired_stats = compute_paired_stats(baseline_runs, feature_runs)
+    ci_stats = compute_ci_stats(baseline_runs, feature_runs)
 
-    if not paired_stats:
-        print("No common blocks between baseline and feature runs", file=sys.stderr)
+    if not ci_stats:
+        print("No comparable baseline and feature results", file=sys.stderr)
         sys.exit(1)
 
     baseline_ref = args.baseline_ref or "main"
@@ -702,7 +630,7 @@ def main():
     comparison_table = generate_comparison_table(
         baseline_stats,
         feature_stats,
-        paired_stats,
+        ci_stats,
         repo=args.repo,
         baseline_ref=baseline_ref,
         baseline_name=baseline_name,
@@ -712,9 +640,12 @@ def main():
         warmup_blocks=args.warmup_blocks,
         wait_time=args.wait_time,
         bal_mode=bal_mode,
+        run_pairs=args.run_pairs,
     )
-    print(f"Generated comparison ({paired_stats['n']} paired blocks, "
-          f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
+    print(
+        f"Generated comparison ({ci_stats['blocks']} blocks, "
+        f"mean CI ± {ci_stats['ci_ms']:.3f}ms)"
+    )
 
     base_url = f"https://github.com/{args.repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -741,9 +672,10 @@ def main():
             wait_time_tables.append(table)
 
     summary = {
-        "blocks": paired_stats["blocks"],
+        "blocks": ci_stats["blocks"],
         "big_blocks": args.big_blocks,
         "warmup_blocks": args.warmup_blocks,
+        "run_pairs": args.run_pairs,
         "wait_time": args.wait_time,
         "bal_mode": bal_mode,
         "baseline": {
@@ -756,8 +688,7 @@ def main():
             "ref": feature_sha,
             "stats": feature_stats,
         },
-        "paired": paired_stats,
-        "changes": compute_changes(baseline_stats, feature_stats, paired_stats),
+        "changes": compute_changes(baseline_stats, feature_stats, ci_stats),
         "wait_times": wait_time_data,
     }
     with open(args.output_summary, "w") as f:
