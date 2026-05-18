@@ -1,4 +1,4 @@
-// Generates a rich GitHub Actions job summary for reth-bench results.
+// Generates a rich GitHub Actions job summary for benchmark results.
 //
 // Reads from environment:
 //   BENCH_WORK_DIR       – Directory containing summary.json
