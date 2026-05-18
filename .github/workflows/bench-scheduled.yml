@@ -838,7 +838,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const { verdict, fmtChange, fmtMs, metricRows, waitTimeRows, blocksLabel } = require('./.github/scripts/bench-utils');
+            const { verdict, fmtChange, fmtMs, metricRows, blocksLabel } = require('./.github/scripts/bench-utils');
 
             const token = process.env.SLACK_BENCH_BOT_TOKEN;
             const channel = process.env.SLACK_BENCH_CHANNEL;
@@ -955,33 +955,6 @@ jobs:
             if (!data.ok) {
               core.warning(`Slack API error: ${JSON.stringify(data)}`);
               return;
-            }
-
-            // Post wait time breakdown as threaded reply
-            const wtRows = waitTimeRows(summary);
-            if (data.ts && wtRows.length > 0) {
-              const waitTableRows = [
-                [cell('Wait Time'), cell('Baseline'), cell('Feature')],
-                ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature)]),
-              ];
-              await fetch('https://slack.com/api/chat.postMessage', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  channel,
-                  thread_ts: data.ts,
-                  blocks: [{
-                    type: 'table',
-                    column_settings: [{ align: 'left' }, { align: 'right' }, { align: 'right' }],
-                    rows: waitTableRows,
-                  }],
-                  text: 'Wait time breakdown',
-                  unfurl_links: false,
-                }),
-              });
             }
 
       - name: Send Slack notification (failure)

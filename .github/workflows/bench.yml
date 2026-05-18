@@ -646,6 +646,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.ref }}
 
+      - name: Checkout workflow scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+          path: .bench-workflow-scripts
+          sparse-checkout: .github/scripts
+
       - name: Resolve job URL and update status
         if: env.BENCH_COMMENT_ID
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1377,7 +1386,7 @@ jobs:
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
           script: |
-            const notify = require('./.github/scripts/bench-slack-notify.js');
+            const notify = require('./.bench-workflow-scripts/.github/scripts/bench-slack-notify.js');
             await notify.success({ core, context });
 
       - name: Update status (failed)
@@ -1433,7 +1442,7 @@ jobs:
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
-            const notify = require('./.github/scripts/bench-slack-notify.js');
+            const notify = require('./.bench-workflow-scripts/.github/scripts/bench-slack-notify.js');
             await notify.failure({ core, context, failedStep });
 
       - name: Update status (cancelled)
