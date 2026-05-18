@@ -180,19 +180,22 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             let info = if destroyed { None } else { Some(account.info.into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            } else {
+                let mut changed_storage_iter =
+                    account.storage.into_iter().filter(|(_slot, value)| value.is_changed());
+
+                if let Some((slot, value)) = changed_storage_iter.next() {
+                    let first = (keccak256(B256::from(slot)), value.present_value);
+                    let rest = changed_storage_iter
+                        .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value));
+
+                    hashed_state.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter(false, core::iter::once(first).chain(rest)),
+                    );
+                }
             }
         }
     }
