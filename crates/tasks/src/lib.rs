@@ -50,7 +50,7 @@ pub use for_each_ordered::ForEachOrdered;
 
 pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
-pub use runtime::RayonConfig;
+pub use runtime::{RayonConfig, DEFAULT_PROOF_WORKER_MAX_THREADS};
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
 
 /// A [`TaskExecutor`] is now an alias for [`Runtime`].
