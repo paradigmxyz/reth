@@ -455,6 +455,11 @@ impl AuthServerHandle {
         self.local_addr
     }
 
+    /// Returns the JWT secret used by the auth server.
+    pub const fn jwt_secret(&self) -> &JwtSecret {
+        &self.secret
+    }
+
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
         if let Some(handle) = self.handle {
