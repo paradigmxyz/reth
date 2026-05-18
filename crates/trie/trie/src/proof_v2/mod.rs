@@ -643,12 +643,13 @@ where
 
             // Find the common prefix length, which is the number of nibbles shared between the
             // current branch and the key.
+            let branch_path_len = self.branch_path.len();
             let common_prefix_len = self.branch_path.common_prefix_length(&key);
 
             // If the current branch does not share all of its nibbles with the new key then it is
             // not the parent of the new key. In this case the current branch will have no more
             // children. We can pop it and loop back to the top to try again with its parent branch.
-            if common_prefix_len < self.branch_path.len() {
+            if common_prefix_len < branch_path_len {
                 self.pop_branch(targets)?;
                 continue
             }
@@ -665,7 +666,8 @@ where
                 // Push the new leaf onto the new branch.
                 self.push_new_leaf(targets, nibble, short_key, val)?;
             } else {
-                let short_key = key.slice_unchecked(common_prefix_len + 1, key.len());
+                let key_len = key.len();
+                let short_key = key.slice_unchecked(common_prefix_len + 1, key_len);
                 self.push_new_leaf(targets, nibble, short_key, val)?;
             }
 
@@ -718,8 +720,9 @@ where
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
+        let upper_bound = upper_bound.as_ref();
         while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
+            upper_bound.is_none_or(|upper_bound| key < upper_bound)
         {
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
@@ -1065,8 +1068,9 @@ where
 
             // Since we've popped all branches which don't start with cached_path, branch_path at
             // this point must be equal to or shorter than cached_path.
+            let pre_cached_branch_path_len = self.branch_path.len();
             debug_assert!(
-                self.branch_path.len() < cached_path.len() || self.branch_path == cached_path,
+                pre_cached_branch_path_len < cached_path.len() || self.branch_path == cached_path,
                 "branch_path {:?} is different-or-longer-than cached_path {cached_path:?}",
                 self.branch_path
             );
@@ -1077,6 +1081,7 @@ where
             if self.branch_path != cached_path {
                 self.push_cached_branch(targets, cached_path, &cached_branch)?;
             }
+            let branch_path_len = self.branch_path.len();
 
             // At this point the top of the branch stack is the same branch which was found in the
             // cache.
@@ -1095,7 +1100,6 @@ where
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
             // children have already been constructed.
             if self.prefix_set.contains(&self.branch_path) {
-                let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
                 for nibble in 0u8..16 {
                     if !curr_state_mask.is_bit_set(nibble) {
@@ -1115,10 +1119,9 @@ where
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
             // function would select the same child again.
             if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref.len() > self.branch_path.len()
+                uncalculated_lower_bound_ref.len() > branch_path_len
             {
-                let lower_nibble =
-                    uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len());
+                let lower_nibble = uncalculated_lower_bound_ref.get_unchecked(branch_path_len);
                 // Clear all nibbles strictly below `lower_nibble` since they've been processed.
                 let already_processed_mask = TrieMask::new((1u16 << lower_nibble) - 1);
                 next_child_nibbles &= !already_processed_mask;
