@@ -720,16 +720,6 @@ def target_metric_stat_diff(pairs: list[tuple[float, float]], stat_name: str) ->
     )
 
 
-def target_metric_directions_agree(diffs: list[float]) -> bool:
-    if len(diffs) < 2:
-        return True
-    return (
-        all(diff > 0 for diff in diffs)
-        or all(diff < 0 for diff in diffs)
-        or all(diff == 0 for diff in diffs)
-    )
-
-
 def target_metric_run_stat_value(run: dict, stat_name: str) -> float:
     value = run.get(stat_name)
     if isinstance(value, dict):
