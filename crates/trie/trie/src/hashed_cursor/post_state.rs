@@ -387,7 +387,7 @@ where
     }
 
     fn reset(&mut self) {
-        let Self { cursor, db_cursor_state, post_state_cursor, last_key, post_state: _, .. } = self;
+        let Self { cursor, db_cursor_state, post_state_cursor, last_key, .. } = self;
 
         cursor.reset();
         post_state_cursor.reset();
