@@ -1,12 +1,17 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::{PayloadAttributes, PayloadStatusEnum};
+use alloy_primitives::{keccak256, Address, B256};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV6,
+    ExecutionPayloadSidecar, PayloadAttributes, PayloadStatusEnum, PraguePayloadFields,
+};
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::{
-    node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
+    node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext,
+    wallet::Wallet, NodeHelperType,
 };
 use reth_node_api::TreeConfig;
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -16,6 +21,18 @@ use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_tasks::Runtime;
 use std::sync::Arc;
+
+/// Helper function to create Amsterdam payload attributes.
+pub(crate) const fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadAttributes {
+    PayloadAttributes {
+        timestamp,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Address::ZERO,
+        withdrawals: Some(vec![]),
+        parent_beacon_block_root: Some(B256::ZERO),
+        slot_number: Some(0),
+    }
+}
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -254,6 +271,117 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     node.wait_block(1, block_hash, false).await?;
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_build_and_submit_amsterdam_payload_with_bal() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut nodes, wallet) = setup::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .amsterdam_activated()
+                .build(),
+        ),
+        false,
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+
+    let payload = node.new_payload().await?;
+    let envelope = payload_to_v6(payload.clone())?;
+    assert!(!envelope.execution_payload.block_access_list.is_empty());
+    assert_eq!(
+        payload.block().header().block_access_list_hash(),
+        Some(keccak256(&envelope.execution_payload.block_access_list))
+    );
+
+    let block_hash = submit_v6_payload(&node, envelope).await?;
+    node.update_forkchoice(block_hash, block_hash).await?;
+    node.assert_new_block(tx_hash, block_hash, payload.block().number).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_advance_amsterdam_chain_with_bal() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut nodes, wallet) = setup::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .amsterdam_activated()
+                .build(),
+        ),
+        false,
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+
+    for nonce in 0..3 {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(1, wallet.inner.clone(), nonce)
+                .await;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+
+        let payload = node.new_payload().await?;
+        let envelope = payload_to_v6(payload.clone())?;
+        assert!(!envelope.execution_payload.block_access_list.is_empty());
+        assert_eq!(
+            payload.block().header().block_access_list_hash(),
+            Some(keccak256(&envelope.execution_payload.block_access_list))
+        );
+
+        let block_hash = submit_v6_payload(&node, envelope).await?;
+        node.update_forkchoice(block_hash, block_hash).await?;
+        node.assert_new_block(tx_hash, block_hash, payload.block().number).await?;
+    }
+
+    let best_block = node.inner.provider.best_block_number()?;
+    assert_eq!(best_block, 3);
+
+    Ok(())
+}
+
+fn payload_to_v6<P>(payload: P) -> eyre::Result<ExecutionPayloadEnvelopeV6>
+where
+    P: TryInto<ExecutionPayloadEnvelopeV6>,
+    P::Error: std::fmt::Display,
+{
+    payload.try_into().map_err(|err| eyre::eyre!(err.to_string()))
+}
+
+async fn submit_v6_payload(
+    node: &NodeHelperType<EthereumNode>,
+    envelope: ExecutionPayloadEnvelopeV6,
+) -> eyre::Result<B256> {
+    let block_hash =
+        envelope.execution_payload.payload_inner.payload_inner.payload_inner.block_hash;
+    let versioned_hashes = envelope.blobs_bundle.versioned_hashes();
+    let execution_data = ExecutionData::new(
+        ExecutionPayload::V4(envelope.execution_payload),
+        ExecutionPayloadSidecar::v4(
+            CancunPayloadFields::new(B256::ZERO, versioned_hashes),
+            PraguePayloadFields::new(envelope.execution_requests),
+        ),
+    );
+
+    let status = node.inner.add_ons_handle.beacon_engine_handle.new_payload(execution_data).await?;
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+
+    Ok(block_hash)
 }
 
 /// Tests that the sparse trie pipeline can be shared with the payload builder.
