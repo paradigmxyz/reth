@@ -50,7 +50,8 @@ pub struct LazyTrieData {
 
 impl Clone for LazyTrieData {
     fn clone(&self) -> Self {
-        Self { data: Arc::clone(&self.data), compute: self.compute.clone() }
+        let compute = if self.data.get().is_some() { None } else { self.compute.clone() };
+        Self { data: Arc::clone(&self.data), compute }
     }
 }
 
