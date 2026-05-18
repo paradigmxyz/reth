@@ -121,42 +121,32 @@ pub enum AnyNode {
     Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),
+    /// An "enode:" peer whose host may be a domain name instead of an IP address
+    TrustedPeer(TrustedPeer),
 }
 
 impl AnyNode {
     /// Returns the peer id of the node.
-    #[cfg(not(feature = "secp256k1"))]
-    pub const fn peer_id(&self) -> PeerId {
-        match self {
-            Self::NodeRecord(record) => record.id,
-            Self::PeerId(peer_id) => *peer_id,
-        }
-    }
-
-    /// Returns the peer id of the node.
-    #[cfg(feature = "secp256k1")]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
+            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => pk2id(&enr.public_key()),
             Self::PeerId(peer_id) => *peer_id,
+            Self::TrustedPeer(peer) => peer.id,
         }
     }
 
     /// Returns the full node record if available.
-    #[cfg(not(feature = "secp256k1"))]
-    pub const fn node_record(&self) -> Option<NodeRecord> {
-        match self {
-            Self::NodeRecord(record) => Some(*record),
-            Self::PeerId(_) => None,
-        }
-    }
-
-    /// Returns the full node record if available.
-    #[cfg(feature = "secp256k1")]
+    ///
+    /// For [`AnyNode::TrustedPeer`] variants with a domain host, this returns `None` because
+    /// DNS resolution is required first.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
+            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => {
                 let node_record = NodeRecord {
                     address: enr
@@ -170,7 +160,17 @@ impl AnyNode {
                 .into_ipv4_mapped();
                 Some(node_record)
             }
-            Self::PeerId(_) => None,
+            #[cfg(any(test, feature = "std"))]
+            Self::TrustedPeer(peer) => peer.try_node_record().ok(),
+            _ => None,
+        }
+    }
+
+    /// Returns the [`TrustedPeer`] if this is a `TrustedPeer` variant.
+    pub const fn trusted_peer(&self) -> Option<&TrustedPeer> {
+        match self {
+            Self::TrustedPeer(peer) => Some(peer),
+            _ => None,
         }
     }
 }
@@ -196,7 +196,11 @@ impl FromStr for AnyNode {
             if let Ok(record) = NodeRecord::from_str(s) {
                 return Ok(Self::NodeRecord(record))
             }
-            // incomplete enode
+            // Try as TrustedPeer (supports hostnames in addition to IPs)
+            if let Ok(trusted) = TrustedPeer::from_str(s) {
+                return Ok(Self::TrustedPeer(trusted))
+            }
+            // incomplete enode with only a peer id
             if let Ok(peer_id) = PeerId::from_str(rem) {
                 return Ok(Self::PeerId(peer_id))
             }
@@ -210,6 +214,12 @@ impl FromStr for AnyNode {
     }
 }
 
+impl From<TrustedPeer> for AnyNode {
+    fn from(value: TrustedPeer) -> Self {
+        Self::TrustedPeer(value)
+    }
+}
+
 impl core::fmt::Display for AnyNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -219,6 +229,7 @@ impl core::fmt::Display for AnyNode {
             Self::PeerId(peer_id) => {
                 write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
             }
+            Self::TrustedPeer(peer) => write!(f, "{peer}"),
         }
     }
 }
@@ -340,6 +351,29 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(node.to_string(), url);
+    }
+
+    #[test]
+    fn test_trusted_peer_parse_hostname() {
+        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@my-node.example.com:30303";
+        let node: AnyNode = url.parse().unwrap();
+        assert!(matches!(node, AnyNode::TrustedPeer(_)));
+        assert_eq!(
+            node.peer_id(),
+            "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse::<PeerId>().unwrap()
+        );
+        // node_record() returns None for hostname-based peers (requires DNS resolution)
+        assert!(node.node_record().is_none());
+        assert!(node.trusted_peer().is_some());
+        assert_eq!(node.to_string(), url);
+    }
+
+    #[test]
+    fn test_trusted_peer_parse_ip_still_returns_node_record() {
+        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let node: AnyNode = url.parse().unwrap();
+        // IP-based enodes should still parse as NodeRecord (not TrustedPeer)
+        assert!(matches!(node, AnyNode::NodeRecord(_)));
     }
 
     #[test]

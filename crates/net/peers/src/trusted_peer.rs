@@ -50,8 +50,9 @@ impl TrustedPeer {
     }
 
     /// Tries to resolve directly to a [`NodeRecord`] if the host is an IP address.
+    /// Returns `Err` with the domain name if the host is a domain that requires DNS resolution.
     #[cfg(any(test, feature = "std"))]
-    fn try_node_record(&self) -> Result<NodeRecord, &str> {
+    pub fn try_node_record(&self) -> Result<NodeRecord, &str> {
         match &self.host {
             Host::Ipv4(ip) => Ok(self.to_node_record((*ip).into())),
             Host::Ipv6(ip) => Ok(self.to_node_record((*ip).into())),
