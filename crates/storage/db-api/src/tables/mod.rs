@@ -386,6 +386,14 @@ tables! {
         type Value = Bytecode;
     }
 
+    /// Stores bytecode IDs by bytecode hash.
+    ///
+    /// Bytecode payloads for these IDs are stored in static files.
+    table BytecodeIds {
+        type Key = B256;
+        type Value = u64;
+    }
+
     /// Stores the current state of an [`Account`].
     table PlainAccountState {
         type Key = Address;

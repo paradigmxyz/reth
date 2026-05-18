@@ -901,14 +901,37 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Writes bytecodes to MDBX.
+    /// Writes bytecodes to static files and stores hash-to-ID pointers in MDBX.
     fn write_bytecodes(
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
     ) -> ProviderResult<()> {
-        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
+        let mut next_bytecode_id = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Bytecodes)
+            .map_or(0, |id| id + 1);
+
+        let mut ids_cursor = self.tx_ref().cursor_write::<tables::BytecodeIds>()?;
+        let mut legacy_bytecodes_cursor = self.tx_ref().cursor_read::<tables::Bytecodes>()?;
+        let mut bytecodes_writer = None;
+
         for (hash, bytecode) in bytecodes {
-            bytecodes_cursor.upsert(hash, &bytecode)?;
+            if ids_cursor.seek_exact(hash)?.is_some() ||
+                legacy_bytecodes_cursor.seek_exact(hash)?.is_some()
+            {
+                continue
+            }
+
+            let bytecode_id = next_bytecode_id;
+            next_bytecode_id += 1;
+
+            let writer = match bytecodes_writer.as_mut() {
+                Some(writer) => writer,
+                None => bytecodes_writer
+                    .insert(self.static_file_provider.latest_writer(StaticFileSegment::Bytecodes)?),
+            };
+            writer.append_bytecode(bytecode_id, &bytecode)?;
+            ids_cursor.upsert(hash, &bytecode_id)?;
         }
         Ok(())
     }

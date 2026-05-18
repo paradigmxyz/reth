@@ -99,6 +99,7 @@ impl<C: ChainSpecParser> Command<C> {
                     StaticFileSegment::StorageChangeSets => {
                         writer.prune_storage_changesets(highest_block)?;
                     }
+                    StaticFileSegment::Bytecodes => unreachable!(),
                 }
             }
         }
@@ -145,6 +146,7 @@ impl<C: ChainSpecParser> Command<C> {
                 tx.clear::<tables::AccountChangeSets>()?;
                 tx.clear::<tables::StorageChangeSets>()?;
                 tx.clear::<tables::Bytecodes>()?;
+                tx.clear::<tables::BytecodeIds>()?;
                 tx.clear::<tables::Receipts<ReceiptTy<N>>>()?;
 
                 reset_prune_checkpoint(tx, PruneSegment::Receipts)?;

@@ -178,6 +178,7 @@ pub(crate) fn config_for_selections(
             transaction_senders: blocks_per_file(SnapshotComponentType::TransactionSenders),
             account_change_sets: blocks_per_file(SnapshotComponentType::AccountChangesets),
             storage_change_sets: blocks_per_file(SnapshotComponentType::StorageChangesets),
+            bytecodes: None,
         },
     };
 

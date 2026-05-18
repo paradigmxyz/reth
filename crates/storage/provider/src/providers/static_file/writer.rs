@@ -10,7 +10,7 @@ use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::FastInstant as Instant;
+use reth_primitives_traits::{Bytecode, FastInstant as Instant};
 use reth_static_file_types::{
     ChangesetOffset, ChangesetOffsetReader, ChangesetOffsetWriter, SegmentHeader,
     SegmentRangeInclusive, StaticFileSegment,
@@ -78,6 +78,7 @@ pub(crate) struct StaticFileWriters<N> {
     transaction_senders: RwLock<Option<StaticFileProviderRW<N>>>,
     account_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
     storage_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
+    bytecodes: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
 impl<N> Default for StaticFileWriters<N> {
@@ -89,6 +90,7 @@ impl<N> Default for StaticFileWriters<N> {
             transaction_senders: Default::default(),
             account_change_sets: Default::default(),
             storage_change_sets: Default::default(),
+            bytecodes: Default::default(),
         }
     }
 }
@@ -106,6 +108,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
             StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
             StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
+            StaticFileSegment::Bytecodes => self.bytecodes.write(),
         };
 
         if write_guard.is_none() {
@@ -131,6 +134,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.transaction_senders,
             &self.account_change_sets,
             &self.storage_change_sets,
+            &self.bytecodes,
         ] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
@@ -150,6 +154,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.transaction_senders,
             &self.account_change_sets,
             &self.storage_change_sets,
+            &self.bytecodes,
         ] {
             let writer = writer_lock.read();
             if let Some(writer) = writer.as_ref() &&
@@ -181,6 +186,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.transaction_senders,
             &self.account_change_sets,
             &self.storage_change_sets,
+            &self.bytecodes,
         ] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
@@ -1399,6 +1405,27 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::StorageChangeSets,
                 StaticFileProviderOperation::Append,
                 count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Appends bytecode to the static file by its bytecode ID.
+    pub fn append_bytecode(&mut self, bytecode_id: u64, bytecode: &Bytecode) -> ProviderResult<()> {
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Bytecodes);
+
+        self.increment_block(bytecode_id)?;
+        self.append_column(bytecode)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::Bytecodes,
+                StaticFileProviderOperation::Append,
                 Some(start.elapsed()),
             );
         }

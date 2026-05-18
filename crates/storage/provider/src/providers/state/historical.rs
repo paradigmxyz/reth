@@ -2,6 +2,7 @@ use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
+    StaticFileProviderFactory,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
@@ -659,6 +660,7 @@ where
         + StageCheckpointReader
         + StorageSettingsCache
         + RocksDBProviderFactory
+        + StaticFileProviderFactory
         + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
@@ -674,11 +676,18 @@ where
 
 impl<Provider, N> BytecodeReader for HistoricalStateProviderRef<'_, Provider, N>
 where
-    Provider: DBProvider + BlockNumReader + NodePrimitivesProvider<Primitives = N>,
+    Provider: DBProvider
+        + BlockNumReader
+        + StaticFileProviderFactory
+        + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some(bytecode_id) = self.tx().get_by_encoded_key::<tables::BytecodeIds>(code_hash)? {
+            return self.provider.static_file_provider().bytecode_by_id(bytecode_id)
+        }
+
         self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
@@ -754,7 +763,7 @@ impl<
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
+reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + RocksDBProviderFactory + StaticFileProviderFactory + NodePrimitivesProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -875,7 +884,7 @@ mod tests {
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
-        StateProvider,
+        StateProvider, StaticFileProviderFactory,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
     use reth_db_api::{
@@ -910,6 +919,7 @@ mod tests {
             + StageCheckpointReader
             + StorageSettingsCache
             + RocksDBProviderFactory
+            + StaticFileProviderFactory
             + NodePrimitivesProvider,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();

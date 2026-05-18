@@ -11,12 +11,12 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
-    BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TransactionMask,
-    TransactionSenderMask,
+    BlockHashMask, BytecodeMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
+    TransactionMask, TransactionSenderMask,
 };
 use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::{SealedHeader, SignedTransaction};
+use reth_primitives_traits::{Bytecode, SealedHeader, SignedTransaction};
 use reth_static_file_types::ChangesetOffset;
 use reth_storage_api::range_size_hint;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -140,6 +140,11 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
         } else {
             Ok(None)
         }
+    }
+
+    /// Reads bytecode by static-file bytecode ID.
+    pub fn bytecode_by_id(&self, bytecode_id: u64) -> ProviderResult<Option<Bytecode>> {
+        self.cursor()?.get_one::<BytecodeMask>(bytecode_id.into())
     }
 }
 

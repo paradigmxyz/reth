@@ -1,5 +1,6 @@
 use crate::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
+    StaticFileProviderFactory,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -257,8 +258,8 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
-    for LatestStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + BlockHashReader + StaticFileProviderFactory + StorageSettingsCache>
+    StateProvider for LatestStateProviderRef<'_, Provider>
 {
     /// Get storage by plain (unhashed) storage key slot.
     fn storage(
@@ -283,11 +284,15 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader> BytecodeReader
+impl<Provider: DBProvider + BlockHashReader + StaticFileProviderFactory> BytecodeReader
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some(bytecode_id) = self.tx().get_by_encoded_key::<tables::BytecodeIds>(code_hash)? {
+            return self.0.static_file_provider().bytecode_by_id(bytecode_id)
+        }
+
         self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
@@ -310,7 +315,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader + StorageSettingsCache]);
+reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader + StaticFileProviderFactory + StorageSettingsCache]);
 
 #[cfg(test)]
 mod tests {
@@ -328,7 +333,7 @@ mod tests {
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
     const fn assert_latest_state_provider<
-        T: DBProvider + BlockHashReader + StorageSettingsCache,
+        T: DBProvider + BlockHashReader + StaticFileProviderFactory + StorageSettingsCache,
     >() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
