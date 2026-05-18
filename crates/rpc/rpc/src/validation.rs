@@ -1,7 +1,10 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{eip7685::RequestsOrHash, eip7928::bal::DecodedBal};
+use alloy_eips::{
+    eip7685::RequestsOrHash,
+    eip7928::{bal::DecodedBal, compute_block_access_list_hash},
+};
 use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
@@ -127,7 +130,7 @@ where
         block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
-        _decoded_bal: Option<DecodedBal>,
+        decoded_bal: Option<DecodedBal>,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
@@ -175,16 +178,34 @@ where
 
         self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
         self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
+        if let Some(decoded_bal) = &decoded_bal {
+            decoded_bal
+                .as_bal()
+                .validate_gas_limit(block.gas_limit())
+                .map_err(ConsensusError::from)?;
+        }
+
         let parent_header_hash = parent_header.hash();
         let state_provider = self.provider.state_by_block_hash(parent_header_hash)?;
 
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let executor = self.evm_config.batch_executor(cached_db);
+        let mut executor = self.evm_config.batch_executor(cached_db);
 
-        let mut accessed_blacklisted = None;
-        let output = executor.execute_with_state_closure(&block, |state| {
+        let result = executor.execute_one(&block)?;
+
+        let rebuilt_bal = if decoded_bal.is_some() {
+            Some(executor.take_bal().ok_or_else(|| {
+                BlockExecutionError::msg("missing rebuilt block access list after BAL execution")
+            })?)
+        } else {
+            None
+        };
+
+        let output = {
+            let mut state = executor.into_state();
+            let mut accessed_blacklisted = None;
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by scanning
                 // the `State`'s cache that records everything read from database during execution.
@@ -194,16 +215,33 @@ where
                     }
                 }
             }
-        })?;
 
-        if let Some(account) = accessed_blacklisted {
-            return Err(ValidationApiError::Blacklist(account))
+            if let Some(account) = accessed_blacklisted {
+                return Err(ValidationApiError::Blacklist(account))
+            }
+
+            BlockExecutionOutput { state: state.take_bundle(), result }
+        };
+
+        if let Some((decoded_bal, rebuilt_bal)) = decoded_bal.as_ref().zip(rebuilt_bal.as_ref()) &&
+            rebuilt_bal.as_slice() != decoded_bal.as_bal().as_slice()
+        {
+            return Err(ConsensusError::BlockAccessListHashMismatch(
+                GotExpected::new(compute_block_access_list_hash(rebuilt_bal), decoded_bal.hash())
+                    .into(),
+            )
+            .into())
         }
 
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(&block, &output, None, None)?;
+        self.consensus.validate_block_post_execution(
+            &block,
+            &output,
+            None,
+            decoded_bal.as_ref().map(|decoded_bal| decoded_bal.hash()),
+        )?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -728,8 +766,12 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
-            ValidationApiError::Consensus(_) |
             ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
+            ValidationApiError::Consensus(
+                error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
+                ConsensusError::BlockAccessListHashMismatch(_)),
+            ) => invalid_params_rpc_err(error.to_string()),
+            ValidationApiError::Consensus(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Execution(err) => match err {
                 error @ BlockExecutionError::Validation(_) => {
                     invalid_params_rpc_err(error.to_string())
