@@ -411,18 +411,51 @@ fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
 TARGET_METRICS_START_MS=""
-TXGEN_METRICS_ARGS=()
-if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
-  TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
-  TXGEN_METRICS_ARGS=(
-    --metrics-url "http://${BENCH_METRICS_ADDR}/"
-    --scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS"
-  )
-fi
-
 CLICKHOUSE_REPORT=()
 if [ -n "${CLICKHOUSE_URL:-}" ]; then
   CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
+fi
+
+METRICS_ARGS=()
+PROMETHEUS_REPORT=()
+PROMETHEUS_METADATA=()
+METRICS_URL_ADDED=false
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+  if [ -z "${BENCH_METRICS_ADDR:-}" ]; then
+    echo "::error::BENCH_METRICS_ADDR is required when benchmark metrics are enabled"
+    exit 1
+  fi
+
+  METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
+  METRICS_URL_ADDED=true
+fi
+
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+  TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
+  if [ "$METRICS_URL_ADDED" = true ]; then
+    METRICS_ARGS+=(--scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS")
+  fi
+fi
+
+if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+  if [ "$METRICS_URL_ADDED" != true ] && [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+    METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
+  fi
+  PROMETHEUS_REPORT+=(--report "victoriametrics:$BENCH_VICTORIAMETRICS_URL")
+
+  if [ -n "${BENCH_LABELS_FILE:-}" ] && [ -f "$BENCH_LABELS_FILE" ]; then
+    BENCHMARK_START=$(jq -r '.run_start_epoch // empty' "$BENCH_LABELS_FILE")
+    if [ -n "$BENCHMARK_START" ]; then
+      METRICS_ARGS+=(--metrics-align "$BENCHMARK_START")
+    fi
+
+    for key in benchmark_run run_type benchmark_id run_start_epoch reference_epoch bench_sha; do
+      value=$(jq -r --arg key "$key" '.[$key] // empty' "$BENCH_LABELS_FILE")
+      if [ -n "$value" ]; then
+        PROMETHEUS_METADATA+=(-m "$key=$value")
+      fi
+    done
+  fi
 fi
 
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
@@ -431,16 +464,19 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --jwt-secret "$DATADIR/jwt.hex" \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
-  "${TXGEN_METRICS_ARGS[@]}" \
+  "${METRICS_ARGS[@]}" \
   --wait-for-persistence never \
   --report json:"$OUTPUT_DIR/report.json" \
   "${CLICKHOUSE_REPORT[@]}" \
+  "${PROMETHEUS_REPORT[@]}" \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
+  -m "job=github-reth-bench" \
   -m "platform=ethereum" \
   -m "scenario=replay" \
   -m "bal-mode=${BENCH_BAL:-false}" \
-  -m "bal-enabled=$USE_BAL" 2>&1 | sed -u "s/^/[bench] /"
+  -m "bal-enabled=$USE_BAL" \
+  "${PROMETHEUS_METADATA[@]}" 2>&1 | sed -u "s/^/[bench] /"
 
 if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
