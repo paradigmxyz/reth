@@ -20,6 +20,7 @@ reth-ethereum-primitives.workspace = true
 revm.workspace = true
 reth-evm.workspace = true
 reth-storage-errors.workspace = true
+alloy-sol-types = { workspace = true }
 
 # Alloy
 alloy-primitives.workspace = true
