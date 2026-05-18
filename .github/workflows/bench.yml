@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       blocks:
-        description: "Number of blocks to benchmark"
+        description: "Number of blocks to benchmark (default: 500, big blocks: 65)"
         required: false
-        default: "500"
+        default: ""
         type: string
       big_blocks:
         description: "Use big blocks mode: false, true, or target gas like 100M/2G"
@@ -82,9 +82,9 @@ on:
           - on-error
           - never
       run_pairs:
-        description: "Number of benchmark run pairs (1 = AB, 2 = ABBA, 3 = ABABAB)"
+        description: "Number of benchmark run pairs (default: 6, big blocks: 10)"
         required: false
-        default: "6"
+        default: ""
         type: string
       otlp:
         description: "Export OTLP traces and logs"
@@ -182,7 +182,9 @@ jobs:
             const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
             let bigBlocksTargetGas = '';
+            let explicitBlocks = false;
             let explicitWarmup = false;
+            let explicitRunPairs = false;
 
             const parseBigBlocks = (value) => {
               value = String(value || 'false');
@@ -191,7 +193,9 @@ jobs:
               if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
               return null;
             };
+            const defaultBlocks = (isBigBlocks) => isBigBlocks ? '65' : '500';
             const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
+            const defaultRunPairs = (isBigBlocks) => isBigBlocks ? '10' : '6';
             const benchRunOrder = (runPairs) => {
               const n = Number(runPairs);
               if (!Number.isInteger(n) || n < 1) {
@@ -202,7 +206,8 @@ jobs:
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
-              blocks = '${{ github.event.inputs.blocks }}' || '500';
+              blocks = '${{ github.event.inputs.blocks }}' || '';
+              explicitBlocks = blocks !== '';
               warmup = '${{ github.event.inputs.warmup }}' || '';
               explicitWarmup = warmup !== '';
               baseline = '${{ github.event.inputs.baseline }}';
@@ -218,7 +223,8 @@ jobs:
               bigBlocks = parsedBigBlocks.enabled;
               bigBlocksTargetGas = parsedBigBlocks.targetGas;
               bal = '${{ github.event.inputs.bal }}' || 'false';
-              var runPairs = '${{ github.event.inputs.run_pairs }}' || '6';
+              var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
+              explicitRunPairs = runPairs !== '';
               var otlp = '${{ github.event.inputs.otlp }}' === 'true' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
@@ -248,7 +254,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '6', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -305,7 +311,9 @@ jobs:
                     invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
                   } else {
                     defaults[key] = value;
+                    if (key === 'blocks') explicitBlocks = true;
                     if (key === 'warmup') explicitWarmup = true;
+                    if (key === 'run-pairs') explicitRunPairs = true;
                   }
                 } else if (refArgs.has(key)) {
                   if (!value) {
@@ -351,6 +359,13 @@ jobs:
               var featureNodeArgs = defaults['feature-args'];
             }
 
+            const isBigBlocks = bigBlocks === 'true';
+            if (!explicitBlocks) {
+              blocks = defaultBlocks(isBigBlocks);
+            }
+            if (!explicitRunPairs) {
+              runPairs = defaultRunPairs(isBigBlocks);
+            }
             if (!/^\d+$/.test(blocks)) {
               core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
               return;
@@ -510,7 +525,7 @@ jobs:
             const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
-            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
             const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
@@ -558,7 +573,7 @@ jobs:
             const driver = '${{ steps.args.outputs.driver }}' || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = '${{ steps.args.outputs.driver-reason }}';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
-            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
             const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
@@ -719,7 +734,7 @@ jobs:
             const driver = process.env.BENCH_DRIVER || (bal !== 'false' ? 'reth-bench' : 'txgen');
             const driverReason = process.env.BENCH_DRIVER_REASON || '';
             const driverNote = driverReason ? `, driver: \`${driver}\` (fallback: \`${driverReason}\`)` : `, driver: \`${driver}\``;
-            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
             core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${driverNote}${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
@@ -1062,8 +1077,8 @@ jobs:
           echo "${RUN_ORDER}" > "$BENCH_WORK_DIR/run_order.txt"
           echo "Run order: ${RUN_ORDER} (A=feature, B=baseline)"
 
-          feature_total=$(grep -o A <<< "$RUN_ORDER" | wc -l | tr -d ' ')
-          baseline_total=$(grep -o B <<< "$RUN_ORDER" | wc -l | tr -d ' ')
+          run_total="${#RUN_ORDER}"
+          run_progress=0
           feature_index=0
           baseline_index=0
           RUN_SCRIPT=.github/scripts/bench-reth-run.sh
@@ -1077,14 +1092,12 @@ jobs:
               run_type="feature"
               feature_index=$((feature_index + 1))
               run_index="$feature_index"
-              run_total="$feature_total"
               ref="$FEATURE_REF"
               binary="../reth-feature/target/profiling/${BENCH_NODE_BIN}"
             elif [ "$side" = "B" ]; then
               run_type="baseline"
               baseline_index=$((baseline_index + 1))
               run_index="$baseline_index"
-              run_total="$baseline_total"
               ref="$BASELINE_REF"
               binary="../reth-baseline/target/profiling/${BENCH_NODE_BIN}"
             else
@@ -1092,8 +1105,9 @@ jobs:
               exit 1
             fi
 
+            run_progress=$((run_progress + 1))
             run_label="${run_type}-${run_index}"
-            .github/scripts/bench-update-status.sh "Running benchmark: ${run_label} (${run_index}/${run_total})..."
+            .github/scripts/bench-update-status.sh "Running benchmark: ${run_label} (${run_progress}/${run_total})..."
             LAST_RUN_START=$(date +%s)
             echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
             export OTEL_RESOURCE_ATTRIBUTES="benchmark_id=${BENCH_ID},benchmark_run=${run_label},run_type=${run_type},git_ref=${ref}"
