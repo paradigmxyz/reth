@@ -3,6 +3,7 @@
 use futures::{future::BoxFuture, ready, stream::FuturesUnordered, FutureExt, StreamExt};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use std::{
+    collections::HashMap,
     io,
     task::{Context, Poll},
 };
@@ -13,8 +14,8 @@ use tracing::warn;
 /// It returns a resolved (`PeerId`, `NodeRecord`) update when one of its in‑flight tasks completes.
 #[derive(Debug)]
 pub struct TrustedPeersResolver {
-    /// The list of trusted peers to resolve.
-    pub trusted_peers: Vec<TrustedPeer>,
+    /// The trusted peers to resolve, keyed by [`PeerId`] for deduplication and O(1) removal.
+    pub trusted_peers: HashMap<PeerId, TrustedPeer>,
     /// The timer that triggers a new resolution cycle.
     pub interval: Interval,
     /// Futures for currently in‑flight resolution tasks.
@@ -24,6 +25,7 @@ pub struct TrustedPeersResolver {
 impl TrustedPeersResolver {
     /// Create a new resolver with the given trusted peers and resolution interval.
     pub fn new(trusted_peers: Vec<TrustedPeer>, resolve_interval: Interval) -> Self {
+        let trusted_peers = trusted_peers.into_iter().map(|p| (p.id, p)).collect();
         Self { trusted_peers, interval: resolve_interval, pending: FuturesUnordered::new() }
     }
 
@@ -44,7 +46,7 @@ impl TrustedPeersResolver {
         if self.interval.poll_tick(cx).is_ready() {
             self.pending.clear();
 
-            for trusted in self.trusted_peers.iter().cloned() {
+            for trusted in self.trusted_peers.values().cloned() {
                 let peer_id = trusted.id;
                 let task = async move {
                     let result = trusted.resolve().await;

@@ -21,7 +21,7 @@ use reth_network_api::{
     PeersInfo,
 };
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
@@ -320,6 +320,10 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
         self.send_message(NetworkHandleMessage::AddTrustedPeerId(peer));
     }
 
+    fn add_trusted_peer_node(&self, peer: TrustedPeer) {
+        self.send_message(NetworkHandleMessage::AddTrustedPeerNode(peer));
+    }
+
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
     fn add_peer_kind(
@@ -525,6 +529,8 @@ pub trait NetworkProtocols: Send + Sync {
 pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Marks a peer as trusted.
     AddTrustedPeerId(PeerId),
+    /// Adds a trusted peer that may use a hostname, registering it for periodic DNS re-resolution.
+    AddTrustedPeerNode(TrustedPeer),
     /// Adds an address for a peer, including its ID, kind, and socket address.
     AddPeerAddress(PeerId, Option<PeerKind>, PeerAddr),
     /// Removes a peer from the peerset corresponding to the given kind.

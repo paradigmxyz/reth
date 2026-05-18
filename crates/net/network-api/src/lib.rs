@@ -140,6 +140,13 @@ pub trait Peers: PeersInfo {
         self.add_peer_kind(peer, Some(PeerKind::Trusted), tcp_addr, Some(udp_addr));
     }
 
+    /// Registers a trusted peer that may use a hostname instead of an IP address.
+    ///
+    /// Resolution is performed asynchronously by the periodic DNS resolver; the peer is
+    /// added to the peer set on first successful resolution and re-resolved periodically
+    /// so address changes are picked up automatically.
+    fn add_trusted_peer_node(&self, _peer: reth_network_peers::TrustedPeer) {}
+
     /// Adds a peer to the known peer set, with the given kind.
     ///
     /// If the peer already exists, then this will update its tracked info.

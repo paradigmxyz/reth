@@ -307,6 +307,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         self.peers_manager.add_trusted_peer_id(peer_id)
     }
 
+    /// Adds a trusted peer that may use a hostname, with periodic DNS re-resolution.
+    pub(crate) fn add_trusted_peer_node(&mut self, trusted: reth_network_peers::TrustedPeer) {
+        self.peers_manager.add_trusted_peer_node(trusted)
+    }
+
     /// Adds a peer and its address with the given kind to the peerset.
     pub(crate) fn add_peer_kind(
         &mut self,
