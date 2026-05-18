@@ -165,7 +165,7 @@ impl LogArgs {
     /// Initializes tracing with the configured options from cli args.
     ///
     /// When `enable_reload` is true, a global log handle is installed that allows changing
-    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    /// log levels at runtime.
     ///
     /// # Arguments
     /// * `layers` - Pre-configured layers to include

@@ -1,11 +1,12 @@
-use crate::utils::eth_payload_attributes;
+use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    SignedBidSubmissionV3, SignedBidSubmissionV4,
+    BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
+    SignedBidSubmissionV6,
 };
 use alloy_rpc_types_engine::{BlobsBundleV1, ExecutionPayloadV3};
 use alloy_rpc_types_eth::TransactionRequest;
@@ -293,6 +294,92 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
         .await
         .is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_flashbots_validate_v6() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    for nonce in 0..3 {
+        let _ = provider
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).nonce(nonce))
+            .await?;
+    }
+
+    let payload = node.new_payload().await?;
+    assert!(payload.block_access_list().is_some());
+    assert!(payload.block().body().transactions().count() >= 3);
+
+    let envelope = payload.clone().try_into_v6()?;
+    let mut request = BuilderBlockValidationRequestV6 {
+        request: SignedBidSubmissionV6 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: envelope.execution_payload,
+            blobs_bundle: envelope.blobs_bundle,
+            execution_requests: envelope.execution_requests.try_into().unwrap(),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
+        .await
+        .expect("request should validate");
+
+    request.registered_gas_limit -= 1;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
+        .await
+        .is_err());
+    request.registered_gas_limit += 1;
+
+    let mut invalid_bal_request = request.clone();
+    invalid_bal_request.request.execution_payload.block_access_list = Bytes::from_static(&[0xc0]);
+    assert!(provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&invalid_bal_request,)
+        )
+        .await
+        .is_err());
+
+    request.request.execution_payload.payload_inner.payload_inner.payload_inner.state_root =
+        B256::ZERO;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
+        .await
+        .is_err());
+
     Ok(())
 }
 
