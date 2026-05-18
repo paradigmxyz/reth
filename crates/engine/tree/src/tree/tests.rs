@@ -2316,3 +2316,258 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
     );
     assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
 }
+
+// --- Backfill target selection tests ---
+//
+// Cover `backfill_target_hash` and its consumer `backfill_sync_target`, exercised end-to-end
+// via `on_disconnected_downloaded_block`. The OP Stack branch targets head; the Ethereum
+// branch targets finalized. When the CL has no finalized hash yet, the optimistic fallback to
+// head is handled by `backfill_sync_target`.
+
+#[test]
+fn test_backfill_target_hash_eth_returns_finalized() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    let head = B256::from([0xAA; 32]);
+    let finalized = B256::from([0xBB; 32]);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+
+    assert_eq!(test_harness.tree.backfill_target_hash(state), finalized);
+}
+
+#[test]
+fn test_backfill_target_hash_eth_returns_zero_finalized() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    let head = B256::from([0xAA; 32]);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+
+    assert_eq!(test_harness.tree.backfill_target_hash(state), B256::ZERO);
+}
+
+#[test]
+fn test_backfill_target_hash_opstack_returns_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+    let head = B256::from([0xAA; 32]);
+    let finalized = B256::from([0xBB; 32]);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+
+    // OP Stack: finalized can lag far behind the canonical tip; target head regardless.
+    assert_eq!(test_harness.tree.backfill_target_hash(state), head);
+}
+
+#[test]
+fn test_backfill_sync_target_without_sync_state_returns_none() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    assert_eq!(
+        test_harness.tree.backfill_sync_target(0, MIN_BLOCKS_FOR_PIPELINE_RUN + 100, None),
+        None
+    );
+}
+
+/// On OP Stack, a disconnected downloaded block whose missing parent is far ahead of the
+/// canonical tip should trigger a backfill targeting `head_block_hash`, not finalized.
+#[test]
+fn test_on_disconnected_downloaded_block_opstack_targets_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+
+    let head_hash = B256::from([0xAA; 32]);
+    let finalized_hash = B256::from([0xBB; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: finalized_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let canonical_head = BlockNumHash::new(0, B256::ZERO);
+    let downloaded_block =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+    let missing_parent =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+
+    let event = test_harness.tree.on_disconnected_downloaded_block(
+        downloaded_block,
+        missing_parent,
+        canonical_head,
+    );
+
+    match event {
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target))) => {
+            assert_eq!(
+                target.sync_target(),
+                Some(head_hash),
+                "OP Stack backfill should target head, not finalized"
+            );
+        }
+        other => panic!("Expected BackfillAction(Start), got: {other:?}"),
+    }
+}
+
+/// On Ethereum, a disconnected downloaded block whose missing parent is far ahead of the
+/// canonical tip should trigger a backfill targeting `finalized_block_hash`.
+#[test]
+fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+
+    let head_hash = B256::from([0xAA; 32]);
+    let finalized_hash = B256::from([0xBB; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: finalized_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let canonical_head = BlockNumHash::new(0, B256::ZERO);
+    let downloaded_block =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+    let missing_parent =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+
+    let event = test_harness.tree.on_disconnected_downloaded_block(
+        downloaded_block,
+        missing_parent,
+        canonical_head,
+    );
+
+    match event {
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target))) => {
+            assert_eq!(
+                target.sync_target(),
+                Some(finalized_hash),
+                "Ethereum backfill should target finalized"
+            );
+        }
+        other => panic!("Expected BackfillAction(Start), got: {other:?}"),
+    }
+}
+
+/// On Ethereum, a zero finalized hash means optimistic sync. The helper still selects finalized,
+/// but the sync-target builder falls back to `head_block_hash`.
+#[test]
+fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+
+    let head_hash = B256::from([0xAA; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let canonical_head = BlockNumHash::new(0, B256::ZERO);
+    let downloaded_block =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+    let missing_parent =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+
+    let event = test_harness.tree.on_disconnected_downloaded_block(
+        downloaded_block,
+        missing_parent,
+        canonical_head,
+    );
+
+    match event {
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target))) => {
+            assert_eq!(
+                target.sync_target(),
+                Some(head_hash),
+                "Ethereum optimistic backfill should target head when finalized is zero"
+            );
+        }
+        other => panic!("Expected BackfillAction(Start), got: {other:?}"),
+    }
+}
+
+/// Verifies that the post-backfill recheck path in `on_backfill_sync_finished` retriggers a
+/// new backfill targeting whichever block `backfill_target_hash` resolves to — head on OP
+/// Stack, finalized on Ethereum — when that block is buffered far ahead of where the
+/// just-finished pipeline landed.
+async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind: EngineApiKind) {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    test_harness.tree.engine_kind = engine_kind;
+
+    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
+    test_harness = test_harness.with_blocks(base_chain.clone());
+    test_harness
+        .fcu_to(base_chain.last().unwrap().recovered_block().hash(), ForkchoiceStatus::Valid)
+        .await;
+
+    // Long unsynced chain. The last block is what the helper should resolve to.
+    let main_chain = test_harness
+        .block_builder
+        .create_fork(base_chain[0].recovered_block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 50);
+    let target_block = main_chain.last().unwrap().clone();
+    let target_hash = target_block.hash();
+
+    // Buffer the target block — the recheck looks up the helper's resolved hash in the buffer
+    // to decide whether to retrigger.
+    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block());
+
+    // Place the buffered hash in the FCU slot the helper picks for this chain type, and put
+    // an unrelated hash (not in buffer) in the other slot to keep the two slots distinct.
+    let other_hash = B256::from([0xFF; 32]);
+    let (head_block_hash, finalized_block_hash) = if engine_kind.is_opstack() {
+        (target_hash, other_hash)
+    } else {
+        (other_hash, target_hash)
+    };
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState { head_block_hash, safe_block_hash: head_block_hash, finalized_block_hash },
+        ForkchoiceStatus::Syncing,
+    );
+
+    // Simulate backfill finishing far below the buffered target (gap > threshold).
+    let backfill_finished_block_number = MIN_BLOCKS_FOR_PIPELINE_RUN + 1;
+    let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
+    test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+    let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
+        block_number: backfill_finished_block_number,
+    });
+    let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
+
+    let event = test_harness.from_tree_rx.recv().await.unwrap();
+    match event {
+        EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target)) => {
+            assert_eq!(
+                emitted_target.sync_target(),
+                Some(target_hash),
+                "post-backfill recheck should retrigger backfill to the buffered target"
+            );
+        }
+        _ => panic!("Expected BackfillAction(Start), got: {event:#?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_head() {
+    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::OpStack).await;
+}
+
+#[tokio::test]
+async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
+    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
+}
