@@ -53,10 +53,14 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
             provider,
             &[PruneSegment::AccountHistory, PruneSegment::StorageHistory],
         )?;
-        let tx = effective_resource(provider, &[PruneSegment::TransactionLookup])?;
+        let tx =
+            effective_resource(provider, &[PruneSegment::TransactionLookup, PruneSegment::Bodies])?;
         let logs =
             effective_resource(provider, &[PruneSegment::Receipts, PruneSegment::ContractLogs])?;
-        let receipts = effective_resource(provider, &[PruneSegment::Receipts])?;
+        let receipts = effective_resource(
+            provider,
+            &[PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
+        )?;
         let blocks = effective_resource(provider, &[PruneSegment::Bodies])?;
 
         let proof_oldest = chain_info
