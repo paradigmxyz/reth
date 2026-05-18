@@ -80,7 +80,7 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProviderFactory},
+    providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
@@ -112,6 +112,9 @@ type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
 /// without entering execution.
 const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
+
+/// Worker name for deferred trie data and changeset provider preparation.
+const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -485,6 +488,7 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+        let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
         // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
         // `provider_builder` (consumed by `spawn_payload_processor` below).
@@ -496,7 +500,7 @@ where
             env.clone(),
             txs,
             provider_builder.clone(),
-            overlay_factory.clone(),
+            overlay_factory,
             &strategy,
         ));
 
@@ -793,12 +797,13 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        // Create the overlay provider NOW, while we're on the engine loop thread and trie changeset
-        // eviction cannot race with us. If we deferred this to the background task, persistence
-        // could advance and evict changeset cache entries between factory creation and the task
-        // actually running, causing expensive DB fallback computations when building the overlay.
-        let changeset_provider =
-            ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
+        let changeset_provider = ensure_ok_post_block!(
+            changeset_provider
+                .try_into_inner()
+                .ok()
+                .expect("changeset provider handle is not cloned"),
+            block
+        );
 
         let executed_block = self.spawn_deferred_trie_task(
             Arc::new(block),
@@ -863,6 +868,29 @@ where
 
             Ok(block)
         })
+    }
+
+    /// Spawns a background task that creates the changeset provider used by the deferred trie task.
+    ///
+    /// This is started before execution so overlay construction can run concurrently with payload
+    /// validation, then awaited before the deferred trie task is spawned.
+    fn spawn_changeset_provider_task(
+        &self,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
+    ) -> LazyHandle<ProviderResult<OverlayStateProvider<P::Provider>>> {
+        let parent_span = Span::current();
+        self.payload_processor.executor().spawn_blocking_named(
+            DEFERRED_TRIE_WORKER_NAME,
+            move || {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_validator",
+                    parent: parent_span,
+                    "changeset_provider",
+                )
+                .entered();
+                overlay_factory.database_provider_ro()
+            },
+        )
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -1796,7 +1824,7 @@ where
         // Spawn task that computes trie data asynchronously.
         self.payload_processor
             .executor()
-            .spawn_blocking_named("trie-input", compute_trie_input_task);
+            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
