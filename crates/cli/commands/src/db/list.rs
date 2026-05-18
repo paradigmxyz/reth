@@ -22,7 +22,7 @@ pub struct Command {
     #[arg(long, short, default_value_t = false)]
     reverse: bool,
     /// How many items to take from the walker
-    #[arg(long, short, default_value_t = 5)]
+    #[arg(long, short, default_value_t = 5, value_parser = parse_nonzero_usize)]
     len: usize,
     /// Search parameter for both keys and values. Prefix it with `0x` to search for binary data,
     /// and text otherwise.
@@ -88,6 +88,15 @@ impl Command {
     }
 }
 
+/// Parses a `usize` and ensures it is non-zero.
+fn parse_nonzero_usize(s: &str) -> Result<usize, String> {
+    let value: usize = s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+    if value == 0 {
+        return Err("value must be greater than 0".to_string())
+    }
+    Ok(value)
+}
+
 struct ListTableViewer<'a, N: NodeTypes> {
     tool: &'a DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     args: &'a Command,
@@ -141,5 +150,41 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
         })??;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_nonzero_usize_accepts_positive() {
+        assert_eq!(parse_nonzero_usize("1").unwrap(), 1);
+        assert_eq!(parse_nonzero_usize("42").unwrap(), 42);
+    }
+
+    #[test]
+    fn parse_nonzero_usize_rejects_zero() {
+        assert!(parse_nonzero_usize("0").is_err());
+    }
+
+    #[test]
+    fn parse_nonzero_usize_rejects_invalid() {
+        assert!(parse_nonzero_usize("-1").is_err());
+        assert!(parse_nonzero_usize("abc").is_err());
+    }
+
+    #[test]
+    fn command_rejects_zero_len() {
+        // `--len 0` must fail at argument parsing.
+        let result = Command::try_parse_from(["list", "Headers", "--len", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn command_accepts_positive_len() {
+        let cmd = Command::try_parse_from(["list", "Headers", "--len", "10"]).unwrap();
+        assert_eq!(cmd.len, 10);
     }
 }

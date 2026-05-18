@@ -194,7 +194,7 @@ where
 
     /// Go to a specific page.
     fn go_to_page(&mut self, page: usize) {
-        self.skip = (self.count * page).min(self.total_entries - self.count);
+        self.skip = (self.count * page).min(self.total_entries.saturating_sub(self.count));
         self.fetch_page();
     }
 
@@ -398,7 +398,7 @@ where
         ),
         ViewMode::GoToPage => Paragraph::new(format!(
             "Go to page (max {}): {}",
-            app.total_entries / app.count,
+            app.total_entries / app.count.max(1),
             app.input
         )),
     }
