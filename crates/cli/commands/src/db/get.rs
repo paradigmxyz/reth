@@ -14,7 +14,7 @@ use reth_db_api::{
     table::{Compress, Decompress, DupSort, Table},
     tables,
     transaction::DbTx,
-    RawKey, RawTable, Receipts, TableViewer, Transactions,
+    RawKey, RawTable, TableViewer,
 };
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
@@ -264,15 +264,12 @@ impl Command {
                                     );
                                 }
                                 StaticFileSegment::Transactions => {
-                                    let transaction = <<Transactions as Table>::Value>::decompress(
-                                        content[0].as_slice(),
-                                    )?;
+                                    let transaction = TxTy::<N>::decompress(content[0].as_slice())?;
                                     println!("{}", serde_json::to_string_pretty(&transaction)?);
                                 }
                                 StaticFileSegment::Receipts => {
-                                    let receipt = <<Receipts as Table>::Value>::decompress(
-                                        content[0].as_slice(),
-                                    )?;
+                                    let receipt =
+                                        ReceiptTy::<N>::decompress(content[0].as_slice())?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
                                 StaticFileSegment::TransactionSenders => {

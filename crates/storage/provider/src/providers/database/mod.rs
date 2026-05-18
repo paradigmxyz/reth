@@ -5,11 +5,11 @@ use crate::{
     },
     to_range,
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    EitherWriterDestination, HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider,
-    MetadataProvider, ProviderError, PruneCheckpointReader, RocksDBProviderFactory,
-    StageCheckpointReader, StateProviderBox, StaticFileProviderFactory, StaticFileWriter,
-    TransactionVariant, TransactionsProvider,
+    BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
+    DatabaseProviderFactory, EitherWriterDestination, HashedPostStateProvider, HeaderProvider,
+    HeaderSyncGapProvider, InMemoryBalStore, MetadataProvider, ProviderError,
+    PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
+    StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -90,6 +90,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
+    /// Store for block access lists.
+    bal_store: BalStoreHandle,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Minimum distance from tip required before pruning can occur.
@@ -152,6 +154,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
             changeset_cache: ChangesetCache::new(),
+            bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             read_only_sync: None,
@@ -180,6 +183,12 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
     pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
+        self
+    }
+
+    /// Sets the BAL store for an existing [`ProviderFactory`].
+    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
+        self.bal_store = bal_store;
         self
     }
 
@@ -583,6 +592,12 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
     type Primitives = N::Primitives;
 }
 
+impl<N: NodeTypesWithDB> BalProvider for ProviderFactory<N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
+    }
+}
+
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
     type Provider = DatabaseProvider<<N::DB as Database>::TX, N>;
@@ -955,6 +970,7 @@ where
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            bal_store,
             runtime,
             minimum_pruning_distance,
             read_only_sync,
@@ -968,6 +984,7 @@ where
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
             .field("changeset_cache", &changeset_cache)
+            .field("bal_store", &bal_store)
             .field("runtime", &runtime)
             .field("minimum_pruning_distance", &minimum_pruning_distance)
             .field(
@@ -989,6 +1006,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
             changeset_cache: self.changeset_cache.clone(),
+            bal_store: self.bal_store.clone(),
             runtime: self.runtime.clone(),
             minimum_pruning_distance: self.minimum_pruning_distance,
             read_only_sync: self.read_only_sync.clone(),

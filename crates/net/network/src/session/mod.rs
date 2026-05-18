@@ -123,6 +123,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// Shared local range information that gets propagated to active sessions.
     /// This represents the range of blocks that this node can serve to other peers.
     local_range_info: BlockRangeInfo,
+    /// When true, block announcement messages (`NewBlock`, `NewBlockHashes`) are rejected before
+    /// RLP decoding on new sessions to avoid memory amplification.
+    reject_block_announcements: bool,
 }
 
 // === impl SessionManager ===
@@ -140,6 +143,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
         eth_max_message_size: usize,
+        reject_block_announcements: bool,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -176,6 +180,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             handshake,
             eth_max_message_size,
             local_range_info,
+            reject_block_announcements,
         }
     }
 
@@ -496,10 +501,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 local_addr,
                 peer_id,
                 capabilities,
-                conn,
+                mut conn,
                 status,
                 direction,
                 client_id,
+                peer_listen_port,
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -563,6 +569,10 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     BlockRangeInfo::new(update.earliest, update.latest, update.latest_hash)
                 });
 
+                if self.reject_block_announcements {
+                    conn.set_reject_block_announcements(true);
+                }
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -609,6 +619,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     client_version: Arc::clone(&client_version),
                     remote_addr,
                     local_addr,
+                    peer_listen_port,
                 };
 
                 self.active_sessions.insert(peer_id, handle);
@@ -1197,6 +1208,9 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         (multiplex_stream.into(), their_status)
     };
 
+    // `port` field is effectively deprecated, so we treat 0 value as a missing port.
+    let peer_listen_port = (their_hello.port != 0).then_some(their_hello.port);
+
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
@@ -1207,5 +1221,6 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         conn,
         direction,
         client_id: their_hello.client_version,
+        peer_listen_port,
     }
 }

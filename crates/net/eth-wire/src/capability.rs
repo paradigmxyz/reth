@@ -188,6 +188,34 @@ impl SharedCapabilities {
         self.0.iter().find(|c| c.version() == cap.version as u8 && c.name() == cap.name)
     }
 
+    /// Converts a capability-local message ID into the relative `RLPx` message ID used by
+    /// [`P2PStream`](crate::P2PStream).
+    ///
+    /// `P2PStream` strips the reserved p2p message ID range before yielding subprotocol messages,
+    /// so the returned ID is relative to the first shared capability, not the absolute wire ID.
+    #[inline]
+    pub fn relative_message_id(&self, cap: &Capability, message_id: u8) -> Option<u8> {
+        let shared = self.find(cap)?;
+        if message_id >= shared.num_messages() {
+            return None
+        }
+
+        shared.relative_message_id_offset().checked_add(message_id)
+    }
+
+    /// Converts a relative `RLPx` message ID back into the message ID local to `cap`.
+    ///
+    /// Returns `None` if `cap` is not shared, if the relative ID belongs to a different
+    /// capability, or if it is outside the capability's negotiated message range.
+    #[inline]
+    pub fn capability_message_id(&self, cap: &Capability, relative_message_id: u8) -> Option<u8> {
+        let shared = self.find(cap)?;
+        let start = shared.relative_message_id_offset();
+        let end = start.checked_add(shared.num_messages())?;
+
+        (start..end).contains(&relative_message_id).then(|| relative_message_id - start)
+    }
+
     /// Returns the matching shared capability for the given capability offset.
     ///
     /// `offset` is the multiplexed message id offset of the capability relative to the reserved
@@ -362,7 +390,7 @@ impl UnsupportedCapabilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Capabilities, Capability};
+    use crate::{Capabilities, Capability, SnapVersion};
     use alloy_primitives::bytes::Bytes;
     use alloy_rlp::{Decodable, Encodable};
     use reth_eth_wire_types::RawCapabilityMessage;
@@ -528,6 +556,40 @@ mod tests {
         // the 6th shared message is the first message of the eth capability
         let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
         assert_eq!(shared_eth.name(), "eth");
+    }
+
+    #[test]
+    fn relative_message_id_accounts_for_intermediate_capabilities() {
+        let intermediate_cap = Capability::new_static("foo", 1);
+        let intermediate = Protocol::new(intermediate_cap.clone(), 3);
+        let snap = Capability::snap(SnapVersion::V1);
+        let eth = Capability::eth(EthVersion::Eth69);
+        let local_capabilities =
+            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V1)];
+        let peer_capabilities = vec![eth, intermediate_cap, snap.clone()];
+
+        let shared = SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap();
+        let snap_id = shared.relative_message_id(&snap, 2).unwrap();
+
+        assert_eq!(snap_id, EthMessageID::message_count(EthVersion::Eth69) + 3 + 2);
+        assert_eq!(shared.capability_message_id(&snap, snap_id), Some(2));
+    }
+
+    #[test]
+    fn capability_message_id_rejects_other_capability_range() {
+        let intermediate_cap = Capability::new_static("foo", 1);
+        let intermediate = Protocol::new(intermediate_cap.clone(), 3);
+        let snap = Capability::snap(SnapVersion::V1);
+        let local_capabilities =
+            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V1)];
+        let peer_capabilities =
+            vec![Capability::eth(EthVersion::Eth69), intermediate_cap.clone(), snap.clone()];
+
+        let shared = SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap();
+        let intermediate_id = shared.relative_message_id(&intermediate_cap, 1).unwrap();
+
+        assert_eq!(shared.capability_message_id(&snap, intermediate_id), None);
+        assert_eq!(shared.relative_message_id(&snap, SnapVersion::V1.message_count()), None);
     }
 
     #[test]

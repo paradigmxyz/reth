@@ -1,12 +1,17 @@
 //! This contains the [`BenchContext`], which is information that all replay-based benchmarks need.
 //! The initialization code is also the same, so this can be shared across benchmark commands.
 
-use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
+use crate::{
+    authenticated_transport::AuthenticatedTransportConnect,
+    bench::generate_big_block::BigBlocksInitialState, bench_mode::BenchMode,
+};
 use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
+use futures::{stream, StreamExt, TryStreamExt};
 use reqwest::Url;
 use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use tracing::info;
@@ -21,6 +26,8 @@ pub(crate) struct BenchContext {
     pub(crate) auth_provider: RootProvider<AnyNetwork>,
     /// The block provider is used for block queries.
     pub(crate) block_provider: RootProvider<AnyNetwork>,
+    /// The local regular RPC provider is used for non-authenticated node RPCs like `testing_*`.
+    pub(crate) local_rpc_provider: RootProvider<AnyNetwork>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
     pub(crate) benchmark_mode: BenchMode,
@@ -34,6 +41,8 @@ pub(crate) struct BenchContext {
     pub(crate) wait_for_persistence: WaitForPersistence,
     /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
     pub(crate) no_wait_for_caches: bool,
+    /// Initial state for generated big blocks.
+    pub(crate) big_blocks_initial_state: Option<BigBlocksInitialState>,
 }
 
 impl BenchContext {
@@ -83,6 +92,11 @@ impl BenchContext {
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
 
+        let local_rpc_url = Url::parse(&bench_args.local_rpc_url)?;
+        info!(target: "reth-bench", "Connecting to local regular RPC at {} for testing namespace calls", local_rpc_url);
+        let local_rpc_provider =
+            RootProvider::<AnyNetwork>::new(ClientBuilder::default().http(local_rpc_url));
+
         // Computes the block range for the benchmark.
         //
         // - If `--advance` is provided, fetches the latest block from the engine and sets:
@@ -91,6 +105,7 @@ impl BenchContext {
         // - If only `--to` is provided, fetches the latest block from the engine and sets:
         //     - `from = head`
         // - Otherwise, uses the values from `--from` and `--to`.
+        let mut big_blocks_initial_state = None;
         let (from, to) = if let Some(advance) = bench_args.advance {
             if advance == 0 {
                 return Err(eyre::eyre!("--advance must be greater than 0"));
@@ -102,6 +117,12 @@ impl BenchContext {
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
             let head_number = head_block.header.number;
             (Some(head_number), Some(head_number + advance))
+        } else if bench_args.big_blocks.is_some() && bench_args.from.is_none() {
+            let (from, initial_state) =
+                derive_big_blocks_initial_state(&auth_provider, &block_provider).await?;
+            big_blocks_initial_state = initial_state;
+
+            (Some(from), bench_args.to)
         } else if bench_args.from.is_none() && bench_args.to.is_some() {
             let head_block = auth_provider
                 .get_block_by_number(BlockNumberOrTag::Latest)
@@ -159,12 +180,85 @@ impl BenchContext {
         Ok(Self {
             auth_provider,
             block_provider,
+            local_rpc_provider,
             benchmark_mode,
             next_block,
             use_reth_namespace,
             rlp_blocks,
             wait_for_persistence,
             no_wait_for_caches,
+            big_blocks_initial_state,
         })
     }
+}
+
+/// Derives the initial state for big blocks benchmark from RPC of the local node.
+async fn derive_big_blocks_initial_state(
+    local_provider: &RootProvider<AnyNetwork>,
+    source_provider: &RootProvider<AnyNetwork>,
+) -> eyre::Result<(u64, Option<BigBlocksInitialState>)> {
+    let local_head = local_provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .full()
+        .await?
+        .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
+
+    let local_head_number = local_head.header.number;
+    let local_head_hash = local_head.header.hash;
+
+    let source_block_at_local_head = source_provider
+        .get_block_by_number(local_head_number.into())
+        .await?
+        .ok_or_else(|| eyre::eyre!("Failed to fetch block {local_head_number} from RPC"))?;
+
+    // Node's tip is not synthetic, no initial state needed
+    if source_block_at_local_head.header.number == local_head_number &&
+        source_block_at_local_head.header.hash == local_head_hash
+    {
+        return Ok((local_head_number, None));
+    }
+
+    // If the tip is synthetic, derive last regular block from the last transaction the node has.
+    let last_regular_block = if let Some(tx_hash) = local_head.transactions.hashes().last() {
+        let tx = source_provider
+            .get_transaction_by_hash(tx_hash)
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to fetch transaction {tx_hash} from RPC"))?;
+        tx.block_number
+            .ok_or_else(|| eyre::eyre!("Transaction {tx_hash} from local head is pending on RPC"))?
+    } else {
+        return Err(eyre::eyre!(
+            "Synthetic local tip has no transactions, can't derive last regular block"
+        ));
+    };
+
+    let initial_state = BigBlocksInitialState {
+        prior_block_hashes: fetch_recent_block_hashes(source_provider, last_regular_block).await?,
+        next_synthetic_block_number: local_head_number + 1,
+    };
+
+    Ok((last_regular_block, Some(initial_state)))
+}
+
+async fn fetch_recent_block_hashes(
+    provider: &RootProvider<AnyNetwork>,
+    latest_regular_block: u64,
+) -> eyre::Result<Vec<(u64, B256)>> {
+    const BLOCKHASH_HISTORY: u64 = 256;
+    const MAX_CONCURRENT_BLOCK_HASH_REQUESTS: usize = 5;
+
+    let start = latest_regular_block.saturating_sub(BLOCKHASH_HISTORY - 1);
+    let hashes = stream::iter(start..=latest_regular_block)
+        .map(|block_number| async move {
+            provider
+                .get_block_by_number(block_number.into())
+                .await
+                .map(|block| block.map(|block| (block_number, block.header.hash)))
+        })
+        .buffered(MAX_CONCURRENT_BLOCK_HASH_REQUESTS)
+        .try_filter_map(|block_hash| async move { Ok(block_hash) })
+        .try_collect()
+        .await?;
+
+    Ok(hashes)
 }

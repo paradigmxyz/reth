@@ -54,10 +54,11 @@ pub mod snap;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use block_access_lists::client::BlockAccessListsClient;
+pub use block_access_lists::client::{BalRequirement, BlockAccessListsClient};
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
 pub use receipts::client::ReceiptsClient;
+pub use reth_eth_wire_types::BlockAccessLists;
 use reth_primitives_traits::Block;
 
 /// Helper trait that unifies network behaviour needed for fetching entire blocks.

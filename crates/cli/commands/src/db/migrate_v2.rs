@@ -1,10 +1,7 @@
 //! `reth db migrate-v2` command for migrating v1 storage layout to v2.
-//!
-//! Migrates data that cannot be recomputed (changesets + receipts) from MDBX to
-//! static files, clears recomputable tables (senders, indices, trie, plain
-//! state), compacts MDBX, then runs the pipeline to rebuild them.
 
 use crate::common::CliNodeTypes;
+use alloy_primitives::Address;
 use clap::Parser;
 use reth_db::{
     mdbx::{self, ffi},
@@ -20,15 +17,16 @@ use reth_db_api::{
 };
 use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_provider::{
-    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, MetadataProvider,
-    MetadataWriter, ProviderFactory, PruneCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter, StorageSettings,
+    providers::ProviderNodeTypes, BlockNumReader, DBProvider, DatabaseProviderFactory,
+    MetadataProvider, MetadataWriter, ProviderFactory, PruneCheckpointReader,
+    RocksDBProviderFactory, StageCheckpointWriter, StaticFileProviderFactory, StaticFileWriter,
+    StorageSettings,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::StageCheckpointReader;
-use tracing::info;
+use tracing::{info, warn};
 
 /// `reth db migrate-v2` command
 #[derive(Debug, Parser)]
@@ -87,7 +85,12 @@ impl Command {
         // === Phase 2: Migrate receipts → static files ===
         Self::migrate_receipts::<NodeTypesWithDBAdapter<N, DatabaseEnv>>(&provider_factory, tip)?;
 
-        // === Phase 3: Flip metadata to v2 ===
+        // === Phase 3: Migrate indices → RocksDB ===
+        Self::migrate_to_rocksdb::<_, tables::TransactionHashNumbers>(&provider_factory)?;
+        Self::migrate_to_rocksdb::<_, tables::AccountsHistory>(&provider_factory)?;
+        Self::migrate_to_rocksdb::<_, tables::StoragesHistory>(&provider_factory)?;
+
+        // === Phase 4: Flip metadata to v2 ===
         info!(target: "reth::cli", "Writing StorageSettings v2 metadata");
         {
             let provider_rw = provider_factory.database_provider_rw()?;
@@ -96,10 +99,10 @@ impl Command {
         }
         info!(target: "reth::cli", "Storage settings updated to v2");
 
-        // === Phase 4: Clear recomputable tables ===
-        Self::clear_recomputable_tables(&provider_factory)?;
+        // === Phase 5: Clear migrated and recomputable MDBX tables ===
+        Self::clear_migrated_and_recomputable_tables(&provider_factory)?;
 
-        // === Phase 5: Compact MDBX (before pipeline, so it runs on a smaller DB) ===
+        // === Phase 6: Compact MDBX (before pipeline, so it runs on a smaller DB) ===
         let db_path = provider_factory.db_ref().path();
         Self::compact_mdbx(provider_factory.db_ref())?;
 
@@ -109,7 +112,7 @@ impl Command {
         let compact_path = db_path.with_file_name("db_compact");
         Self::swap_compacted_db(&db_path, &compact_path)?;
 
-        // === Phase 6: Reopen DB and run pipeline ===
+        // === Phase 7: Reopen DB and run pipeline ===
         // The caller will reopen the environment and run the pipeline.
         // We return here — the pipeline step is handled in mod.rs after
         // reopening the database with the compacted copy.
@@ -132,8 +135,12 @@ impl Command {
             .and_then(|cp| cp.block_number)
             .map_or(0, |b| b + 1);
 
-        let mut writer =
-            sf_provider.get_writer(first_block, StaticFileSegment::AccountChangeSets)?;
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+        if first_block > 0 {
+            writer.ensure_at_block(first_block - 1)?;
+        }
 
         let mut count = 0u64;
         let mut walker = cursor.walk(Some(first_block))?.peekable();
@@ -174,11 +181,15 @@ impl Command {
             .and_then(|cp| cp.block_number)
             .map_or(0, |b| b + 1);
 
-        let mut writer =
-            sf_provider.get_writer(first_block, StaticFileSegment::StorageChangeSets)?;
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
+        if first_block > 0 {
+            writer.ensure_at_block(first_block - 1)?;
+        }
 
         let mut count = 0u64;
-        let mut walker = cursor.walk(Some(Default::default()))?.peekable();
+        let mut walker = cursor.walk(Some((first_block, Address::ZERO).into()))?.peekable();
 
         for block in first_block..=tip {
             let mut entries = Vec::new();
@@ -238,6 +249,18 @@ impl Command {
             .map_or(0, |b| b + 1);
         let first_block = prune_start.max(existing.map_or(0, |b| b + 1));
 
+        // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
+        // earlier than first_block (e.g. 2603897 from prune checkpoint).
+        if first_block > 0 {
+            let mut writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;
+            writer.ensure_at_block(first_block - 1)?;
+            writer.commit()?;
+        }
+
+        let before = sf_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map_or(0, |tx| tx + 1);
+
         let block_range = first_block..=tip;
 
         let segment = reth_static_file::segments::Receipts;
@@ -245,16 +268,46 @@ impl Command {
 
         sf_provider.commit()?;
 
-        info!(target: "reth::cli", "Receipts migrated");
+        let after = sf_provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map_or(0, |tx| tx + 1);
+        let count = after - before;
+        info!(target: "reth::cli", count, "Receipts migrated");
         Ok(())
     }
 
-    /// Clears tables that can be recomputed by the pipeline and resets their
-    /// stage checkpoints.
-    fn clear_recomputable_tables<N: ProviderNodeTypes>(
+    fn migrate_to_rocksdb<N: ProviderNodeTypes, T: Table>(
         factory: &ProviderFactory<N>,
     ) -> eyre::Result<()> {
-        info!(target: "reth::cli", "Clearing recomputable MDBX tables");
+        info!(target: "reth::cli", table = T::NAME, "Migrating MDBX table → RocksDB");
+
+        let provider = factory.provider()?.disable_long_read_transaction_safety();
+        let mut cursor = provider.tx_ref().cursor_read::<T>()?;
+
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb.clear::<T>()?;
+        let mut batch = rocksdb.batch_with_auto_commit();
+
+        let mut count = 0u64;
+        for entry in cursor.walk(None)? {
+            let (key, value) = entry?;
+            batch.put::<T>(key, &value)?;
+            count += 1;
+        }
+
+        batch.commit()?;
+        rocksdb.flush(&[T::NAME])?;
+
+        info!(target: "reth::cli", table = T::NAME, count, "MDBX table migrated to RocksDB");
+        Ok(())
+    }
+
+    /// Clears MDBX tables that were migrated to v2 backends or can be recomputed by the pipeline,
+    /// and resets only the recomputed stage checkpoints.
+    fn clear_migrated_and_recomputable_tables<N: ProviderNodeTypes>(
+        factory: &ProviderFactory<N>,
+    ) -> eyre::Result<()> {
+        info!(target: "reth::cli", "Clearing migrated and recomputable MDBX tables");
         let db = factory.db_ref();
 
         macro_rules! clear_table {
@@ -273,7 +326,7 @@ impl Command {
         // Senders — rebuilt by SenderRecovery
         clear_table!(tables::TransactionSenders);
 
-        // Indices — rebuilt by TransactionLookup / IndexAccountHistory / IndexStorageHistory
+        // Indices — migrated to RocksDB
         clear_table!(tables::TransactionHashNumbers);
         clear_table!(tables::AccountsHistory);
         clear_table!(tables::StoragesHistory);
@@ -289,18 +342,45 @@ impl Command {
         // Reset stage checkpoints so the pipeline rebuilds everything
         info!(target: "reth::cli", "Resetting stage checkpoints");
         let provider_rw = factory.database_provider_rw()?;
-        for stage in [
-            StageId::SenderRecovery,
-            StageId::TransactionLookup,
-            StageId::IndexAccountHistory,
-            StageId::IndexStorageHistory,
-            StageId::MerkleExecute,
-            StageId::MerkleUnwind,
-        ] {
+        for stage in [StageId::SenderRecovery, StageId::MerkleExecute, StageId::MerkleUnwind] {
             provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(0))?;
             info!(target: "reth::cli", %stage, "Checkpoint reset to 0");
         }
         provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+
+        if provider_rw.last_block_number()? > 0 {
+            let first_indices_entry = provider_rw
+                .tx_ref()
+                .cursor_read::<tables::BlockBodyIndices>()?
+                .seek(1)?
+                .map(|(block, _)| block)
+                .ok_or_else(|| eyre::eyre!("no block body indices found"))?;
+
+            // If the first block body indices entry is not block 1, it means that the v1 database
+            // was likely initialized with dummy blocks coming from a dummy chain generated by
+            // `setup_without_evm`.
+            //
+            // In that case, sender recovery starts from the first block that has a corresponding
+            // block body indices entry.
+            if first_indices_entry > 1 {
+                provider_rw.save_stage_checkpoint(
+                    StageId::SenderRecovery,
+                    StageCheckpoint::new(first_indices_entry - 1),
+                )?;
+
+                // Make sure that senders static files segment is at the correct height.
+                let static_file_provider = provider_rw.static_file_provider();
+                let mut senders_writer =
+                    static_file_provider.latest_writer(StaticFileSegment::TransactionSenders)?;
+                senders_writer.ensure_at_block(first_indices_entry - 1)?;
+                senders_writer.commit()?;
+
+                warn!(
+                    target: "reth::cli",
+                    "Missing block body indices data for first {first_indices_entry} blocks, initializing sender recovery with the first block that has a corresponding block body indices entry"
+                );
+            }
+        }
         provider_rw.commit()?;
 
         info!(target: "reth::cli", "Recomputable tables cleared");

@@ -1,4 +1,4 @@
-// Updates the reth-bench PR comment with current status.
+// Updates the benchmark PR comment with current status.
 //
 // Reads from environment:
 //   BENCH_COMMENT_ID  – GitHub comment ID to update

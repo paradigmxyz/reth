@@ -1,11 +1,8 @@
-use crate::{
-    provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
-    SparseTrieUpdates,
-};
+use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
 use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -82,6 +79,47 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
 
         Ok(self.as_revealed_mut().unwrap())
     }
+
+    /// Reveals a batch of V2 proof nodes into this trie.
+    ///
+    /// If `nodes` contains a node at the empty path it is used to reveal the root (transitioning
+    /// the trie from blind to revealed). Otherwise the trie must already be revealed.
+    ///
+    /// Reserves capacity for the expected number of nodes (including branch children) before
+    /// revealing them.
+    pub fn reveal_v2_proof_nodes(
+        &mut self,
+        nodes: &mut [ProofTrieNodeV2],
+        retain_updates: bool,
+    ) -> SparseTrieResult<()> {
+        let capacity = estimate_v2_proof_capacity(nodes);
+
+        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+        } else {
+            self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
+        trie.reserve_nodes(capacity);
+        trie.reveal_nodes(nodes)?;
+
+        Ok(())
+    }
+}
+
+/// Calculates capacity estimation for V2 proof nodes.
+///
+/// This counts nodes and their children (for branch nodes) to provide proper capacity hints for
+/// `reserve_nodes`.
+fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
+    let mut capacity = nodes.len();
+
+    for node in nodes {
+        if let TrieNodeV2::Branch(branch) = &node.node {
+            capacity += branch.state_mask.count_ones() as usize;
+        }
+    }
+
+    capacity
 }
 
 impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
@@ -90,7 +128,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealableSparseTrie};
+    /// use reth_trie_sparse::RevealableSparseTrie;
     ///
     /// let trie = <RevealableSparseTrie>::blind();
     /// assert!(trie.is_blind());
@@ -202,39 +240,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         };
     }
 
-    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the update fails.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-        provider: impl TrieNodeProvider,
-    ) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.update_leaf(path, value, provider)?;
-        Ok(())
-    }
-
-    /// Removes a leaf node at the specified key path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the leaf cannot be removed
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn remove_leaf(
-        &mut self,
-        path: &Nibbles,
-        provider: impl TrieNodeProvider,
-    ) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.remove_leaf(path, provider)?;
-        Ok(())
-    }
-
     /// Shrinks the capacity of the sparse trie's node storage.
     /// Works for both revealed and blind tries with allocated storage.
     pub fn shrink_nodes_to(&mut self, size: usize) {
@@ -255,6 +260,32 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
             }
             _ => {}
         }
+    }
+}
+
+impl RevealableSparseTrie {
+    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the trie is still blind, or if the update fails.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
+        revealed.update_leaf(path, value)?;
+        Ok(())
+    }
+
+    /// Removes a leaf node at the specified key path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the trie is still blind, or if the leaf cannot be removed.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
+        revealed.remove_leaf(path)?;
+        Ok(())
     }
 }
 
@@ -447,7 +478,10 @@ impl SparseNode {
     /// Returns the memory size of this node in bytes.
     pub const fn memory_size(&self) -> usize {
         match self {
-            Self::Empty | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Empty => core::mem::size_of::<Self>(),
+            Self::Branch { .. } => {
+                core::mem::size_of::<Self>() + core::mem::size_of::<[B256; 16]>()
+            }
             Self::Leaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }

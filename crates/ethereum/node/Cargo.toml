@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-ethereum-engine-primitives.workspace = true
+reth-ethereum-engine-primitives = { workspace = true, features = ["std"] }
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
@@ -39,19 +39,24 @@ reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 # ethereum
 alloy-eips.workspace = true
+alloy-primitives.workspace = true
+jsonrpsee.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 
 # async
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 # revm with required ethereum features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
 
 # misc
 eyre.workspace = true
+ethereum_ssz.workspace = true
+http-body-util.workspace = true
+tower.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
@@ -78,8 +83,11 @@ tokio.workspace = true
 serde_json.workspace = true
 rand.workspace = true
 serde.workspace = true
+enr = { workspace = true, features = ["rust-secp256k1"] }
 alloy-rpc-types-trace.workspace = true
 similar-asserts.workspace = true
+reqwest.workspace = true
+reth-rpc-layer.workspace = true
 
 [features]
 default = []
