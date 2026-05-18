@@ -5,7 +5,6 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
@@ -974,7 +973,6 @@ where
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
 
-        let bal = self.get_block_access_list(block).await?;
-        Ok(bal.map(|b: BlockAccessList| alloy_rlp::encode(b).into()))
+        Ok(self.get_raw_block_access_list(block).await?)
     }
 }
