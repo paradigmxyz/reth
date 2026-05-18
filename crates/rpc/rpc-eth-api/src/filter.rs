@@ -3,6 +3,7 @@
 use alloy_json_rpc::RpcObject;
 use alloy_rpc_types_eth::{Filter, FilterChanges, FilterId, Log, PendingTransactionFilterKind};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
@@ -39,6 +40,38 @@ pub trait EthFilterApi<T: RpcObject> {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+
+    /// Returns logs matching given filter object with cursor-based pagination.
+    ///
+    /// On the first call, pass `cursor = None`. The response contains a page of matching
+    /// logs and, if more pages are available, a `next_cursor` token. Pass that token
+    /// back on the next call (with the same `filter`) to fetch the next page. When the
+    /// response's `next_cursor` is `None`, all matching logs have been returned.
+    ///
+    /// Pagination is at block boundaries: a single response always contains complete
+    /// blocks (mirroring the atomicity guarantee of `eth_getLogs`). The cursor is bound
+    /// to the filter it was issued for; reusing a cursor with a different filter returns
+    /// a `cursor was issued for a different filter` error.
+    #[method(name = "getLogsWithCursor")]
+    async fn logs_with_cursor(
+        &self,
+        filter: Filter,
+        cursor: Option<String>,
+    ) -> RpcResult<LogsResponseWithCursor>;
+}
+
+/// Response returned by `eth_getLogsWithCursor`.
+///
+/// `next_cursor` is `None` when there are no more pages.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogsResponseWithCursor {
+    /// Matching logs for this page (in block, transaction, log order).
+    pub logs: Vec<Log>,
+    /// Opaque token to pass back on the next call to continue pagination. `None`
+    /// when all matching logs have been returned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 /// Limits for logs queries
