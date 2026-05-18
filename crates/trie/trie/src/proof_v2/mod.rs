@@ -359,13 +359,16 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(child_path = ?self.last_child_path()),
+        fields(child_path),
     )]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
     ) -> Result<(), StateProofError> {
-        let Some(child_path) = self.last_child_path() else { return Ok(()) };
+        if self.branch_stack.last().is_some_and(|branch| branch.state_mask.is_empty()) {
+            return Ok(())
+        }
+
         let child =
             self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
 
@@ -376,6 +379,15 @@ where
             self.child_stack.push(child);
             return Ok(())
         }
+
+        if targets.is_none() {
+            trace!(target: TRACE_TARGET, "Pushing uncommitted child onto stack");
+            self.child_stack.push(child);
+            return Ok(())
+        }
+
+        let Some(child_path) = self.last_child_path() else { unreachable!("checked above") };
+        tracing::Span::current().record("child_path", tracing::field::debug(&child_path));
 
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
