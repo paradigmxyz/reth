@@ -4,8 +4,8 @@
 //! at address 0x00000000000000000000000000000000000000AA.
 //!
 //! Milestone 1: any input → uint256(1234)
-//! Milestone 3: decode ApiRequest (raw URL mode), validate, return mock responses
-//! Milestone 4 (future): real HTTP calls via reqwest
+//! Milestone 3: decode ApiRequest, validate, return mock responses
+//! Milestone 4: real HTTP calls via reqwest::blocking
 
 use alloy_evm::{
     eth::EthEvmContext,
@@ -23,6 +23,8 @@ use revm::{
     primitives::hardfork::SpecId,
     Inspector,
 };
+use serde_json::Value as JsonValue;
+use std::time::Duration;
 
 /// The address of the API_CALL precompile: 0x00000000000000000000000000000000000000AA
 pub const API_CALL_ADDRESS: Address = {
@@ -36,6 +38,12 @@ const API_CALL_GAS: u64 = 3_000;
 
 /// Maximum request body size in bytes.
 const MAX_BODY_SIZE: usize = 4096;
+
+/// Maximum response body size in bytes.
+const MAX_RESPONSE_SIZE: usize = 8192;
+
+/// HTTP timeout in milliseconds.
+const HTTP_TIMEOUT_MS: u64 = 5000;
 
 // ---------------------------------------------------------------------------
 // ABI struct definition — matches the Solidity struct exactly.
@@ -86,60 +94,203 @@ fn is_private_url(url: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Mock response logic — Milestone 3 only
+// JSON path extraction — supports dot notation and array indexing
 // ---------------------------------------------------------------------------
 
-fn mock_uint_value(url: &str) -> u64 {
-    let lower = url.to_lowercase();
-    if lower.contains("weather") {
-        72
-    } else if lower.contains("bitcoin") || lower.contains("btc") {
-        104_000
-    } else if lower.contains("gold") {
-        2_340
-    } else if lower.contains("price") {
-        42_000
-    } else {
-        1234
+/// Navigate a JSON value by a path like "bpi.USD.rate_float" or "periods[0].temperature"
+///
+/// Supports:
+///   - Dot-separated keys: "data.price"
+///   - Array indexing: "periods[0].temperature"
+///   - Top-level keys: "price"
+fn extract_json_path<'a>(json: &'a JsonValue, path: &str) -> Option<&'a JsonValue> {
+    if path.is_empty() {
+        return Some(json);
     }
+
+    let mut current = json;
+
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+
+        // Check for array indexing: "periods[0]"
+        if let Some(bracket_pos) = segment.find('[') {
+            let key = &segment[..bracket_pos];
+            let idx_str = &segment[bracket_pos + 1..segment.len() - 1]; // strip [ and ]
+
+            // Navigate to the key first (if non-empty)
+            if !key.is_empty() {
+                current = current.get(key)?;
+            }
+
+            // Then index into the array
+            let idx: usize = idx_str.parse().ok()?;
+            current = current.get(idx)?;
+        } else {
+            current = current.get(segment)?;
+        }
+    }
+
+    Some(current)
 }
 
-fn mock_string_value(url: &str) -> String {
-    let lower = url.to_lowercase();
-    if lower.contains("weather") {
-        "Sunny, 72°F".to_string()
-    } else if lower.contains("joke") || lower.contains("random") {
-        "Why did the smart contract go to therapy? Too many trust issues.".to_string()
-    } else if lower.contains("bitcoin") || lower.contains("btc") {
-        "104000".to_string()
-    } else if lower.contains("gold") {
-        "2340".to_string()
-    } else {
-        "ExternEVM mock response".to_string()
-    }
-}
-
 // ---------------------------------------------------------------------------
-// ABI encoding helpers — wrap in tuple for abi_encode_params
+// Convert extracted JSON value to the requested type and ABI-encode
 // ---------------------------------------------------------------------------
 
-fn encode_response(response_type: u8, url: &str) -> Vec<u8> {
+fn encode_json_value(value: &JsonValue, response_type: u8) -> Result<Vec<u8>, String> {
     match response_type {
+        // 0 = raw bytes (JSON value as UTF-8)
         0 => {
-            let raw: Bytes = mock_string_value(url).into_bytes().into();
-            (raw,).abi_encode_params()
+            let raw_str = match value {
+                JsonValue::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            let raw: Bytes = raw_str.into_bytes().into();
+            Ok((raw,).abi_encode_params())
         }
+        // 1 = uint256
         1 => {
-            (U256::from(mock_uint_value(url)),).abi_encode_params()
+            let num = match value {
+                JsonValue::Number(n) => {
+                    if let Some(u) = n.as_u64() {
+                        u
+                    } else if let Some(f) = n.as_f64() {
+                        // Truncate float to integer (e.g. 72.5 → 72)
+                        if f < 0.0 {
+                            return Err(format!("negative number cannot be uint256: {f}"));
+                        }
+                        f as u64
+                    } else {
+                        return Err(format!("cannot convert number to uint256: {n}"));
+                    }
+                }
+                JsonValue::String(s) => {
+                    // Try parsing string as number (some APIs return numbers as strings)
+                    let trimmed = s.trim().replace(',', "");
+                    if let Ok(u) = trimmed.parse::<u64>() {
+                        u
+                    } else if let Ok(f) = trimmed.parse::<f64>() {
+                        if f < 0.0 {
+                            return Err(format!("negative number cannot be uint256: {f}"));
+                        }
+                        f as u64
+                    } else {
+                        return Err(format!("cannot parse string as uint256: {s}"));
+                    }
+                }
+                JsonValue::Bool(b) => {
+                    if *b { 1 } else { 0 }
+                }
+                _ => return Err(format!("cannot convert {value} to uint256")),
+            };
+            Ok((U256::from(num),).abi_encode_params())
         }
+        // 2 = string
         2 => {
-            (mock_string_value(url),).abi_encode_params()
+            let s = match value {
+                JsonValue::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            Ok((s,).abi_encode_params())
         }
+        // 3 = bool
         3 => {
-            (mock_uint_value(url) != 0,).abi_encode_params()
+            let b = match value {
+                JsonValue::Bool(b) => *b,
+                JsonValue::Number(n) => n.as_u64().map(|v| v != 0).unwrap_or(false),
+                JsonValue::String(s) => {
+                    matches!(s.to_lowercase().as_str(), "true" | "1" | "yes")
+                }
+                JsonValue::Null => false,
+                _ => true, // objects/arrays are truthy
+            };
+            Ok((b,).abi_encode_params())
         }
-        _ => unreachable!(),
+        _ => Err(format!("invalid responseType: {response_type}")),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Perform the actual HTTP call
+// ---------------------------------------------------------------------------
+
+fn perform_http_call(request: &ApiRequest) -> Result<JsonValue, String> {
+    // Build a blocking HTTP client.
+    // reqwest::blocking can panic inside a tokio runtime, so we use
+    // tokio::task::block_in_place to allow blocking within the async context.
+    let result = tokio::task::block_in_place(|| {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("HTTP client build error: {e}"))?;
+
+        // Build the request
+        let mut req_builder = match request.method.as_str() {
+            "GET" => client.get(&request.url),
+            "POST" => client.post(&request.url),
+            _ => return Err(format!("unsupported method: {}", request.method)),
+        };
+
+        // Parse and apply headers from bytes (expected to be JSON: {"Key": "Value", ...})
+        if !request.headers.is_empty() {
+            match serde_json::from_slice::<JsonValue>(&request.headers) {
+                Ok(JsonValue::Object(map)) => {
+                    for (key, val) in map {
+                        if let JsonValue::String(v) = val {
+                            req_builder = req_builder.header(&key, &v);
+                        }
+                    }
+                }
+                Ok(_) => {
+                    return Err("headers must be a JSON object".to_string());
+                }
+                Err(e) => {
+                    return Err(format!("failed to parse headers JSON: {e}"));
+                }
+            }
+        }
+
+        // Set body for POST
+        if request.method == "POST" && !request.body.is_empty() {
+            req_builder = req_builder.body(request.body.to_vec());
+        }
+
+        // Send the request
+        let response = req_builder
+            .send()
+            .map_err(|e| format!("HTTP request failed: {e}"))?;
+
+        // Check status
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("HTTP {status}"));
+        }
+
+        // Read response body with size limit
+        let body_bytes = response
+            .bytes()
+            .map_err(|e| format!("failed to read response body: {e}"))?;
+
+        if body_bytes.len() > MAX_RESPONSE_SIZE {
+            return Err(format!(
+                "response size {} exceeds max {}",
+                body_bytes.len(),
+                MAX_RESPONSE_SIZE
+            ));
+        }
+
+        // Parse JSON
+        let json: JsonValue = serde_json::from_slice(&body_bytes)
+            .map_err(|e| format!("failed to parse response JSON: {e}"))?;
+
+        Ok(json)
+    });
+
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +314,7 @@ fn api_call_precompile(input: PrecompileInput<'_>) -> PrecompileResult {
         return Ok(PrecompileOutput::new(gas_used, output.into(), input.reservoir));
     }
 
-    // --- Milestone 3: Decode ABI-encoded ApiRequest ---
+    // --- Decode ABI-encoded ApiRequest ---
     let request = match ApiRequest::abi_decode(input.data) {
         Ok(req) => req,
         Err(e) => {
@@ -183,7 +334,7 @@ fn api_call_precompile(input: PrecompileInput<'_>) -> PrecompileResult {
     eprintln!("  responsePath: {}", request.responsePath);
     eprintln!("  responseType: {}", request.responseType);
 
-    // --- Validation ---
+    // --- Validation (same as Milestone 3) ---
     if request.url.is_empty() {
         eprintln!("[ExternEVM] ERROR: url is empty");
         return Ok(PrecompileOutput::halt(
@@ -225,17 +376,69 @@ fn api_call_precompile(input: PrecompileInput<'_>) -> PrecompileResult {
     }
 
     if request.body.len() > MAX_BODY_SIZE {
-        eprintln!("[ExternEVM] ERROR: body size {} exceeds max {}", request.body.len(), MAX_BODY_SIZE);
+        eprintln!(
+            "[ExternEVM] ERROR: body size {} exceeds max {}",
+            request.body.len(),
+            MAX_BODY_SIZE
+        );
         return Ok(PrecompileOutput::halt(
             PrecompileHalt::Other("API_CALL: body exceeds max size".into()),
             input.reservoir,
         ));
     }
 
-    // --- Mock response ---
-    let output_bytes = encode_response(request.responseType, &request.url);
+    // --- Milestone 4: Real HTTP call ---
+    let json = match perform_http_call(&request) {
+        Ok(json) => {
+            eprintln!("[ExternEVM] HTTP response received, parsing...");
+            json
+        }
+        Err(e) => {
+            eprintln!("[ExternEVM] HTTP error: {e}");
+            return Ok(PrecompileOutput::halt(
+                PrecompileHalt::Other(format!("API_CALL: {e}").into()),
+                input.reservoir,
+            ));
+        }
+    };
+
+    // --- Extract value at responsePath ---
+    let extracted = match extract_json_path(&json, &request.responsePath) {
+        Some(val) => val,
+        None => {
+            eprintln!(
+                "[ExternEVM] ERROR: responsePath '{}' not found in JSON",
+                request.responsePath
+            );
+            eprintln!("[ExternEVM] JSON body: {json}");
+            return Ok(PrecompileOutput::halt(
+                PrecompileHalt::Other(
+                    format!("API_CALL: responsePath '{}' not found", request.responsePath).into(),
+                ),
+                input.reservoir,
+            ));
+        }
+    };
+
     eprintln!(
-        "[ExternEVM] Returning mock response ({} bytes, responseType={})",
+        "[ExternEVM] Extracted value at '{}': {}",
+        request.responsePath, extracted
+    );
+
+    // --- Encode to the requested type ---
+    let output_bytes = match encode_json_value(extracted, request.responseType) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("[ExternEVM] Encoding error: {e}");
+            return Ok(PrecompileOutput::halt(
+                PrecompileHalt::Other(format!("API_CALL: {e}").into()),
+                input.reservoir,
+            ));
+        }
+    };
+
+    eprintln!(
+        "[ExternEVM] Returning real response ({} bytes, responseType={})",
         output_bytes.len(),
         request.responseType
     );
