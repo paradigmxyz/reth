@@ -17,11 +17,7 @@ use reth_primitives_traits::{
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{
-    fmt,
-    sync::{Arc, LazyLock},
-    time::Instant,
-};
+use std::{fmt, sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// Manages flattened state trie overlays for in-memory blocks.
@@ -34,10 +30,11 @@ pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     overlays: Arc<DashMap<OverlayCacheKey, Arc<TrieInputSorted>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
+    metrics: StateTrieOverlayMetrics,
 }
 
 /// Metrics for state trie overlay management.
-#[derive(Metrics)]
+#[derive(Clone, Metrics)]
 #[metrics(scope = "sync.block_validation.state_trie_overlay")]
 struct StateTrieOverlayMetrics {
     /// Duration of overlay computation in seconds.
@@ -48,9 +45,6 @@ struct StateTrieOverlayMetrics {
     overlay_cache_fills: Counter,
 }
 
-static STATE_TRIE_OVERLAY_METRICS: LazyLock<StateTrieOverlayMetrics> =
-    LazyLock::new(StateTrieOverlayMetrics::default);
-
 impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
     fn default() -> Self {
         Self {
@@ -58,6 +52,7 @@ impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
             overlays: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
+            metrics: Default::default(),
         }
     }
 }
@@ -79,6 +74,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             blocks: Default::default(),
             overlays: Default::default(),
             worker_pool: Some(worker_pool),
+            metrics: Default::default(),
         }
     }
 
@@ -254,7 +250,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let span = tracing::Span::current();
 
         if let Some(input) = self.overlays.get(&key).map(|entry| Arc::clone(entry.value())) {
-            STATE_TRIE_OVERLAY_METRICS.overlay_cache_reuses.increment(1);
+            self.metrics.overlay_cache_reuses.increment(1);
             span.record("cache_reused", true);
             return Ok(input)
         }
@@ -296,29 +292,30 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         // The vacant entry is the cache-fill gate: racing callers block instead of recomputing.
         let input = match self.overlays.entry(key) {
             Entry::Occupied(entry) => {
-                STATE_TRIE_OVERLAY_METRICS.overlay_cache_reuses.increment(1);
+                self.metrics.overlay_cache_reuses.increment(1);
                 span.record("cache_reused", true);
                 return Ok(Arc::clone(entry.get()))
             }
             Entry::Vacant(entry) => {
-                STATE_TRIE_OVERLAY_METRICS.overlay_cache_fills.increment(1);
+                self.metrics.overlay_cache_fills.increment(1);
                 let input = {
                     #[cfg(feature = "rayon")]
                     {
                         if let Some(worker_pool) = &self.worker_pool {
                             let compute_span = span;
-                            Arc::new(worker_pool.install_fn(|| {
+                            let metrics = self.metrics.clone();
+                            Arc::new(worker_pool.install_fn(move || {
                                 let _guard = compute_span.enter();
-                                compute_overlay(compute_input, anchor_hash)
+                                compute_overlay(compute_input, anchor_hash, &metrics)
                             }))
                         } else {
-                            Arc::new(compute_overlay(compute_input, anchor_hash))
+                            Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
                         }
                     }
 
                     #[cfg(not(feature = "rayon"))]
                     {
-                        Arc::new(compute_overlay(compute_input, anchor_hash))
+                        Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
                     }
                 };
 
@@ -331,6 +328,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
     }
 
     /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
+    ///
+    /// Returns `None` if `parent_hash` is not `preferred_anchor` and the manager does not contain a
+    /// block for `parent_hash`, meaning there is no in-memory parent chain to inspect.
     pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
         Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
     }
@@ -405,6 +405,7 @@ enum ComputeOverlayInput<N: NodePrimitives> {
 fn compute_overlay<N: NodePrimitives>(
     input: ComputeOverlayInput<N>,
     anchor_hash: B256,
+    metrics: &StateTrieOverlayMetrics,
 ) -> TrieInputSorted {
     let started_at = Instant::now();
     let block_count = match &input {
@@ -434,7 +435,7 @@ fn compute_overlay<N: NodePrimitives>(
     };
 
     let elapsed = started_at.elapsed();
-    STATE_TRIE_OVERLAY_METRICS.overlay_computation_duration_seconds.record(elapsed.as_secs_f64());
+    metrics.overlay_computation_duration_seconds.record(elapsed.as_secs_f64());
     tracing::Span::current().record("elapsed_us", elapsed.as_micros() as u64);
     debug!(
         target: "chain_state::state_trie_overlay",
