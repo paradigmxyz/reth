@@ -35,7 +35,7 @@ use reth_provider::{
     StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_stages_api::ControlFlow;
+use reth_stages_api::{ControlFlow, StageId};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
@@ -1255,6 +1255,28 @@ where
         // Check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
+
+            // The Headers stage can be ahead of the Execution stage after a partial
+            // `stage unwind`, snapshot import, or crash recovery. In that case a
+            // canonical header exists for the FCU head but no state has been computed
+            // for it; returning VALID here would prevent the backfill pipeline from
+            // running and leave execution stuck. Force the missing-block path
+            // instead, which returns Syncing and triggers backfill (#23234).
+            if let Ok(provider) = self.provider.database_provider_ro() {
+                if let Ok(Some(execution_checkpoint)) =
+                    provider.get_stage_checkpoint(StageId::Execution)
+                {
+                    if canonical_header.number() > execution_checkpoint.block_number {
+                        debug!(
+                            target: "engine::tree",
+                            head = canonical_header.number(),
+                            execution = execution_checkpoint.block_number,
+                            "canonical header exists but execution has not reached it, falling through to backfill"
+                        );
+                        return Ok(None);
+                    }
+                }
+            }
 
             // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
             // own chain at will, so we need to always trigger a new payload job if requested.
