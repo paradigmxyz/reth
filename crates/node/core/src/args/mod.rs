@@ -62,9 +62,7 @@ pub use datadir_args::DatadirArgs;
 
 /// BenchmarkArgs struct for configuring the benchmark to run
 mod benchmark_args;
-pub use benchmark_args::{
-    BenchmarkArgs, RpcBlockFetchRetries, WaitForPersistence, DEFAULT_METRICS_SCRAPE_INTERVAL_MS,
-};
+pub use benchmark_args::{BenchmarkArgs, RpcBlockFetchRetries, WaitForPersistence};
 
 /// EngineArgs for configuring the engine
 mod engine;

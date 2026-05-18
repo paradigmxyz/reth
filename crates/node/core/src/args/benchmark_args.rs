@@ -3,9 +3,6 @@
 use clap::Args;
 use std::{path::PathBuf, str::FromStr};
 
-/// Default Prometheus metrics scrape interval in milliseconds.
-pub const DEFAULT_METRICS_SCRAPE_INTERVAL_MS: u64 = 200;
-
 /// Parameters for benchmark configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
 #[command(next_help_heading = "Benchmark")]
@@ -72,38 +69,16 @@ pub struct BenchmarkArgs {
     #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
     pub output: Option<PathBuf>,
 
-    /// Optional Prometheus metrics endpoint to scrape on a fixed interval.
+    /// Optional Prometheus metrics endpoint to scrape after each block.
     ///
-    /// When provided, reth-bench will periodically fetch metrics from this URL.
-    /// Results are written as JSONL records containing the metric name, labels,
-    /// value, offset timestamp, and Unix timestamp.
+    /// When provided, reth-bench will fetch metrics from this URL after each
+    /// `newPayload` / `forkchoiceUpdated` call, recording per-block execution
+    /// and state root durations. Results are written to `metrics.csv` in the
+    /// output directory.
     ///
     /// Example: `http://127.0.0.1:9001/metrics`
     #[arg(long = "metrics-url", value_name = "URL", verbatim_doc_comment)]
     pub metrics_url: Option<String>,
-
-    /// Path to write interval-based Prometheus metrics scrapes as JSONL.
-    ///
-    /// If omitted, `--metrics-url` writes `metrics.jsonl` inside `--output`.
-    #[arg(
-        long = "metrics-output",
-        value_name = "PATH",
-        requires = "metrics_url",
-        verbatim_doc_comment
-    )]
-    pub metrics_output: Option<PathBuf>,
-
-    /// Prometheus metrics scrape interval in milliseconds.
-    ///
-    /// Matches the `GitHub` benchmark workflow default interval.
-    #[arg(
-        long = "scrape-interval-ms",
-        value_name = "MILLISECONDS",
-        default_value_t = DEFAULT_METRICS_SCRAPE_INTERVAL_MS,
-        requires = "metrics_url",
-        verbatim_doc_comment
-    )]
-    pub scrape_interval_ms: u64,
 
     /// Number of retries for fetching blocks from `--rpc-url` after a failure.
     ///
@@ -281,7 +256,6 @@ mod tests {
         let default_args = BenchmarkArgs {
             engine_rpc_url: "http://localhost:8551".to_string(),
             local_rpc_url: "http://localhost:8545".to_string(),
-            scrape_interval_ms: DEFAULT_METRICS_SCRAPE_INTERVAL_MS,
             ..Default::default()
         };
         let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;

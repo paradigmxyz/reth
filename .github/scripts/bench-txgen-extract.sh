@@ -15,13 +15,19 @@
 #   <output-dir>/benchmark-blocks.ndjson
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
-# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS
+# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL
 set -euxo pipefail
 
 BINARY="$1"
 OUTPUT_DIR="$2"
 
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
+BAL_MODE="${BENCH_BAL:-false}"
+INCLUDE_BAL=false
+if [ "$BAL_MODE" != "false" ] && [ -n "$BAL_MODE" ]; then
+  INCLUDE_BAL=true
+fi
+
 DATADIR_NAME="datadir"
 if [ "$BIG_BLOCKS" = "true" ]; then
   DATADIR_NAME="datadir-big-blocks"
@@ -125,21 +131,27 @@ if [ "$BIG_BLOCKS" = "true" ]; then
 fi
 
 EXTRACT_FROM=$(( HEAD_DEC + 1 ))
+TXGEN_EXTRACT_ARGS=()
+if [ "$INCLUDE_BAL" = "true" ]; then
+  TXGEN_EXTRACT_ARGS+=(--bal)
+fi
 if [ "$BIG_BLOCKS" = "true" ]; then
-  echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+  echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured, bal=${INCLUDE_BAL})"
   "$TXGEN_ETHEREUM" extract-big-blocks \
     --rpc "$BENCH_RPC_URL" \
     --from "$EXTRACT_FROM" \
     --count "$TOTAL" \
     --target-gas "${BENCH_BIG_BLOCKS_TARGET_GAS:-1G}" \
+    "${TXGEN_EXTRACT_ARGS[@]}" \
     -o "$ALL_BLOCKS"
 else
   EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
-  echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+  echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured, bal=${INCLUDE_BAL})"
   "$TXGEN_ETHEREUM" extract \
     --rpc "$BENCH_RPC_URL" \
     --from "$EXTRACT_FROM" \
     --to "$EXTRACT_TO" \
+    "${TXGEN_EXTRACT_ARGS[@]}" \
     -o "$ALL_BLOCKS"
 fi
 
@@ -150,5 +162,12 @@ else
   : > "$WARMUP_FILE"
 fi
 awk -v warmup="$WARMUP" 'NR > warmup { print }' "$ALL_BLOCKS" > "$BENCHMARK_FILE"
+
+if [ "$INCLUDE_BAL" = "true" ] && [ "$BAL_MODE" != "true" ]; then
+  echo "Writing no-BAL payload variants for selective BAL mode (${BAL_MODE})"
+  for file in "$ALL_BLOCKS" "$WARMUP_FILE" "$BENCHMARK_FILE"; do
+    jq -c 'del(.bal, .merged_block_access_list)' "$file" > "${file%.ndjson}-no-bal.ndjson"
+  done
+fi
 
 echo "Extraction complete: $(wc -l < "$ALL_BLOCKS") payloads in ${OUTPUT_DIR}"

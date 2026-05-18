@@ -2,7 +2,7 @@
 #
 # Runs a single txgen-backed Engine API benchmark cycle:
 # mount snapshot → start node → extract source blocks → warmup → send-blocks →
-# convert txgen JSON report into the legacy reth-bench CSVs.
+# convert txgen JSON report into legacy benchmark CSVs.
 #
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
@@ -89,12 +89,29 @@ with open(output_path, "w") as f:
 PY
 }
 
-# Unsupported txgen-path behavior is made explicit here. Keep this check near
-# the top so BAL support can be added when txgen supports it.
-if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
-  echo "::error::txgen driver does not support BAL replay yet; use big-blocks with the reth-bench driver"
-  exit 1
-fi
+bal_enabled_for_label() {
+  case "${BENCH_BAL:-false}" in
+    false|"")
+      echo false
+      ;;
+    true)
+      echo true
+      ;;
+    feature)
+      if [[ "$LABEL" == feature* ]]; then echo true; else echo false; fi
+      ;;
+    baseline)
+      if [[ "$LABEL" == baseline* ]]; then echo true; else echo false; fi
+      ;;
+    *)
+      echo "::error::Unknown BENCH_BAL value: ${BENCH_BAL}" >&2
+      return 1
+      ;;
+  esac
+}
+
+USE_BAL="$(bal_enabled_for_label)"
+echo "BAL replay for ${LABEL}: ${USE_BAL} (mode=${BENCH_BAL:-false})"
 
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
@@ -309,6 +326,15 @@ if [ -n "${TXGEN_PAYLOADS_DIR:-}" ] && [ -d "$TXGEN_PAYLOADS_DIR" ]; then
     WARMUP_BLOCKS="$TXGEN_PAYLOADS_DIR/warmup-blocks.ndjson"
     BENCHMARK_BLOCKS="$TXGEN_PAYLOADS_DIR/benchmark-blocks.ndjson"
   fi
+  if [ "$USE_BAL" != "true" ]; then
+    WARMUP_NO_BAL="${WARMUP_BLOCKS%.ndjson}-no-bal.ndjson"
+    BENCHMARK_NO_BAL="${BENCHMARK_BLOCKS%.ndjson}-no-bal.ndjson"
+    if [ -f "$BENCHMARK_NO_BAL" ]; then
+      WARMUP_BLOCKS="$WARMUP_NO_BAL"
+      BENCHMARK_BLOCKS="$BENCHMARK_NO_BAL"
+    fi
+  fi
+  echo "Selected txgen payloads: warmup=${WARMUP_BLOCKS}, benchmark=${BENCHMARK_BLOCKS}"
   if [ ! -f "$BENCHMARK_BLOCKS" ]; then
     echo "::error::Pre-extracted payloads missing: ${BENCHMARK_BLOCKS}"
     exit 1
@@ -331,21 +357,27 @@ else
   fi
 
   EXTRACT_FROM=$(( HEAD_DEC + 1 ))
+  TXGEN_EXTRACT_ARGS=()
+  if [ "$USE_BAL" = "true" ]; then
+    TXGEN_EXTRACT_ARGS+=(--bal)
+  fi
   if [ "$BIG_BLOCKS" = "true" ]; then
-    echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+    echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured, bal=${USE_BAL})"
     "$TXGEN_ETHEREUM" extract-big-blocks \
       --rpc "$BENCH_RPC_URL" \
       --from "$EXTRACT_FROM" \
       --count "$TOTAL" \
       --target-gas "${BENCH_BIG_BLOCKS_TARGET_GAS:-1G}" \
+      "${TXGEN_EXTRACT_ARGS[@]}" \
       -o "$ALL_BLOCKS"
   else
     EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
-    echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured)"
+    echo "Extracting blocks ${EXTRACT_FROM}..${EXTRACT_TO} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured, bal=${USE_BAL})"
     "$TXGEN_ETHEREUM" extract \
       --rpc "$BENCH_RPC_URL" \
       --from "$EXTRACT_FROM" \
       --to "$EXTRACT_TO" \
+      "${TXGEN_EXTRACT_ARGS[@]}" \
       -o "$ALL_BLOCKS"
   fi
 
@@ -406,7 +438,9 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
   -m "platform=ethereum" \
-  -m "scenario=replay" 2>&1 | sed -u "s/^/[bench] /"
+  -m "scenario=replay" \
+  -m "bal-mode=${BENCH_BAL:-false}" \
+  -m "bal-enabled=$USE_BAL" 2>&1 | sed -u "s/^/[bench] /"
 
 if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"

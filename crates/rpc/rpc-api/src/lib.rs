@@ -41,7 +41,7 @@ pub use servers::*;
 pub mod servers {
     pub use crate::{
         admin::AdminApiServer,
-        debug::{DebugApiServer, DebugExecutionWitnessApiServer},
+        debug::DebugApiServer,
         engine::{EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
         mev::{MevFullApiServer, MevSimApiServer},
         miner::MinerApiServer,
@@ -72,7 +72,7 @@ pub mod clients {
     pub use crate::{
         admin::AdminApiClient,
         anvil::AnvilApiClient,
-        debug::{DebugApiClient, DebugExecutionWitnessApiClient},
+        debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},
         hardhat::HardhatApiClient,
         mev::{MevFullApiClient, MevSimApiClient},
