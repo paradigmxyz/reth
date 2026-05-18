@@ -49,6 +49,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
+alloy-eip7928.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

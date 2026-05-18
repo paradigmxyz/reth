@@ -4,7 +4,7 @@ use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
@@ -357,8 +357,17 @@ where
                 })
             })?;
 
+            let bal = alloy_eip7928::bal::Bal::from(executor.take_bal().unwrap_or_default());
+            bal.validate_gas_limit(block.header().gas_limit()).map_err(|err| {
+                StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Validation(ConsensusError::from(err)),
+                }
+            })?;
+            let bal_hash = alloy_eip7928::compute_block_access_list_hash(&bal);
+
             if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, None)
+                self.consensus.validate_block_post_execution(&block, &result, None, Some(bal_hash))
             {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
