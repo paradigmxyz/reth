@@ -334,12 +334,17 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             }
         }
 
-        // Sort storage slots and convert to HashedStorageSorted
+        // Convert storage slots to map-backed sorted storage.
         let hashed_storages = storages
             .into_iter()
-            .map(|(address, mut slots)| {
-                slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+            .map(|(address, slots)| {
+                (
+                    address,
+                    HashedStorageSorted {
+                        storage_slots: slots.into_iter().collect(),
+                        wiped: false,
+                    },
+                )
             })
             .collect();
 
@@ -502,15 +507,17 @@ mod tests {
         // Verify first occurrences were kept (nonce 1, not 2)
         assert_eq!(sorted.accounts.len(), 2);
         let hashed_addr1 = keccak256(address1);
-        let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        let account1 = sorted.accounts.get(&hashed_addr1).unwrap();
+        assert_eq!(account1.as_ref().unwrap().nonce, 1);
 
         // Ordering guarantees - accounts sorted by hashed address
-        assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+        let account_keys = sorted.accounts.keys().copied().collect::<Vec<_>>();
+        assert!(account_keys.windows(2).all(|w| w[0] <= w[1]));
 
         // Ordering guarantees - storage slots sorted by hashed slot
         for storage in sorted.storages.values() {
-            assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
+            let storage_keys = storage.storage_slots.keys().copied().collect::<Vec<_>>();
+            assert!(storage_keys.windows(2).all(|w| w[0] <= w[1]));
         }
     }
 
@@ -625,27 +632,27 @@ mod tests {
         let hashed_addr1 = keccak256(address1);
         let hashed_addr2 = keccak256(address2);
 
-        let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        let account1 = sorted.accounts.get(&hashed_addr1).unwrap();
+        assert_eq!(account1.as_ref().unwrap().nonce, 1);
 
-        let account2 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr2).unwrap();
-        assert!(account2.1.is_none());
+        let account2 = sorted.accounts.get(&hashed_addr2).unwrap();
+        assert!(account2.is_none());
 
-        assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+        let account_keys = sorted.accounts.keys().copied().collect::<Vec<_>>();
+        assert!(account_keys.windows(2).all(|w| w[0] <= w[1]));
 
         let storage = sorted.storages.get(&hashed_addr1).expect("storage for address1");
         assert_eq!(storage.storage_slots.len(), 2);
 
-        let found_slot1 = storage.storage_slots.iter().find(|(k, _)| *k == hashed_slot1).unwrap();
-        assert_eq!(found_slot1.1, U256::from(100));
+        assert_eq!(storage.storage_slots.get(&hashed_slot1), Some(&U256::from(100)));
 
-        let found_slot2 = storage.storage_slots.iter().find(|(k, _)| *k == hashed_slot2).unwrap();
-        assert_eq!(found_slot2.1, U256::from(200));
+        assert_eq!(storage.storage_slots.get(&hashed_slot2), Some(&U256::from(200)));
 
         assert_ne!(hashed_slot1, plain_slot1);
         assert_ne!(hashed_slot2, plain_slot2);
 
-        assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
+        let storage_keys = storage.storage_slots.keys().copied().collect::<Vec<_>>();
+        assert!(storage_keys.windows(2).all(|w| w[0] <= w[1]));
     }
 
     #[test]
@@ -717,15 +724,14 @@ mod tests {
         let expected_hashed_addr2 = keccak256(address2);
         assert_eq!(sorted.accounts.len(), 2);
 
-        let account1 =
-            sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 10);
+        let account1 = sorted.accounts.get(&expected_hashed_addr1).unwrap();
+        assert_eq!(account1.as_ref().unwrap().nonce, 10);
 
-        let account2 =
-            sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr2).unwrap();
-        assert_eq!(account2.1.unwrap().nonce, 20);
+        let account2 = sorted.accounts.get(&expected_hashed_addr2).unwrap();
+        assert_eq!(account2.as_ref().unwrap().nonce, 20);
 
-        assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+        let account_keys = sorted.accounts.keys().copied().collect::<Vec<_>>();
+        assert!(account_keys.windows(2).all(|w| w[0] <= w[1]));
 
         let expected_hashed_slot1 = keccak256(plain_slot1);
         let expected_hashed_slot2 = keccak256(plain_slot2);
@@ -743,11 +749,11 @@ mod tests {
             .storage_slots
             .iter()
             .any(|(k, v)| *k == expected_hashed_slot2 && *v == U256::from(200)));
-        assert!(storage1.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
+        let storage_keys = storage1.storage_slots.keys().copied().collect::<Vec<_>>();
+        assert!(storage_keys.windows(2).all(|w| w[0] <= w[1]));
 
         let storage2 = sorted.storages.get(&expected_hashed_addr2).expect("storage for address2");
         assert_eq!(storage2.storage_slots.len(), 1);
-        assert_eq!(storage2.storage_slots[0].0, expected_hashed_slot1);
-        assert_eq!(storage2.storage_slots[0].1, U256::from(300));
+        assert_eq!(storage2.storage_slots.get(&expected_hashed_slot1), Some(&U256::from(300)));
     }
 }

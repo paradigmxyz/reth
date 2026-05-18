@@ -4315,6 +4315,7 @@ mod tests {
     use revm_database::BundleState;
     use revm_state::AccountInfo;
     use std::{
+        collections::BTreeMap,
         sync::{mpsc, Arc},
         time::Duration,
     };
@@ -4739,7 +4740,7 @@ mod tests {
         // Create sorted storage trie updates
         let storage_trie1 = StorageTrieUpdatesSorted {
             is_deleted: false,
-            storage_nodes: vec![
+            storage_nodes: BTreeMap::from([
                 (
                     Nibbles::from_nibbles([0x1, 0x0]),
                     Some(BranchNodeCompact::new(
@@ -4751,12 +4752,12 @@ mod tests {
                     )),
                 ),
                 (Nibbles::from_nibbles([0x2, 0x0]), None), // Deletion of existing node
-            ],
+            ]),
         };
 
         let storage_trie2 = StorageTrieUpdatesSorted {
             is_deleted: true, // Wipe all storage for this address
-            storage_nodes: vec![],
+            storage_nodes: BTreeMap::default(),
         };
 
         let mut storage_tries = B256Map::default();
@@ -4913,21 +4914,21 @@ mod tests {
                     kept_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(kept_slot, U256::from(1))],
+                        storage_slots: BTreeMap::from([(kept_slot, U256::from(1))]),
                     },
                 ),
                 (
                     deferred_masked_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(deferred_masked_slot, U256::from(2))],
+                        storage_slots: BTreeMap::from([(deferred_masked_slot, U256::from(2))]),
                     },
                 ),
                 (
                     in_memory_overlap_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(in_memory_overlap_slot, U256::from(3))],
+                        storage_slots: BTreeMap::from([(in_memory_overlap_slot, U256::from(3))]),
                     },
                 ),
             ]),
@@ -4943,21 +4944,27 @@ mod tests {
                     kept_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(kept_storage_node, Some(branch(0b1010)))],
+                        storage_nodes: BTreeMap::from([(kept_storage_node, Some(branch(0b1010)))]),
                     },
                 ),
                 (
                     deferred_masked_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(deferred_masked_storage_node, Some(branch(0b0101)))],
+                        storage_nodes: BTreeMap::from([(
+                            deferred_masked_storage_node,
+                            Some(branch(0b0101)),
+                        )]),
                     },
                 ),
                 (
                     in_memory_overlap_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(in_memory_overlap_storage_node, Some(branch(0b0110)))],
+                        storage_nodes: BTreeMap::from([(
+                            in_memory_overlap_storage_node,
+                            Some(branch(0b0110)),
+                        )]),
                     },
                 ),
             ]),
@@ -4979,7 +4986,7 @@ mod tests {
                 deferred_masked_storage,
                 HashedStorageSorted {
                     wiped: false,
-                    storage_slots: vec![(deferred_masked_slot, U256::from(4))],
+                    storage_slots: BTreeMap::from([(deferred_masked_slot, U256::from(4))]),
                 },
             )]),
         );
@@ -4989,7 +4996,10 @@ mod tests {
                 deferred_masked_storage,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(deferred_masked_storage_node, Some(branch(0b1100)))],
+                    storage_nodes: BTreeMap::from([(
+                        deferred_masked_storage_node,
+                        Some(branch(0b1100)),
+                    )]),
                 },
             )]),
         );
@@ -5013,14 +5023,14 @@ mod tests {
                     in_memory_overlap_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(in_memory_overlap_slot, U256::from(5))],
+                        storage_slots: BTreeMap::from([(in_memory_overlap_slot, U256::from(5))]),
                     },
                 ),
                 (
                     in_memory_only_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(in_memory_only_slot, U256::from(6))],
+                        storage_slots: BTreeMap::from([(in_memory_only_slot, U256::from(6))]),
                     },
                 ),
             ]),
@@ -5035,14 +5045,20 @@ mod tests {
                     in_memory_overlap_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(in_memory_overlap_storage_node, Some(branch(0b1001)))],
+                        storage_nodes: BTreeMap::from([(
+                            in_memory_overlap_storage_node,
+                            Some(branch(0b1001)),
+                        )]),
                     },
                 ),
                 (
                     in_memory_only_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(in_memory_only_storage_node, Some(branch(0b1111)))],
+                        storage_nodes: BTreeMap::from([(
+                            in_memory_only_storage_node,
+                            Some(branch(0b1111)),
+                        )]),
                     },
                 ),
             ]),

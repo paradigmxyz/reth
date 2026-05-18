@@ -1,4 +1,7 @@
+use alloc::collections::BTreeMap;
+#[cfg(test)]
 use alloc::vec::Vec;
+#[cfg(test)]
 use core::cmp::Ordering;
 use itertools::Itertools;
 
@@ -6,6 +9,7 @@ use itertools::Itertools;
 ///
 /// Callers pass slices in priority order (index 0 = highest priority), so the first
 /// slice's value for a key takes precedence over later slices.
+#[cfg(test)]
 pub(crate) fn kway_merge_sorted<'a, K, V>(
     slices: impl IntoIterator<Item = &'a [(K, V)]>,
 ) -> Vec<(K, V)>
@@ -26,11 +30,34 @@ where
         .collect()
 }
 
+/// Merge sorted maps into a sorted `BTreeMap`. First occurrence wins for duplicate keys.
+///
+/// Callers pass maps in priority order (index 0 = highest priority), so the first
+/// map's value for a key takes precedence over later maps. The k-way merge deduplicates
+/// before inserting into the result map.
+pub(crate) fn kway_merge_sorted_maps<'a, K, V>(
+    maps: impl IntoIterator<Item = &'a BTreeMap<K, V>>,
+) -> BTreeMap<K, V>
+where
+    K: Ord + Clone + 'a,
+    V: Clone + 'a,
+{
+    maps.into_iter()
+        .filter(|m| !m.is_empty())
+        .enumerate()
+        .map(|(i, m)| m.iter().map(move |(k, v)| (i, k, v)))
+        .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
+        .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
+        .map(|(_, k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// Merge sorted left slices into a sorted `Vec`, excluding keys present in any right slice.
 ///
 /// Callers pass left slices in priority order (index 0 = highest priority), so the first
 /// left slice's value for a key takes precedence over later slices. Right slice order is ignored;
 /// the right-hand side only contributes keys to exclude.
+#[cfg(test)]
 pub(crate) fn kway_merge_disjoint_sorted<'a, K, V>(
     capacity: usize,
     left_slices: impl IntoIterator<Item = &'a [(K, V)]>,
@@ -71,8 +98,69 @@ where
     out
 }
 
+/// Merge sorted left maps into a sorted `BTreeMap`, excluding keys present in any right map.
+///
+/// Callers pass left maps in priority order (index 0 = highest priority), so the first
+/// left map's value for a key takes precedence over later maps. Right map order is ignored;
+/// the right-hand side only contributes keys to exclude.
+pub(crate) fn kway_merge_disjoint_sorted_maps<'a, K, V>(
+    left_maps: impl IntoIterator<Item = &'a BTreeMap<K, V>>,
+    right_maps: impl IntoIterator<Item = &'a BTreeMap<K, V>>,
+) -> BTreeMap<K, V>
+where
+    K: Ord + Clone + 'a,
+    V: Clone + 'a,
+{
+    let mut right_keys = right_maps
+        .into_iter()
+        .filter(|m| !m.is_empty())
+        .map(|m| m.keys())
+        .kmerge()
+        .dedup()
+        .peekable();
+
+    let mut out = BTreeMap::new();
+    for (_, key, value) in left_maps
+        .into_iter()
+        .filter(|m| !m.is_empty())
+        .enumerate()
+        .map(|(i, m)| m.iter().map(move |(k, v)| (i, k, v)))
+        .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
+        .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
+    {
+        while right_keys.peek().is_some_and(|right_key| *right_key < key) {
+            right_keys.next();
+        }
+
+        if right_keys.peek().is_some_and(|right_key| *right_key == key) {
+            continue;
+        }
+
+        out.insert(key.clone(), value.clone());
+    }
+
+    out
+}
+
+/// Extend a sorted map with another sorted map.
+/// Values from `other` take precedence for duplicate keys.
+pub(crate) fn extend_sorted_map<K, V>(target: &mut BTreeMap<K, V>, other: &BTreeMap<K, V>)
+where
+    K: Clone + Ord,
+    V: Clone,
+{
+    if target.is_empty() {
+        target.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+    } else {
+        for (key, value) in other {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+}
+
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
 /// Values from `other` take precedence for duplicate keys.
+#[cfg(test)]
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
 where
     K: Clone + Ord,

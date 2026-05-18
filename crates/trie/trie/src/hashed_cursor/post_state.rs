@@ -1,9 +1,9 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::forward_cursor::ForwardInMemoryCursor;
 use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostStateSorted;
+use std::{collections::BTreeMap, ops::Bound};
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
@@ -96,8 +96,8 @@ where
     cursor_wiped: bool,
     /// Entry that `database_cursor` is currently pointing to.
     cursor_entry: Option<(B256, V::NonZero)>,
-    /// Forward-only in-memory cursor over underlying V.
-    post_state_cursor: ForwardInMemoryCursor<'a, B256, V>,
+    /// In-memory cursor over the post-state overlay.
+    post_state_cursor: OverlayMapCursor<'a, B256, V>,
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
@@ -108,13 +108,50 @@ where
     post_state: &'a HashedPostStateSorted,
 }
 
+#[derive(Debug)]
+struct OverlayMapCursor<'a, K, V> {
+    entries: Option<&'a BTreeMap<K, V>>,
+    current: Option<(&'a K, &'a V)>,
+}
+
+impl<'a, K: Ord, V> OverlayMapCursor<'a, K, V> {
+    fn new(entries: Option<&'a BTreeMap<K, V>>) -> Self {
+        let current = entries.and_then(BTreeMap::first_key_value);
+        Self { entries, current }
+    }
+
+    fn has_any(&self, predicate: impl Fn((&K, &V)) -> bool) -> bool {
+        self.entries.is_some_and(|entries| entries.iter().any(predicate))
+    }
+
+    const fn current(&self) -> Option<(&'a K, &'a V)> {
+        self.current
+    }
+
+    fn reset(&mut self) {
+        self.current = self.entries.and_then(BTreeMap::first_key_value);
+    }
+
+    fn seek(&mut self, key: &K) -> Option<(&'a K, &'a V)> {
+        self.current = self.entries.and_then(|entries| entries.range(key..).next());
+        self.current
+    }
+
+    fn first_after(&mut self, key: &K) -> Option<(&'a K, &'a V)> {
+        self.current = self
+            .entries
+            .and_then(|entries| entries.range((Bound::Excluded(key), Bound::Unbounded)).next());
+        self.current
+    }
+}
+
 impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
 where
     C: HashedCursor<Value = Account>,
 {
     /// Create new account cursor which combines a DB cursor and the post state.
     pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state.accounts);
+        let post_state_cursor = OverlayMapCursor::new(Some(&post_state.accounts));
         Self {
             cursor,
             cursor_wiped: false,
@@ -155,12 +192,12 @@ where
     fn get_storage_overlay(
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
-    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
+    ) -> (OverlayMapCursor<'a, B256, U256>, bool) {
         let post_state_storage = post_state.storages.get(&hashed_address);
         let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
-        let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
+        let storage_slots = post_state_storage.map(|u| u.storage_slots_ref());
 
-        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
+        (OverlayMapCursor::new(storage_slots), cursor_wiped)
     }
 }
 
@@ -225,7 +262,7 @@ where
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
             let post_state_current =
-                self.post_state_cursor.current().copied().map(|(k, v)| (k, v.into_option()));
+                self.post_state_cursor.current().map(|(k, v)| (*k, (*v).into_option()));
 
             match (post_state_current, &self.cursor_entry) {
                 (Some((mem_key, None)), _)
@@ -302,7 +339,7 @@ where
         // If either cursor is currently pointing to the last entry which was returned then consume
         // that entry so that `choose_next_entry` is looking at the subsequent one.
         if let Some((key, _)) = self.post_state_cursor.current() &&
-            key == &last_key
+            *key == last_key
         {
             self.post_state_cursor.first_after(&last_key);
         }
@@ -489,7 +526,7 @@ mod tests {
                 // Create a HashedPostStateSorted with the storage data
                 let hashed_address = B256::ZERO;
                 let storage_sorted = reth_trie_common::HashedStorageSorted {
-                    storage_slots: post_state_nodes,
+                    storage_slots: post_state_nodes.into_iter().collect(),
                     wiped: false,
                 };
                 let mut storages = alloy_primitives::map::B256Map::default();

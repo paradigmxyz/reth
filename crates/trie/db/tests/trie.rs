@@ -458,7 +458,7 @@ fn account_and_storage_trie() {
     let account_updates = account_updates.account_nodes_ref();
     assert_eq!(account_updates.len(), 2);
 
-    let (nibbles1a, node1a) = account_updates.first().unwrap();
+    let (nibbles1a, node1a) = account_updates.iter().next().unwrap();
     assert_eq!(nibbles1a.to_vec(), vec![0xB]);
     let node1a = node1a.as_ref().unwrap();
     assert_eq!(node1a.state_mask, TrieMask::new(0b1011));
@@ -467,7 +467,7 @@ fn account_and_storage_trie() {
     assert_eq!(node1a.root_hash, None);
     assert_eq!(node1a.hashes.len(), 2);
 
-    let (nibbles2a, node2a) = account_updates.last().unwrap();
+    let (nibbles2a, node2a) = account_updates.iter().next_back().unwrap();
     assert_eq!(nibbles2a.to_vec(), vec![0xB, 0x0]);
     let node2a = node2a.as_ref().unwrap();
     assert_eq!(node2a.state_mask, TrieMask::new(0b10001));
@@ -505,7 +505,7 @@ fn account_and_storage_trie() {
     let account_updates = account_updates.account_nodes_ref();
     assert_eq!(account_updates.len(), 2);
 
-    let (nibbles1b, node1b) = account_updates.first().unwrap();
+    let (nibbles1b, node1b) = account_updates.iter().next().unwrap();
     assert_eq!(nibbles1b.to_vec(), vec![0xB]);
     let node1b = node1b.as_ref().unwrap();
     assert_eq!(node1b.state_mask, TrieMask::new(0b1011));
@@ -516,7 +516,7 @@ fn account_and_storage_trie() {
     assert_eq!(node1a.hashes[0], node1b.hashes[0]);
     assert_eq!(node1a.hashes[1], node1b.hashes[2]);
 
-    let (nibbles2b, node2b) = account_updates.last().unwrap();
+    let (nibbles2b, node2b) = account_updates.iter().next_back().unwrap();
     assert_eq!(nibbles2b.to_vec(), vec![0xB, 0x0]);
     let node2b = node2b.as_ref().unwrap();
     assert_eq!(node2a, node2b);

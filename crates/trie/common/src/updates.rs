@@ -1,5 +1,5 @@
 use crate::{
-    utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
+    utils::{extend_sorted_map, kway_merge_disjoint_sorted_maps, kway_merge_sorted_maps},
     BranchNodeCompact, HashBuilder, Nibbles,
 };
 use alloc::{
@@ -158,18 +158,14 @@ impl TrieUpdates {
 
     /// Converts trie updates into [`TrieUpdatesSorted`].
     pub fn into_sorted(mut self) -> TrieUpdatesSorted {
-        let mut account_nodes = self
-            .account_nodes
-            .drain()
-            .map(|(path, node)| {
-                // Updated nodes take precedence over removed nodes.
-                self.removed_nodes.remove(&path);
-                (path, Some(node))
-            })
-            .collect::<Vec<_>>();
+        let mut account_nodes = BTreeMap::new();
+        for (path, node) in self.account_nodes.drain() {
+            // Updated nodes take precedence over removed nodes.
+            self.removed_nodes.remove(&path);
+            account_nodes.insert(path, Some(node));
+        }
 
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
-        account_nodes.sort_unstable_by_key(|a| a.0);
 
         let storage_tries = self
             .storage_tries
@@ -182,11 +178,8 @@ impl TrieUpdates {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> TrieUpdatesSorted {
-        let mut account_nodes = self
-            .account_nodes
-            .iter()
-            .map(|(path, node)| (*path, Some(node.clone())))
-            .collect::<Vec<_>>();
+        let mut account_nodes: BTreeMap<_, _> =
+            self.account_nodes.iter().map(|(path, node)| (*path, Some(node.clone()))).collect();
 
         // Add removed nodes that aren't already updated (updated nodes take precedence)
         account_nodes.extend(
@@ -195,7 +188,6 @@ impl TrieUpdates {
                 .filter(|path| !self.account_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
-        account_nodes.sort_unstable_by_key(|a| a.0);
 
         let storage_tries = self
             .storage_tries
@@ -362,18 +354,14 @@ impl StorageTrieUpdates {
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSorted`].
     pub fn into_sorted(mut self) -> StorageTrieUpdatesSorted {
-        let mut storage_nodes = self
-            .storage_nodes
-            .into_iter()
-            .map(|(path, node)| {
-                // Updated nodes take precedence over removed nodes.
-                self.removed_nodes.remove(&path);
-                (path, Some(node))
-            })
-            .collect::<Vec<_>>();
+        let mut storage_nodes = BTreeMap::new();
+        for (path, node) in self.storage_nodes {
+            // Updated nodes take precedence over removed nodes.
+            self.removed_nodes.remove(&path);
+            storage_nodes.insert(path, Some(node));
+        }
 
         storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
-        storage_nodes.sort_unstable_by_key(|a| a.0);
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
@@ -381,11 +369,8 @@ impl StorageTrieUpdates {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> StorageTrieUpdatesSorted {
-        let mut storage_nodes = self
-            .storage_nodes
-            .iter()
-            .map(|(path, node)| (*path, Some(node.clone())))
-            .collect::<Vec<_>>();
+        let mut storage_nodes: BTreeMap<_, _> =
+            self.storage_nodes.iter().map(|(path, node)| (*path, Some(node.clone()))).collect();
 
         // Add removed nodes that aren't already updated (updated nodes take precedence)
         storage_nodes.extend(
@@ -394,7 +379,6 @@ impl StorageTrieUpdates {
                 .filter(|path| !self.storage_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
-        storage_nodes.sort_unstable_by_key(|a| a.0);
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
@@ -550,32 +534,18 @@ pub struct TrieUpdatesSortedRef<'a> {
 pub struct TrieUpdatesSorted {
     /// Sorted collection of updated state nodes with corresponding paths. None indicates that a
     /// node was removed.
-    account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+    account_nodes: BTreeMap<Nibbles, Option<BranchNodeCompact>>,
     /// Storage tries stored by hashed address of the account the trie belongs to.
     storage_tries: B256Map<StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
     /// Creates a new `TrieUpdatesSorted` with the given account nodes and storage tries.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if `account_nodes` is not sorted by the `Nibbles` key,
-    /// or if any storage trie's `storage_nodes` is not sorted by its `Nibbles` key.
     pub fn new(
-        account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+        account_nodes: impl IntoIterator<Item = (Nibbles, Option<BranchNodeCompact>)>,
         storage_tries: B256Map<StorageTrieUpdatesSorted>,
     ) -> Self {
-        debug_assert!(
-            account_nodes.is_sorted_by_key(|item| &item.0),
-            "account_nodes must be sorted by Nibbles key"
-        );
-        debug_assert!(
-            storage_tries.values().all(|storage_trie| {
-                storage_trie.storage_nodes.is_sorted_by_key(|item| &item.0)
-            }),
-            "all storage_nodes in storage_tries must be sorted by Nibbles key"
-        );
+        let account_nodes = account_nodes.into_iter().collect();
         Self { account_nodes, storage_tries }
     }
 
@@ -585,7 +555,7 @@ impl TrieUpdatesSorted {
     }
 
     /// Returns reference to updated account nodes.
-    pub fn account_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
+    pub const fn account_nodes_ref(&self) -> &BTreeMap<Nibbles, Option<BranchNodeCompact>> {
         &self.account_nodes
     }
 
@@ -610,7 +580,7 @@ impl TrieUpdatesSorted {
     /// storage trie.
     pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend account nodes
-        extend_sorted_vec(&mut self.account_nodes, &other.account_nodes);
+        extend_sorted_map(&mut self.account_nodes, &other.account_nodes);
 
         // Merge storage tries
         for (hashed_address, storage_trie) in &other.storage_tries {
@@ -668,13 +638,12 @@ impl TrieUpdatesSorted {
         }
 
         // Large k: k-way merge.
-        let account_nodes =
-            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+        let account_nodes = kway_merge_sorted_maps(items.iter().map(|i| &i.as_ref().account_nodes));
 
         struct StorageAcc<'a> {
             is_deleted: bool,
             sealed: bool,
-            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+            maps: Vec<&'a BTreeMap<Nibbles, Option<BranchNodeCompact>>>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
@@ -684,14 +653,14 @@ impl TrieUpdatesSorted {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     is_deleted: false,
                     sealed: false,
-                    slices: Vec::new(),
+                    maps: Vec::new(),
                 });
 
                 if entry.sealed {
                     continue;
                 }
 
-                entry.slices.push(storage.storage_nodes.as_slice());
+                entry.maps.push(&storage.storage_nodes);
 
                 if storage.is_deleted {
                     entry.is_deleted = true;
@@ -703,7 +672,7 @@ impl TrieUpdatesSorted {
         let storage_tries = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_nodes = kway_merge_sorted(entry.slices);
+                let storage_nodes = kway_merge_sorted_maps(entry.maps);
                 (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
             })
             .collect();
@@ -718,23 +687,21 @@ impl TrieUpdatesSorted {
     /// the batch, later items take precedence over earlier ones. The order of the mask does not
     /// matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
-        let account_nodes = kway_merge_disjoint_sorted(
-            batch.iter().map(|item| item.account_nodes.len()).sum(),
-            batch.iter().rev().map(|item| item.account_nodes.as_slice()),
-            mask.iter().map(|item| item.account_nodes.as_slice()),
+        let account_nodes = kway_merge_disjoint_sorted_maps(
+            batch.iter().rev().map(|item| &item.account_nodes),
+            mask.iter().map(|item| &item.account_nodes),
         );
 
         struct StorageAcc<'a> {
             is_deleted: bool,
             sealed: bool,
-            node_count: usize,
-            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+            maps: Vec<&'a BTreeMap<Nibbles, Option<BranchNodeCompact>>>,
         }
 
         #[derive(Default)]
         struct StorageMaskAcc<'a> {
             is_deleted: bool,
-            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+            maps: Vec<&'a BTreeMap<Nibbles, Option<BranchNodeCompact>>>,
         }
 
         let mut storage_tries = B256Map::with_capacity_and_hasher(
@@ -747,16 +714,14 @@ impl TrieUpdatesSorted {
                 let entry = storage_tries.entry(*hashed_address).or_insert_with(|| StorageAcc {
                     is_deleted: false,
                     sealed: false,
-                    node_count: 0,
-                    slices: Vec::new(),
+                    maps: Vec::new(),
                 });
 
                 if entry.sealed {
                     continue;
                 }
 
-                entry.slices.push(storage_trie.storage_nodes.as_slice());
-                entry.node_count += storage_trie.storage_nodes.len();
+                entry.maps.push(&storage_trie.storage_nodes);
                 if storage_trie.is_deleted {
                     entry.is_deleted = true;
                     entry.sealed = true;
@@ -776,9 +741,9 @@ impl TrieUpdatesSorted {
                 }
                 if storage_trie.is_deleted {
                     entry.is_deleted = true;
-                    entry.slices.clear();
+                    entry.maps.clear();
                 } else {
-                    entry.slices.push(storage_trie.storage_nodes.as_slice());
+                    entry.maps.push(&storage_trie.storage_nodes);
                 }
             }
         }
@@ -788,12 +753,10 @@ impl TrieUpdatesSorted {
             .filter_map(|(hashed_address, entry)| {
                 let storage_nodes = match storage_masks.get(&hashed_address) {
                     Some(mask_entry) if mask_entry.is_deleted => return None,
-                    Some(mask_entry) => kway_merge_disjoint_sorted(
-                        entry.node_count,
-                        entry.slices,
-                        mask_entry.slices.iter().copied(),
-                    ),
-                    None => kway_merge_sorted(entry.slices),
+                    Some(mask_entry) => {
+                        kway_merge_disjoint_sorted_maps(entry.maps, mask_entry.maps.iter().copied())
+                    }
+                    None => kway_merge_sorted_maps(entry.maps),
                 };
 
                 (!storage_nodes.is_empty() || entry.is_deleted).then_some((
@@ -856,7 +819,7 @@ pub struct StorageTrieUpdatesSorted {
     pub is_deleted: bool,
     /// Sorted collection of updated storage nodes with corresponding paths. None indicates a node
     /// is removed.
-    pub storage_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+    pub storage_nodes: BTreeMap<Nibbles, Option<BranchNodeCompact>>,
 }
 
 impl StorageTrieUpdatesSorted {
@@ -866,17 +829,17 @@ impl StorageTrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage nodes.
-    pub fn storage_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
+    pub const fn storage_nodes_ref(&self) -> &BTreeMap<Nibbles, Option<BranchNodeCompact>> {
         &self.storage_nodes
     }
 
     /// Returns the total number of storage node updates.
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.storage_nodes.len()
     }
 
     /// Returns `true` if there are no storage node updates.
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.storage_nodes.is_empty()
     }
 
@@ -888,12 +851,12 @@ impl StorageTrieUpdatesSorted {
         if other.is_deleted {
             self.is_deleted = true;
             self.storage_nodes.clear();
-            self.storage_nodes.extend(other.storage_nodes.iter().cloned());
+            self.storage_nodes.extend(other.storage_nodes.iter().map(|(k, v)| (*k, v.clone())));
             return;
         }
 
         // Extend storage nodes
-        extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
+        extend_sorted_map(&mut self.storage_nodes, &other.storage_nodes);
         self.is_deleted = self.is_deleted || other.is_deleted;
     }
 
@@ -908,7 +871,7 @@ impl StorageTrieUpdatesSorted {
         // Discard updates older than the first deletion since the trie was wiped at that point.
         let del_idx = updates.iter().position(|u| u.is_deleted);
         let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_nodes = kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
+        let storage_nodes = kway_merge_sorted_maps(relevant.iter().map(|u| &u.storage_nodes));
 
         Self { is_deleted: del_idx.is_some(), storage_nodes }
     }
@@ -948,6 +911,10 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
 
+    fn map<K: Ord, V>(entries: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, V> {
+        entries.into_iter().collect()
+    }
+
     #[test]
     fn test_trie_updates_sorted_extend_ref() {
         // Test extending with empty updates
@@ -959,50 +926,56 @@ mod tests {
 
         // Test extending account nodes
         let mut updates1 = TrieUpdatesSorted {
-            account_nodes: vec![
+            account_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x03]), None),
-            ],
+            ]),
             storage_tries: B256Map::default(),
         };
         let updates2 = TrieUpdatesSorted {
-            account_nodes: vec![
+            account_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x02]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())), /* Override */
-            ],
+            ]),
             storage_tries: B256Map::default(),
         };
         updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 3);
         // Should be sorted: 0x01, 0x02, 0x03
-        assert_eq!(updates1.account_nodes[0].0, Nibbles::from_nibbles_unchecked([0x01]));
-        assert_eq!(updates1.account_nodes[1].0, Nibbles::from_nibbles_unchecked([0x02]));
-        assert_eq!(updates1.account_nodes[2].0, Nibbles::from_nibbles_unchecked([0x03]));
+        let account_keys = updates1.account_nodes.keys().copied().collect::<Vec<_>>();
+        assert_eq!(
+            account_keys,
+            vec![
+                Nibbles::from_nibbles_unchecked([0x01]),
+                Nibbles::from_nibbles_unchecked([0x02]),
+                Nibbles::from_nibbles_unchecked([0x03])
+            ]
+        );
         // 0x03 should have Some value from updates2 (override)
-        assert!(updates1.account_nodes[2].1.is_some());
+        assert!(updates1.account_nodes[&Nibbles::from_nibbles_unchecked([0x03])].is_some());
 
         // Test extending storage tries
         let storage_trie1 = StorageTrieUpdatesSorted {
             is_deleted: false,
-            storage_nodes: vec![(
+            storage_nodes: map([(
                 Nibbles::from_nibbles_unchecked([0x0a]),
                 Some(BranchNodeCompact::default()),
-            )],
+            )]),
         };
         let storage_trie2 = StorageTrieUpdatesSorted {
             is_deleted: false,
-            storage_nodes: vec![(Nibbles::from_nibbles_unchecked([0x0b]), None)],
+            storage_nodes: map([(Nibbles::from_nibbles_unchecked([0x0b]), None)]),
         };
 
         let hashed_address1 = B256::from([1; 32]);
         let hashed_address2 = B256::from([2; 32]);
 
         let mut updates1 = TrieUpdatesSorted {
-            account_nodes: vec![],
+            account_nodes: BTreeMap::new(),
             storage_tries: B256Map::from_iter([(hashed_address1, storage_trie1.clone())]),
         };
         let updates2 = TrieUpdatesSorted {
-            account_nodes: vec![],
+            account_nodes: BTreeMap::new(),
             storage_tries: B256Map::from_iter([
                 (hashed_address1, storage_trie2),
                 (hashed_address2, storage_trie1),
@@ -1022,18 +995,18 @@ mod tests {
         // Test case 1: Extending with a deleted storage trie that has nodes
         let mut storage1 = StorageTrieUpdatesSorted {
             is_deleted: false,
-            storage_nodes: vec![
+            storage_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x02]), None),
-            ],
+            ]),
         };
 
         let storage2 = StorageTrieUpdatesSorted {
             is_deleted: true,
-            storage_nodes: vec![
+            storage_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x04]), None),
-            ],
+            ]),
         };
 
         storage1.extend_ref(&storage2);
@@ -1042,24 +1015,24 @@ mod tests {
         assert!(storage1.is_deleted);
         // Original nodes should be cleared, but other's nodes should be added
         assert_eq!(storage1.storage_nodes.len(), 2);
-        assert_eq!(storage1.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x03]));
-        assert_eq!(storage1.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x04]));
+        assert!(storage1.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x03])));
+        assert!(storage1.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x04])));
 
         // Test case 2: Extending a deleted storage trie with more nodes
         let mut storage3 = StorageTrieUpdatesSorted {
             is_deleted: true,
-            storage_nodes: vec![(
+            storage_nodes: map([(
                 Nibbles::from_nibbles_unchecked([0x05]),
                 Some(BranchNodeCompact::default()),
-            )],
+            )]),
         };
 
         let storage4 = StorageTrieUpdatesSorted {
             is_deleted: true,
-            storage_nodes: vec![
+            storage_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x06]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x07]), None),
-            ],
+            ]),
         };
 
         storage3.extend_ref(&storage4);
@@ -1068,8 +1041,8 @@ mod tests {
         assert!(storage3.is_deleted);
         // Should have nodes from other (original cleared then extended)
         assert_eq!(storage3.storage_nodes.len(), 2);
-        assert_eq!(storage3.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x06]));
-        assert_eq!(storage3.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x07]));
+        assert!(storage3.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x06])));
+        assert!(storage3.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x07])));
     }
 
     #[test]
@@ -1088,14 +1061,14 @@ mod tests {
                     kept_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(slot1, None)],
+                        storage_nodes: map([(slot1, None)]),
                     },
                 ),
                 (
                     removed_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(slot1, Some(BranchNodeCompact::default()))],
+                        storage_nodes: map([(slot1, Some(BranchNodeCompact::default()))]),
                     },
                 ),
             ]),
@@ -1107,7 +1080,10 @@ mod tests {
                 kept_storage,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(slot1, Some(BranchNodeCompact::default())), (slot2, None)],
+                    storage_nodes: map([
+                        (slot1, Some(BranchNodeCompact::default())),
+                        (slot2, None),
+                    ]),
                 },
             )]),
         );
@@ -1119,12 +1095,12 @@ mod tests {
                     kept_storage,
                     StorageTrieUpdatesSorted {
                         is_deleted: false,
-                        storage_nodes: vec![(slot2, Some(BranchNodeCompact::default()))],
+                        storage_nodes: map([(slot2, Some(BranchNodeCompact::default()))]),
                     },
                 ),
                 (
                     removed_storage,
-                    StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
+                    StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: BTreeMap::new() },
                 ),
             ]),
         );
@@ -1139,13 +1115,13 @@ mod tests {
             vec![&remove_b, &remove_a],
         );
 
-        assert_eq!(result.account_nodes, vec![(kept_node, None)]);
+        assert_eq!(result.account_nodes, map([(kept_node, None)]));
         assert_eq!(result.storage_tries.len(), 1);
         assert_eq!(
             result.storage_tries.get(&kept_storage),
             Some(&StorageTrieUpdatesSorted {
                 is_deleted: false,
-                storage_nodes: vec![(slot1, Some(BranchNodeCompact::default()))],
+                storage_nodes: map([(slot1, Some(BranchNodeCompact::default()))]),
             })
         );
         assert!(!result.storage_tries.contains_key(&removed_storage));
@@ -1163,7 +1139,7 @@ mod tests {
                 overlapping_storage,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(slot, Some(BranchNodeCompact::default()))],
+                    storage_nodes: map([(slot, Some(BranchNodeCompact::default()))]),
                 },
             )]),
         );
@@ -1172,7 +1148,7 @@ mod tests {
             vec![(overlapping_node, None)],
             B256Map::from_iter([(
                 overlapping_storage,
-                StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: vec![(slot, None)] },
+                StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: map([(slot, None)]) },
             )]),
         );
 
@@ -1180,7 +1156,7 @@ mod tests {
             vec![(overlapping_node, Some(BranchNodeCompact::default()))],
             B256Map::from_iter([(
                 overlapping_storage,
-                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
+                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: BTreeMap::new() },
             )]),
         );
 
@@ -1207,11 +1183,11 @@ mod tests {
                 hashed_address,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![
+                    storage_nodes: map([
                         (grandparent, Some(BranchNodeCompact::default())),
                         (parent, Some(BranchNodeCompact::default())),
                         (child, Some(BranchNodeCompact::default())),
-                    ],
+                    ]),
                 },
             )]),
         );
@@ -1224,22 +1200,22 @@ mod tests {
                 hashed_address,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![
+                    storage_nodes: map([
                         (grandparent, Some(BranchNodeCompact::default())),
                         (parent, Some(BranchNodeCompact::default())),
-                    ],
+                    ]),
                 },
             )]),
         );
 
         let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
 
-        assert_eq!(result.account_nodes, vec![(child, Some(BranchNodeCompact::default()))]);
+        assert_eq!(result.account_nodes, map([(child, Some(BranchNodeCompact::default()))]));
         assert_eq!(
             result.storage_tries.get(&hashed_address),
             Some(&StorageTrieUpdatesSorted {
                 is_deleted: false,
-                storage_nodes: vec![(child, Some(BranchNodeCompact::default()))],
+                storage_nodes: map([(child, Some(BranchNodeCompact::default()))]),
             })
         );
     }
@@ -1255,7 +1231,7 @@ mod tests {
                 storage,
                 StorageTrieUpdatesSorted {
                     is_deleted: false,
-                    storage_nodes: vec![(slot, Some(BranchNodeCompact::default()))],
+                    storage_nodes: map([(slot, Some(BranchNodeCompact::default()))]),
                 },
             )]),
         );
@@ -1263,7 +1239,7 @@ mod tests {
             vec![],
             B256Map::from_iter([(
                 storage,
-                StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: vec![] },
+                StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: BTreeMap::new() },
             )]),
         );
 
@@ -1273,7 +1249,7 @@ mod tests {
             result.storage_tries.get(&storage),
             Some(&StorageTrieUpdatesSorted {
                 is_deleted: false,
-                storage_nodes: vec![(slot, Some(BranchNodeCompact::default()))],
+                storage_nodes: map([(slot, Some(BranchNodeCompact::default()))]),
             })
         );
     }
@@ -1287,14 +1263,14 @@ mod tests {
 
         let storage_trie = StorageTrieUpdatesSorted {
             is_deleted: false,
-            storage_nodes: vec![
+            storage_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x0a]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x0b]), None),
-            ],
+            ]),
         };
 
         let sorted = TrieUpdatesSorted {
-            account_nodes: vec![],
+            account_nodes: BTreeMap::new(),
             storage_tries: B256Map::from_iter([(hashed_address, storage_trie)]),
         };
 
@@ -1327,14 +1303,14 @@ mod tests {
 
         let storage_trie = StorageTrieUpdatesSorted {
             is_deleted: true,
-            storage_nodes: vec![(
+            storage_nodes: map([(
                 Nibbles::from_nibbles_unchecked([0x0a]),
                 Some(BranchNodeCompact::default()),
-            )],
+            )]),
         };
 
         let sorted = TrieUpdatesSorted {
-            account_nodes: vec![],
+            account_nodes: BTreeMap::new(),
             storage_tries: B256Map::from_iter([(hashed_address, storage_trie)]),
         };
 
@@ -1361,10 +1337,10 @@ mod tests {
 
         let sorted = StorageTrieUpdatesSorted {
             is_deleted: false,
-            storage_nodes: vec![
+            storage_nodes: map([
                 (Nibbles::from_nibbles_unchecked([0x02]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x03]), None),
-            ],
+            ]),
         };
 
         storage.extend_from_sorted(&sorted);
@@ -1388,10 +1364,10 @@ mod tests {
 
         let sorted = StorageTrieUpdatesSorted {
             is_deleted: true,
-            storage_nodes: vec![(
+            storage_nodes: map([(
                 Nibbles::from_nibbles_unchecked([0x0a]),
                 Some(BranchNodeCompact::default()),
-            )],
+            )]),
         };
 
         storage.extend_from_sorted(&sorted);
@@ -1408,10 +1384,10 @@ mod tests {
         let mut updates = TrieUpdates::default();
 
         let sorted = TrieUpdatesSorted {
-            account_nodes: vec![
+            account_nodes: map([
                 (Nibbles::default(), Some(BranchNodeCompact::default())), // Empty nibbles
                 (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
-            ],
+            ]),
             storage_tries: B256Map::default(),
         };
 
@@ -1584,7 +1560,9 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::TrieUpdatesSorted> for TrieUpdatesSorted<'a> {
         fn from(value: &'a super::TrieUpdatesSorted) -> Self {
             Self {
-                account_nodes: Cow::Borrowed(&value.account_nodes),
+                account_nodes: Cow::Owned(
+                    value.account_nodes.iter().map(|(path, node)| (*path, node.clone())).collect(),
+                ),
                 storage_tries: value.storage_tries.iter().map(|(k, v)| (*k, v.into())).collect(),
             }
         }
@@ -1593,7 +1571,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<TrieUpdatesSorted<'a>> for super::TrieUpdatesSorted {
         fn from(value: TrieUpdatesSorted<'a>) -> Self {
             Self {
-                account_nodes: value.account_nodes.into_owned(),
+                account_nodes: value.account_nodes.into_owned().into_iter().collect(),
                 storage_tries: value
                     .storage_tries
                     .into_iter()
@@ -1649,14 +1627,19 @@ pub mod serde_bincode_compat {
         fn from(value: &'a super::StorageTrieUpdatesSorted) -> Self {
             Self {
                 is_deleted: value.is_deleted,
-                storage_nodes: Cow::Borrowed(&value.storage_nodes),
+                storage_nodes: Cow::Owned(
+                    value.storage_nodes.iter().map(|(path, node)| (*path, node.clone())).collect(),
+                ),
             }
         }
     }
 
     impl<'a> From<StorageTrieUpdatesSorted<'a>> for super::StorageTrieUpdatesSorted {
         fn from(value: StorageTrieUpdatesSorted<'a>) -> Self {
-            Self { is_deleted: value.is_deleted, storage_nodes: value.storage_nodes.into_owned() }
+            Self {
+                is_deleted: value.is_deleted,
+                storage_nodes: value.storage_nodes.into_owned().into_iter().collect(),
+            }
         }
     }
 
@@ -1773,17 +1756,17 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.account_nodes.push((
+            data.trie_updates.account_nodes.insert(
                 Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
                 Some(BranchNodeCompact::default()),
-            ));
+            );
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
             data.trie_updates
                 .account_nodes
-                .push((Nibbles::from_nibbles_unchecked([0x0f, 0x0f, 0x0f, 0x0f]), None));
+                .insert(Nibbles::from_nibbles_unchecked([0x0f, 0x0f, 0x0f, 0x0f]), None);
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
@@ -1810,17 +1793,17 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.storage_nodes.push((
+            data.trie_updates.storage_nodes.insert(
                 Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
                 Some(BranchNodeCompact::default()),
-            ));
+            );
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
             data.trie_updates
                 .storage_nodes
-                .push((Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]), None));
+                .insert(Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]), None);
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

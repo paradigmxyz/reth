@@ -294,7 +294,10 @@ where
 
         storage_tries.insert(
             *hashed_address,
-            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
+            StorageTrieUpdatesSorted {
+                storage_nodes: storage_nodes.into_iter().collect(),
+                is_deleted: storage_changeset.is_deleted,
+            },
         );
     }
 

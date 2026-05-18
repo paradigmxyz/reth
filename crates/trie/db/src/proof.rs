@@ -120,7 +120,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         let hashed_address = keccak256(address);
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(
-            Default::default(),
+            [],
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
@@ -142,7 +142,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         let targets = slots.iter().map(keccak256).collect();
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(
-            Default::default(),
+            [],
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(

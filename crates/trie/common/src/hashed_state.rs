@@ -3,10 +3,10 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
+    utils::{extend_sorted_map, kway_merge_disjoint_sorted_maps, kway_merge_sorted_maps},
     KeyHasher, MultiProofTargets, Nibbles,
 };
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -327,8 +327,7 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut accounts: Vec<_> = self.accounts.into_iter().collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = self.accounts.into_iter().collect();
 
         let storages = self
             .storages
@@ -342,8 +341,7 @@ impl HashedPostState {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
-        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
 
         let storages = self
             .storages
@@ -497,8 +495,7 @@ impl HashedStorage {
 
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        let storage_slots = self.storage.into_iter().collect();
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
@@ -506,8 +503,7 @@ impl HashedStorage {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
-        let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        let storage_slots = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
@@ -518,22 +514,23 @@ impl HashedStorage {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostStateSorted {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
-    pub accounts: Vec<(B256, Option<Account>)>,
+    pub accounts: BTreeMap<B256, Option<Account>>,
     /// Map of hashed addresses to their sorted storage updates.
     pub storages: B256Map<HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
-    pub const fn new(
-        accounts: Vec<(B256, Option<Account>)>,
+    pub fn new(
+        accounts: impl IntoIterator<Item = (B256, Option<Account>)>,
         storages: B256Map<HashedStorageSorted>,
     ) -> Self {
+        let accounts = accounts.into_iter().collect();
         Self { accounts, storages }
     }
 
     /// Returns reference to hashed accounts.
-    pub const fn accounts(&self) -> &Vec<(B256, Option<Account>)> {
+    pub const fn accounts(&self) -> &BTreeMap<B256, Option<Account>> {
         &self.accounts
     }
 
@@ -577,12 +574,7 @@ impl HashedPostStateSorted {
             } else {
                 let mut prefix_set =
                     PrefixSetMut::with_capacity(hashed_storage.storage_slots.len());
-                prefix_set.extend_keys(
-                    hashed_storage
-                        .storage_slots
-                        .iter()
-                        .map(|(hashed_slot, _)| Nibbles::unpack(hashed_slot)),
-                );
+                prefix_set.extend_keys(hashed_storage.storage_slots.keys().map(Nibbles::unpack));
                 prefix_set
             };
 
@@ -598,7 +590,7 @@ impl HashedPostStateSorted {
     /// Sorts the accounts after extending. Sorts the storage after extending, for each account.
     pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend accounts
-        extend_sorted_vec(&mut self.accounts, &other.accounts);
+        extend_sorted_map(&mut self.accounts, &other.accounts);
 
         // Extend storages
         for (hashed_address, other_storage) in &other.storages {
@@ -650,12 +642,12 @@ impl HashedPostStateSorted {
         }
 
         // Large k: k-way merge.
-        let accounts = kway_merge_sorted(items.iter().map(|i| i.as_ref().accounts.as_slice()));
+        let accounts = kway_merge_sorted_maps(items.iter().map(|i| &i.as_ref().accounts));
 
         struct StorageAcc<'a> {
             wiped: bool,
             sealed: bool,
-            slices: Vec<&'a [(B256, U256)]>,
+            maps: Vec<&'a BTreeMap<B256, U256>>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
@@ -665,14 +657,14 @@ impl HashedPostStateSorted {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     wiped: false,
                     sealed: false,
-                    slices: Vec::new(),
+                    maps: Vec::new(),
                 });
 
                 if entry.sealed {
                     continue;
                 }
 
-                entry.slices.push(storage.storage_slots.as_slice());
+                entry.maps.push(&storage.storage_slots);
                 if storage.wiped {
                     entry.wiped = true;
                     entry.sealed = true;
@@ -683,7 +675,7 @@ impl HashedPostStateSorted {
         let storages = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_slots = kway_merge_sorted(entry.slices);
+                let storage_slots = kway_merge_sorted_maps(entry.maps);
                 (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
             })
             .collect();
@@ -697,23 +689,21 @@ impl HashedPostStateSorted {
     /// level unless the mask wipes the entire storage. For duplicate keys in the batch, later
     /// items take precedence over earlier ones. The order of the mask does not matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
-        let accounts = kway_merge_disjoint_sorted(
-            batch.iter().map(|item| item.accounts.len()).sum(),
-            batch.iter().rev().map(|item| item.accounts.as_slice()),
-            mask.iter().map(|item| item.accounts.as_slice()),
+        let accounts = kway_merge_disjoint_sorted_maps(
+            batch.iter().rev().map(|item| &item.accounts),
+            mask.iter().map(|item| &item.accounts),
         );
 
         struct StorageAcc<'a> {
             wiped: bool,
             sealed: bool,
-            slot_count: usize,
-            slices: Vec<&'a [(B256, U256)]>,
+            maps: Vec<&'a BTreeMap<B256, U256>>,
         }
 
         #[derive(Default)]
         struct StorageMaskAcc<'a> {
             wiped: bool,
-            slices: Vec<&'a [(B256, U256)]>,
+            maps: Vec<&'a BTreeMap<B256, U256>>,
         }
 
         let mut storages = B256Map::with_capacity_and_hasher(
@@ -726,16 +716,14 @@ impl HashedPostStateSorted {
                 let entry = storages.entry(*hashed_address).or_insert_with(|| StorageAcc {
                     wiped: false,
                     sealed: false,
-                    slot_count: 0,
-                    slices: Vec::new(),
+                    maps: Vec::new(),
                 });
 
                 if entry.sealed {
                     continue;
                 }
 
-                entry.slices.push(storage.storage_slots.as_slice());
-                entry.slot_count += storage.storage_slots.len();
+                entry.maps.push(&storage.storage_slots);
                 if storage.wiped {
                     entry.wiped = true;
                     entry.sealed = true;
@@ -755,9 +743,9 @@ impl HashedPostStateSorted {
                 }
                 if storage.wiped {
                     entry.wiped = true;
-                    entry.slices.clear();
+                    entry.maps.clear();
                 } else {
-                    entry.slices.push(storage.storage_slots.as_slice());
+                    entry.maps.push(&storage.storage_slots);
                 }
             }
         }
@@ -767,12 +755,10 @@ impl HashedPostStateSorted {
             .filter_map(|(hashed_address, entry)| {
                 let storage_slots = match storage_masks.get(&hashed_address) {
                     Some(mask_entry) if mask_entry.wiped => return None,
-                    Some(mask_entry) => kway_merge_disjoint_sorted(
-                        entry.slot_count,
-                        entry.slices,
-                        mask_entry.slices.iter().copied(),
-                    ),
-                    None => kway_merge_sorted(entry.slices),
+                    Some(mask_entry) => {
+                        kway_merge_disjoint_sorted_maps(entry.maps, mask_entry.maps.iter().copied())
+                    }
+                    None => kway_merge_sorted_maps(entry.maps),
                 };
 
                 (!storage_slots.is_empty() || entry.wiped).then_some((
@@ -803,7 +789,7 @@ impl AsRef<Self> for HashedPostStateSorted {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorageSorted {
     /// Sorted collection of updated storage slots. [`U256::ZERO`] indicates a deleted value.
-    pub storage_slots: Vec<(B256, U256)>,
+    pub storage_slots: BTreeMap<B256, U256>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
 }
@@ -815,17 +801,17 @@ impl HashedStorageSorted {
     }
 
     /// Returns reference to updated storage slots.
-    pub fn storage_slots_ref(&self) -> &[(B256, U256)] {
+    pub const fn storage_slots_ref(&self) -> &BTreeMap<B256, U256> {
         &self.storage_slots
     }
 
     /// Returns the total number of storage slot updates.
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.storage_slots.len()
     }
 
     /// Returns `true` if there are no storage slot updates.
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.storage_slots.is_empty()
     }
 
@@ -838,12 +824,12 @@ impl HashedStorageSorted {
             // If other is wiped, clear everything and copy from other
             self.wiped = true;
             self.storage_slots.clear();
-            self.storage_slots.extend(other.storage_slots.iter().copied());
+            self.storage_slots.extend(other.storage_slots.iter().map(|(k, v)| (*k, *v)));
             return;
         }
 
         // Extend the sorted non-zero valued slots
-        extend_sorted_vec(&mut self.storage_slots, &other.storage_slots);
+        extend_sorted_map(&mut self.storage_slots, &other.storage_slots);
     }
 
     /// Batch-merge sorted hashed storage. Iterator yields **newest to oldest**.
@@ -856,7 +842,7 @@ impl HashedStorageSorted {
 
         let wipe_idx = updates.iter().position(|u| u.wiped);
         let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
+        let storage_slots = kway_merge_sorted_maps(relevant.iter().map(|u| &u.storage_slots));
 
         Self { wiped: wipe_idx.is_some(), storage_slots }
     }
@@ -1002,6 +988,10 @@ mod tests {
     use alloy_primitives::Bytes;
     use revm_database::{states::StorageSlot, StorageWithOriginalValues};
     use revm_state::{AccountInfo, Bytecode};
+
+    fn map<K: Ord, V>(entries: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, V> {
+        entries.into_iter().collect()
+    }
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -1493,21 +1483,21 @@ mod tests {
     fn test_hashed_post_state_sorted_extend_ref() {
         // Test extending accounts
         let mut state1 = HashedPostStateSorted {
-            accounts: vec![
+            accounts: map([
                 (B256::from([1; 32]), Some(Account::default())),
                 (B256::from([3; 32]), Some(Account::default())),
                 (B256::from([5; 32]), None),
-            ],
+            ]),
             storages: B256Map::default(),
         };
 
         let state2 = HashedPostStateSorted {
-            accounts: vec![
+            accounts: map([
                 (B256::from([2; 32]), Some(Account::default())),
                 (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), /* Override */
                 (B256::from([4; 32]), Some(Account::default())),
                 (B256::from([6; 32]), None),
-            ],
+            ]),
             storages: B256Map::default(),
         };
 
@@ -1515,70 +1505,69 @@ mod tests {
 
         // Check accounts are merged and sorted
         assert_eq!(state1.accounts.len(), 6);
-        assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
-        assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
-        assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
-        assert_eq!(state1.accounts[2].1.unwrap().nonce, 1); // Should have state2's value
-        assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
-        assert_eq!(state1.accounts[4].0, B256::from([5; 32]));
-        assert_eq!(state1.accounts[4].1, None);
-        assert_eq!(state1.accounts[5].0, B256::from([6; 32]));
-        assert_eq!(state1.accounts[5].1, None);
+        assert_eq!(
+            state1.accounts.keys().copied().collect::<Vec<_>>(),
+            vec![
+                B256::from([1; 32]),
+                B256::from([2; 32]),
+                B256::from([3; 32]),
+                B256::from([4; 32]),
+                B256::from([5; 32]),
+                B256::from([6; 32])
+            ]
+        );
+        assert_eq!(state1.accounts[&B256::from([3; 32])].unwrap().nonce, 1);
+        assert_eq!(state1.accounts[&B256::from([5; 32])], None);
+        assert_eq!(state1.accounts[&B256::from([6; 32])], None);
     }
 
     #[test]
     fn test_hashed_storage_sorted_extend_ref() {
         // Test normal extension
         let mut storage1 = HashedStorageSorted {
-            storage_slots: vec![
+            storage_slots: map([
                 (B256::from([1; 32]), U256::from(10)),
                 (B256::from([3; 32]), U256::from(30)),
                 (B256::from([5; 32]), U256::ZERO),
-            ],
+            ]),
             wiped: false,
         };
 
         let storage2 = HashedStorageSorted {
-            storage_slots: vec![
+            storage_slots: map([
                 (B256::from([2; 32]), U256::from(20)),
                 (B256::from([3; 32]), U256::from(300)), // Override
                 (B256::from([4; 32]), U256::from(40)),
                 (B256::from([6; 32]), U256::ZERO),
-            ],
+            ]),
             wiped: false,
         };
 
         storage1.extend_ref(&storage2);
 
         assert_eq!(storage1.storage_slots.len(), 6);
-        assert_eq!(storage1.storage_slots[0].0, B256::from([1; 32]));
-        assert_eq!(storage1.storage_slots[0].1, U256::from(10));
-        assert_eq!(storage1.storage_slots[1].0, B256::from([2; 32]));
-        assert_eq!(storage1.storage_slots[1].1, U256::from(20));
-        assert_eq!(storage1.storage_slots[2].0, B256::from([3; 32]));
-        assert_eq!(storage1.storage_slots[2].1, U256::from(300)); // Should have storage2's value
-        assert_eq!(storage1.storage_slots[3].0, B256::from([4; 32]));
-        assert_eq!(storage1.storage_slots[3].1, U256::from(40));
-        assert_eq!(storage1.storage_slots[4].0, B256::from([5; 32]));
-        assert_eq!(storage1.storage_slots[4].1, U256::ZERO);
-        assert_eq!(storage1.storage_slots[5].0, B256::from([6; 32]));
-        assert_eq!(storage1.storage_slots[5].1, U256::ZERO);
+        assert_eq!(storage1.storage_slots[&B256::from([1; 32])], U256::from(10));
+        assert_eq!(storage1.storage_slots[&B256::from([2; 32])], U256::from(20));
+        assert_eq!(storage1.storage_slots[&B256::from([3; 32])], U256::from(300));
+        assert_eq!(storage1.storage_slots[&B256::from([4; 32])], U256::from(40));
+        assert_eq!(storage1.storage_slots[&B256::from([5; 32])], U256::ZERO);
+        assert_eq!(storage1.storage_slots[&B256::from([6; 32])], U256::ZERO);
         assert!(!storage1.wiped);
 
         // Test wiped storage
         let mut storage3 = HashedStorageSorted {
-            storage_slots: vec![
+            storage_slots: map([
                 (B256::from([1; 32]), U256::from(10)),
                 (B256::from([2; 32]), U256::ZERO),
-            ],
+            ]),
             wiped: false,
         };
 
         let storage4 = HashedStorageSorted {
-            storage_slots: vec![
+            storage_slots: map([
                 (B256::from([3; 32]), U256::from(30)),
                 (B256::from([4; 32]), U256::ZERO),
-            ],
+            ]),
             wiped: true,
         };
 
@@ -1587,10 +1576,8 @@ mod tests {
         assert!(storage3.wiped);
         // When wiped, should only have storage4's values
         assert_eq!(storage3.storage_slots.len(), 2);
-        assert_eq!(storage3.storage_slots[0].0, B256::from([3; 32]));
-        assert_eq!(storage3.storage_slots[0].1, U256::from(30));
-        assert_eq!(storage3.storage_slots[1].0, B256::from([4; 32]));
-        assert_eq!(storage3.storage_slots[1].1, U256::ZERO);
+        assert_eq!(storage3.storage_slots[&B256::from([3; 32])], U256::from(30));
+        assert_eq!(storage3.storage_slots[&B256::from([4; 32])], U256::ZERO);
     }
 
     /// Test extending with sorted accounts merges correctly into `HashMap`
@@ -1603,7 +1590,7 @@ mod tests {
         state.accounts.insert(addr1, Some(Default::default()));
 
         let mut sorted_state = HashedPostStateSorted::default();
-        sorted_state.accounts.push((addr2, Some(Default::default())));
+        sorted_state.accounts.insert(addr2, Some(Default::default()));
 
         state.extend_from_sorted(&sorted_state);
 
@@ -1620,7 +1607,7 @@ mod tests {
         let mut state = HashedPostState::default();
 
         let mut sorted_state = HashedPostStateSorted::default();
-        sorted_state.accounts.push((addr1, None));
+        sorted_state.accounts.insert(addr1, None);
 
         state.extend_from_sorted(&sorted_state);
 
@@ -1648,14 +1635,14 @@ mod tests {
                     kept_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(slot1, U256::from(1))],
+                        storage_slots: map([(slot1, U256::from(1))]),
                     },
                 ),
                 (
                     removed_storage,
                     HashedStorageSorted {
                         wiped: false,
-                        storage_slots: vec![(slot1, U256::from(2))],
+                        storage_slots: map([(slot1, U256::from(2))]),
                     },
                 ),
             ]),
@@ -1667,7 +1654,7 @@ mod tests {
                 kept_storage,
                 HashedStorageSorted {
                     wiped: false,
-                    storage_slots: vec![(slot1, U256::from(3)), (slot2, U256::from(4))],
+                    storage_slots: map([(slot1, U256::from(3)), (slot2, U256::from(4))]),
                 },
             )]),
         );
@@ -1677,9 +1664,12 @@ mod tests {
             B256Map::from_iter([
                 (
                     kept_storage,
-                    HashedStorageSorted { wiped: false, storage_slots: vec![(slot2, U256::ZERO)] },
+                    HashedStorageSorted { wiped: false, storage_slots: map([(slot2, U256::ZERO)]) },
                 ),
-                (removed_storage, HashedStorageSorted { wiped: true, storage_slots: vec![] }),
+                (
+                    removed_storage,
+                    HashedStorageSorted { wiped: true, storage_slots: BTreeMap::new() },
+                ),
             ]),
         );
 
@@ -1693,13 +1683,13 @@ mod tests {
             vec![&remove_b, &remove_a],
         );
 
-        assert_eq!(result.accounts, vec![(kept_account, Some(account(2)))]);
+        assert_eq!(result.accounts, map([(kept_account, Some(account(2)))]));
         assert_eq!(result.storages.len(), 1);
         assert_eq!(
             result.storages.get(&kept_storage),
             Some(&HashedStorageSorted {
                 wiped: false,
-                storage_slots: vec![(slot1, U256::from(3))],
+                storage_slots: map([(slot1, U256::from(3))]),
             })
         );
         assert!(!result.storages.contains_key(&removed_storage));
@@ -1719,7 +1709,7 @@ mod tests {
             vec![(overlapping_account, Some(account(1)))],
             B256Map::from_iter([(
                 overlapping_storage,
-                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] },
+                HashedStorageSorted { wiped: false, storage_slots: map([(slot, U256::from(1))]) },
             )]),
         );
 
@@ -1727,7 +1717,7 @@ mod tests {
             vec![(overlapping_account, Some(account(2)))],
             B256Map::from_iter([(
                 overlapping_storage,
-                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(2))] },
+                HashedStorageSorted { wiped: false, storage_slots: map([(slot, U256::from(2))]) },
             )]),
         );
 
@@ -1735,7 +1725,7 @@ mod tests {
             vec![(overlapping_account, None)],
             B256Map::from_iter([(
                 overlapping_storage,
-                HashedStorageSorted { wiped: true, storage_slots: vec![] },
+                HashedStorageSorted { wiped: true, storage_slots: BTreeMap::new() },
             )]),
         );
 
@@ -1755,14 +1745,14 @@ mod tests {
             vec![],
             B256Map::from_iter([(
                 storage,
-                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] },
+                HashedStorageSorted { wiped: false, storage_slots: map([(slot, U256::from(1))]) },
             )]),
         );
         let mask = HashedPostStateSorted::new(
             vec![],
             B256Map::from_iter([(
                 storage,
-                HashedStorageSorted { wiped: false, storage_slots: vec![] },
+                HashedStorageSorted { wiped: false, storage_slots: BTreeMap::new() },
             )]),
         );
 
@@ -1770,7 +1760,10 @@ mod tests {
 
         assert_eq!(
             result.storages.get(&storage),
-            Some(&HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] })
+            Some(&HashedStorageSorted {
+                wiped: false,
+                storage_slots: map([(slot, U256::from(1))])
+            })
         );
     }
 
@@ -1784,7 +1777,7 @@ mod tests {
         let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
 
         let sorted = HashedStorageSorted {
-            storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
+            storage_slots: map([(slot2, U256::from(200)), (slot3, U256::ZERO)]),
             wiped: false,
         };
 
@@ -1806,7 +1799,7 @@ mod tests {
         let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
 
         let sorted =
-            HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };
+            HashedStorageSorted { storage_slots: map([(slot2, U256::from(200))]), wiped: true };
 
         storage.extend_from_sorted(&sorted);
 
@@ -2095,7 +2088,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
         fn from(value: &'a super::HashedPostStateSorted) -> Self {
             Self {
-                accounts: Cow::Borrowed(&value.accounts),
+                accounts: Cow::Owned(value.accounts.iter().map(|(k, v)| (*k, *v)).collect()),
                 storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
             }
         }
@@ -2104,7 +2097,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<HashedPostStateSorted<'a>> for super::HashedPostStateSorted {
         fn from(value: HashedPostStateSorted<'a>) -> Self {
             Self {
-                accounts: value.accounts.into_owned(),
+                accounts: value.accounts.into_owned().into_iter().collect(),
                 storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
             }
         }
@@ -2154,13 +2147,21 @@ pub mod serde_bincode_compat {
 
     impl<'a> From<&'a super::HashedStorageSorted> for HashedStorageSorted<'a> {
         fn from(value: &'a super::HashedStorageSorted) -> Self {
-            Self { storage_slots: Cow::Borrowed(&value.storage_slots), wiped: value.wiped }
+            Self {
+                storage_slots: Cow::Owned(
+                    value.storage_slots.iter().map(|(k, v)| (*k, *v)).collect(),
+                ),
+                wiped: value.wiped,
+            }
         }
     }
 
     impl<'a> From<HashedStorageSorted<'a>> for super::HashedStorageSorted {
         fn from(value: HashedStorageSorted<'a>) -> Self {
-            Self { storage_slots: value.storage_slots.into_owned(), wiped: value.wiped }
+            Self {
+                storage_slots: value.storage_slots.into_owned().into_iter().collect(),
+                wiped: value.wiped,
+            }
         }
     }
 
@@ -2197,6 +2198,11 @@ pub mod serde_bincode_compat {
         use reth_primitives_traits::Account;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
+        use std::collections::BTreeMap;
+
+        fn map<K: Ord, V>(entries: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, V> {
+            entries.into_iter().collect()
+        }
 
         #[test]
         fn test_hashed_post_state_bincode_roundtrip() {
@@ -2262,10 +2268,10 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state.accounts.push((B256::random(), Some(Account::default())));
+            data.hashed_state.accounts.insert(B256::random(), Some(Account::default()));
             data.hashed_state
                 .accounts
-                .push((B256::random(), Some(Account { nonce: 1, ..Default::default() })));
+                .insert(B256::random(), Some(Account { nonce: 1, ..Default::default() }));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
@@ -2273,7 +2279,7 @@ pub mod serde_bincode_compat {
             data.hashed_state.storages.insert(
                 B256::random(),
                 HashedStorageSorted {
-                    storage_slots: vec![(B256::from([1; 32]), U256::from(10))],
+                    storage_slots: map([(B256::from([1; 32]), U256::from(10))]),
                     wiped: false,
                 },
             );
@@ -2292,7 +2298,10 @@ pub mod serde_bincode_compat {
             }
 
             let mut data = Data {
-                hashed_storage: HashedStorageSorted { storage_slots: Vec::new(), wiped: false },
+                hashed_storage: HashedStorageSorted {
+                    storage_slots: BTreeMap::new(),
+                    wiped: false,
+                },
             };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
@@ -2303,7 +2312,7 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_storage.storage_slots.push((B256::random(), U256::from(1)));
+            data.hashed_storage.storage_slots.insert(B256::random(), U256::from(1));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

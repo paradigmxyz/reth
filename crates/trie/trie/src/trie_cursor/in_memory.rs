@@ -1,8 +1,9 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
-use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
+use crate::updates::TrieUpdatesSorted;
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
+use std::{collections::BTreeMap, ops::Bound};
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -58,8 +59,8 @@ pub struct InMemoryTrieCursor<'a, C> {
     cursor: C,
     /// Tracks whether the DB cursor is available, positioned, or exhausted.
     db_cursor_state: DbCursorState,
-    /// Forward-only in-memory cursor over storage trie nodes.
-    in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
+    /// In-memory cursor over trie update nodes.
+    in_memory_cursor: OverlayMapCursor<'a, Nibbles, Option<BranchNodeCompact>>,
     /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
     #[cfg(debug_assertions)]
@@ -67,6 +68,39 @@ pub struct InMemoryTrieCursor<'a, C> {
     seeked: bool,
     /// Reference to the full trie updates.
     trie_updates: &'a TrieUpdatesSorted,
+}
+
+#[derive(Debug)]
+struct OverlayMapCursor<'a, K, V> {
+    entries: Option<&'a BTreeMap<K, V>>,
+    current: Option<(&'a K, &'a V)>,
+}
+
+impl<'a, K: Ord, V> OverlayMapCursor<'a, K, V> {
+    fn new(entries: Option<&'a BTreeMap<K, V>>) -> Self {
+        let current = entries.and_then(BTreeMap::first_key_value);
+        Self { entries, current }
+    }
+
+    const fn current(&self) -> Option<(&'a K, &'a V)> {
+        self.current
+    }
+
+    fn reset(&mut self) {
+        self.current = self.entries.and_then(BTreeMap::first_key_value);
+    }
+
+    fn seek(&mut self, key: &K) -> Option<(&'a K, &'a V)> {
+        self.current = self.entries.and_then(|entries| entries.range(key..).next());
+        self.current
+    }
+
+    fn first_after(&mut self, key: &K) -> Option<(&'a K, &'a V)> {
+        self.current = self
+            .entries
+            .and_then(|entries| entries.range((Bound::Excluded(key), Bound::Unbounded)).next());
+        self.current
+    }
 }
 
 #[derive(Debug)]
@@ -104,7 +138,7 @@ impl DbCursorState {
 impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// Create new account trie cursor which combines a DB cursor and the trie updates.
     pub fn new_account(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
-        let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates.account_nodes_ref());
+        let in_memory_cursor = OverlayMapCursor::new(Some(trie_updates.account_nodes_ref()));
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
@@ -140,12 +174,12 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     fn get_storage_overlay(
         trie_updates: &'a TrieUpdatesSorted,
         hashed_address: B256,
-    ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
+    ) -> (OverlayMapCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
         let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
         let cursor_wiped = storage_trie_updates.is_some_and(|u| u.is_deleted());
-        let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&[]);
+        let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref());
 
-        (ForwardInMemoryCursor::new(storage_nodes), cursor_wiped)
+        (OverlayMapCursor::new(storage_nodes), cursor_wiped)
     }
 
     /// Returns a mutable reference to the underlying cursor if it's not wiped, None otherwise.
@@ -210,7 +244,8 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// node.
     fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
-            let mem_entry = self.in_memory_cursor.current().cloned();
+            let mem_entry =
+                self.in_memory_cursor.current().map(|(key, value)| (*key, value.clone()));
             let db_entry = self.db_cursor_state.entry();
 
             match (mem_entry, db_entry) {
@@ -320,7 +355,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         // If either cursor is currently pointing to the last entry which was returned then consume
         // that entry so that `choose_next_entry` is looking at the subsequent one.
         if let Some((key, _)) = self.in_memory_cursor.current() &&
-            key == &last_key
+            *key == last_key
         {
             self.in_memory_cursor.first_after(&last_key);
         }

@@ -79,7 +79,7 @@ where
                 *hashed_address,
                 StorageTrieUpdatesSorted {
                     is_deleted: storage_updates.is_deleted(),
-                    storage_nodes: storage_changesets,
+                    storage_nodes: storage_changesets.into_iter().collect(),
                 },
             );
         }
@@ -168,7 +168,7 @@ fn compute_wiped_storage_changesets(
 
     // Merge the two sorted iterators
     let merged = storage_trie_wiped_changeset_iter(
-        storage_updates.storage_nodes.iter().map(|e| e.0),
+        storage_updates.storage_nodes.keys().copied(),
         all_nodes,
     )?;
 
@@ -242,6 +242,14 @@ mod tests {
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
 
+    fn map<K: Ord, V>(entries: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, V> {
+        entries.into_iter().collect()
+    }
+
+    fn map_entries<K: Copy, V: Clone>(map: &BTreeMap<K, V>) -> Vec<(K, V)> {
+        map.iter().map(|(key, value)| (*key, value.clone())).collect()
+    }
+
     #[test]
     fn test_empty_updates() {
         // Create an empty mock factory
@@ -295,14 +303,15 @@ mod tests {
 
         // Check account changesets
         assert_eq!(changesets.account_nodes_ref().len(), 2);
+        let account_changesets = map_entries(changesets.account_nodes_ref());
 
         // path1 should have the old node1 value
-        assert_eq!(changesets.account_nodes_ref()[0].0, path1);
-        assert_eq!(changesets.account_nodes_ref()[0].1, Some(node1));
+        assert_eq!(account_changesets[0].0, path1);
+        assert_eq!(account_changesets[0].1, Some(node1));
 
         // path3 should have None (it didn't exist before)
-        assert_eq!(changesets.account_nodes_ref()[1].0, path3);
-        assert_eq!(changesets.account_nodes_ref()[1].1, None);
+        assert_eq!(account_changesets[1].0, path3);
+        assert_eq!(account_changesets[1].1, None);
     }
 
     #[test]
@@ -335,7 +344,7 @@ mod tests {
             hashed_address,
             StorageTrieUpdatesSorted {
                 is_deleted: false,
-                storage_nodes: vec![(path1, Some(new_node1)), (path3, Some(new_node3))],
+                storage_nodes: map([(path1, Some(new_node1)), (path3, Some(new_node3))]),
             },
         );
 
@@ -349,14 +358,15 @@ mod tests {
         let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
         assert!(!storage_changesets.is_deleted);
         assert_eq!(storage_changesets.storage_nodes.len(), 2);
+        let storage_nodes = map_entries(&storage_changesets.storage_nodes);
 
         // path1 should have the old node1 value
-        assert_eq!(storage_changesets.storage_nodes[0].0, path1);
-        assert_eq!(storage_changesets.storage_nodes[0].1, Some(node1));
+        assert_eq!(storage_nodes[0].0, path1);
+        assert_eq!(storage_nodes[0].1, Some(node1));
 
         // path3 should have None (it didn't exist before)
-        assert_eq!(storage_changesets.storage_nodes[1].0, path3);
-        assert_eq!(storage_changesets.storage_nodes[1].1, None);
+        assert_eq!(storage_nodes[1].0, path3);
+        assert_eq!(storage_nodes[1].1, None);
     }
 
     #[test]
@@ -390,7 +400,7 @@ mod tests {
             hashed_address,
             StorageTrieUpdatesSorted {
                 is_deleted: true,
-                storage_nodes: vec![(path1, Some(new_node1))],
+                storage_nodes: map([(path1, Some(new_node1))]),
             },
         );
 
@@ -406,16 +416,17 @@ mod tests {
 
         // Should include all three nodes (changed path1 + wiped path2 and path3)
         assert_eq!(storage_changesets.storage_nodes.len(), 3);
+        let storage_nodes = map_entries(&storage_changesets.storage_nodes);
 
         // All paths should be present in sorted order
-        assert_eq!(storage_changesets.storage_nodes[0].0, path1);
-        assert_eq!(storage_changesets.storage_nodes[1].0, path2);
-        assert_eq!(storage_changesets.storage_nodes[2].0, path3);
+        assert_eq!(storage_nodes[0].0, path1);
+        assert_eq!(storage_nodes[1].0, path2);
+        assert_eq!(storage_nodes[2].0, path3);
 
         // All should have their old values
-        assert_eq!(storage_changesets.storage_nodes[0].1, Some(node1));
-        assert_eq!(storage_changesets.storage_nodes[1].1, Some(node2));
-        assert_eq!(storage_changesets.storage_nodes[2].1, Some(node3));
+        assert_eq!(storage_nodes[0].1, Some(node1));
+        assert_eq!(storage_nodes[1].1, Some(node2));
+        assert_eq!(storage_nodes[2].1, Some(node3));
     }
 
     #[test]
@@ -447,7 +458,7 @@ mod tests {
             hashed_address,
             StorageTrieUpdatesSorted {
                 is_deleted: true,
-                storage_nodes: vec![(path2, Some(new_node2))],
+                storage_nodes: map([(path2, Some(new_node2))]),
             },
         );
 
@@ -462,15 +473,16 @@ mod tests {
 
         // Should include all three paths: existing path1, new path2, existing path3
         assert_eq!(storage_changesets.storage_nodes.len(), 3);
+        let storage_nodes = map_entries(&storage_changesets.storage_nodes);
 
         // Check sorted order
-        assert_eq!(storage_changesets.storage_nodes[0].0, path1);
-        assert_eq!(storage_changesets.storage_nodes[1].0, path2);
-        assert_eq!(storage_changesets.storage_nodes[2].0, path3);
+        assert_eq!(storage_nodes[0].0, path1);
+        assert_eq!(storage_nodes[1].0, path2);
+        assert_eq!(storage_nodes[2].0, path3);
 
         // path1 and path3 have old values, path2 has None (didn't exist)
-        assert_eq!(storage_changesets.storage_nodes[0].1, Some(node1));
-        assert_eq!(storage_changesets.storage_nodes[1].1, None);
-        assert_eq!(storage_changesets.storage_nodes[2].1, Some(node3));
+        assert_eq!(storage_nodes[0].1, Some(node1));
+        assert_eq!(storage_nodes[1].1, None);
+        assert_eq!(storage_nodes[2].1, Some(node3));
     }
 }
