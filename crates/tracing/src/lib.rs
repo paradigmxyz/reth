@@ -104,7 +104,7 @@ pub struct RethTracer {
     #[cfg(feature = "tracy")]
     tracy: Option<LayerInfo>,
     /// When true, the stdout filter is wrapped in a reload layer so log levels
-    /// can be changed at runtime via RPC (`debug_verbosity`, `debug_vmodule`).
+    /// can be changed at runtime.
     enable_reload: bool,
 }
 
@@ -167,7 +167,7 @@ impl RethTracer {
         self
     }
 
-    /// Enables runtime log filter reloading via RPC (`debug_verbosity`, `debug_vmodule`).
+    /// Enables runtime log filter reloading.
     pub const fn with_reload(mut self, enable: bool) -> Self {
         self.enable_reload = enable;
         self

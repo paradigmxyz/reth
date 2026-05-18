@@ -360,6 +360,13 @@ where
             return Err(EthApiError::HeaderNotFound(end.into()).into());
         }
 
+        // Check if the requested range overlaps with pruned history (EIP-4444)
+        let earliest_block =
+            self.provider().earliest_block_number().map_err(Eth::Error::from_eth_err)?;
+        if start < earliest_block {
+            return Err(EthApiError::PrunedHistoryUnavailable.into());
+        }
+
         if start > end {
             return Err(EthApiError::InvalidParams(
                 "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),

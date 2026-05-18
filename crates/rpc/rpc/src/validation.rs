@@ -1,12 +1,12 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::eip7685::RequestsOrHash;
+use alloy_eips::{eip7685::RequestsOrHash, eip7928::bal::DecodedBal};
 use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    BuilderBlockValidationRequestV5,
+    BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
@@ -127,6 +127,7 @@ where
         block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
+        _decoded_bal: Option<DecodedBal>,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
@@ -387,6 +388,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            None,
         )
         .await
     }
@@ -415,6 +417,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            None,
         )
         .await
     }
@@ -455,6 +458,51 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            None,
+        )
+        .await
+    }
+
+    /// Core logic for validating the builder submission v6
+    async fn validate_builder_submission_v6(
+        &self,
+        request: BuilderBlockValidationRequestV6,
+    ) -> Result<(), ValidationApiError> {
+        let decoded_bal =
+            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
+                .map_err(ValidationApiError::InvalidBlockAccessList)?;
+
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V4(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self
+                        .validate_blobs_bundle_v2(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
+
+        let chain_spec = self.provider.chain_spec();
+        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
+            block.rlp_length() > MAX_RLP_BLOCK_SIZE
+        {
+            return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
+                rlp_length: block.rlp_length(),
+                max_rlp_length: MAX_RLP_BLOCK_SIZE,
+            }));
+        }
+
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+            Some(decoded_bal),
         )
         .await
     }
@@ -533,6 +581,24 @@ where
 
         self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v5(&this, request)
+                .await
+                .map_err(ErrorObject::from);
+            let _ = tx.send(result);
+        });
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }
+
+    /// Validates a block submitted to the relay
+    async fn validate_builder_submission_v6(
+        &self,
+        request: BuilderBlockValidationRequestV6,
+    ) -> RpcResult<()> {
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking_task(async move {
+            let result = Self::validate_builder_submission_v6(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
@@ -630,6 +696,8 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
+    #[error("invalid block access list: {_0}")]
+    InvalidBlockAccessList(alloy_rlp::Error),
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
     #[error(transparent)]
@@ -654,6 +722,7 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::Blacklist(_) |
             ValidationApiError::ProposerPayment |
             ValidationApiError::InvalidBlobsBundle |
+            ValidationApiError::InvalidBlockAccessList(_) |
             ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
 
             ValidationApiError::MissingLatestBlock |

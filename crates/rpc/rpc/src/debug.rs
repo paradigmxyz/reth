@@ -831,10 +831,6 @@ where
         Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
     }
 
-    async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_account_range(
         &self,
         _block_number: BlockNumberOrTag,
@@ -844,10 +840,6 @@ where
         _nostorage: bool,
         _incompletes: bool,
     ) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_block_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
         Ok(())
     }
 
@@ -869,10 +861,6 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Option<Bytes>> {
         Self::debug_code_by_hash(self, hash, block_id).await.map_err(Into::into)
-    }
-
-    async fn debug_cpu_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
-        Ok(())
     }
 
     async fn debug_db_ancient(&self, _kind: String, _number: u64) -> RpcResult<()> {
@@ -925,10 +913,6 @@ where
         Ok(())
     }
 
-    async fn debug_freeze_client(&self, _node: String) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_gc_stats(&self) -> RpcResult<()> {
         Ok(())
     }
@@ -957,10 +941,6 @@ where
         Ok(())
     }
 
-    async fn debug_go_trace(&self, _file: String, _seconds: u64) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_intermediate_roots(
         &self,
         block_hash: B256,
@@ -971,10 +951,6 @@ where
     }
 
     async fn debug_mem_stats(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_mutex_profile(&self, _file: String, _nsec: u64) -> RpcResult<()> {
         Ok(())
     }
 
@@ -990,10 +966,6 @@ where
         Ok(Default::default())
     }
 
-    async fn debug_set_block_profile_rate(&self, _rate: u64) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_set_gc_percent(&self, _v: i32) -> RpcResult<()> {
         Ok(())
     }
@@ -1002,15 +974,7 @@ where
         Ok(())
     }
 
-    async fn debug_set_mutex_profile_fraction(&self, _rate: i32) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_set_trie_flush_interval(&self, _interval: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_stacks(&self) -> RpcResult<()> {
         Ok(())
     }
 
@@ -1030,28 +994,12 @@ where
         Ok(())
     }
 
-    async fn debug_start_cpu_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_start_go_trace(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
         block_id: Option<BlockId>,
     ) -> RpcResult<(B256, TrieUpdates)> {
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
-    }
-
-    async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_stop_go_trace(&self) -> RpcResult<()> {
-        Ok(())
     }
 
     async fn debug_storage_range_at(
@@ -1086,26 +1034,6 @@ where
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
         self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
-    }
-
-    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
-        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
-    }
-
-    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
-        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
-    }
-
-    async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_write_mem_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_write_mutex_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
     }
 }
 
