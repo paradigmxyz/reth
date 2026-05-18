@@ -414,6 +414,7 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   "${PROMETHEUS_REPORT[@]}" \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
+  -m "job=github-reth-bench" \
   -m "platform=ethereum" \
   -m "scenario=replay" \
   -m "bal-mode=${BENCH_BAL:-false}" \
