@@ -19,9 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
-};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -188,7 +186,6 @@ impl TestHarness {
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let tree_config =
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
-        let runtime = reth_tasks::Runtime::test();
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -198,7 +195,6 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
-            runtime.state_trie_overlay_worker_pool(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
@@ -215,7 +211,7 @@ impl TestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
-            runtime.clone(),
+            reth_tasks::Runtime::test(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -236,7 +232,7 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
-            runtime,
+            reth_tasks::Runtime::test(),
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -271,18 +267,13 @@ impl TestHarness {
             parent_hash = hash;
         }
 
-        let state_trie_overlays = StateTrieOverlayManager::default();
-        for block in &blocks {
-            state_trie_overlays.insert_block(block.clone());
-        }
-
         self.tree.state.tree_state = TreeState {
             blocks_by_hash,
             blocks_by_number,
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
-            state_trie_overlays,
+            cached_canonical_overlay: None,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();

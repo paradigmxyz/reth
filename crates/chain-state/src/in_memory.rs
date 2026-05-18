@@ -17,7 +17,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData};
+use reth_trie::{
+    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
+    TrieInputSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -815,9 +818,10 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
     /// after the block was validated.
     ///
-    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state and
-    /// trie updates) to be performed outside the critical validation path. This can improve latency
-    /// for time-sensitive operations like block validation.
+    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
+    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
+    /// outside the critical validation path. This can improve latency for time-sensitive
+    /// operations like block validation.
     ///
     /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
     /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
@@ -884,6 +888,20 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().trie_updates
+    }
+
+    /// Returns the trie input anchored to the persisted ancestor.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
+        self.trie_data().trie_input().cloned()
+    }
+
+    /// Returns the anchor hash of the trie input, if present.
+    #[inline]
+    pub fn anchor_hash(&self) -> Option<B256> {
+        self.trie_data().anchor_hash()
     }
 
     /// Returns a [`BlockNumber`] of the block.

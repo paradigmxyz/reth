@@ -537,6 +537,10 @@ pub struct BlockValidationMetrics {
     pub hashed_post_state_size: Histogram,
     /// Size of `TrieUpdatesSorted` (`total_len`)
     pub trie_updates_sorted_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `TrieUpdatesSorted` (`total_len`)
+    pub anchored_overlay_trie_updates_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
+    pub anchored_overlay_hashed_state_size: Histogram,
 }
 
 impl BlockValidationMetrics {

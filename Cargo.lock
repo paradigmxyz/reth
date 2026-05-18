@@ -7730,7 +7730,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-storage-api",
- "reth-tasks",
  "reth-testing-utils",
  "reth-trie",
  "revm-database",

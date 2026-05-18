@@ -6,7 +6,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, ExecutedBlock, LazyOverlay};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -38,39 +38,30 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
-    /// Flattened state trie overlays for in-memory blocks.
-    pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
+    /// Pre-computed lazy overlay for the canonical head.
+    ///
+    /// This is optimistically prepared after the canonical head changes, so that
+    /// the next payload building on the canonical head can use it immediately
+    /// without recomputing.
+    pub(crate) cached_canonical_overlay: Option<PreparedCanonicalOverlay<N>>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
-    pub fn new(
-        current_canonical_head: BlockNumHash,
-        engine_kind: EngineApiKind,
-        state_trie_overlays: StateTrieOverlayManager<N>,
-    ) -> Self {
+    pub fn new(current_canonical_head: BlockNumHash, engine_kind: EngineApiKind) -> Self {
         Self {
             blocks_by_hash: B256Map::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
             parent_to_child: B256Map::default(),
             engine_kind,
-            state_trie_overlays,
+            cached_canonical_overlay: None,
         }
     }
 
     /// Resets the state and points to the given canonical head.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        let engine_kind = self.engine_kind;
-        let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
-        if !removed_hashes.is_empty() {
-            self.state_trie_overlays.remove_blocks(removed_hashes);
-        }
-        self.blocks_by_hash.clear();
-        self.blocks_by_number.clear();
-        self.parent_to_child.clear();
-        self.current_canonical_head = current_canonical_head;
-        self.engine_kind = engine_kind;
+        *self = Self::new(current_canonical_head, self.engine_kind);
     }
 
     /// Returns the number of executed blocks stored.
@@ -110,6 +101,64 @@ impl<N: NodePrimitives> TreeState<N> {
         Some((parent_hash, blocks))
     }
 
+    /// Prepares a cached lazy overlay for the current canonical head.
+    ///
+    /// This should be called after the canonical head changes to optimistically
+    /// prepare the overlay for the next payload that will likely build on it.
+    ///
+    /// Returns a clone of the prepared overlay so the caller can spawn a background
+    /// task to trigger computation via [`LazyOverlay::get`] for the cached anchor.
+    /// This ensures the overlay is actually computed before the next payload arrives.
+    pub(crate) fn prepare_canonical_overlay(&mut self) -> Option<PreparedCanonicalOverlay<N>> {
+        let canonical_hash = self.current_canonical_head.hash;
+
+        // Get blocks leading to the canonical head
+        let Some((anchor_hash, blocks)) = self.blocks_by_hash(canonical_hash) else {
+            // Canonical head not in memory (persisted), no overlay needed
+            self.cached_canonical_overlay = None;
+            return None;
+        };
+
+        let num_blocks = blocks.len();
+        let prepared = PreparedCanonicalOverlay {
+            parent_hash: canonical_hash,
+            overlay: LazyOverlay::new(blocks),
+            anchor_hash,
+        };
+        self.cached_canonical_overlay = Some(prepared.clone());
+
+        debug!(
+            target: "engine::tree",
+            %canonical_hash,
+            %anchor_hash,
+            num_blocks,
+            "Prepared cached canonical overlay"
+        );
+
+        Some(prepared)
+    }
+
+    /// Returns the cached overlay if it matches the requested parent hash and anchor.
+    ///
+    /// Both parent hash and anchor hash must match to ensure the overlay is valid.
+    /// This prevents using a stale overlay after persistence has advanced the anchor.
+    pub fn get_cached_overlay(
+        &self,
+        parent_hash: B256,
+        expected_anchor: B256,
+    ) -> Option<&PreparedCanonicalOverlay<N>> {
+        self.cached_canonical_overlay.as_ref().filter(|cached| {
+            cached.parent_hash == parent_hash && cached.anchor_hash == expected_anchor
+        })
+    }
+
+    /// Invalidates the cached overlay.
+    ///
+    /// Should be called when the anchor changes (e.g., after persistence).
+    pub(crate) fn invalidate_cached_overlay(&mut self) {
+        self.cached_canonical_overlay = None;
+    }
+
     /// Insert executed block into the state.
     pub fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
         let hash = executed.recovered_block().hash();
@@ -120,13 +169,11 @@ impl<N: NodePrimitives> TreeState<N> {
             return;
         }
 
-        let overlay_block = executed.clone();
         self.blocks_by_hash.insert(hash, executed.clone());
 
         self.blocks_by_number.entry(block_number).or_default().push(executed);
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.state_trie_overlays.insert_block(overlay_block);
     }
 
     /// Remove single executed block by its hash.
@@ -187,12 +234,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes canonical blocks below the upper bound, only if the last persisted hash is
     /// part of the canonical chain.
-    fn remove_canonical_until(
-        &mut self,
-        upper_bound: BlockNumber,
-        last_persisted_hash: B256,
-        removed_hashes: &mut Vec<B256>,
-    ) {
+    pub fn remove_canonical_until(&mut self, upper_bound: BlockNumber, last_persisted_hash: B256) {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
 
         // If the last persisted hash is not canonical, then we don't want to remove any canonical
@@ -207,12 +249,9 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
             current_block = executed.recovered_block().parent_hash();
             if executed.recovered_block().number() <= upper_bound {
-                let hash = executed.recovered_block().hash();
                 let num_hash = executed.recovered_block().num_hash();
                 debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
-                if self.remove_by_hash(hash).is_some() {
-                    removed_hashes.push(hash);
-                }
+                self.remove_by_hash(executed.recovered_block().hash());
             }
         }
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
@@ -220,11 +259,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
     /// sidechains that fork from below the finalized block.
-    fn prune_finalized_sidechains(
-        &mut self,
-        finalized_num_hash: BlockNumHash,
-        removed_hashes: &mut Vec<B256>,
-    ) {
+    pub fn prune_finalized_sidechains(&mut self, finalized_num_hash: BlockNumHash) {
         let BlockNumHash { number: finalized_num, hash: finalized_hash } = finalized_num_hash;
 
         // We remove disconnected sidechains in three steps:
@@ -243,7 +278,6 @@ impl<N: NodePrimitives> TreeState<N> {
         for hash in blocks_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
-                removed_hashes.push(hash);
             }
         }
 
@@ -270,7 +304,6 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(block) = blocks_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
-                removed_hashes.push(block);
                 blocks_to_remove.extend(children);
             }
         }
@@ -311,18 +344,16 @@ impl<N: NodePrimitives> TreeState<N> {
         // * remove all canonical blocks below the upper bound
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
-        let mut removed_hashes = Vec::new();
-        self.remove_canonical_until(upper_bound.number, last_persisted_hash, &mut removed_hashes);
+        self.remove_canonical_until(upper_bound.number, last_persisted_hash);
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
         if let Some(finalized_num_hash) = finalized_num_hash {
-            self.prune_finalized_sidechains(finalized_num_hash, &mut removed_hashes);
+            self.prune_finalized_sidechains(finalized_num_hash);
         }
 
-        if !removed_hashes.is_empty() {
-            self.state_trie_overlays.remove_blocks(removed_hashes);
-        }
+        // Invalidate the cached overlay since blocks were removed and the anchor may have changed
+        self.invalidate_cached_overlay();
     }
 
     /// Updates the canonical head to the given block.
@@ -390,6 +421,39 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 }
 
+/// Pre-computed lazy overlay for the canonical head block.
+///
+/// This is prepared **optimistically** when the canonical head changes, allowing
+/// the next payload (which typically builds on the canonical head) to reuse
+/// the pre-computed overlay immediately without re-traversing in-memory blocks.
+///
+/// The overlay captures executed blocks from all in-memory blocks
+/// between the canonical head and the persisted anchor. When a new payload
+/// arrives building on the canonical head, this cached overlay can be used
+/// directly instead of calling `blocks_by_hash` again.
+///
+/// # Invalidation
+///
+/// The cached overlay is invalidated when:
+/// - Persistence completes (anchor changes)
+/// - The canonical head changes to a different block
+#[derive(Debug, Clone)]
+pub struct PreparedCanonicalOverlay<N: NodePrimitives = EthPrimitives> {
+    /// The block hash for which this overlay is prepared as a parent.
+    ///
+    /// When a payload arrives with this parent hash, the overlay can be reused.
+    pub parent_hash: B256,
+    /// The pre-computed lazy overlay containing executed blocks for the canonical segment.
+    ///
+    /// This is computed optimistically after `set_canonical_head` so subsequent payloads don't
+    /// need to walk the in-memory chain again.
+    pub overlay: LazyOverlay<N>,
+    /// The anchor hash (persisted ancestor) this overlay is based on.
+    ///
+    /// Used to verify the overlay is still valid (anchor hasn't changed due to persistence).
+    pub anchor_hash: B256,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,11 +461,7 @@ mod tests {
 
     #[test]
     fn test_tree_state_normal_descendant() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
@@ -424,11 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
@@ -454,11 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
@@ -498,11 +550,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state = TreeState::new(start_num_hash, EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -552,11 +600,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state = TreeState::new(start_num_hash, EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -606,11 +650,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state = TreeState::new(start_num_hash, EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
