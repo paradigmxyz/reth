@@ -16,9 +16,9 @@ mod metrics;
 mod writer_tests;
 
 use reth_nippy_jar::NippyJar;
-use reth_static_file_types::{SegmentHeader, StaticFileSegment};
+use reth_static_file_types::{ChangesetOffsetReader, SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::{ops::Deref, sync::Arc};
+use std::{io, ops::Deref, sync::Arc};
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> =
@@ -29,6 +29,7 @@ type LoadedJarRef<'a> =
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
     mmap_handle: Arc<reth_nippy_jar::DataReader>,
+    csoff_reader: Option<ChangesetOffsetReader>,
 }
 
 impl LoadedJar {
@@ -36,7 +37,20 @@ impl LoadedJar {
         match jar.open_data_reader() {
             Ok(data_reader) => {
                 let mmap_handle = Arc::new(data_reader);
-                Ok(Self { jar, mmap_handle })
+
+                let csoff_reader = if jar.user_header().segment().is_change_based() {
+                    let csoff_path = jar.data_path().with_extension("csoff");
+                    let len = jar.user_header().changeset_offsets_len();
+                    match ChangesetOffsetReader::new(&csoff_path, len) {
+                        Ok(reader) => Some(reader),
+                        Err(err) if err.kind() == io::ErrorKind::NotFound && len == 0 => None,
+                        Err(err) => return Err(ProviderError::other(err)),
+                    }
+                } else {
+                    None
+                };
+
+                Ok(Self { jar, mmap_handle, csoff_reader })
             }
             Err(e) => Err(ProviderError::other(e)),
         }
@@ -54,6 +68,11 @@ impl LoadedJar {
     /// Returns the total size of the data and offsets files (from the in-memory mmap).
     fn size(&self) -> usize {
         self.mmap_handle.size() + self.mmap_handle.offsets_size()
+    }
+
+    /// Returns a reference to the cached changeset offset reader.
+    const fn csoff_reader(&self) -> Option<&ChangesetOffsetReader> {
+        self.csoff_reader.as_ref()
     }
 }
 

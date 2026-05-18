@@ -1,4 +1,4 @@
-// Shared utilities for reth-bench result rendering.
+// Shared utilities for benchmark result rendering.
 //
 // Used by bench-job-summary.js and bench-slack-notify.js.
 

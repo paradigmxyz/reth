@@ -126,9 +126,9 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
-    /// Thrown if the pre-V6 `PayloadAttributes` or `ExecutionPayload` contains a block access list
-    #[error("block access list not before V6")]
-    BlockAccessListNotSupportedBeforeV6,
+    /// Thrown if the current engine method version does not support a block access list
+    #[error("block access list not supported in this engine API version")]
+    BlockAccessListNotSupported,
     /// Thrown if  `engine_newPayload` contains no block access list
     /// after Amsterdam
     #[error("no block access list post-Amsterdam")]
@@ -137,9 +137,9 @@ pub enum VersionSpecificValidationError {
     /// before Amsterdam
     #[error("block access list pre-Amsterdam")]
     HasBlockAccessListPreAmsterdam,
-    /// Thrown if the pre-V6 `PayloadAttributes` or `ExecutionPayload` contains a slot number
-    #[error("slot number not before V6")]
-    SlotNumberNotSupportedBeforeV6,
+    /// Thrown if the current engine method version does not support a slot number
+    #[error("slot number not supported in this engine API version")]
+    SlotNumberNotSupported,
     /// Thrown if  `engine_newPayload` contains no slot number
     /// after Amsterdam
     #[error("no slot number post-Amsterdam")]

@@ -12,11 +12,11 @@ use reth_storage_api::StateProviderFactory;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
-    RpcNodeCore,
+    RpcNodeCore, RpcNodeCoreExt,
 };
 
 /// Helper trait for `eth_blockAccessList` RPC method.
-pub trait GetBlockAccessList: Trace + Call + LoadBlock {
+pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
     /// Retrieves the block access list for a block identified by its hash.
     fn get_block_access_list(
         &self,
@@ -27,6 +27,12 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+
+            if let Some(cached_bal) =
+                self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
+            {
+                return Ok(Some(cached_bal.as_bal().clone().into_alloy_bal()))
+            }
 
             self.spawn_blocking_io(move |eth_api| {
                 let state = eth_api

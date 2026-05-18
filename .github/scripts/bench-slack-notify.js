@@ -1,4 +1,4 @@
-// Sends Slack notifications for reth-bench results.
+// Sends Slack notifications for benchmark results.
 //
 // Reads from environment:
 //   SLACK_BENCH_BOT_TOKEN  – Slack Bot User OAuth Token (xoxb-...)
@@ -18,7 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows } = require('./bench-utils');
+const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -76,11 +76,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
   const commitUrl = `https://github.com/${repo}/commit`;
+  const repoLink = `<https://github.com/${repo}|Reth>`;
   const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
   const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
 
   // Meta line
-  const metaParts = [];
+  const metaParts = [`*Repo:* ${repoLink}`];
   if (prNumber) metaParts.push(`*<${prUrl}|PR #${prNumber}>*`);
   metaParts.push(`triggered by ${actorSlackId ? `<@${actorSlackId}>` : `@${actor}`}`);
 
@@ -156,32 +157,15 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
     },
   ];
 
-  // Wait times as a separate table block (sent as threaded reply due to Slack one-table limit)
-  const threadBlocks = [];
-  const wtRows = waitTimeRows(summary);
-  if (wtRows.length > 0) {
-    const waitTableRows = [
-      [cell('Wait Time'), cell('Baseline'), cell('Feature')],
-      ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature)]),
-    ];
-    threadBlocks.push({
-      type: 'table',
-      column_settings: [
-        { align: 'left' },
-        { align: 'right' },
-        { align: 'right' },
-      ],
-      rows: waitTableRows,
-    });
-  }
-
-  return { blocks, threadBlocks };
+  return blocks;
 }
 
 function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, failedStep }) {
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
+  const repoLink = `<https://github.com/${repo}|Reth>`;
   const actorMention = actorSlackId ? `<@${actorSlackId}>` : `@${actor}`;
   const parts = [
+    `*Repo:* ${repoLink}`,
     prNumber ? `*<${prUrl}|PR #${prNumber}>*` : '',
     `by ${actorMention}`,
     `failed while *${failedStep}*`,
@@ -238,17 +222,8 @@ async function success({ core, context }) {
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
   const actorSlackId = slackUsers[actor];
 
-  const { blocks, threadBlocks } = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
+  const blocks = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
   const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
-
-  async function sendWithThread(ch) {
-    const res = await postToSlack(token, ch, blocks, text, core);
-    if (res.ok && res.ts && threadBlocks.length > 0) {
-      for (const tb of threadBlocks) {
-        await postToSlack(token, ch, [tb], 'Wait time breakdown', core, res.ts);
-      }
-    }
-  }
 
   const slackMode = process.env.BENCH_SLACK || 'always';
 
@@ -259,7 +234,7 @@ async function success({ core, context }) {
     const changes = summary.changes || {};
     const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
     if (hasImprovement) {
-      await sendWithThread(channel);
+      await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
     } else {
       core.info('No significant improvement, skipping public channel notification');
@@ -277,7 +252,7 @@ async function success({ core, context }) {
   // DM the actor only when results were not posted to the public channel
   if (!postedToChannel) {
     if (actorSlackId) {
-      await sendWithThread(actorSlackId);
+      await postToSlack(token, actorSlackId, blocks, text, core);
     } else {
       core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
     }

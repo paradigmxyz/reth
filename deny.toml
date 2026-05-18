@@ -16,6 +16,10 @@ ignore = [
     "RUSTSEC-2026-0002",
     # https://rustsec.org/advisories/RUSTSEC-2026-0097 rand is unsound with a custom logger
     "RUSTSEC-2026-0097",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0118 vulnerable DnssecDnsHandle code was
+    # moved from hickory-proto to hickory-net in 0.26.0; we use hickory-net 0.26.1 which has
+    # the fix, and no patched hickory-proto release exists
+    "RUSTSEC-2026-0118",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -61,6 +65,7 @@ allow = [
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
     "CDLA-Permissive-2.0",
+    "MPL-2.0",
 ]
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
@@ -93,4 +98,5 @@ allow-git = [
     "https://github.com/alloy-rs/hardforks",
     "https://github.com/paradigmxyz/jsonrpsee",
     "https://github.com/DaniPopes/slotmap.git",
+    "https://github.com/sigp/discv5",
 ]

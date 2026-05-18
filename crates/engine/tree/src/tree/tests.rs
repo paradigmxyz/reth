@@ -184,11 +184,18 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
+        let tree_config =
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
-        let engine_api_tree_state =
-            EngineApiTreeState::new(10, 10, header.num_hash(), EngineApiKind::Ethereum);
+        let engine_api_tree_state = EngineApiTreeState::new(
+            10,
+            10,
+            tree_config.invalid_header_hit_eviction_threshold(),
+            header.num_hash(),
+            EngineApiKind::Ethereum,
+        );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
         let (to_payload_service, _payload_command_rx) = unbounded_channel();
@@ -217,8 +224,7 @@ impl TestHarness {
             persistence_handle,
             PersistenceState { last_persisted_block: BlockNumHash::default(), rx: None },
             payload_builder,
-            // always assume enough parallelism for tests
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
+            tree_config,
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
@@ -682,7 +688,6 @@ async fn test_holesky_payload() {
                     sidecar: ExecutionPayloadSidecar::none(),
                 },
                 tx,
-                enqueued_at: std::time::Instant::now(),
             }
             .into(),
         ))
@@ -2248,4 +2253,66 @@ fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
         }
         other => panic!("Expected MakeCanonical for head block, got: {other:?}"),
     }
+}
+
+/// Tests that canonicalizing a downloaded sync target head also applies the tracked finalized
+/// block from the original `SYNCING` forkchoice state.
+#[test]
+fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    let genesis = &blocks[0];
+    let finalized_block = &blocks[1];
+    let head_block = &blocks[2];
+
+    test_harness = test_harness.with_blocks(vec![
+        genesis.clone(),
+        finalized_block.clone(),
+        head_block.clone(),
+    ]);
+
+    let finalized_num_hash = finalized_block.recovered_block().num_hash();
+    let head_num_hash = head_block.recovered_block().num_hash();
+
+    test_harness.tree.state.tree_state.set_canonical_head(genesis.recovered_block().num_hash());
+
+    let fcu_state = ForkchoiceState {
+        head_block_hash: head_num_hash.hash,
+        safe_block_hash: head_num_hash.hash,
+        finalized_block_hash: finalized_num_hash.hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    let event = test_harness
+        .tree
+        .on_valid_downloaded_block(head_num_hash)
+        .unwrap()
+        .expect("expected canonicalization event for sync target head");
+
+    test_harness.tree.on_tree_event(event).unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), head_num_hash.hash);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(finalized_num_hash),
+        "Finalized block from the syncing FCU should be applied once the head becomes canonical"
+    );
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_safe_num_hash(),
+        Some(head_num_hash),
+        "Safe block from the syncing FCU should be applied once the head becomes canonical"
+    );
+    assert_eq!(
+        test_harness.tree.state.forkchoice_state_tracker.last_valid_state(),
+        Some(fcu_state)
+    );
+    assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
 }

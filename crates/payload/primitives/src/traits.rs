@@ -3,18 +3,14 @@
 use crate::PayloadBuilderError;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
-use reth_chain_state::ComputedTrieData;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted,
-};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -26,44 +22,10 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-    /// Block's hashed state.
-    ///
-    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
-    /// to convert from one to the other when it's not necessary.
-    pub hashed_state: Either<Arc<HashedPostState>, Arc<HashedPostStateSorted>>,
-    /// Trie updates that result from calculating the state root for the block.
-    ///
-    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
-    /// to convert from one to the other when it's not necessary.
-    pub trie_updates: Either<Arc<TrieUpdates>, Arc<TrieUpdatesSorted>>,
-}
-
-impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
-    /// Converts this into an [`reth_chain_state::ExecutedBlock`].
-    ///
-    /// Ensures hashed state and trie updates are in their sorted representations
-    /// as required by `reth_chain_state::ExecutedBlock`.
-    pub fn into_executed_payload(self) -> reth_chain_state::ExecutedBlock<N> {
-        let hashed_state = match self.hashed_state {
-            // Convert unsorted to sorted
-            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
-            // Already sorted
-            Either::Right(sorted) => sorted,
-        };
-
-        let trie_updates = match self.trie_updates {
-            // Convert unsorted to sorted
-            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
-            // Already sorted
-            Either::Right(sorted) => sorted,
-        };
-
-        reth_chain_state::ExecutedBlock::new(
-            self.recovered_block,
-            self.execution_output,
-            ComputedTrieData::without_trie_input(hashed_state, trie_updates),
-        )
-    }
+    /// Block's hashed state (unsorted).
+    pub hashed_state: Arc<HashedPostState>,
+    /// Trie updates that result from calculating the state root for the block (unsorted).
+    pub trie_updates: Arc<TrieUpdates>,
 }
 
 /// Represents a successfully built execution payload (block).
@@ -80,6 +42,13 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
 
     /// Returns the total fees collected from all transactions in this block.
     fn fees(&self) -> U256;
+
+    /// Returns the EIP-7928 block access list included in this payload.
+    ///
+    /// Returns `None` for payloads that do not carry a block access list.
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
 
     /// Returns the complete execution result including state updates.
     ///

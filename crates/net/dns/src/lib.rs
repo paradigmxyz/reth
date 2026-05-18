@@ -409,12 +409,18 @@ mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
     use alloy_chains::Chain;
+    use alloy_primitives::keccak256;
     use alloy_rlp::{Decodable, Encodable};
+    use data_encoding::BASE32_NOPAD;
     use enr::EnrKey;
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
+
+    fn entry_hash(entry_txt: &str) -> String {
+        BASE32_NOPAD.encode(&keccak256(entry_txt.as_bytes()).as_slice()[..16])
+    }
 
     #[test]
     fn test_convert_enr_node_record() {
@@ -503,11 +509,9 @@ mod tests {
         let resolver = MapResolver::default();
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
-        root.sign(&secret_key).unwrap();
 
         let link =
             LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
-        resolver.insert(link.domain.clone(), root.to_string());
 
         let mut builder = Enr::builder();
         let fork_id = MAINNET.hardfork_fork_id(EthereumHardfork::Frontier).unwrap();
@@ -517,8 +521,13 @@ mod tests {
             .tcp4(30303)
             .add_value(b"eth", &EnrForkIdEntry::from(fork_id));
         let enr = builder.build(&secret_key).unwrap();
+        let enr_txt = enr.to_base64();
 
-        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+        root.enr_root = entry_hash(&enr_txt);
+        root.sign(&secret_key).unwrap();
+
+        resolver.insert(link.domain.clone(), root.to_string());
+        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr_txt);
 
         let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
 
@@ -582,12 +591,13 @@ mod tests {
 
         let mut new_root = root.clone();
         new_root.sequence_number = new_root.sequence_number.saturating_add(1);
-        new_root.enr_root = "NEW_ENR_ROOT".to_string();
-        new_root.sign(&secret_key).unwrap();
-        resolver.insert(link.domain.clone(), new_root.to_string());
 
         let enr = Enr::empty(&secret_key).unwrap();
-        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr.to_base64());
+        let enr_txt = enr.to_base64();
+        new_root.enr_root = entry_hash(&enr_txt);
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr_txt);
 
         let event = poll_fn(|cx| service.poll(cx)).await;
 
@@ -602,6 +612,46 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_hash_mismatch_is_not_cached_and_does_not_poison_same_hash() {
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = MapResolver::default();
+
+        let invalid_entry = "enrtree-branch:AAAAAAAAAAAAAAAAAAAA".to_string();
+        let valid_entry = "enrtree-branch:YNEGZIWHOM7TOOSUATAPTM".to_string();
+
+        let hash = entry_hash(&valid_entry);
+
+        let bad_link =
+            LinkEntry { domain: "bad.example.org".to_string(), pubkey: secret_key.public() };
+        let good_link =
+            LinkEntry { domain: "good.example.org".to_string(), pubkey: secret_key.public() };
+
+        resolver.insert(format!("{}.{}", hash, bad_link.domain), invalid_entry);
+        resolver.insert(format!("{}.{}", hash, good_link.domain), valid_entry.clone());
+
+        let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
+
+        service.resolve_entry(bad_link, hash.clone(), ResolveKind::Enr);
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(service.dns_record_cache.get(&hash).is_none());
+
+        service.resolve_entry(good_link, hash.clone(), ResolveKind::Enr);
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        let cached = service.dns_record_cache.get(&hash).cloned();
+        assert_eq!(cached.map(|entry| entry.to_string()), Some(valid_entry));
     }
 
     #[tokio::test]

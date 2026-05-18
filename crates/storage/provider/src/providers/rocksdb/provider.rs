@@ -28,7 +28,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteOptions, DB,
+    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
 use std::{
     collections::BTreeMap,
@@ -37,6 +37,13 @@ use std::{
     sync::Arc,
 };
 use tracing::instrument;
+
+/// Returns [`WriteOptions`] with WAL sync enabled for crash durability.
+fn synced_write_options() -> WriteOptions {
+    let mut opts = WriteOptions::default();
+    opts.set_sync(true);
+    opts
+}
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
@@ -126,17 +133,24 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// to 64 MB default, with negligible impact on mean throughput.
 const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
 
+/// Default total `RocksDB` memtable memory budget across column families (4 GiB).
+///
+/// This is a soft limit; with write stalls enabled, `RocksDB` waits for flushes once
+/// memtable arena usage exceeds the budget.
+const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
-/// Default auto-commit threshold for batch writes (4 GiB).
+/// Default auto-commit threshold for batch writes (512 MiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
-/// during large bulk writes. The consistency check on startup heals any crash
-/// that occurs between auto-commits.
-const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
+/// during large bulk writes. Keep this below the `RocksDB` write buffer manager
+/// budget so stalls can recover without waiting on a single large flush.
+/// The consistency check on startup heals any crash that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -200,6 +214,9 @@ impl RocksDBBuilder {
         options.create_missing_column_families(true);
         options.set_max_background_jobs(DEFAULT_MAX_BACKGROUND_JOBS);
         options.set_bytes_per_sync(DEFAULT_BYTES_PER_SYNC);
+        let write_buffer_manager =
+            WriteBufferManager::new_write_buffer_manager(DEFAULT_WRITE_BUFFER_MANAGER_SIZE, true);
+        options.set_write_buffer_manager(&write_buffer_manager);
 
         options.set_bottommost_compression_type(DBCompressionType::Zstd);
         options.set_bottommost_zstd_max_train_bytes(0, true);
@@ -765,7 +782,7 @@ impl RocksDBProvider {
     /// # Panics
     /// Panics if the provider is in read-only mode.
     pub fn tx(&self) -> RocksTx<'_> {
-        let write_options = WriteOptions::default();
+        let write_options = synced_write_options();
         let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
@@ -842,6 +859,19 @@ impl RocksDBProvider {
             })?;
 
             Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
+        })
+    }
+
+    /// Gets raw bytes from the specified table without decompressing.
+    pub fn get_raw<T: Table>(&self, key: T::Key) -> ProviderResult<Option<Vec<u8>>> {
+        let encoded = key.encode();
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            this.0.get_cf(this.get_cf_handle::<T>()?, encoded.as_ref()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })
         })
     }
 
@@ -960,6 +990,18 @@ impl RocksDBProvider {
     pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Creates an iterator starting from the given key (inclusive, seek forward).
+    ///
+    /// Returns decoded `(Key, Value)` pairs starting from the first key >= `key`.
+    pub fn iter_from<T: Table>(&self, key: T::Key) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
@@ -1243,7 +1285,7 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
+        self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -1726,14 +1768,12 @@ impl<'a> RocksDBBatch<'a> {
                 "Auto-committing RocksDB batch"
             );
             let old_batch = std::mem::take(&mut self.inner);
-            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
-                |e| {
-                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                },
-            )?;
+            self.provider.0.db_rw().write_opt(old_batch, &synced_write_options()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
         }
         Ok(())
     }
@@ -1746,7 +1786,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+        self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,

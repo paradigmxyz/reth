@@ -876,9 +876,17 @@ where
         self.fork_tracker
             .max_initcode_size
             .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
+        // EIP-8037: When state gas is enabled, `tx.gas` can exceed the per-tx gas limit cap
+        // because the cap only applies to regular gas (state gas uses a reservoir).
+        // Store 0 to disable the txpool-level check.
+        let tx_gas_limit_cap = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+            0
+        } else {
+            evm_env.cfg_env.tx_gas_limit_cap()
+        };
         self.fork_tracker
             .tx_gas_limit_cap
-            .store(evm_env.cfg_env.tx_gas_limit_cap(), std::sync::atomic::Ordering::Relaxed);
+            .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1060,7 +1068,12 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
+            // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap
+            tx_gas_limit_cap: if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+                0
+            } else {
+                evm_env.cfg_env.tx_gas_limit_cap()
+            },
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
