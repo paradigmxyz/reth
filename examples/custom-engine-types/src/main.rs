@@ -52,7 +52,7 @@ use reth_ethereum::{
     },
     pool::{PoolTransaction, TransactionPool},
     primitives::{Block, SealedBlock},
-    provider::{EthStorage, StateProviderFactory},
+    provider::{EthStorage, PruneCheckpointReader, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
     tasks::Runtime,
     EthPrimitives, TransactionSigned,
@@ -244,6 +244,7 @@ pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValid
 impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<Types = Self>,
+    <N as FullNodeTypes>::Provider: PruneCheckpointReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
