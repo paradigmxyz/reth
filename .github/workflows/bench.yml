@@ -360,19 +360,6 @@ jobs:
               core.setFailed(`Invalid bal mode: ${bal}`);
               return;
             }
-            if (bal !== 'false' && bigBlocks !== 'true') {
-              const msg = `❌ **Invalid bench command**\n\n\`bal\` requires \`big-blocks=true\`.\n\n**Usage:** ${usage}`;
-              if (context.eventName === 'issue_comment') {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: msg,
-                });
-              }
-              core.setFailed(msg);
-              return;
-            }
 
             // Resolve display names for baseline/feature
             let baselineName = baseline || 'main';
@@ -474,7 +461,7 @@ jobs:
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
-            const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
@@ -518,7 +505,7 @@ jobs:
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
-            const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
@@ -672,7 +659,7 @@ jobs:
             const bal = process.env.BENCH_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
-            const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const abbaEnabled = (process.env.BENCH_ABBA || 'true') !== 'false';
