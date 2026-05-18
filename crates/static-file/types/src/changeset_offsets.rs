@@ -6,10 +6,14 @@
 use crate::ChangesetOffset;
 use std::{
     fs::{File, OpenOptions},
-    io::{self, Write},
-    os::unix::fs::FileExt,
+    io::{self, Seek, SeekFrom, Write},
     path::Path,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
+#[cfg(windows)]
+use std::os::windows::fs::FileExt;
 
 /// Writer for appending changeset offsets to a sidecar file.
 #[derive(Debug)]
@@ -33,7 +37,7 @@ impl ChangesetOffsetWriter {
     ///
     /// This mirrors `NippyJar`'s healing behavior where config/header is the commit boundary.
     pub fn new(path: impl AsRef<Path>, committed_len: u64) -> io::Result<Self> {
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
@@ -103,10 +107,9 @@ impl ChangesetOffsetWriter {
             std::cmp::Ordering::Equal => {}
         }
 
-        let records_written = committed_len;
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        file.seek(SeekFrom::End(0))?;
 
-        Ok(Self { file, records_written })
+        Ok(Self { file, records_written: committed_len })
     }
 
     /// Appends a single changeset offset record.
@@ -139,6 +142,7 @@ impl ChangesetOffsetWriter {
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
         self.file.set_len(len * Self::RECORD_SIZE as u64)?;
+        self.file.seek(SeekFrom::End(0))?;
         self.file.sync_all()?;
         self.records_written = len;
         Ok(())
@@ -185,7 +189,7 @@ impl ChangesetOffsetReader {
 
         let byte_pos = block_index * Self::RECORD_SIZE as u64;
         let mut buf = [0u8; Self::RECORD_SIZE];
-        self.file.read_exact_at(&mut buf, byte_pos)?;
+        read_exact_at(&self.file, &mut buf, byte_pos)?;
 
         let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
         let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
@@ -208,7 +212,7 @@ impl ChangesetOffsetReader {
 
         for i in 0..count {
             let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
+            read_exact_at(&self.file, &mut buf, pos)?;
             let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
             let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
             result.push(ChangesetOffset::new(offset, num_changes));
@@ -226,6 +230,38 @@ impl ChangesetOffsetReader {
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
+}
+
+#[cfg(unix)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    while !buf.is_empty() {
+        match file.read_at(buf, offset) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => {
+                offset += n as u64;
+                buf = &mut buf[n..];
+            }
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => {
+                offset += n as u64;
+                buf = &mut buf[n..];
+            }
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -19,7 +19,7 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthApiError, FillTransaction};
+use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -88,6 +88,10 @@ pub trait EthApi<
     /// Returns the chain ID of the current network.
     #[method(name = "chainId")]
     async fn chain_id(&self) -> RpcResult<Option<U64>>;
+
+    /// Returns effective routing capabilities for this node.
+    #[method(name = "capabilities")]
+    fn capabilities(&self) -> RpcResult<EthCapabilities>;
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
@@ -480,6 +484,12 @@ where
     async fn chain_id(&self) -> RpcResult<Option<U64>> {
         trace!(target: "rpc::eth", "Serving eth_chainId");
         Ok(Some(EthApiSpec::chain_id(self)))
+    }
+
+    /// Handler for: `eth_capabilities`
+    fn capabilities(&self) -> RpcResult<EthCapabilities> {
+        trace!(target: "rpc::eth", "Serving eth_capabilities");
+        EthApiSpec::capabilities(self).to_rpc_result()
     }
 
     /// Handler for: `eth_getBlockByHash`

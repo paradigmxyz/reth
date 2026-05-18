@@ -6,8 +6,12 @@ use futures::Future;
 use reth_chainspec::ChainInfo;
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
+use reth_prune_types::{PruneMode, PruneSegment};
 use reth_rpc_convert::RpcTxReq;
-use reth_storage_api::{BlockNumReader, StageCheckpointReader, TransactionsProvider};
+use reth_rpc_eth_types::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
+use reth_storage_api::{
+    BlockNumReader, PruneCheckpointReader, StageCheckpointReader, TransactionsProvider,
+};
 
 use crate::{helpers::EthSigner, EthApiTypes, RpcNodeCore};
 
@@ -35,6 +39,44 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
     /// Returns provider chain info
     fn chain_info(&self) -> RethResult<ChainInfo> {
         Ok(self.provider().chain_info()?)
+    }
+
+    /// Returns the maximum number of blocks into the past for generating state proofs.
+    fn proof_window(&self) -> u64;
+
+    /// Returns effective routing capabilities for this node.
+    fn capabilities(&self) -> RethResult<EthCapabilities> {
+        let chain_info = self.chain_info()?;
+        let provider = self.provider();
+
+        let state = effective_resource(
+            provider,
+            &[PruneSegment::AccountHistory, PruneSegment::StorageHistory],
+        )?;
+        let tx = effective_resource(provider, &[PruneSegment::TransactionLookup])?;
+        let logs =
+            effective_resource(provider, &[PruneSegment::Receipts, PruneSegment::ContractLogs])?;
+        let receipts = effective_resource(provider, &[PruneSegment::Receipts])?;
+        let blocks = effective_resource(provider, &[PruneSegment::Bodies])?;
+
+        let proof_oldest = chain_info
+            .best_number
+            .saturating_sub(self.proof_window())
+            .max(state.oldest_block.map(|number| number.to::<u64>()).unwrap_or_default());
+        let state_proofs = EthCapabilitiesResource::window(proof_oldest, self.proof_window());
+
+        Ok(EthCapabilities {
+            head: EthCapabilitiesHead {
+                number: U64::from(chain_info.best_number),
+                hash: chain_info.best_hash,
+            },
+            state,
+            tx,
+            logs,
+            receipts,
+            blocks,
+            state_proofs,
+        })
     }
 
     /// Returns `true` if the network is undergoing sync.
@@ -70,6 +112,35 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
         };
         Ok(status)
     }
+}
+
+fn effective_resource(
+    provider: &impl PruneCheckpointReader,
+    segments: &[PruneSegment],
+) -> RethResult<EthCapabilitiesResource> {
+    let mut oldest_block = 0;
+    let mut retention_blocks = None::<u64>;
+
+    for segment in segments {
+        let Some(checkpoint) = provider.get_prune_checkpoint(*segment)? else {
+            continue;
+        };
+
+        if let Some(block_number) = checkpoint.block_number {
+            oldest_block = oldest_block.max(block_number.saturating_add(1));
+        }
+
+        if let PruneMode::Distance(distance) = checkpoint.prune_mode {
+            retention_blocks =
+                Some(retention_blocks.map_or(distance, |current| current.min(distance)));
+        }
+    }
+
+    Ok(if let Some(retention_blocks) = retention_blocks {
+        EthCapabilitiesResource::window(oldest_block, retention_blocks)
+    } else {
+        EthCapabilitiesResource::available_from(oldest_block)
+    })
 }
 
 /// A handle to [`EthSigner`]s with its generics set from [`TransactionsProvider`] and
