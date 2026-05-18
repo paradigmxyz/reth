@@ -2134,4 +2134,38 @@ mod tests {
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
     }
+
+    #[tokio::test]
+    async fn logs_with_cursor_rejects_invalid_cursor() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let err = eth_filter
+            .logs_with_cursor(Filter::default(), Some("not-a-valid-cursor".to_string()))
+            .await
+            .expect_err("invalid cursor should be rejected");
+        assert_eq!(err.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+        assert!(err.message().contains("invalid cursor"));
+    }
+
+    #[tokio::test]
+    async fn logs_with_cursor_rejects_filter_mismatch() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        // Issue a cursor under filter A, then submit it with filter B.
+        let filter_a = Filter::new().from_block(100u64).to_block(200u64);
+        let filter_b = Filter::new().from_block(100u64).to_block(300u64);
+        let hash_a = canonical_filter_hash(&filter_a);
+        let cursor_for_a = LogsCursor::new(hash_a, 150).encode();
+
+        let err = eth_filter
+            .logs_with_cursor(filter_b, Some(cursor_for_a))
+            .await
+            .expect_err("cursor reuse against different filter should be rejected");
+        assert_eq!(err.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+        assert!(err.message().contains("cursor was issued for a different filter"));
+    }
 }
