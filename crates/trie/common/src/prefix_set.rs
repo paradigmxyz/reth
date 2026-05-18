@@ -165,6 +165,8 @@ impl PrefixSetMut {
     pub fn freeze(mut self) -> PrefixSet {
         if self.all {
             PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+        } else if self.keys.len() <= 1 {
+            PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         } else {
             self.keys.sort_unstable();
             self.keys.dedup();
