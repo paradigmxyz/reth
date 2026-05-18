@@ -3156,8 +3156,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let mut iter = storage_tries.peekable();
+        let Some(first) = iter.next() else { return Ok(0) };
+        let storage_tries = if let Some(second) = iter.next() {
+            let mut sorted_storage_tries = Vec::with_capacity(iter.size_hint().0 + 2);
+            sorted_storage_tries.push(first);
+            sorted_storage_tries.push(second);
+            sorted_storage_tries.extend(iter);
+            sorted_storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+            sorted_storage_tries
+        } else {
+            vec![first]
+        };
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
         });
