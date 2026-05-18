@@ -218,7 +218,6 @@ fn encode_json_value(value: &JsonValue, response_type: u8) -> Result<Vec<u8>, St
 // ---------------------------------------------------------------------------
 
 fn perform_http_call(request: &ApiRequest) -> Result<JsonValue, String> {
-    // Build a blocking HTTP client.
     // reqwest::blocking can panic inside a tokio runtime, so we use
     // tokio::task::block_in_place to allow blocking within the async context.
     let result = tokio::task::block_in_place(|| {
@@ -234,6 +233,10 @@ fn perform_http_call(request: &ApiRequest) -> Result<JsonValue, String> {
             "POST" => client.post(&request.url),
             _ => return Err(format!("unsupported method: {}", request.method)),
         };
+
+        // Always set a User-Agent — many APIs (weather.gov, CoinGecko) reject
+        // requests without one.
+        req_builder = req_builder.header("User-Agent", "ExternEVM/0.4.0");
 
         // Parse and apply headers from bytes (expected to be JSON: {"Key": "Value", ...})
         if !request.headers.is_empty() {
@@ -334,7 +337,7 @@ fn api_call_precompile(input: PrecompileInput<'_>) -> PrecompileResult {
     eprintln!("  responsePath: {}", request.responsePath);
     eprintln!("  responseType: {}", request.responseType);
 
-    // --- Validation (same as Milestone 3) ---
+    // --- Validation ---
     if request.url.is_empty() {
         eprintln!("[ExternEVM] ERROR: url is empty");
         return Ok(PrecompileOutput::halt(
