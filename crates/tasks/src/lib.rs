@@ -51,7 +51,10 @@ pub use for_each_ordered::ForEachOrdered;
 pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
-pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
+pub use runtime::{
+    Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig,
+    DEFAULT_PROOF_ACCOUNT_WORKER_THREADS, DEFAULT_PROOF_STORAGE_WORKER_THREADS,
+};
 
 /// A [`TaskExecutor`] is now an alias for [`Runtime`].
 pub type TaskExecutor = Runtime;
