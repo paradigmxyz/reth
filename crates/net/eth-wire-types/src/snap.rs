@@ -511,8 +511,8 @@ mod tests {
         test_roundtrip(SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
             request_id: 42,
             block_access_lists: BlockAccessLists(vec![
-                Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]),
-                Bytes::from_static(&[0xc1, alloy_rlp::EMPTY_LIST_CODE]),
+                Some(Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])),
+                Some(Bytes::from_static(&[0xc1, alloy_rlp::EMPTY_LIST_CODE])),
             ]),
         }));
     }

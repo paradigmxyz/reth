@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate benchmark charts from reth-bench CSV output.
+"""Generate benchmark charts from benchmark CSV output.
 
 Usage:
     bench-engine-charts.py <combined_csv> --output-dir <dir> [--baseline <baseline_csv>]

@@ -5,7 +5,6 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
@@ -187,6 +186,10 @@ pub trait EthApi<
         nonce: U64,
     ) -> RpcResult<Option<T>>;
 
+    /// Returns all transactions in the local pending pool.
+    #[method(name = "pendingTransactions")]
+    fn pending_transactions(&self) -> RpcResult<Vec<T>>;
+
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
     async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<R>>;
@@ -295,6 +298,7 @@ pub trait EthApi<
         request: TxReq,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<U256>;
 
     /// Returns the current price per gas in wei.
@@ -312,6 +316,10 @@ pub trait EthApi<
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
+
+    /// Returns the base fee for the next block, or `null` before London activation.
+    #[method(name = "baseFee")]
+    async fn base_fee(&self) -> RpcResult<Option<U256>>;
 
     /// Introduced in EIP-4844, returns the current blob base fee in wei.
     #[method(name = "blobBaseFee")]
@@ -416,6 +424,10 @@ pub trait EthApi<
         &self,
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a given block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
@@ -640,6 +652,12 @@ where
             .await?)
     }
 
+    /// Handler for: `eth_pendingTransactions`
+    fn pending_transactions(&self) -> RpcResult<Vec<RpcTransaction<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", "Serving eth_pendingTransactions");
+        Ok(EthTransactions::pending_transactions(self)?)
+    }
+
     /// Handler for: `eth_getTransactionReceipt`
     async fn transaction_receipt(
         &self,
@@ -773,13 +791,14 @@ where
         request: RpcTxReq<T::NetworkTypes>,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(EthCall::estimate_gas_at(
             self,
             request,
             block_number.unwrap_or_default(),
-            state_override,
+            EvmOverrides::new(state_override, block_overrides),
         )
         .await?)
     }
@@ -810,6 +829,12 @@ where
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
         Ok(EthFees::blob_base_fee(self).await?)
+    }
+
+    /// Handler for: `eth_baseFee`
+    async fn base_fee(&self) -> RpcResult<Option<U256>> {
+        trace!(target: "rpc::eth", "Serving eth_baseFee");
+        Ok(EthFees::base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -928,6 +953,7 @@ where
 
         Ok(Some(json))
     }
+
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
     async fn block_access_list_by_block_number(
         &self,
@@ -941,11 +967,22 @@ where
 
         Ok(Some(json))
     }
+
+    /// Handler for: `eth_getBlockAccessList`
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
+
+        let bal = self.get_block_access_list(block_id).await?;
+        let json = serde_json::to_value(&bal)
+            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
+
+        Ok(Some(json))
+    }
+
     /// Handler for: `eth_getBlockAccessListRaw`
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
 
-        let bal = self.get_block_access_list(block).await?;
-        Ok(bal.map(|b: BlockAccessList| alloy_rlp::encode(b).into()))
+        Ok(self.get_raw_block_access_list(block).await?)
     }
 }

@@ -130,6 +130,11 @@ pub struct BenchmarkArgs {
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub rlp_blocks: bool,
+
+    /// If provided, the benchmark will generate the specified number of big blocks and use them
+    /// instead of regular blocks.
+    #[arg(long, verbatim_doc_comment)]
+    pub big_blocks: Option<usize>,
 }
 
 /// Retry strategy for fetching blocks from the benchmark RPC provider.

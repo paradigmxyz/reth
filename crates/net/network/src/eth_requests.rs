@@ -6,13 +6,12 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockAccessLists, BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockAccessLists,
-    GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, GetReceipts70, HeadersDirection,
-    NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
+    BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
+    HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -314,6 +313,15 @@ where
 
         receipts
     }
+
+    fn on_cells_request(
+        &self,
+        _peer_id: PeerId,
+        _request: GetCells,
+        response: oneshot::Sender<RequestResult<Cells>>,
+    ) {
+        let _ = response.send(Ok(Cells::default()));
+    }
 }
 
 impl<C, N> EthRequestHandler<C, N>
@@ -334,29 +342,10 @@ where
         request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
-        let access_lists = self
-            .client
-            .bal_store()
-            .get_by_hashes_with_limit(&request.0, limit)
-            .unwrap_or_else(|_| empty_block_access_lists_with_limit(request.0.len(), limit));
+        let access_lists =
+            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
-}
-
-/// Builds the error fallback response while still enforcing the BAL response soft limit.
-fn empty_block_access_lists_with_limit(count: usize, limit: GetBlockAccessListLimit) -> Vec<Bytes> {
-    let mut out = Vec::with_capacity(count);
-    let mut size = 0;
-    for _ in 0..count {
-        let bal = Bytes::from_static(&[0xc0]);
-        size += bal.len();
-        out.push(bal);
-
-        if limit.exceeds(size) {
-            break
-        }
-    }
-    out
 }
 
 /// An endless future.
@@ -404,6 +393,9 @@ where
                     }
                     IncomingEthRequest::GetBlockAccessLists { peer_id, request, response } => {
                         this.on_block_access_lists_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetCells { peer_id, request, response } => {
+                        this.on_cells_request(peer_id, request, response)
                     }
                 }
             },
@@ -500,5 +492,16 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetBlockAccessLists,
         /// The channel sender for the response containing block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    },
+    /// Request Cells from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetCells {
+        /// The ID of the peer to request cells from.
+        peer_id: PeerId,
+        /// The requested block hashes.
+        request: GetCells,
+        /// The channel sender for the response containing cells.
+        response: oneshot::Sender<RequestResult<Cells>>,
     },
 }
