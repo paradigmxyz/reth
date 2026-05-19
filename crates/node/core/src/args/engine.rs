@@ -315,19 +315,10 @@ impl Default for DefaultEngineValues {
     }
 }
 
-fn default_persistence_backpressure_threshold(
-    persistence_threshold: u64,
-    memory_block_buffer_target: u64,
-) -> u64 {
-    let min_backpressure_threshold =
-        persistence_threshold.saturating_add(memory_block_buffer_target).saturating_add(1);
-    if DefaultEngineValues::get_global().persistence_backpressure_threshold
-        > min_backpressure_threshold
-    {
-        DefaultEngineValues::get_global().persistence_backpressure_threshold
-    } else {
-        min_backpressure_threshold
-    }
+fn default_persistence_backpressure_threshold(persistence_threshold: u64) -> u64 {
+    DefaultEngineValues::get_global()
+        .persistence_backpressure_threshold
+        .max(persistence_threshold.saturating_mul(2))
 }
 
 /// Parameters for configuring the engine driver.
@@ -667,10 +658,7 @@ impl EngineArgs {
     /// Returns the effective persistence backpressure threshold.
     pub fn persistence_backpressure_threshold(&self) -> u64 {
         self.persistence_backpressure_threshold.unwrap_or_else(|| {
-            default_persistence_backpressure_threshold(
-                self.persistence_threshold,
-                self.memory_block_buffer_target,
-            )
+            default_persistence_backpressure_threshold(self.persistence_threshold)
         })
     }
 
@@ -771,12 +759,27 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(args.persistence_backpressure_threshold(), 151);
+        assert_eq!(args.persistence_backpressure_threshold(), 200);
 
         let tree_config = args.tree_config();
         assert_eq!(tree_config.persistence_threshold(), 100);
         assert_eq!(tree_config.memory_block_buffer_target(), 50);
-        assert_eq!(tree_config.persistence_backpressure_threshold(), 151);
+        assert_eq!(tree_config.persistence_backpressure_threshold(), 200);
+    }
+
+    #[test]
+    fn default_backpressure_threshold_uses_global_default_when_larger() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "4",
+        ])
+        .args;
+
+        assert_eq!(
+            args.persistence_backpressure_threshold(),
+            DefaultEngineValues::get_global().persistence_backpressure_threshold
+        );
     }
 
     #[test]
