@@ -33,7 +33,24 @@ EPSILON = 1e-9
 TARGET_METRIC_BLOCK_HEIGHT_QUERY = "reth_blockchain_tree_canonical_chain_height"
 TARGET_METRIC_COUNTER_STATS = ("p50", "p90")
 TARGET_METRIC_MIN_PAIRED_OBSERVATIONS = 30
-TARGET_METRIC_IGNORED_CARDINALITY_LABELS = frozenset(("quantile", "run_type"))
+TARGET_METRIC_IGNORED_CARDINALITY_LABELS = frozenset(
+    (
+        "bal-enabled",
+        "bal-mode",
+        "bench_sha",
+        "benchmark_id",
+        "benchmark_run",
+        "git-ref",
+        "git-sha",
+        "job",
+        "platform",
+        "quantile",
+        "reference_epoch",
+        "run_start_epoch",
+        "run_type",
+        "scenario",
+    )
+)
 SELECTOR_RE = re.compile(
     r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(?P<labels>[^}]*)\})?$"
 )
