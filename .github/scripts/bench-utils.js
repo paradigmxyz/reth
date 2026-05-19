@@ -17,7 +17,7 @@ function fmtChange(ch) {
   const details = [];
   if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
   if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
-  if (ch.informational) details.push('informational');
+  if (ch.informational) details.push(ch.informational_reason || 'informational');
   const detailStr = details.length ? ` (${details.join(', ')})` : '';
   const sig = ch.informational ? 'neutral' : ch.sig;
   return `${pctStr}${detailStr} ${SIG_EMOJI[sig]}`;
