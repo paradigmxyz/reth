@@ -74,6 +74,7 @@ use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -609,8 +610,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let last_block_number = plan.last_block().expect("checked non-empty block range").number;
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
-        let tx_nums: Vec<TxNumber> = if persist_rest_blocks.is_empty() {
-            Vec::new()
+        let tx_nums: SmallVec<[TxNumber; 4]> = if persist_rest_blocks.is_empty() {
+            SmallVec::new()
         } else {
             let first_tx_num = self
                 .tx
@@ -619,7 +620,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .map(|(n, _)| n + 1)
                 .unwrap_or_default();
 
-            let mut nums = Vec::with_capacity(persist_rest_blocks.len());
+            let mut nums = SmallVec::with_capacity(persist_rest_blocks.len());
             let mut current = first_tx_num;
             for block in persist_rest_blocks {
                 nums.push(current);
