@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_network_peers::{id2pk, AnyNode, NodeRecord};
+use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
@@ -76,7 +76,7 @@ where
 
         for peer in peers {
             infos.push(PeerInfo {
-                id: keccak256(peer.remote_id.as_slice()).to_string(),
+                id: alloy_primitives::hex::encode(keccak256(peer.remote_id.as_slice())),
                 name: peer.client_version.to_string(),
                 enode: peer.enode,
                 enr: peer.enr,
@@ -155,9 +155,7 @@ where
         ]);
 
         Ok(NodeInfo {
-            id: id2pk(enode.id)
-                .map(|pk| pk.to_string())
-                .unwrap_or_else(|_| alloy_primitives::hex::encode(enode.id.as_slice())),
+            id: alloy_primitives::hex::encode(keccak256(enode.id.as_slice())),
             name: status.client_version,
             enode: enode.to_string(),
             enr: self.network.local_enr().to_string(),

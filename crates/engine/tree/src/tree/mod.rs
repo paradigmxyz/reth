@@ -11,10 +11,10 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError};
+use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain,
+    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -23,7 +23,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -50,7 +50,6 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
-mod cached_state;
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -62,16 +61,21 @@ pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
-pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
+pub use reth_execution_cache::{
+    CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
+    PayloadExecutionCache, SavedCache,
+};
+pub use types::{ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
@@ -149,13 +153,22 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     fn new(
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
+        invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
+        state_trie_overlay_worker_pool: Arc<WorkerPool>,
     ) -> Self {
         Self {
-            invalid_headers: InvalidHeaderCache::new(max_invalid_header_cache_length),
+            invalid_headers: InvalidHeaderCache::new(
+                max_invalid_header_cache_length,
+                invalid_header_hit_eviction_threshold,
+            ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind),
+            tree_state: TreeState::new(
+                canonical_block,
+                engine_kind,
+                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
+            ),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -178,18 +191,46 @@ pub struct TreeOutcome<T> {
     pub outcome: T,
     /// An optional event to tell the caller to do something.
     pub event: Option<TreeEvent>,
+    /// Whether the block was already seen, meaning no real execution happened during this
+    /// `newPayload` call.
+    pub already_seen: bool,
 }
 
 impl<T> TreeOutcome<T> {
     /// Create new tree outcome.
     pub const fn new(outcome: T) -> Self {
-        Self { outcome, event: None }
+        Self { outcome, event: None, already_seen: false }
     }
 
     /// Set event on the outcome.
     pub fn with_event(mut self, event: TreeEvent) -> Self {
         self.event = Some(event);
         self
+    }
+
+    /// Set the `already_seen` flag on the outcome.
+    pub const fn with_already_seen(mut self, value: bool) -> Self {
+        self.already_seen = value;
+        self
+    }
+}
+
+/// Result of trying to insert a new payload in [`EngineApiTreeHandler`].
+#[derive(Debug)]
+pub struct TryInsertPayloadResult {
+    /// - `Valid`: Payload successfully validated and inserted
+    /// - `Syncing`: Parent missing, payload buffered for later
+    /// - Error status: Payload is invalid
+    pub status: PayloadStatus,
+    /// Whether the block was already seen
+    pub already_seen: bool,
+}
+
+impl TryInsertPayloadResult {
+    /// Convert the result into a [`TreeOutcome`].
+    #[inline]
+    pub fn into_outcome(self) -> TreeOutcome<PayloadStatus> {
+        TreeOutcome::new(self.status).with_already_seen(self.already_seen)
     }
 }
 
@@ -275,6 +316,9 @@ where
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
     execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
+    /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
+    /// Suppresses persistence cycles during payload building.
+    building_payload: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -366,6 +410,7 @@ where
             evm_config,
             changeset_cache,
             execution_timing_stats: HashMap::new(),
+            building_payload: false,
             runtime,
         }
     }
@@ -402,8 +447,10 @@ where
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
+            config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
+            runtime.state_trie_overlay_worker_pool(),
         );
 
         let task = Self::new(
@@ -443,12 +490,79 @@ where
         self.incoming_tx.clone()
     }
 
+    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
+    /// persistence is falling behind execution.
+    const fn persistence_gap(&self) -> u64 {
+        self.state
+            .tree_state
+            .canonical_block_number()
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    }
+
+    /// Returns `true` when the main loop should stop draining the tree input channel.
+    ///
+    /// This is the case when persistence is already running and the gap between the canonical tip
+    /// and the last persisted block has reached the configured threshold.
+    const fn should_backpressure(&self) -> bool {
+        self.persistence_state.in_progress() &&
+            self.persistence_gap() >= self.config.persistence_backpressure_threshold()
+    }
+
     /// Run the engine API handler.
     ///
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
-            match self.wait_for_event() {
+            // Each iteration has three phases:
+            //
+            // 1. Non-blocking poll for persistence completion. If the background flush already
+            //    landed, absorb the result now so the gap calculation below is fresh.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
+            //    the backpressure threshold we only block on the persistence receiver, leaving new
+            //    engine requests sitting in the unbounded upstream channel.
+            // 3. Handle the event (engine message or persistence completion) and kick off a new
+            //    persistence cycle if the threshold is met again.
+            //
+            // The net effect: when the persistence gap exceeds the threshold, we stop
+            // processing incoming messages and let them queue in the channel. This is only a
+            // soft form of backpressure: it delays replies and, more importantly, prevents
+            // executing further blocks that would pile up in the persistence queue - where each
+            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
+            // engine channel.
+            //
+            // Standard Ethereum CLs won't truly back off - the engine API has no
+            // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
+            // this cannot prevent the incoming channel from growing under sustained load.
+            // But it shifts the bottleneck to the lighter-weight incoming queue rather than
+            // the costlier persistence pipeline. Other clients that respect reply latency
+            // can treat the delayed responses as a signal to chill out.
+            match self.try_poll_persistence() {
+                Ok(true) => {
+                    if let Err(err) = self.advance_persistence() {
+                        error!(target: "engine::tree", %err, "Advancing persistence failed");
+                        return
+                    }
+                    continue;
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    error!(target: "engine::tree", %err, "Polling persistence failed");
+                    return
+                }
+            }
+
+            let event = if self.should_backpressure() {
+                self.metrics.engine.backpressure_active.set(1.0);
+                let stall_start = Instant::now();
+                let event = self.wait_for_persistence_event();
+                self.metrics.engine.backpressure_stall_duration.record(stall_start.elapsed());
+                event
+            } else {
+                self.metrics.engine.backpressure_active.set(0.0);
+                self.wait_for_event()
+            };
+
+            match event {
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
@@ -480,6 +594,24 @@ where
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
                 return
             }
+        }
+    }
+
+    /// Blocks until the in-flight persistence task completes, used when we are under
+    /// backpressure.
+    ///
+    /// Unlike `wait_for_event`, this deliberately does not read from the tree input channel. Any
+    /// requests sent to the tree remain queued upstream until persistence catches up.
+    fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
+        let maybe_persistence = self.persistence_state.rx.take();
+
+        if let Some((persistence_rx, start_time, _action)) = maybe_persistence {
+            match persistence_rx.recv() {
+                Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
+                Err(_) => LoopEvent::Disconnected,
+            }
+        } else {
+            self.wait_for_event()
         }
     }
 
@@ -629,13 +761,12 @@ where
         // record pre-execution phase duration
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
-        let status = if self.backfill_sync_state.is_idle() {
-            self.try_insert_payload(payload)?
+        let mut outcome = if self.backfill_sync_state.is_idle() {
+            self.try_insert_payload(payload)?.into_outcome()
         } else {
-            self.try_buffer_payload(payload)?
+            TreeOutcome::new(self.try_buffer_payload(payload)?)
         };
 
-        let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
             // Only create the canonical event if this block isn't already the canonical head
@@ -653,16 +784,11 @@ where
     }
 
     /// Processes a payload during normal sync operation.
-    ///
-    /// Returns:
-    /// - `Valid`: Payload successfully validated and inserted
-    /// - `Syncing`: Parent missing, payload buffered for later
-    /// - Error status: Payload is invalid
     #[instrument(level = "debug", target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -670,31 +796,40 @@ where
 
         match self.insert_payload(payload) {
             Ok(status) => {
-                let status = match status {
+                let (status, already_seen) = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
                         self.try_connect_buffered_blocks(num_hash)?;
-                        PayloadStatusEnum::Valid
+                        (PayloadStatusEnum::Valid, false)
                     }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
-                        PayloadStatusEnum::Valid
+                        (PayloadStatusEnum::Valid, true)
                     }
-                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) => {
+                        (PayloadStatusEnum::Syncing, false)
+                    }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                         // not known to be invalid, but we don't know anything else
-                        PayloadStatusEnum::Syncing
+                        (PayloadStatusEnum::Syncing, true)
                     }
                 };
 
-                Ok(PayloadStatus::new(status, latest_valid_hash))
+                Ok(TryInsertPayloadResult {
+                    status: PayloadStatus::new(status, latest_valid_hash),
+                    already_seen,
+                })
             }
-            Err(error) => match error {
-                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
-                InsertPayloadError::Payload(error) => {
-                    Ok(self.on_new_payload_error(error, num_hash, parent_hash)?)
-                }
-            },
+            Err(error) => {
+                let status = match error {
+                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
+                    InsertPayloadError::Payload(error) => {
+                        self.on_new_payload_error(error, num_hash, parent_hash)?
+                    }
+                };
+
+                Ok(TryInsertPayloadResult { status, already_seen: false })
+            }
         }
     }
 
@@ -994,6 +1129,8 @@ where
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
 
+        self.building_payload = attrs.is_some() && self.config.suppress_persistence_during_build();
+
         // Record metrics
         self.record_forkchoice_metrics();
 
@@ -1288,7 +1425,8 @@ where
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
         loop {
             // Wait for any in-progress persistence to complete (blocking)
-            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+            if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
+                debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
                 self.on_persistence_complete(result, start_time)?;
             }
@@ -1308,8 +1446,7 @@ where
     /// Tries to poll for a completed persistence task (non-blocking).
     ///
     /// Returns `true` if a persistence task was completed, `false` otherwise.
-    #[cfg(test)]
-    pub fn try_poll_persistence(&mut self) -> Result<bool, AdvancePersistenceError> {
+    fn try_poll_persistence(&mut self) -> Result<bool, AdvancePersistenceError> {
         let Some((rx, start_time, action)) = self.persistence_state.rx.take() else {
             return Ok(false);
         };
@@ -1374,19 +1511,7 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        // Invalidate cached overlay since the anchor has changed
-        self.state.tree_state.invalidate_cached_overlay();
-
         self.on_new_persisted_block()?;
-
-        // Re-prepare overlay for the current canonical head with the new anchor.
-        // Spawn a background task to trigger computation so it's ready when the next payload
-        // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
-            self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = overlay.get();
-            });
-        }
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
@@ -1419,15 +1544,31 @@ where
             },
             FromEngine::Request(request) => {
                 match request {
-                    EngineApiRequest::InsertExecutedBlock(block) => {
-                        let block_num_hash = block.recovered_block().num_hash();
+                    EngineApiRequest::InsertExecutedBlock(payload) => {
+                        let block_num_hash = payload.recovered_block.num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
+                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+                            // block already known to the tree (e.g. delivered via newPayload first)
+                            return Ok(ops::ControlFlow::Continue(()))
+                        }
+
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
+
+                        let block = match self
+                            .payload_validator
+                            .on_inserted_executed_block(payload, &self.state)
+                        {
+                            Ok(block) => block,
+                            Err(err) => {
+                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
+                                return Ok(ops::ControlFlow::Continue(()))
+                            }
+                        };
 
                         // if the parent is the canonical head, we can insert the block as the
                         // pending block
@@ -1439,7 +1580,6 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
-                        self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -1526,6 +1666,7 @@ where
                                 wait_for_persistence,
                                 wait_for_caches,
                                 tx,
+                                enqueued_at,
                             } => {
                                 debug!(
                                     target: "engine::tree",
@@ -1534,7 +1675,9 @@ where
                                     "Processing reth_newPayload"
                                 );
 
-                                let persistence_wait = if wait_for_persistence {
+                                let backpressure_wait = enqueued_at.elapsed();
+
+                                let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
                                         let (persistence_tx, persistence_rx) =
@@ -1557,12 +1700,12 @@ where
                                             .recv()
                                             .expect("persistence result channel closed");
                                         let _ = self.on_persistence_complete(result, start_time);
-                                        Some(wait_duration)
+                                        wait_duration
                                     } else {
-                                        Some(Duration::ZERO)
+                                        Duration::ZERO
                                     }
                                 } else {
-                                    None
+                                    Duration::ZERO
                                 };
 
                                 let cache_wait = wait_for_caches
@@ -1585,7 +1728,7 @@ where
 
                                 let timings = NewPayloadTimings {
                                     latency,
-                                    persistence_wait,
+                                    persistence_wait: backpressure_wait + explicit_persistence_wait,
                                     execution_cache_wait: cache_wait
                                         .map(|wait| wait.execution_cache),
                                     sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
@@ -1785,7 +1928,35 @@ where
             self.on_canonical_chain_update(chain_update);
         }
 
+        self.on_canonicalized_sync_target(target);
+
         Ok(())
+    }
+
+    /// Applies the tracked forkchoice state once its sync target head becomes canonical.
+    fn on_canonicalized_sync_target(&mut self, target: B256) {
+        let Some(sync_target_state) = self
+            .state
+            .forkchoice_state_tracker
+            .sync_target_state()
+            .filter(|state| state.head_block_hash == target)
+        else {
+            return;
+        };
+
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(sync_target_state) {
+            debug!(
+                target: "engine::tree",
+                head = %sync_target_state.head_block_hash,
+                safe = %sync_target_state.safe_block_hash,
+                finalized = %sync_target_state.finalized_block_hash,
+                ?outcome,
+                "Canonicalized sync target head before safe/finalized could be applied"
+            );
+            return;
+        }
+
+        self.state.forkchoice_state_tracker.promote_sync_target_to_valid(sync_target_state);
     }
 
     /// Convenience function to handle an optional tree event.
@@ -1847,7 +2018,7 @@ where
                 if total_duration > threshold.expect("checked above") {
                     self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
                         stats,
-                        commit_duration: commit_dur,
+                        commit_duration: Some(commit_dur),
                         total_duration,
                     }));
                 }
@@ -1884,9 +2055,13 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold and
-    /// backfill is not running.
+    /// block is greater than or equal to the persistence threshold,
+    /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
+        if self.building_payload {
+            return false
+        }
+
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
             return false
@@ -2008,9 +2183,7 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        // Skip building trie input and anchor for DB-loaded blocks.
-        let trie_data =
-            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
+        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
@@ -2171,7 +2344,10 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
+        self.emit_event(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(head),
+            error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+        });
 
         Ok(status)
     }
@@ -2741,12 +2917,7 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(
-            &mut V,
-            Input,
-            TreeCtx<'_, N>,
-        )
-            -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
+        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2816,10 +2987,22 @@ where
 
         let start = Instant::now();
 
-        let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
-        // Store timing stats for detailed block logging after persistence
+        // Emit slow block event immediately after execution so it appears even when
+        // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
         if let Some(stats) = timing_stats {
+            if let Some(threshold) = self.config.slow_block_threshold() {
+                let total_duration = stats.execution_duration + stats.state_hash_duration;
+                if total_duration > threshold {
+                    self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
+                        stats: stats.clone(),
+                        commit_duration: None,
+                        total_duration,
+                    }));
+                }
+            }
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
@@ -2877,11 +3060,26 @@ where
         );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
-        // keep track of the invalid header
-        self.state.invalid_headers.insert(block.block_with_parent());
-        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
-            Box::new(block),
-        )));
+        // keep track of the invalid header unless the consensus impl considers it transient
+        let is_transient = match &validation_err {
+            InsertBlockValidationError::Consensus(err) => self.consensus.is_transient_error(err),
+            _ => false,
+        };
+        if is_transient {
+            warn!(
+                target: "engine::tree",
+                invalid_hash=%block.hash(),
+                invalid_number=block.number(),
+                %validation_err,
+                "Skipping invalid header cache insert for transient validation error",
+            );
+        } else {
+            self.state.invalid_headers.insert(block.block_with_parent());
+        }
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(block),
+            error: validation_err.to_string(),
+        }));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
@@ -3035,12 +3233,12 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
-        attrs: T::PayloadAttributes,
+        attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
         if let Err(err) =
-            self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
+            self.payload_validator.validate_payload_attributes_against_header(&attributes, head)
         {
             warn!(target: "engine::tree", %err, ?head, "Invalid payload attributes");
             return OnForkChoiceUpdated::invalid_payload_attributes()
@@ -3051,10 +3249,30 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
+        let cache = if self.config.share_execution_cache_with_payload_builder() {
+            self.payload_validator.cache_for(state.head_block_hash)
+        } else {
+            None
+        };
+
+        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() {
+            self.payload_validator.sparse_trie_handle_for(
+                state.head_block_hash,
+                head.state_root(),
+                &self.state,
+            )
+        } else {
+            None
+        };
+
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
-        let pending_payload_id =
-            self.payload_builder.send_new_payload(state.head_block_hash, attrs);
+        let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
+            parent_hash: state.head_block_hash,
+            attributes,
+            cache,
+            trie_handle,
+        });
 
         // Client software MUST respond to this method call in the following way:
         // {

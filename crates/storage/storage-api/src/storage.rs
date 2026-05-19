@@ -58,9 +58,6 @@ pub trait StorageChangeSetReader: Send {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 
-    /// Get the total count of all storage changes.
-    fn storage_changeset_count(&self) -> ProviderResult<usize>;
-
     /// Get storage changesets for a block as static-file rows.
     ///
     /// Default implementation uses `storage_changeset` and maps to `StorageBeforeTx`.

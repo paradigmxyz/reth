@@ -592,8 +592,6 @@ impl Default for ArenaParallelismThresholds {
 /// the upper trie to route each update to the correct subtrie, then processes subtries in
 /// parallel when the update count exceeds [`ArenaParallelismThresholds::min_updates`].
 ///
-/// [`SparseTrie::update_leaf`] and [`SparseTrie::remove_leaf`] are not yet implemented.
-///
 /// After updates, structural changes (branch collapse, subtrie unwrapping) are handled by
 /// propagating dirty state back up through the upper trie.
 ///
@@ -2426,23 +2424,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.debug_assert_subtrie_structure();
 
         Ok(())
-    }
-
-    fn update_leaf<P: crate::provider::TrieNodeProvider>(
-        &mut self,
-        _full_path: Nibbles,
-        _value: Vec<u8>,
-        _provider: P,
-    ) -> SparseTrieResult<()> {
-        unimplemented!("ArenaParallelSparseTrie uses update_leaves for batch leaf updates")
-    }
-
-    fn remove_leaf<P: crate::provider::TrieNodeProvider>(
-        &mut self,
-        _full_path: &Nibbles,
-        _provider: P,
-    ) -> SparseTrieResult<()> {
-        unimplemented!("ArenaParallelSparseTrie uses update_leaves for batch leaf removals")
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]

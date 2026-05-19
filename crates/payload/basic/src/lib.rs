@@ -14,13 +14,17 @@ use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
-use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
+use reth_execution_cache::SavedCache;
+use reth_payload_builder::{
+    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
+use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
     fmt,
     future::Future,
@@ -140,11 +144,10 @@ where
 
     fn new_payload_job(
         &self,
-        parent: B256,
-        attributes: <Self::Job as PayloadJob>::PayloadAttributes,
+        input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if parent.is_zero() {
+        let parent_header = if input.parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -153,14 +156,14 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(parent)
+                .sealed_header_by_hash(input.parent_hash)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(parent))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
         };
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
-        let config = PayloadConfig::new(Arc::new(parent_header), attributes, id);
+        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -174,6 +177,8 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
+            execution_cache: input.cache,
+            trie_handle: input.trie_handle,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -322,6 +327,10 @@ where
     /// This is used to avoid reading the same state over and over again when new attempts are
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     cached_reads: Option<CachedReads>,
+    /// Optional execution cache shared with the engine.
+    execution_cache: Option<SavedCache>,
+    /// Optional state root task handle, shared with the engine.
+    trie_handle: Option<StateRootHandle>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -347,12 +356,20 @@ where
         let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
+        let execution_cache = self.execution_cache.clone();
+        let trie_handle = self.trie_handle.take();
         let builder = self.builder.clone();
         self.executor.spawn_blocking_task(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+            let args = BuildArguments {
+                cached_reads,
+                execution_cache,
+                trie_handle,
+                config: payload_config,
+                cancel,
+                best_payload,
+            };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         });
@@ -482,6 +499,8 @@ where
 
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
+                execution_cache: self.execution_cache.clone(),
+                trie_handle: None,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -809,6 +828,15 @@ impl<Payload> BuildOutcomeKind<Payload> {
 pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
+    /// Optional execution cache shared with the engine.
+    pub execution_cache: Option<SavedCache>,
+    /// Optional state root task handle, shared with the engine.
+    ///
+    /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
+    /// block until this task completes. The trie is anchored at the built block's state
+    /// root, so if the next `newPayload` is not on top of that block, the trie cache is
+    /// invalidated and cleared.
+    pub trie_handle: Option<StateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -821,11 +849,13 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
     pub const fn new(
         cached_reads: CachedReads,
+        execution_cache: Option<SavedCache>,
+        trie_handle: Option<StateRootHandle>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
     }
 }
 

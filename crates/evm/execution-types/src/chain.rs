@@ -161,7 +161,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
     /// 3. The trie data map.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn into_inner(
         self,
     ) -> (

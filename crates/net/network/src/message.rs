@@ -8,10 +8,10 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
-    NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData,
-    PooledTransactions, Receipts, SharedTransactions, Transactions,
+    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, Cells, EthMessage,
+    EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetReceipts,
+    NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -119,6 +119,10 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetBlockBodies(GetBlockBodies),
+    /// Requests block access lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists(GetBlockAccessLists),
 
     /// Requests receipts from the peer.
     ///
@@ -173,6 +177,12 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a block access lists request.
         response: oneshot::Receiver<RequestResult<BlockAccessLists>>,
     },
+    ///
+    /// Represents a response to a request for cells.
+    Cells {
+        /// The receiver channel for the response to a cells request.
+        response: oneshot::Receiver<RequestResult<Cells>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -216,6 +226,10 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 Ok(res) => PeerResponseResult::BlockAccessLists(res),
                 Err(err) => PeerResponseResult::BlockAccessLists(Err(err.into())),
             },
+            Self::Cells { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Cells(res),
+                Err(err) => PeerResponseResult::Cells(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -240,6 +254,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts70(RequestResult<Receipts70<N::Receipt>>),
     /// Represents a result containing block access lists or an error.
     BlockAccessLists(RequestResult<BlockAccessLists>),
+    /// Represents a result containing cells or an error.
+    Cells(RequestResult<Cells>),
 }
 
 // === impl PeerResponseResult ===
@@ -291,6 +307,13 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
                 }
                 Err(err) => Err(err),
             },
+            Self::Cells(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthMessage::Cells(request))
+                }
+                Err(err) => Err(err),
+            },
         }
     }
 
@@ -305,6 +328,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(res) => res.as_ref().err(),
             Self::Receipts70(res) => res.as_ref().err(),
             Self::BlockAccessLists(res) => res.as_ref().err(),
+            Self::Cells(res) => res.as_ref().err(),
         }
     }
 

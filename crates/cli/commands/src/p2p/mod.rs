@@ -188,7 +188,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
             )
         }
 
-        config.peers.trusted_nodes_only = self.network.trusted_only;
+        config.peers.trusted_nodes_only |= self.network.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret();
         let p2p_secret_key = self.network.secret_key(default_secret_key_path)?;

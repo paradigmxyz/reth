@@ -28,6 +28,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
     ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
     StageCheckpointWriter,
@@ -40,7 +41,7 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
+use std::{any::Any, net::SocketAddr, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
@@ -209,7 +210,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let consensus = Arc::new(components.consensus().clone());
 
                     let mut config = config;
-                    config.peers.trusted_nodes_only = self.network.trusted_only;
+                    config.peers.trusted_nodes_only |= self.network.trusted_only;
                     config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
                     let network_secret_path = self

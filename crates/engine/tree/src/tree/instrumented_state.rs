@@ -237,8 +237,9 @@ impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> 
         &self,
         input: TrieInput,
         target: HashedPostState,
+        mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
-        self.state_provider.witness(input, target)
+        self.state_provider.witness(input, target, mode)
     }
 }
 

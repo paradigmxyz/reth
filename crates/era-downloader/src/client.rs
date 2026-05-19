@@ -52,9 +52,18 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     const CHECKSUMS: &'static str = "checksums.txt";
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
+    ///
+    /// The file type is auto-detected from the URL. Use
+    /// [`with_era_type`](Self::with_era_type) to override.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
         let era_type = EraFileType::from_url(url.as_str());
         Self { client, url, folder: folder.into(), era_type }
+    }
+
+    /// Override the auto-detected [`EraFileType`].
+    pub const fn with_era_type(mut self, era_type: EraFileType) -> Self {
+        self.era_type = era_type;
+        self
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -366,5 +375,20 @@ mod tests {
         let actual_number = client.file_name_to_number(file_name);
 
         assert_eq!(actual_number, expected_number);
+    }
+
+    #[test]
+    fn test_with_era_type_overrides_auto_detection() {
+        // URL without "era1" auto-detects as Era
+        let client = EraClient::new(
+            Client::new(),
+            Url::from_str("https://example.com/").unwrap(),
+            PathBuf::new(),
+        );
+        assert_eq!(client.era_type, EraFileType::Era);
+
+        // with_era_type overrides to Era1
+        let client = client.with_era_type(EraFileType::Era1);
+        assert_eq!(client.era_type, EraFileType::Era1);
     }
 }

@@ -76,6 +76,7 @@ use crate::{
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::{Decodable, Encodable};
+use sha2::{Digest, Sha256};
 use snap::{read::FrameDecoder, write::FrameEncoder};
 use std::{
     io::{Read, Write},
@@ -493,6 +494,73 @@ impl Accumulator {
 
         Ok(Self { root: B256::from(root) })
     }
+
+    /// Compute the accumulator from a list of header records.
+    ///
+    /// Implements `hash_tree_root(List[HeaderRecord, 8192])` per the ERA1 spec:
+    /// - Each leaf is `sha256(block_hash || total_difficulty_le_bytes32)`
+    /// - Leaves are padded to `MAX_BLOCKS_PER_ERA1` (8192) with zero hashes
+    /// - Binary Merkle tree is computed bottom-up
+    /// - Final root is `sha256(merkle_root || le_bytes32(actual_count))`
+    ///
+    /// Returns `Err` if `records` exceeds [`MAX_BLOCKS_PER_ERA1`].
+    pub fn from_header_records(records: &[HeaderRecord]) -> Result<Self, E2sError> {
+        let capacity = MAX_BLOCKS_PER_ERA1;
+
+        if records.len() > capacity {
+            return Err(E2sError::Ssz(format!(
+                "Too many header records: got {}, max {}",
+                records.len(),
+                capacity
+            )));
+        }
+
+        // Compute leaf hash for each header record
+        let mut leaves = Vec::with_capacity(capacity);
+        for record in records {
+            let mut data = [0u8; 64];
+            data[..32].copy_from_slice(record.block_hash.as_slice());
+            data[32..].copy_from_slice(&record.total_difficulty.to_le_bytes::<32>());
+            leaves.push(<[u8; 32]>::from(Sha256::digest(data)));
+        }
+
+        // Pad to capacity with zero hashes
+        leaves.resize(capacity, [0u8; 32]);
+
+        // Binary Merkle tree bottom-up (capacity is always a power of two)
+        while leaves.len() > 1 {
+            let mut next_level = Vec::with_capacity(leaves.len() / 2);
+            for pair in leaves.chunks_exact(2) {
+                let mut data = [0u8; 64];
+                data[..32].copy_from_slice(&pair[0]);
+                data[32..].copy_from_slice(&pair[1]);
+                next_level.push(<[u8; 32]>::from(Sha256::digest(data)));
+            }
+            leaves = next_level;
+        }
+
+        let merkle_root = leaves[0];
+
+        // mix_in_length: sha256(merkle_root || le_bytes32(actual_length))
+        let mut mix = [0u8; 64];
+        mix[..32].copy_from_slice(&merkle_root);
+        let length = records.len() as u64;
+        mix[32..40].copy_from_slice(&length.to_le_bytes());
+        // remaining bytes stay zero (uint256 LE padding)
+
+        Ok(Self { root: B256::from(<[u8; 32]>::from(Sha256::digest(mix))) })
+    }
+}
+
+/// A header record used to compute the ERA1 accumulator.
+///
+/// Per the ERA1 spec: `header-record := { block-hash: Bytes32, total-difficulty: Uint256 }`
+#[derive(Debug, Clone)]
+pub struct HeaderRecord {
+    /// The block hash (keccak256 of RLP-encoded header)
+    pub block_hash: B256,
+    /// The cumulative total difficulty at this block
+    pub total_difficulty: U256,
 }
 
 /// A block tuple in an Era1 file, containing all components for a single block
@@ -689,6 +757,44 @@ mod tests {
             assert_eq!(decoded_log.address, original_log.address);
             assert_eq!(decoded_log.data.topics(), original_log.data.topics());
         }
+    }
+
+    #[test]
+    fn test_accumulator_from_header_records_known_vectors() {
+        // Known-answer vectors computed from the SSZ spec:
+        //   hash_tree_root(List[HeaderRecord, 8192])
+        let expected_empty: B256 =
+            "4a8c3a07c8d23adc5bac61157555c3c784d53d9bc110c1370809bd23cd93777d".parse().unwrap();
+        let expected_single_zero: B256 =
+            "81fd641249670887a731386e756a7a1538dc781b1b0bf016889045d350812817".parse().unwrap();
+        let expected_single_nonzero: B256 =
+            "ada35c48d81117f4fd588554cd4c4752356336e84cb41106dea1ceb4cfac8799".parse().unwrap();
+
+        // Empty list
+        let acc_empty = Accumulator::from_header_records(&[]).unwrap();
+        assert_eq!(acc_empty.root, expected_empty);
+
+        // Single record with zero values
+        let records = vec![HeaderRecord { block_hash: B256::ZERO, total_difficulty: U256::ZERO }];
+        let acc = Accumulator::from_header_records(&records).unwrap();
+        assert_eq!(acc.root, expected_single_zero);
+
+        // Single record with non-zero values
+        let records2 = vec![HeaderRecord {
+            block_hash: B256::from([1u8; 32]),
+            total_difficulty: U256::from(100u64),
+        }];
+        let acc2 = Accumulator::from_header_records(&records2).unwrap();
+        assert_eq!(acc2.root, expected_single_nonzero);
+    }
+
+    #[test]
+    fn test_accumulator_rejects_oversized_input() {
+        let records = vec![
+            HeaderRecord { block_hash: B256::ZERO, total_difficulty: U256::ZERO };
+            MAX_BLOCKS_PER_ERA1 + 1
+        ];
+        assert!(Accumulator::from_header_records(&records).is_err());
     }
 
     #[test]

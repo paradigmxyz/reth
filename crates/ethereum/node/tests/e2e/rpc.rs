@@ -1,18 +1,19 @@
-use crate::utils::eth_payload_attributes;
+use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    SignedBidSubmissionV3, SignedBidSubmissionV4,
+    BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
+    SignedBidSubmissionV6,
 };
 use alloy_rpc_types_engine::{BlobsBundleV1, ExecutionPayloadV3};
 use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::setup_engine;
-use reth_network::types::NatResolver;
+use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::{NetworkArgs, RpcServerArgs},
@@ -23,6 +24,7 @@ use reth_payload_primitives::BuiltPayload;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_tasks::Runtime;
 use std::{
+    net::{IpAddr, Ipv4Addr},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -296,6 +298,92 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_flashbots_validate_v6() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    for nonce in 0..3 {
+        let _ = provider
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).nonce(nonce))
+            .await?;
+    }
+
+    let payload = node.new_payload().await?;
+    assert!(payload.block_access_list().is_some());
+    assert!(payload.block().body().transactions().count() >= 3);
+
+    let envelope = payload.clone().try_into_v6()?;
+    let mut request = BuilderBlockValidationRequestV6 {
+        request: SignedBidSubmissionV6 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: envelope.execution_payload,
+            blobs_bundle: envelope.blobs_bundle,
+            execution_requests: envelope.execution_requests.try_into().unwrap(),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
+        .await
+        .expect("request should validate");
+
+    request.registered_gas_limit -= 1;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
+        .await
+        .is_err());
+    request.registered_gas_limit += 1;
+
+    let mut invalid_bal_request = request.clone();
+    invalid_bal_request.request.execution_payload.block_access_list = Bytes::from_static(&[0xc0]);
+    assert!(provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&invalid_bal_request,)
+        )
+        .await
+        .is_err());
+
+    request.request.execution_payload.payload_inner.payload_inner.payload_inner.state_root =
+        B256::ZERO;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
+        .await
+        .is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_eth_config() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -372,6 +460,96 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
     let info = api.node_info().await.unwrap();
 
     assert_eq!(info.ip, external_ip);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_admin_node_info_uses_discv5_port_when_discv4_is_disabled() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let runtime = Runtime::test();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec =
+        Arc::new(ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).build());
+
+    let mut network = NetworkArgs::default().with_unused_ports();
+    network.bootnodes = Some(Vec::new());
+    network.discovery.disable_dns_discovery = true;
+    network.discovery.disable_discv4_discovery = true;
+    network = network.with_nat_resolver(NatResolver::ExternalIp("127.0.0.1".parse().unwrap()));
+
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_network(network)
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    assert!(node.network.discv4().is_none());
+    let discv5_port = node.network.discv5().expect("discv5 should be enabled").local_port();
+
+    let local_record = node.network.local_node_record();
+    let local_enr = node.network.local_enr();
+    let info = node.add_ons_handle.admin_api().node_info().await.unwrap();
+
+    assert_eq!(local_record.udp_port, discv5_port);
+    assert_eq!(local_enr.udp4(), Some(discv5_port));
+    assert_eq!(info.ports.discovery, discv5_port);
+    assert_eq!(info.ports.listener, local_record.tcp_port);
+    assert_eq!(info.enode, local_record.to_string());
+    assert!(info.enode.contains(&format!("?discport={discv5_port}")));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_admin_node_info_discv5_enr_uses_nat_extip_when_discv4_is_disabled() -> eyre::Result<()>
+{
+    reth_tracing::init_test_tracing();
+
+    let runtime = Runtime::test();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec =
+        Arc::new(ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).build());
+
+    let mut network = NetworkArgs::default().with_unused_ports();
+    network.bootnodes = Some(Vec::new());
+    network.discovery.disable_dns_discovery = true;
+    network.discovery.disable_discv4_discovery = true;
+    let external_ip = Ipv4Addr::new(203, 0, 113, 7);
+    network = network.with_nat_resolver(NatResolver::ExternalIp(IpAddr::V4(external_ip)));
+
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_network(network)
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    assert!(node.network.discv4().is_none());
+    let discv5 = node.network.discv5().expect("discv5 should be enabled");
+    let discv5_port = discv5.local_port();
+    let info = node.add_ons_handle.admin_api().node_info().await.unwrap();
+    let admin_enr: enr::Enr<enr::secp256k1::SecretKey> =
+        info.enr.parse().map_err(|err| eyre::eyre!("failed to parse admin ENR: {err}"))?;
+
+    assert_eq!(discv5.local_enr().ip4(), Some(external_ip));
+    assert_eq!(discv5.local_enr().udp4(), Some(discv5_port));
+    assert_eq!(admin_enr.ip4(), Some(external_ip));
+    assert_eq!(admin_enr.udp4(), Some(discv5_port));
+    assert_eq!(info.ip, IpAddr::V4(external_ip));
+    assert_eq!(info.ports.discovery, discv5_port);
 
     Ok(())
 }

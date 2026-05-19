@@ -46,6 +46,9 @@ pub struct NetworkMetrics {
     /// Number of Eth Requests dropped due to channel being at full capacity
     pub(crate) total_dropped_eth_requests_at_full_capacity: Counter,
 
+    /// Number of transaction events dropped due to the tx manager channel being at full capacity
+    pub(crate) total_dropped_tx_events_at_full_capacity: Counter,
+
     /* ================ POLL DURATION ================ */
 
     /* -- Total poll duration of `NetworksManager` future -- */
@@ -293,7 +296,7 @@ pub struct TransactionFetcherMetrics {
 #[macro_export]
 macro_rules! duration_metered_exec {
     ($code:expr, $acc:expr) => {{
-        let start = std::time::Instant::now();
+        let start = reth_primitives_traits::FastInstant::now();
 
         let res = $code;
 
@@ -577,6 +580,9 @@ pub struct AnnouncedTxTypesMetrics {
 
     /// Histogram for tracking frequency of EIP-7702 transaction type
     pub(crate) eip7702: Histogram,
+
+    /// Histogram for tracking frequency of unknown/other transaction types
+    pub(crate) other: Histogram,
 }
 
 /// Counts the number of transactions by their type in a block or collection.
@@ -599,6 +605,9 @@ pub struct TxTypesCounter {
 
     /// Count of transactions conforming to EIP-7702 (Restricted Storage Windows).
     pub(crate) eip7702: usize,
+
+    /// Count of unknown/other transaction types not matching any known EIP.
+    pub(crate) other: usize,
 }
 
 impl TxTypesCounter {
@@ -621,6 +630,10 @@ impl TxTypesCounter {
             }
         }
     }
+
+    pub(crate) const fn increase_other(&mut self) {
+        self.other += 1;
+    }
 }
 
 impl AnnouncedTxTypesMetrics {
@@ -632,5 +645,6 @@ impl AnnouncedTxTypesMetrics {
         self.eip1559.record(tx_types_counter.eip1559 as f64);
         self.eip4844.record(tx_types_counter.eip4844 as f64);
         self.eip7702.record(tx_types_counter.eip7702 as f64);
+        self.other.record(tx_types_counter.other as f64);
     }
 }

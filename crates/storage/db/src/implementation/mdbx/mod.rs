@@ -283,6 +283,26 @@ impl Database for DatabaseEnv {
     fn path(&self) -> PathBuf {
         self.path.clone()
     }
+
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        let info = self.inner.info().ok()?;
+        let txnid = info.latter_reader_txnid();
+        if txnid == 0 {
+            None
+        } else {
+            Some(txnid)
+        }
+    }
+
+    fn last_txnid(&self) -> Option<u64> {
+        let info = self.inner.info().ok()?;
+        let txnid = info.last_txnid();
+        if txnid == 0 {
+            None
+        } else {
+            Some(txnid as u64)
+        }
+    }
 }
 
 impl DatabaseMetrics for DatabaseEnv {

@@ -57,7 +57,7 @@ async fn test_assertion_exex<
             println!("Received committed chain: {range:?}");
 
             // Increment blocks count
-            #[allow(clippy::unnecessary_cast)]
+            #[expect(clippy::unnecessary_cast)]
             state_clone.received_blocks.fetch_add(blocks_count as u64, Ordering::SeqCst);
 
             // Send event that we've processed this height

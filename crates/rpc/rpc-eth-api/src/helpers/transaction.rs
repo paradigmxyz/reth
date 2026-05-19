@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::TransactionInfo;
+use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
@@ -155,6 +155,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
     > + Send {
         LoadTransaction::transaction_by_hash(self, hash)
+    }
+
+    /// Returns all transactions from the local pending pool.
+    fn pending_transactions(&self) -> Result<Vec<RpcTransaction<Self::NetworkTypes>>, Self::Error> {
+        self.pool()
+            .pending_transactions()
+            .into_iter()
+            .map(|tx| self.converter().fill_pending(tx.transaction.clone_into_consensus()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Self::Error::from)
     }
 
     /// Get all transactions in the block with the given hash.
@@ -325,16 +335,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             if let Some(block) = self.recovered_block(block_id).await? {
                 let block_hash = block.hash();
                 let block_number = block.number();
+                let block_timestamp = block.timestamp();
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
-                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
+                        block_timestamp: Some(block_timestamp),
                         base_fee: base_fee_per_gas,
                         index: Some(index as u64),
-                        ..Default::default()
                     };
 
                     return Ok(Some(
@@ -396,6 +406,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .and_then(|block| {
                     let block_hash = block.hash();
                     let block_number = block.number();
+                    let block_timestamp = block.timestamp();
                     let base_fee_per_gas = block.base_fee_per_gas();
 
                     block
@@ -403,14 +414,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .enumerate()
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
-                            #[allow(clippy::needless_update)]
                             let tx_info = TransactionInfo {
                                 hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
+                                block_timestamp: Some(block_timestamp),
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
-                                ..Default::default()
                             };
                             Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
@@ -463,15 +473,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
             // set nonce if not already set before
             if request.as_ref().nonce().is_none() {
-                let nonce = self.next_available_nonce(from).await?;
+                let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
             }
 
             let chain_id = self.chain_id();
             request.as_mut().set_chain_id(chain_id.to());
 
-            let estimated_gas =
-                self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+            let estimated_gas = self
+                .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                .await?;
             let gas_limit = estimated_gas;
             request.as_mut().set_gas_limit(gas_limit.to());
 
@@ -505,17 +516,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
         async move {
-            let from = match request.as_ref().from() {
-                Some(from) => from,
-                None => return Err(SignError::NoAccount.into_eth_err()),
-            };
-
             if request.as_ref().value().is_none() {
                 request.as_mut().set_value(U256::ZERO);
             }
 
             if request.as_ref().nonce().is_none() {
-                let nonce = self.next_available_nonce(from).await?;
+                let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
             }
 
@@ -538,8 +544,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             if request.as_ref().gas_limit().is_none() {
-                let estimated_gas =
-                    self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+                let estimated_gas = self
+                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                    .await?;
                 request.as_mut().set_gas_limit(estimated_gas.to());
             }
 
@@ -688,6 +695,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                     index: meta.index,
                     block_hash: meta.block_hash,
                     block_number: meta.block_number,
+                    block_timestamp: meta.timestamp,
                     base_fee: meta.base_fee,
                 }));
             }

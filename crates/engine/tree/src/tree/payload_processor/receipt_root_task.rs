@@ -14,6 +14,8 @@ use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 use tracing::debug_span;
 
+const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
 pub struct IndexedReceipt<R> {
@@ -75,7 +77,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 
         let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
         let mut aggregated_bloom = Bloom::ZERO;
-        let mut encode_buf = Vec::new();
+        let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut received_count = 0usize;
 
         for indexed_receipt in self.receipt_rx {

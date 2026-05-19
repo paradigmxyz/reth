@@ -3,7 +3,7 @@ use crate::{
     PayloadConfig,
 };
 
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
@@ -79,6 +79,13 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::Left(l) => l.slot_number(),
+            Self::Right(r) => r.slot_number(),
+        }
+    }
 }
 
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,
@@ -128,6 +135,13 @@ where
         }
     }
 
+    fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::Left(l) => l.block_access_list(),
+            Self::Right(r) => r.block_access_list(),
+        }
+    }
+
     fn requests(&self) -> Option<Requests> {
         match self {
             Self::Left(l) => l.requests(),
@@ -153,13 +167,22 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments {
+            cached_reads,
+            execution_cache,
+            trie_handle,
+            config,
+            cancel,
+            best_payload,
+        } = args;
         let PayloadConfig { parent_header, attributes, payload_id } = config;
 
         match attributes {
             Either::Left(left_attr) => {
                 let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments {
                     cached_reads,
+                    execution_cache,
+                    trie_handle,
                     config: PayloadConfig { parent_header, attributes: left_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {
@@ -175,6 +198,8 @@ where
             Either::Right(right_attr) => {
                 let right_args = BuildArguments {
                     cached_reads,
+                    execution_cache,
+                    trie_handle,
                     config: PayloadConfig { parent_header, attributes: right_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {

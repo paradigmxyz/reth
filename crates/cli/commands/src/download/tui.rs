@@ -1,4 +1,5 @@
 use crate::download::{
+    download_command,
     manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest},
     DownloadProgress, SelectionPreset,
 };
@@ -262,6 +263,7 @@ impl SelectorApp {
             ComponentSelection::None => return 0,
             ComponentSelection::All => None,
             ComponentSelection::Distance(d) => Some(d),
+            ComponentSelection::Since(block) => Some(self.manifest.block - block + 1),
         };
         self.groups[group_idx]
             .types
@@ -344,6 +346,7 @@ fn format_selection(sel: &ComponentSelection) -> String {
     match sel {
         ComponentSelection::All => "All".to_string(),
         ComponentSelection::Distance(d) => format!("Last {d} blocks"),
+        ComponentSelection::Since(block) => format!("Since block {block}"),
         ComponentSelection::None => "None".to_string(),
     }
 }
@@ -366,7 +369,7 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
     };
     let header = Paragraph::new(format!(" Select snapshot components to download{}", block_info))
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL).title("reth download"));
+        .block(Block::default().borders(Borders::ALL).title(download_command()));
     f.render_widget(header, chunks[0]);
 
     // Component list

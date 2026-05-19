@@ -1,9 +1,11 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
+use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
     DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
@@ -22,7 +24,9 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
+    persistence_backpressure_threshold: u64,
     memory_block_buffer_target: u64,
+    invalid_header_hit_eviction_threshold: u8,
     legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
@@ -45,6 +49,11 @@ pub struct DefaultEngineValues {
     slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
+    share_execution_cache_with_payload_builder: bool,
+    share_sparse_trie_with_payload_builder: bool,
+    suppress_persistence_during_build: bool,
+    bal_parallel_execution_disabled: bool,
+    bal_parallel_state_root_disabled: bool,
 }
 
 impl DefaultEngineValues {
@@ -64,9 +73,21 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the default persistence backpressure threshold
+    pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
+        self.persistence_backpressure_threshold = v;
+        self
+    }
+
     /// Set the default memory block buffer target
     pub const fn with_memory_block_buffer_target(mut self, v: u64) -> Self {
         self.memory_block_buffer_target = v;
+        self
+    }
+
+    /// Set the invalid header cache hit eviction threshold
+    pub const fn with_invalid_header_hit_eviction_threshold(mut self, v: u8) -> Self {
+        self.invalid_header_hit_eviction_threshold = v;
         self
     }
 
@@ -204,13 +225,45 @@ impl DefaultEngineValues {
         self.state_root_task_timeout = v;
         self
     }
+
+    /// Set whether to share the execution cache with the payload builder by default
+    pub const fn with_share_execution_cache_with_payload_builder(mut self, v: bool) -> Self {
+        self.share_execution_cache_with_payload_builder = v;
+        self
+    }
+
+    /// Set whether to share the sparse trie with the payload builder by default
+    pub const fn with_share_sparse_trie_with_payload_builder(mut self, v: bool) -> Self {
+        self.share_sparse_trie_with_payload_builder = v;
+        self
+    }
+
+    /// Set whether to suppress persistence during payload building by default
+    pub const fn with_suppress_persistence_during_build(mut self, v: bool) -> Self {
+        self.suppress_persistence_during_build = v;
+        self
+    }
+
+    /// Set whether to disable BAL-based parallel execution by default
+    pub const fn with_bal_parallel_execution_disabled(mut self, v: bool) -> Self {
+        self.bal_parallel_execution_disabled = v;
+        self
+    }
+
+    /// Set whether to disable BAL-driven parallel state root by default
+    pub const fn with_bal_parallel_state_root_disabled(mut self, v: bool) -> Self {
+        self.bal_parallel_state_root_disabled = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
             prewarming_disabled: false,
@@ -232,7 +285,12 @@ impl Default for DefaultEngineValues {
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
-            state_root_task_timeout: Some("1s".to_string()),
+            state_root_task_timeout: Some("4s".to_string()),
+            share_execution_cache_with_payload_builder: false,
+            share_sparse_trie_with_payload_builder: false,
+            suppress_persistence_during_build: false,
+            bal_parallel_execution_disabled: false,
+            bal_parallel_state_root_disabled: false,
         }
     }
 }
@@ -250,9 +308,23 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
 
+    /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
+    ///
+    /// This value must be greater than `--engine.persistence-threshold`.
+    #[arg(long = "engine.persistence-backpressure-threshold", default_value_t = DefaultEngineValues::get_global().persistence_backpressure_threshold)]
+    pub persistence_backpressure_threshold: u64,
+
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
     pub memory_block_buffer_target: u64,
+
+    /// Configure how many cache hits an invalid header can accumulate before it is evicted and
+    /// reprocessed.
+    ///
+    /// Set to `0` to effectively disable the cache because entries are evicted on the first
+    /// lookup.
+    #[arg(long = "engine.invalid-header-cache-hit-eviction-threshold", default_value_t = DefaultEngineValues::get_global().invalid_header_hit_eviction_threshold)]
+    pub invalid_header_hit_eviction_threshold: u8,
 
     /// Enable legacy state root
     #[arg(long = "engine.legacy-state-root", default_value_t = DefaultEngineValues::get_global().legacy_state_root_task_enabled)]
@@ -387,16 +459,71 @@ pub struct EngineArgs {
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
     ///
-    /// --engine.state-root-task-timeout 1s
+    /// --engine.state-root-task-timeout 4s
     /// --engine.state-root-task-timeout 400ms
     ///
     /// Set to 0s to disable.
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
+        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
+
+    /// Whether to share execution cache with the payload builder.
+    ///
+    /// When enabled, each payload job will get an instance of cross-block execution cache from the
+    /// engine.
+    ///
+    /// Note: this should only be enabled if node would not be requested to process any payloads in
+    /// parallel with payload building.
+    #[arg(
+        long = "engine.share-execution-cache-with-payload-builder",
+        default_value_t = DefaultEngineValues::get_global().share_execution_cache_with_payload_builder,
+    )]
+    pub share_execution_cache_with_payload_builder: bool,
+
+    /// Whether to share the sparse trie with the payload builder.
+    ///
+    /// Replaces the payload builder's blocking `state_root_with_updates()` call with the
+    /// sparse trie, computing the state root concurrently with transaction execution.
+    ///
+    /// The engine and payload builder contend for the same trie — if a builder task is
+    /// still running when `newPayload` arrives, the engine will block until the trie is
+    /// stored back.
+    ///
+    /// The builder also anchors the trie at the built block's state root, so if the next
+    /// `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
+    #[arg(
+        long = "engine.share-sparse-trie-with-payload-builder",
+        default_value_t = DefaultEngineValues::get_global().share_sparse_trie_with_payload_builder,
+    )]
+    pub share_sparse_trie_with_payload_builder: bool,
+
+    /// Suppress persistence while building a payload.
+    ///
+    /// When enabled, persistence cycles are deferred from the moment an FCU with payload
+    /// attributes arrives until the next FCU clears the build. Useful on chains with short
+    /// block times where persistence I/O can interfere with block building latency.
+    #[arg(
+        long = "engine.suppress-persistence-during-build",
+        default_value_t = DefaultEngineValues::get_global().suppress_persistence_during_build,
+    )]
+    pub suppress_persistence_during_build: bool,
+
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution.
+    #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
+    pub bal_parallel_execution_disabled: bool,
+
+    /// Disable BAL-driven parallel state root computation. This is only valid together with
+    /// `--engine.disable-bal-parallel-execution`.
+    #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
+    pub bal_parallel_state_root_disabled: bool,
+
+    /// Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL
+    /// storage slots are not read into the execution cache.
+    #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
+    pub disable_bal_batch_io: bool,
 
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
@@ -417,7 +544,9 @@ impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
             persistence_threshold,
+            persistence_backpressure_threshold,
             memory_block_buffer_target,
+            invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
             state_cache_disabled,
             prewarming_disabled,
@@ -440,10 +569,17 @@ impl Default for EngineArgs {
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
+            persistence_backpressure_threshold,
             memory_block_buffer_target,
+            invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
             state_root_task_compare_updates,
             caching_and_prewarming_enabled: true,
@@ -472,6 +608,12 @@ impl Default for EngineArgs {
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
+            suppress_persistence_during_build,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
+            disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -479,11 +621,28 @@ impl Default for EngineArgs {
 }
 
 impl EngineArgs {
+    /// Validates cross-field engine arguments.
+    pub fn validate(&self) -> eyre::Result<()> {
+        ensure!(
+            self.persistence_backpressure_threshold > self.persistence_threshold,
+            "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
+            self.persistence_backpressure_threshold,
+            self.persistence_threshold
+        );
+        ensure!(
+            self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
+            "--engine.disable-bal-parallel-state-root requires --engine.disable-bal-parallel-execution because BAL parallel execution depends on BAL prewarm state-root updates"
+        );
+        Ok(())
+    }
+
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
         let config = TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
+            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -503,7 +662,17 @@ impl EngineArgs {
             .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
-            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()));
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .with_share_execution_cache_with_payload_builder(
+                self.share_execution_cache_with_payload_builder,
+            )
+            .with_share_sparse_trie_with_payload_builder(
+                self.share_sparse_trie_with_payload_builder,
+            )
+            .with_suppress_persistence_during_build(self.suppress_persistence_during_build)
+            .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
+            .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
+            .without_bal_batch_io(self.disable_bal_batch_io);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -534,7 +703,9 @@ mod tests {
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
+            persistence_backpressure_threshold: 101,
             memory_block_buffer_target: 50,
+            invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
@@ -561,6 +732,12 @@ mod tests {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            share_execution_cache_with_payload_builder: false,
+            share_sparse_trie_with_payload_builder: false,
+            suppress_persistence_during_build: false,
+            bal_parallel_execution_disabled: true,
+            bal_parallel_state_root_disabled: true,
+            disable_bal_batch_io: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -569,8 +746,12 @@ mod tests {
             "reth",
             "--engine.persistence-threshold",
             "100",
+            "--engine.persistence-backpressure-threshold",
+            "101",
             "--engine.memory-block-buffer-target",
             "50",
+            "--engine.invalid-header-cache-hit-eviction-threshold",
+            "7",
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
@@ -601,10 +782,39 @@ mod tests {
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
+            "--engine.disable-bal-parallel-execution",
+            "--engine.disable-bal-parallel-state-root",
+            "--engine.disable-bal-batch-io",
         ])
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn validate_rejects_invalid_backpressure_threshold() {
+        let args = EngineArgs {
+            persistence_threshold: 4,
+            persistence_backpressure_threshold: 4,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.persistence-backpressure-threshold"));
+        assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_rejects_bal_parallel_execution_without_bal_parallel_state_root() {
+        let args = EngineArgs {
+            bal_parallel_execution_disabled: false,
+            bal_parallel_state_root_disabled: true,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.disable-bal-parallel-state-root"));
+        assert!(err.contains("engine.disable-bal-parallel-execution"));
     }
 
     #[test]
@@ -635,5 +845,42 @@ mod tests {
         ])
         .args;
         assert_eq!(args.slow_block_threshold, Some(Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn test_parse_invalid_header_hit_eviction_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(
+            args.invalid_header_hit_eviction_threshold,
+            DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD
+        );
+        assert_eq!(
+            args.tree_config().invalid_header_hit_eviction_threshold(),
+            DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD
+        );
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.invalid-header-cache-hit-eviction-threshold",
+            "0",
+        ])
+        .args;
+        assert_eq!(args.invalid_header_hit_eviction_threshold, 0);
+        assert_eq!(args.tree_config().invalid_header_hit_eviction_threshold(), 0);
+    }
+
+    #[test]
+    fn test_parse_share_sparse_trie_flag() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.share_sparse_trie_with_payload_builder);
+        assert!(!args.tree_config().share_sparse_trie_with_payload_builder());
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.share-sparse-trie-with-payload-builder",
+        ])
+        .args;
+        assert!(args.share_sparse_trie_with_payload_builder);
+        assert!(args.tree_config().share_sparse_trie_with_payload_builder());
     }
 }

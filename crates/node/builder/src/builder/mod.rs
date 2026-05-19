@@ -1,6 +1,7 @@
 //! Customizable node builder.
 
-#![allow(clippy::type_complexity, missing_debug_implementations)]
+#![expect(clippy::type_complexity)]
+#![allow(missing_debug_implementations)]
 
 use crate::{
     common::WithConfigs,

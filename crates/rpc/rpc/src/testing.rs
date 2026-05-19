@@ -119,6 +119,7 @@ where
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),
+                    slot_number: request.payload_attributes.slot_number,
                 };
 
                 let mut builder = evm_config
@@ -178,7 +179,7 @@ where
 
                     let tip = tx.effective_tip_per_gas(base_fee).unwrap_or_default();
                     let gas_used = match builder.execute_transaction(tx) {
-                        Ok(gas_used) => gas_used,
+                        Ok(gas_used) => gas_used.tx_gas_used(),
                         Err(err) => {
                             if skip_invalid_transactions {
                                 debug!(
@@ -205,14 +206,14 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let sealed_block = Arc::new(outcome.block.into_sealed_block());
 
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(sealed_block, total_fees, requests)
+                EthBuiltPayload::new(sealed_block, total_fees, requests, None)
                     .try_into_v5()
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)

@@ -33,18 +33,20 @@ reth-tracing = { workspace = true, optional = true }
 rand.workspace = true
 
 [target.'cfg(unix)'.dependencies]
+tikv-jemalloc-sys = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
 snmalloc-rs = { workspace = true, optional = true }
 libc = "0.2"
 
 [features]
-jemalloc = ["dep:tikv-jemallocator"]
+jemalloc = [
+    "dep:tikv-jemallocator",
+    "dep:tikv-jemalloc-sys",
+    "tikv-jemallocator?/override_allocator_on_supported_platforms",
+]
 
 # Enables jemalloc profiling features
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
-
-# Enables unprefixed malloc (reproducible builds support)
-jemalloc-unprefixed = ["jemalloc", "tikv-jemallocator?/unprefixed_malloc_on_supported_platforms"]
 
 # Wraps the selected allocator in the tracy profiling allocator
 tracy-allocator = ["dep:tracy-client", "dep:reth-tracing"]

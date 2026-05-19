@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -uxo pipefail
 
 crates_to_check=(
-    reth-primitives
-    reth-primitives-traits
     reth-network-peers
     reth-trie-common
     reth-trie-sparse

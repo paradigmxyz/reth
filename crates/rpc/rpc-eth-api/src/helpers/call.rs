@@ -21,7 +21,7 @@ use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnv, TxEnvFor,
+    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -57,9 +57,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
-        state_override: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        EstimateCall::estimate_gas_at(self, request, at, state_override)
+        EstimateCall::estimate_gas_at(self, request, at, overrides)
     }
 
     /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
@@ -517,7 +517,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let result = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
             let access_list = inspector.into_access_list();
-            let gas_used = result.result.gas_used();
+            let gas_used = result.result.tx_gas_used();
             tx_env.set_access_list(access_list.clone());
             if let Err(err) = Self::Error::ensure_success(result.result) {
                 return Ok(AccessListResult {
@@ -529,7 +529,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             // transact again to get the exact gas used
             let result = this.transact(&mut db, evm_env, tx_env)?;
-            let gas_used = result.result.gas_used();
+            let gas_used = result.result.tx_gas_used();
             let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
 
             Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })

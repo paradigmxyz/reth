@@ -7,9 +7,10 @@ use crate::{
 use alloy_consensus::Transaction;
 use alloy_primitives::map::AddressSet;
 use core::fmt;
+use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    collections::{BTreeSet, HashSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -31,7 +32,7 @@ pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -67,7 +68,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             crate::traits::BestTransactions::mark_invalid(
                 self,
                 &best,
-                &InvalidPoolTransactionError::Underpriced,
+                InvalidPoolTransactionError::Underpriced,
             );
         }
     }
@@ -84,7 +85,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
 pub struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.
-    pub(crate) all: BTreeMap<TransactionId, PendingTransaction<T>>,
+    pub(crate) all: OrdMap<TransactionId, PendingTransaction<T>>,
     /// Transactions that can be executed right away: these have the expected nonce.
     ///
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
@@ -111,7 +112,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     pub(crate) fn mark_invalid(
         &mut self,
         tx: &Arc<ValidPoolTransaction<T::Transaction>>,
-        _kind: &InvalidPoolTransactionError,
+        _kind: InvalidPoolTransactionError,
     ) {
         self.invalid.insert(tx.sender_id());
     }
@@ -190,7 +191,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     }
 
     /// Returns the next best transaction and its priority value.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn next_tx_and_priority(
         &mut self,
     ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
@@ -220,7 +221,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 // transactions are returned
                 self.mark_invalid(
                     &best.transaction,
-                    &InvalidPoolTransactionError::Eip4844(
+                    InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::NoEip4844Blobs,
                     ),
                 )
@@ -262,7 +263,7 @@ enum IncomingTransaction<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         Self::mark_invalid(self, tx, kind)
     }
 
@@ -320,9 +321,7 @@ where
             }
             self.best.mark_invalid(
                 &best,
-                &InvalidPoolTransactionError::Consensus(
-                    InvalidTransactionError::TxTypeNotSupported,
-                ),
+                InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
             );
         }
     }
@@ -333,7 +332,7 @@ where
     I: crate::traits::BestTransactions,
     P: FnMut(&<I as Iterator>::Item) -> bool + Send,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         crate::traits::BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -422,7 +421,7 @@ where
     I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         self.inner.mark_invalid(tx, kind)
     }
 
@@ -493,7 +492,7 @@ mod tests {
         let invalid = best.independent.iter().next().unwrap();
         best.mark_invalid(
             &invalid.transaction.clone(),
-            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
 
         // iterator is empty
@@ -522,7 +521,7 @@ mod tests {
         crate::traits::BestTransactions::mark_invalid(
             &mut *best,
             &tx,
-            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
         assert!(Iterator::next(&mut best).is_none());
     }
@@ -1088,7 +1087,7 @@ mod tests {
                     crate::traits::BestTransactions::mark_invalid(
                         &mut best,
                         &tx,
-                        &InvalidPoolTransactionError::Eip4844(
+                        InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::TooManyEip4844Blobs {
                                 have: block_blob_count + tx_blob_count,
                                 permitted: max_blob_count,

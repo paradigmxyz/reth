@@ -905,7 +905,6 @@ where
     /// [`TransactionEvents`] receivers when manually implementing the
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::transaction_event_listener`](crate::TransactionPool).
-    #[allow(clippy::type_complexity)]
     pub fn notify_on_transaction_updates(
         &self,
         promoted: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
