@@ -1064,8 +1064,12 @@ fn dispatch_v2_storage_proofs(
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+    if storage_targets.is_empty() {
+        return Ok(B256Map::default())
+    }
+
     let mut storage_proof_receivers =
-        B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
+        B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
     // Collect hashed addresses from account targets that need their storage roots computed
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
