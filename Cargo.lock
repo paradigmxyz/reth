@@ -11061,7 +11061,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11081,7 +11081,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "eyre",
  "ruint",
@@ -11090,12 +11090,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11110,7 +11110,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.11.1",
@@ -11141,7 +11141,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11156,7 +11156,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11169,7 +11169,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#83190a1571f114d54bb459efc32425d4f4c092f8"
+source = "git+https://github.com/paradigmxyz/revmc?branch=dani%2Fout-of-process-jit#668dbb9398d64ed206226782c723348ad119e768"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",

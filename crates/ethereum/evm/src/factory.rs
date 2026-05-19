@@ -178,6 +178,16 @@ pub struct RevmcMetrics {
     pub compilations_succeeded: metrics::Gauge,
     /// Total number of failed compilations (JIT + AOT).
     pub compilations_failed: metrics::Gauge,
+    /// Total number of JIT helper processes spawned.
+    pub jit_helper_spawns: metrics::Gauge,
+    /// Total number of JIT helper process spawn failures.
+    pub jit_helper_spawn_failures: metrics::Gauge,
+    /// Total number of JIT helper process restarts.
+    pub jit_helper_restarts: metrics::Gauge,
+    /// Total number of JIT helper job timeouts.
+    pub jit_helper_timeouts: metrics::Gauge,
+    /// Total number of JIT helper process disconnects.
+    pub jit_helper_disconnects: metrics::Gauge,
     /// Histogram of total JIT compilation durations (seconds).
     pub jit_compilation_duration: metrics::Histogram,
     /// Duration of the last JIT compilation (seconds).
@@ -210,6 +220,11 @@ impl RevmcMetrics {
             compilations_dispatched,
             compilations_succeeded,
             compilations_failed,
+            jit_helper_spawns,
+            jit_helper_spawn_failures,
+            jit_helper_restarts,
+            jit_helper_timeouts,
+            jit_helper_disconnects,
             ..
         } = *stats;
         self.lookup_hits.set(lookup_hits as f64);
@@ -225,6 +240,11 @@ impl RevmcMetrics {
         self.compilations_dispatched.set(compilations_dispatched as f64);
         self.compilations_succeeded.set(compilations_succeeded as f64);
         self.compilations_failed.set(compilations_failed as f64);
+        self.jit_helper_spawns.set(jit_helper_spawns as f64);
+        self.jit_helper_spawn_failures.set(jit_helper_spawn_failures as f64);
+        self.jit_helper_restarts.set(jit_helper_restarts as f64);
+        self.jit_helper_timeouts.set(jit_helper_timeouts as f64);
+        self.jit_helper_disconnects.set(jit_helper_disconnects as f64);
     }
 
     /// Records a [`CompilationEvent`] into the histogram metrics.
