@@ -449,7 +449,7 @@ def change_str(
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
     details = [f"±{ci_pct:.2f}%", f"floor {floor_pct:.2f}%"]
     if informational:
-        details.append(informational)
+        details.append("informational")
     return f"{pct:+.2f}% {emoji} ({', '.join(details)})"
 
 
