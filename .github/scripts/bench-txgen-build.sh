@@ -23,15 +23,8 @@ fi
 
 EXTRA_FEATURES=""
 EXTRA_RUSTFLAGS=""
-if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
-  EXTRA_FEATURES="otlp,otlp-logs"
-fi
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
-  if [ -n "$EXTRA_FEATURES" ]; then
-    EXTRA_FEATURES="${EXTRA_FEATURES},tracy,tracy-client/ondemand"
-  else
-    EXTRA_FEATURES="tracy,tracy-client/ondemand"
-  fi
+  EXTRA_FEATURES="tracy,tracy-client/ondemand"
   EXTRA_RUSTFLAGS=" -C force-frame-pointers=yes"
 fi
 
