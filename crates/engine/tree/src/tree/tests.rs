@@ -1086,17 +1086,20 @@ fn test_get_save_blocks_plan_limits_partial_persistence_to_threshold() {
 
     let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(&plan, &[(0..3, Some(3..5), false), (3..5, None, true)]);
-    assert_eq!(plan.blocks.len(), 5);
+    assert_plan_steps(
+        &plan,
+        &[(0..3, Some(6..8), false), (3..6, Some(6..8), true), (6..8, None, true)],
+    );
+    assert_eq!(plan.blocks.len(), 8);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (13..=17).collect::<Vec<_>>()
+        (13..=20).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[17].recovered_block().num_hash()));
+    assert_eq!(plan.last_block(), Some(blocks[20].recovered_block().num_hash()));
 }
 
 #[test]
-fn test_get_save_blocks_plan_state_masking_counts_towards_threshold() {
+fn test_get_save_blocks_plan_state_masking_does_not_reduce_persist_rest_threshold() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1112,13 +1115,46 @@ fn test_get_save_blocks_plan_state_masking_counts_towards_threshold() {
 
     let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(&plan, &[(0..3, Some(3..13), false), (3..13, None, true)]);
-    assert_eq!(plan.blocks.len(), 13);
+    assert_plan_steps(
+        &plan,
+        &[(0..3, Some(6..16), false), (3..6, Some(6..16), true), (6..16, None, true)],
+    );
+    assert_eq!(plan.blocks.len(), 16);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (1..=13).collect::<Vec<_>>()
+        (1..=16).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[13].recovered_block().num_hash()));
+    assert_eq!(plan.last_block(), Some(blocks[16].recovered_block().num_hash()));
+}
+
+#[test]
+fn test_get_save_blocks_plan_steady_state_masking_has_catchup_overlap_and_masked_tail() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..30).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[5].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[11].recovered_block().num_hash();
+    test_harness.tree.config =
+        TreeConfig::default().with_persistence_threshold(11).with_num_state_masking_blocks(6);
+
+    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+
+    assert_plan_steps(
+        &plan,
+        &[(0..6, Some(11..17), false), (6..11, Some(11..17), true), (11..17, None, true)],
+    );
+    assert_eq!(plan.blocks.len(), 17);
+    assert_eq!(
+        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        (6..=22).collect::<Vec<_>>()
+    );
+    assert_eq!(plan.last_block(), Some(blocks[22].recovered_block().num_hash()));
+    assert_eq!(plan.last_state_trie_block(), Some(blocks[16].recovered_block().num_hash()));
 }
 
 #[test]
