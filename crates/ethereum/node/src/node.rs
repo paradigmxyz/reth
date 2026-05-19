@@ -547,7 +547,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
         );
     }
 
-    let factory = RethEvmFactory::new(backend);
+    let factory = RethEvmFactory::new_with_metrics(backend, revmc_metrics.as_ref().clone());
     let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
 
     Ok((evm_config, revmc_metrics))

@@ -37,6 +37,8 @@ pub struct RethEvmFactory {
     #[cfg(feature = "jit")]
     disabled: JitBackend,
     #[cfg(feature = "jit")]
+    metrics: RevmcMetrics,
+    #[cfg(feature = "jit")]
     jit: bool,
 }
 
@@ -46,6 +48,8 @@ impl Clone for RethEvmFactory {
             inner: self.inner.clone(),
             #[cfg(feature = "jit")]
             disabled: self.disabled.clone(),
+            #[cfg(feature = "jit")]
+            metrics: self.metrics.clone(),
             #[cfg(feature = "jit")]
             jit: self.jit,
         }
@@ -70,7 +74,17 @@ impl Default for RethEvmFactory {
 impl RethEvmFactory {
     /// Creates a new factory that owns the backend.
     pub fn new(backend: JitBackend) -> Self {
-        Self { inner: JitEvmFactory::new(backend), disabled: JitBackend::disabled(), jit: false }
+        Self::new_with_metrics(backend, RevmcMetrics::default())
+    }
+
+    /// Creates a new factory that owns the backend and records metrics into the given handles.
+    pub fn new_with_metrics(backend: JitBackend, metrics: RevmcMetrics) -> Self {
+        Self {
+            inner: JitEvmFactory::new(backend),
+            disabled: JitBackend::disabled(),
+            metrics,
+            jit: false,
+        }
     }
 
     /// Creates a [`RethEvmFactory`] with JIT disabled.
@@ -90,12 +104,26 @@ impl RethEvmFactory {
 
     /// Pauses background JIT promotion while keeping resident lookups enabled.
     pub fn pause_jit(&self) {
-        self.inner.backend().pause();
+        let backend = self.inner.backend();
+        let was_paused = backend.is_paused();
+        backend.pause();
+        let is_paused = backend.is_paused();
+        if !was_paused && is_paused {
+            self.metrics.pauses_total.increment(1);
+        }
+        self.metrics.paused.set(is_paused as u8 as f64);
     }
 
     /// Resumes background JIT promotion.
     pub fn resume_jit(&self) {
-        self.inner.backend().resume();
+        let backend = self.inner.backend();
+        let was_paused = backend.is_paused();
+        backend.resume();
+        let is_paused = backend.is_paused();
+        if was_paused && !is_paused {
+            self.metrics.resumes_total.increment(1);
+        }
+        self.metrics.paused.set(is_paused as u8 as f64);
     }
 }
 
@@ -188,6 +216,12 @@ pub struct RevmcMetrics {
     pub jit_helper_timeouts: metrics::Gauge,
     /// Total number of JIT helper process disconnects.
     pub jit_helper_disconnects: metrics::Gauge,
+    /// Total number of transitions into paused JIT helper execution.
+    pub pauses_total: metrics::Counter,
+    /// Total number of transitions out of paused JIT helper execution.
+    pub resumes_total: metrics::Counter,
+    /// Whether JIT helper execution is currently paused.
+    pub paused: metrics::Gauge,
     /// Histogram of total JIT compilation durations (seconds).
     pub jit_compilation_duration: metrics::Histogram,
     /// Duration of the last JIT compilation (seconds).
