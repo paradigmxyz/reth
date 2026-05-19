@@ -163,9 +163,12 @@ impl<K: TransactionKind> Tx<K> {
     ) -> R {
         if let Some(metrics_handler) = &self.metrics_handler {
             metrics_handler.log_backtrace_on_long_read_transaction();
-            metrics_handler
-                .env_metrics
-                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
+            let metrics = metrics_handler.env_metrics.table_operation_metrics_ref(T::NAME);
+            if let Some(metrics) = metrics {
+                metrics[operation.index()].record(value_size, || f(&self.inner))
+            } else {
+                f(&self.inner)
+            }
         } else {
             f(&self.inner)
         }

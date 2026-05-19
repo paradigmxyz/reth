@@ -98,25 +98,17 @@ impl DatabaseEnvMetrics {
         transaction_outcomes
     }
 
-    /// Record a metric for database operation executed in `f`.
-    /// Panics if a metric recorder is not found for the given table and operation.
-    pub(crate) fn record_operation<R>(
-        &self,
-        table: &'static str,
-        operation: Operation,
-        value_size: Option<usize>,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        if let Some(metrics) = self.operations.get(table) {
-            metrics[operation.index()].record(value_size, f)
-        } else {
-            f()
-        }
-    }
-
     /// Returns pre-bound operation metric handles for a single table.
     pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
         self.operations.get(table).expect("table operation metric handles not found").clone()
+    }
+
+    /// Returns borrowed operation metric handles for a single table.
+    pub(crate) fn table_operation_metrics_ref(
+        &self,
+        table: &'static str,
+    ) -> Option<&[OperationMetrics; Operation::COUNT]> {
+        self.operations.get(table).map(AsRef::as_ref)
     }
 
     /// Record metrics for opening a database transaction.
