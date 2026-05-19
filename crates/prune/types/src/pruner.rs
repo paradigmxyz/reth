@@ -204,4 +204,108 @@ mod tests {
             HasMoreData(DeletedEntriesLimitReached)
         ));
     }
+
+    #[test]
+    fn test_pruner_output_from_progress() {
+        let finished: PrunerOutput = PruneProgress::Finished.into();
+        assert_eq!(finished.progress, PruneProgress::Finished);
+        assert!(finished.segments.is_empty());
+
+        let interrupted: PrunerOutput =
+            PruneProgress::HasMoreData(PruneInterruptReason::Timeout).into();
+        assert_eq!(interrupted.progress, PruneProgress::HasMoreData(PruneInterruptReason::Timeout));
+        assert!(interrupted.segments.is_empty());
+    }
+
+    #[test]
+    fn test_segment_output_done() {
+        assert_eq!(
+            SegmentOutput::done(),
+            SegmentOutput { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
+        );
+    }
+
+    #[test]
+    fn test_segment_output_not_done() {
+        let checkpoint = SegmentOutputCheckpoint { block_number: Some(42), tx_number: Some(7) };
+
+        assert_eq!(
+            SegmentOutput::not_done(
+                PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
+                Some(checkpoint)
+            ),
+            SegmentOutput {
+                progress: PruneProgress::HasMoreData(PruneInterruptReason::WaitingOnSegment(
+                    PruneSegment::TransactionLookup
+                )),
+                pruned: 0,
+                checkpoint: Some(checkpoint),
+            }
+        );
+    }
+
+    #[test]
+    fn test_segment_output_checkpoint_conversions() {
+        let checkpoint = PruneCheckpoint {
+            block_number: Some(10),
+            tx_number: Some(20),
+            prune_mode: PruneMode::Before(30),
+        };
+
+        let segment_checkpoint = SegmentOutputCheckpoint::from_prune_checkpoint(checkpoint);
+        assert_eq!(
+            segment_checkpoint,
+            SegmentOutputCheckpoint { block_number: Some(10), tx_number: Some(20) }
+        );
+
+        assert_eq!(
+            segment_checkpoint.as_prune_checkpoint(PruneMode::Distance(64)),
+            PruneCheckpoint {
+                block_number: Some(10),
+                tx_number: Some(20),
+                prune_mode: PruneMode::Distance(64),
+            }
+        );
+    }
+
+    #[test]
+    fn test_prune_interrupt_reason_classifiers() {
+        use PruneInterruptReason::*;
+
+        assert!(Timeout.is_timeout());
+        assert!(!DeletedEntriesLimitReached.is_timeout());
+        assert!(!WaitingOnSegment(PruneSegment::Receipts).is_timeout());
+        assert!(!Unknown.is_timeout());
+
+        assert!(DeletedEntriesLimitReached.is_entries_limit_reached());
+        assert!(!Timeout.is_entries_limit_reached());
+        assert!(!WaitingOnSegment(PruneSegment::Receipts).is_entries_limit_reached());
+        assert!(!Unknown.is_entries_limit_reached());
+    }
+
+    #[test]
+    fn test_prune_progress_is_finished() {
+        use PruneInterruptReason::*;
+        use PruneProgress::*;
+
+        assert!(Finished.is_finished());
+        assert!(!HasMoreData(Timeout).is_finished());
+        assert!(!HasMoreData(DeletedEntriesLimitReached).is_finished());
+        assert!(!HasMoreData(WaitingOnSegment(PruneSegment::Receipts)).is_finished());
+        assert!(!HasMoreData(Unknown).is_finished());
+    }
+
+    #[test]
+    fn test_pruned_segment_info_display() {
+        let segment_info = PrunedSegmentInfo {
+            segment: PruneSegment::StorageHistory,
+            pruned: 7,
+            progress: PruneProgress::HasMoreData(PruneInterruptReason::Timeout),
+        };
+
+        assert_eq!(
+            segment_info.to_string(),
+            "(table=StorageHistory, pruned=7, status=HasMoreData(Timeout))"
+        );
+    }
 }

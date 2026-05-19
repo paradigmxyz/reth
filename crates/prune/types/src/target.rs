@@ -223,6 +223,7 @@ fn serde_deserialize_validate<'a, 'de, const MIN_BLOCKS: u64, D: serde::Deserial
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Address;
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
@@ -244,6 +245,65 @@ mod tests {
             serde_json::from_str::<V>(r#""full""#),
             Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
         );
+    }
+
+    #[test]
+    fn test_prune_modes_all() {
+        let prune_modes = PruneModes::all();
+
+        assert_ne!(prune_modes, PruneModes::default());
+        assert_eq!(prune_modes.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(prune_modes.transaction_lookup, Some(PruneMode::Full));
+        assert_eq!(prune_modes.receipts, Some(PruneMode::Full));
+        assert_eq!(prune_modes.account_history, Some(PruneMode::Full));
+        assert_eq!(prune_modes.storage_history, Some(PruneMode::Full));
+        assert_eq!(prune_modes.bodies_history, Some(PruneMode::Full));
+        assert!(prune_modes.receipts_log_filter.is_empty());
+    }
+
+    #[test]
+    fn test_prune_modes_has_receipts_pruning() {
+        assert!(!PruneModes::default().has_receipts_pruning());
+
+        let mut prune_modes = PruneModes { receipts: Some(PruneMode::Full), ..Default::default() };
+        assert!(prune_modes.has_receipts_pruning());
+
+        prune_modes.receipts = None;
+        prune_modes.receipts_log_filter.0.insert(Address::ZERO, PruneMode::Before(10));
+        assert!(prune_modes.has_receipts_pruning());
+
+        prune_modes.receipts = Some(PruneMode::Distance(MINIMUM_DISTANCE));
+        assert!(prune_modes.has_receipts_pruning());
+    }
+
+    #[test]
+    fn test_prune_modes_migrate() {
+        for (receipts, expected_migrated, expected_receipts) in [
+            (None, false, None),
+            (Some(PruneMode::Full), true, Some(PruneMode::Distance(MINIMUM_DISTANCE))),
+            (Some(PruneMode::Distance(0)), true, Some(PruneMode::Distance(MINIMUM_DISTANCE))),
+            (
+                Some(PruneMode::Distance(MINIMUM_DISTANCE - 1)),
+                true,
+                Some(PruneMode::Distance(MINIMUM_DISTANCE)),
+            ),
+            (
+                Some(PruneMode::Distance(MINIMUM_DISTANCE)),
+                false,
+                Some(PruneMode::Distance(MINIMUM_DISTANCE)),
+            ),
+            (
+                Some(PruneMode::Distance(MINIMUM_DISTANCE + 1)),
+                false,
+                Some(PruneMode::Distance(MINIMUM_DISTANCE + 1)),
+            ),
+            (Some(PruneMode::Before(10)), false, Some(PruneMode::Before(10))),
+        ] {
+            let mut prune_modes = PruneModes { receipts, ..Default::default() };
+
+            assert_eq!(prune_modes.migrate(), expected_migrated);
+            assert_eq!(prune_modes.receipts, expected_receipts);
+        }
     }
 
     #[test]
