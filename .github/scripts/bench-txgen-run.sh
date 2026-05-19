@@ -10,7 +10,8 @@
 # Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
-#               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
+#               BENCH_OTLP_TRACES_AUTH, BENCH_OTLP_LOGS_ENDPOINT,
+#               BENCH_OTLP_LOGS_AUTH, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
 set -euxo pipefail
@@ -70,6 +71,14 @@ bal_enabled_for_label() {
       return 1
       ;;
   esac
+}
+
+otlp_basic_auth_header() {
+  local auth="$1"
+  if [ -z "$auth" ]; then
+    return 0
+  fi
+  printf 'Authorization=Basic%%20%s' "$(printf '%s' "$auth" | base64 -w0)"
 }
 
 USE_BAL="$(bal_enabled_for_label)"
@@ -197,6 +206,12 @@ SUDO_ENV=()
 if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
   SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
+fi
+if [ -n "${BENCH_OTLP_TRACES_AUTH:-}" ]; then
+  SUDO_ENV+=("OTEL_EXPORTER_OTLP_TRACES_HEADERS=$(otlp_basic_auth_header "${BENCH_OTLP_TRACES_AUTH}")")
+fi
+if [ -n "${BENCH_OTLP_LOGS_AUTH:-}" ]; then
+  SUDO_ENV+=("OTEL_EXPORTER_OTLP_LOGS_HEADERS=$(otlp_basic_auth_header "${BENCH_OTLP_LOGS_AUTH}")")
 fi
 
 TOTAL_MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
