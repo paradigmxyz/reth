@@ -186,6 +186,24 @@ where
         }
     }
 
+    fn pause_jit(&self) {
+        #[cfg(feature = "jit")]
+        if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
+            .downcast_ref::<factory::RethEvmFactory>()
+        {
+            factory.pause_jit();
+        }
+    }
+
+    fn resume_jit(&self) {
+        #[cfg(feature = "jit")]
+        if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
+            .downcast_ref::<factory::RethEvmFactory>()
+        {
+            factory.resume_jit();
+        }
+    }
+
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
         Ok(EvmEnv::for_eth_block(
             header,

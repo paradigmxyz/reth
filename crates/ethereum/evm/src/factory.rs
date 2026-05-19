@@ -87,6 +87,16 @@ impl RethEvmFactory {
     pub const fn set_jit(&mut self, enabled: bool) {
         self.jit = enabled;
     }
+
+    /// Pauses background JIT promotion while keeping resident lookups enabled.
+    pub fn pause_jit(&self) {
+        self.inner.backend().pause();
+    }
+
+    /// Resumes background JIT promotion.
+    pub fn resume_jit(&self) {
+        self.inner.backend().resume();
+    }
 }
 
 impl EvmFactory for RethEvmFactory {
@@ -200,6 +210,7 @@ impl RevmcMetrics {
             compilations_dispatched,
             compilations_succeeded,
             compilations_failed,
+            ..
         } = *stats;
         self.lookup_hits.set(lookup_hits as f64);
         self.lookup_misses.set(lookup_misses as f64);

@@ -273,6 +273,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self
     }
 
+    /// Pauses background JIT work, if supported, while keeping resident compiled code available.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn pause_jit(&self) {}
+
+    /// Resumes background JIT work, if supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn resume_jit(&self) {}
+
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
     ///
