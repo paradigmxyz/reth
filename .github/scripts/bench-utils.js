@@ -17,12 +17,14 @@ function fmtChange(ch) {
   const details = [];
   if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
   if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  if (ch.informational) details.push('informational');
   const detailStr = details.length ? ` (${details.join(', ')})` : '';
-  return `${pctStr}${detailStr} ${SIG_EMOJI[ch.sig]}`;
+  const sig = ch.informational ? 'neutral' : ch.sig;
+  return `${pctStr}${detailStr} ${SIG_EMOJI[sig]}`;
 }
 
 function verdict(changes) {
-  const vals = Object.values(changes);
+  const vals = Object.values(changes).filter(v => !v.informational);
   const hasBad = vals.some(v => v.sig === 'bad');
   const hasGood = vals.some(v => v.sig === 'good');
   if (hasBad && hasGood) return { emoji: '⚠️', label: 'Mixed Results' };
