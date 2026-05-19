@@ -19,11 +19,12 @@ where
     fn execute_one(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        has_bal: bool,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         match self {
-            Self::Left(a) => a.execute_one(block),
-            Self::Right(b) => b.execute_one(block),
+            Self::Left(a) => a.execute_one(block, has_bal),
+            Self::Right(b) => b.execute_one(block, has_bal),
         }
     }
 
