@@ -42,6 +42,8 @@ where
 {
     type Tx = Tx;
     type Error = Err;
+
+    #[inline]
     fn convert(&self, raw: RawTx) -> Result<Tx, Err> {
         self(raw)
     }
@@ -54,6 +56,8 @@ where
 {
     type Tx = Either<A::Tx, B::Tx>;
     type Error = Either<A::Error, B::Error>;
+
+    #[inline]
     fn convert(&self, raw: Either<RA, RB>) -> Result<Self::Tx, Self::Error> {
         match (self, raw) {
             (Self::Left(a), Either::Left(raw)) => {
@@ -113,6 +117,7 @@ where
     type IntoIter = I;
     type Convert = F;
 
+    #[inline]
     fn into_parts(self) -> (I, F) {
         self
     }
@@ -152,6 +157,7 @@ where
         rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
     >;
 
+    #[inline]
     fn into_par_iter(self) -> Self::Iter {
         match self.0 {
             Either::Left(l) => Either::Left(l.into_par_iter().map(Either::Left)),
@@ -171,6 +177,7 @@ where
         core::iter::Map<R::IntoIter, fn(R::Item) -> Either<L::Item, R::Item>>,
     >;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         match self.0 {
             Either::Left(l) => Either::Left(l.into_iter().map(Either::Left)),
@@ -189,6 +196,7 @@ impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A,
     type IntoIter = EitherIter<A::IntoIter, B::IntoIter>;
     type Convert = Either<A::Convert, B::Convert>;
 
+    #[inline]
     fn into_parts(self) -> (Self::IntoIter, Self::Convert) {
         match self {
             Self::Left(a) => {
