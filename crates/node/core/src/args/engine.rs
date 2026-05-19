@@ -316,6 +316,9 @@ pub struct EngineArgs {
 
     /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
     ///
+    /// If omitted, this defaults to the larger of the default backpressure threshold and twice
+    /// `--engine.persistence-threshold`.
+    ///
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
