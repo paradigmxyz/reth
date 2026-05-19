@@ -359,12 +359,19 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(child_path = ?self.last_child_path()),
+        fields(child_path = ?targets.as_ref().and_then(|_| self.last_child_path())),
     )]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
     ) -> Result<(), StateProofError> {
+        // If proof retention is not requested, keep the tail child deferred. `pop_branch` will
+        // encode all uncommitted children together without needing to materialize this path for an
+        // always-false retain check.
+        if targets.is_none() {
+            return Ok(())
+        }
+
         let Some(child_path) = self.last_child_path() else { return Ok(()) };
         let child =
             self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
