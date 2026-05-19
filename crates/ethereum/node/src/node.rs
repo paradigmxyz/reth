@@ -34,7 +34,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage, PruneCheckpointReader};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -149,7 +149,6 @@ where
         Evm = N::Evm,
     >,
     EthApiError: FromEvmError<N::Evm>,
-    <N as FullNodeTypes>::Provider: PruneCheckpointReader,
 {
     type EthApi = EthApiFor<N, NetworkT>;
 
@@ -428,7 +427,6 @@ where
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
-    <N as FullNodeTypes>::Provider: PruneCheckpointReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -454,7 +452,6 @@ where
 impl<N> DebugNode<N> for EthereumNode
 where
     N: FullNodeComponents<Types = Self>,
-    <N as FullNodeTypes>::Provider: PruneCheckpointReader,
 {
     type RpcBlock = alloy_rpc_types_eth::Block;
 

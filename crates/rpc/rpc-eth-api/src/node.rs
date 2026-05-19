@@ -67,10 +67,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
 
 impl<T> RpcNodeCore for T
 where
-    T: FullNodeComponents<
-        Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
-                      + PruneCheckpointReader,
-    >,
+    T: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>>,
 {
     type Primitives = PrimitivesTy<T::Types>;
     type Provider = T::Provider;

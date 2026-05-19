@@ -32,7 +32,7 @@ use reth_node_ethereum::{
     EthereumNode, EthereumPayloadBuilder, EthereumPoolBuilder,
 };
 use reth_primitives_traits::SealedBlock;
-use reth_provider::{EthStorage, PruneCheckpointReader};
+use reth_provider::EthStorage;
 use revm_primitives::Bytes;
 use tracing::info;
 
@@ -161,7 +161,6 @@ impl NodeTypes for BbNode {
 impl<N> Node<N> for BbNode
 where
     N: FullNodeTypes<Types = Self>,
-    <N as FullNodeTypes>::Provider: PruneCheckpointReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
