@@ -15,10 +15,10 @@ COMMIT="$3"
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 if [ "$BIG_BLOCKS" = "true" ]; then
   NODE_BIN="reth-bb"
-  NODE_PKG="-p reth-bb --bin reth-bb"
+  NODE_PKG="-p reth-bb"
 else
   NODE_BIN="reth"
-  NODE_PKG="-p reth --bin reth"
+  NODE_PKG="--bin reth"
 fi
 
 EXTRA_FEATURES=""
@@ -42,8 +42,6 @@ build_node_binary() {
   cd "$SOURCE_DIR"
   if [ -n "$EXTRA_FEATURES" ]; then
     features_arg="--features ${EXTRA_FEATURES}"
-  fi
-  if [ "${BENCH_TRACY:-off}" != "off" ]; then
     workspace_arg="--workspace"
   fi
 
