@@ -423,7 +423,7 @@ reth-storage-errors = { path = "crates/storage/errors", default-features = false
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
-reth-tracing = { path = "crates/tracing", default-features = false }
+reth-tracing = { path = "crates/tracing" }
 reth-tracing-otlp = { path = "crates/tracing-otlp" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie/trie" }
@@ -539,7 +539,7 @@ syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
 tar = "0.4.44"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
-tracing-appender = "0.2"
+tracing-appender = "0.2.5"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
