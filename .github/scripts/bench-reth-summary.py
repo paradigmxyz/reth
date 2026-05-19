@@ -124,6 +124,24 @@ def compute_stats(combined: list[dict]) -> dict:
     }
 
 
+def compute_point_stats(runs: list[list[dict]]) -> dict:
+    """Compute displayed point estimates for one side of a comparison.
+
+    Cluster CIs estimate percentile changes from one percentile value per run.
+    Match that estimator for displayed percentile point estimates instead of
+    pooling repeated block rows into one percentile sample.
+    """
+    combined = [row for run in runs for row in run]
+    stats = compute_stats(combined)
+    if len(runs) < 2:
+        return stats
+
+    per_run_stats = [compute_stats(run) for run in runs if run]
+    for key in ("p50_ms", "p90_ms", "p99_ms"):
+        stats[key] = _mean([run_stats[key] for run_stats in per_run_stats])
+    return stats
+
+
 def compute_wait_stats(combined: list[dict], field: str) -> dict:
     """Compute mean/p50/p95 for a wait time field (in ms)."""
     values_ms = []
@@ -613,8 +631,8 @@ def main():
     all_baseline = [r for run in baseline_runs for r in run]
     all_feature = [r for run in feature_runs for r in run]
 
-    baseline_stats = compute_stats(all_baseline)
-    feature_stats = compute_stats(all_feature)
+    baseline_stats = compute_point_stats(baseline_runs)
+    feature_stats = compute_point_stats(feature_runs)
     ci_stats = compute_ci_stats(baseline_runs, feature_runs)
 
     if not ci_stats:
