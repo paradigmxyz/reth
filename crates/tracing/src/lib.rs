@@ -39,45 +39,62 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Re-export tracing crates
 pub use tracing;
+#[cfg(feature = "std")]
 pub use tracing_appender;
+#[cfg(feature = "std")]
 pub use tracing_subscriber;
 
-#[cfg(feature = "tracy")]
+#[cfg(all(feature = "tracy", feature = "std"))]
 tracy_client::register_demangler!();
 
 // Re-export our types
+#[cfg(feature = "std")]
 pub use formatter::LogFormat;
+#[cfg(feature = "std")]
 pub use layers::{FileInfo, FileWorkerGuard, Layers};
+#[cfg(feature = "std")]
 pub use log_handle::{
     install_log_handle, log_handle_available, set_log_verbosity, set_log_vmodule,
     LogFilterReloadHandle,
 };
+#[cfg(feature = "std")]
 pub use test_tracer::TestTracer;
 
+#[cfg(feature = "std")]
 #[doc(hidden)]
 pub mod __private {
     pub use super::throttle::*;
 }
 
+#[cfg(feature = "std")]
 mod formatter;
+#[cfg(feature = "std")]
 mod layers;
+#[cfg(feature = "std")]
 pub mod log_handle;
+#[cfg(feature = "std")]
 mod test_tracer;
+#[cfg(feature = "std")]
 mod throttle;
 
+#[cfg(feature = "std")]
 use tracing::level_filters::LevelFilter;
+#[cfg(feature = "std")]
 use tracing_appender::non_blocking::WorkerGuard;
+#[cfg(feature = "std")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 ///  Tracer for application logging.
 ///
 ///  Manages the configuration and initialization of logging layers,
 /// including standard output, optional journald, and optional file logging.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct RethTracer {
     stdout: LayerInfo,
@@ -87,10 +104,11 @@ pub struct RethTracer {
     #[cfg(feature = "tracy")]
     tracy: Option<LayerInfo>,
     /// When true, the stdout filter is wrapped in a reload layer so log levels
-    /// can be changed at runtime via RPC (`debug_verbosity`, `debug_vmodule`).
+    /// can be changed at runtime.
     enable_reload: bool,
 }
 
+#[cfg(feature = "std")]
 impl RethTracer {
     /// Constructs a new `Tracer` with default settings.
     ///
@@ -149,13 +167,14 @@ impl RethTracer {
         self
     }
 
-    /// Enables runtime log filter reloading via RPC (`debug_verbosity`, `debug_vmodule`).
+    /// Enables runtime log filter reloading.
     pub const fn with_reload(mut self, enable: bool) -> Self {
         self.enable_reload = enable;
         self
     }
 }
 
+#[cfg(feature = "std")]
 impl Default for RethTracer {
     fn default() -> Self {
         Self::new()
@@ -166,6 +185,7 @@ impl Default for RethTracer {
 ///
 ///  This struct holds configuration parameters for a tracing layer, including
 ///  the format, filtering directives, optional coloring, and directive.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct LayerInfo {
     format: LogFormat,
@@ -174,6 +194,7 @@ pub struct LayerInfo {
     color: Option<String>,
 }
 
+#[cfg(feature = "std")]
 impl LayerInfo {
     ///  Constructs a new `LayerInfo`.
     ///
@@ -195,6 +216,7 @@ impl LayerInfo {
     }
 }
 
+#[cfg(feature = "std")]
 impl Default for LayerInfo {
     ///  Provides default values for `LayerInfo`.
     ///
@@ -216,6 +238,7 @@ impl Default for LayerInfo {
 /// in an application. Implementations of this trait can specify different logging setups,
 /// such as standard output logging, file logging, journald logging, or custom logging
 /// configurations tailored for specific environments (like testing).
+#[cfg(feature = "std")]
 pub trait Tracer: Sized {
     /// Initialize the logging configuration.
     ///
@@ -241,6 +264,7 @@ pub trait Tracer: Sized {
     fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>>;
 }
 
+#[cfg(feature = "std")]
 impl Tracer for RethTracer {
     fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
         // Configure stdout layer - reloadable if requested for runtime log level changes
@@ -293,6 +317,7 @@ impl Tracer for RethTracer {
 ///  # Note
 ///
 ///  The subscriber will silently fail if it could not be installed.
+#[cfg(feature = "std")]
 pub fn init_test_tracing() {
     let _ = TestTracer::default().init();
 }

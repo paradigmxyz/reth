@@ -7,12 +7,13 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::{Decodable, Encodable};
+use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -300,158 +301,78 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
-        // Reveal the account proof nodes.
-        //
-        // Skip revealing account nodes if this result only contains storage proofs.
-        // `reveal_account_v2_proof_nodes` will return an error if empty `nodes` are passed into it
-        // before the accounts trie root was revealed. This might happen in cases when first account
-        // trie proof arrives later than first storage trie proof even though the account trie proof
-        // was requested first.
-        if !multiproof.account_proofs.is_empty() {
-            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        let reth_trie_common::DecodedMultiProofV2 { account_proofs, mut storage_proofs, .. } =
+            multiproof;
+
+        // Collect `(trie, proof_nodes)` pairs for both the account trie and every storage trie
+        // touched by this multiproof.
+        let mut targets = Vec::with_capacity(storage_proofs.len() + 1);
+
+        if !account_proofs.is_empty() {
+            #[cfg(feature = "metrics")]
+            self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
+            targets.push((Either::Left(&mut self.state), account_proofs));
         }
+
+        // Ensure a storage trie exists for every address whose proofs we're about to reveal
+        for &account in storage_proofs.keys() {
+            let _ = self.storage.get_or_create_trie_mut(account);
+        }
+
+        for (account, trie) in &mut self.storage.tries {
+            if let Some(nodes) = storage_proofs.remove(account) {
+                #[cfg(feature = "metrics")]
+                self.metrics.increment_total_storage_nodes(nodes.len() as u64);
+                targets.push((Either::Right(trie), nodes));
+            }
+        }
+
+        let retain_updates = self.retain_updates;
 
         #[cfg(not(feature = "std"))]
-        // If nostd then serially reveal storage proof nodes for each storage trie
-        {
-            for (account, storage_proofs) in multiproof.storage_proofs {
-                self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
-            }
-
-            Ok(())
-        }
+        let results: Vec<_> = targets
+            .into_iter()
+            .map(|(target, mut nodes)| {
+                let result = match target {
+                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                };
+                (result, nodes)
+            })
+            .collect();
 
         #[cfg(feature = "std")]
-        // If std then reveal storage proofs in parallel
-        {
+        let results: Vec<_> = {
             use rayon::iter::ParallelIterator;
             use reth_primitives_traits::ParallelBridgeBuffered;
 
-            let retain_updates = self.retain_updates;
-
-            // Process all storage trie revealings in parallel, having first removed the
-            // `RevealableSparseTrie`s for each account from their HashMaps. These will be
-            // returned after processing.
-            let results: Vec<_> = multiproof
-                .storage_proofs
+            targets
                 .into_iter()
-                .map(|(account, storage_proofs)| {
-                    let trie = self.storage.take_or_create_trie(&account);
-                    (account, storage_proofs, trie)
-                })
                 .par_bridge_buffered()
-                .map(|(account, storage_proofs, mut trie)| {
-                    let mut bufs = Vec::new();
-                    let result = Self::reveal_storage_v2_proof_nodes_inner(
-                        account,
-                        storage_proofs,
-                        &mut trie,
-                        &mut bufs,
-                        retain_updates,
-                    );
-                    (account, result, trie, bufs)
+                .map(|(target, mut nodes)| {
+                    let result = match target {
+                        Either::Left(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
+                        Either::Right(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
+                    };
+                    (result, nodes)
                 })
-                .collect();
+                .collect()
+        };
 
-            let mut any_err = Ok(());
-            for (account, result, trie, bufs) in results {
-                self.storage.tries.insert(account, trie);
-                if let Ok(_total_nodes) = result {
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics.increment_total_storage_nodes(_total_nodes as u64);
-                    }
-                } else {
-                    any_err = result.map(|_| ());
-                }
-
-                // Keep buffers for deferred dropping
-                self.deferred_drops.proof_nodes_bufs.extend(bufs);
+        // Accumulate the first error and defer dropping the proof node buffers.
+        let mut any_err = Ok(());
+        for (result, nodes) in results {
+            if result.is_err() && any_err.is_ok() {
+                any_err = result.map_err(Into::into);
             }
-
-            any_err
-        }
-    }
-
-    /// Reveals account proof nodes from a V2 proof.
-    ///
-    /// V2 proofs already include the masks in the `ProofTrieNode` structure,
-    /// so no separate masks map is needed.
-    pub fn reveal_account_v2_proof_nodes(
-        &mut self,
-        mut nodes: Vec<ProofTrieNodeV2>,
-    ) -> SparseStateTrieResult<()> {
-        let capacity = estimate_v2_proof_capacity(&nodes);
-
-        #[cfg(feature = "metrics")]
-        self.metrics.increment_total_account_nodes(nodes.len() as u64);
-
-        let root_node = nodes.iter().find(|n| n.path.is_empty());
-        let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-            self.state.reveal_root(root_node.node.clone(), root_node.masks, self.retain_updates)?
-        } else {
-            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
-        };
-        trie.reserve_nodes(capacity);
-        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
-
-        self.deferred_drops.proof_nodes_bufs.push(nodes);
-        Ok(())
-    }
-
-    /// Reveals storage proof nodes from a V2 proof for the given address.
-    ///
-    /// V2 proofs already include the masks in the `ProofTrieNode` structure,
-    /// so no separate masks map is needed.
-    pub fn reveal_storage_v2_proof_nodes(
-        &mut self,
-        account: B256,
-        nodes: Vec<ProofTrieNodeV2>,
-    ) -> SparseStateTrieResult<()> {
-        let trie = self.storage.get_or_create_trie_mut(account);
-        let _total_nodes = Self::reveal_storage_v2_proof_nodes_inner(
-            account,
-            nodes,
-            trie,
-            &mut self.deferred_drops.proof_nodes_bufs,
-            self.retain_updates,
-        )?;
-
-        #[cfg(feature = "metrics")]
-        {
-            self.metrics.increment_total_storage_nodes(_total_nodes as u64);
+            self.deferred_drops.proof_nodes_bufs.push(nodes);
         }
 
-        Ok(())
-    }
-
-    /// Reveals storage V2 proof nodes for the given address. This is an internal static function
-    /// designed to handle a variety of associated public functions.
-    fn reveal_storage_v2_proof_nodes_inner(
-        account: B256,
-        mut nodes: Vec<ProofTrieNodeV2>,
-        trie: &mut RevealableSparseTrie<S>,
-        bufs: &mut Vec<Vec<ProofTrieNodeV2>>,
-        retain_updates: bool,
-    ) -> SparseStateTrieResult<usize> {
-        let capacity = estimate_v2_proof_capacity(&nodes);
-        let total_nodes = nodes.len();
-
-        let root_node = nodes.iter().find(|n| n.path.is_empty());
-        let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
-            trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
-        } else {
-            trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
-        };
-        trie.reserve_nodes(capacity);
-        trace!(target: "trie::sparse", ?account, total_nodes, "Revealing storage nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
-
-        bufs.push(nodes);
-        Ok(total_nodes)
+        any_err
     }
 
     /// Wipe the storage trie at the provided address.
@@ -972,15 +893,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
     }
-
-    /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
-    /// doesn't already exist.
-    #[cfg(feature = "std")]
-    fn take_or_create_trie(&mut self, account: &B256) -> RevealableSparseTrie<S> {
-        self.tries.remove(account).unwrap_or_else(|| {
-            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
-        })
-    }
 }
 
 /// Key for identifying a storage slot in the global LFU cache.
@@ -1010,22 +922,6 @@ impl BucketedLfu<HotSlotKey> {
     }
 }
 
-/// Calculates capacity estimation for V2 proof nodes.
-///
-/// This counts nodes and their children (for branch and extension nodes) to provide
-/// proper capacity hints for `reserve_nodes`.
-fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
-    let mut capacity = nodes.len();
-
-    for node in nodes {
-        if let TrieNodeV2::Branch(branch) = &node.node {
-            capacity += branch.state_mask.count_ones() as usize;
-        }
-    }
-
-    capacity
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1043,7 +939,7 @@ mod tests {
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask,
+        TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -1233,7 +1129,12 @@ mod tests {
         ];
 
         // Reveal V2 proof nodes
-        sparse.reveal_account_v2_proof_nodes(v2_proof_nodes).unwrap();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: v2_proof_nodes,
+                ..Default::default()
+            })
+            .unwrap();
 
         // Check that the state trie contains the leaf node and value
         assert!(matches!(
@@ -1278,7 +1179,12 @@ mod tests {
         ];
 
         // Reveal V2 storage proof nodes for account
-        sparse.reveal_storage_v2_proof_nodes(B256::ZERO, v2_proof_nodes).unwrap();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                storage_proofs: B256Map::from_iter([(B256::ZERO, v2_proof_nodes)]),
+                ..Default::default()
+            })
+            .unwrap();
 
         // Check that the storage trie contains the leaf node and value
         assert!(matches!(

@@ -14,8 +14,11 @@ function fmtS(v) { return v.toFixed(2) + 's'; }
 function fmtChange(ch) {
   if (!ch || (!ch.pct && !ch.ci_pct)) return '';
   const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
-  const ciStr = ch.ci_pct ? ` (±${ch.ci_pct.toFixed(2)}%)` : '';
-  return `${pctStr}${ciStr} ${SIG_EMOJI[ch.sig]}`;
+  const details = [];
+  if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
+  if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  const detailStr = details.length ? ` (${details.join(', ')})` : '';
+  return `${pctStr}${detailStr} ${SIG_EMOJI[ch.sig]}`;
 }
 
 function verdict(changes) {
@@ -30,7 +33,15 @@ function verdict(changes) {
 
 function loadSamplyUrls(workDir) {
   const urls = {};
-  for (const run of ['baseline-1', 'baseline-2', 'feature-1', 'feature-2']) {
+  let runs = [];
+  try {
+    runs = fs.readdirSync(workDir)
+      .filter(run => /^(baseline|feature)-\d+$/.test(run))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  } catch {
+    return urls;
+  }
+  for (const run of runs) {
     try {
       const url = fs.readFileSync(path.join(workDir, run, 'samply-profile-url.txt'), 'utf8').trim();
       if (url) urls[run] = url;
@@ -66,10 +77,14 @@ function blocksLabel(summary) {
   const cores = process.env.BENCH_CORES || '0';
   if (cores !== '0') parts.push({ key: 'Cores', value: cores });
   if (summary.wait_time) parts.push({ key: 'Wait time', value: summary.wait_time });
+  const runPairs = summary.run_pairs || process.env.BENCH_RUN_PAIRS || '';
+  if (runPairs) {
+    parts.push({ key: 'Run pairs', value: runPairs });
+  }
   return parts;
 }
 
-// The 7 metric rows shared by all renderers.
+// The metric rows shared by all renderers.
 // Returns an array of { label, baseline, feature, change } objects.
 function metricRows(summary) {
   const b = summary.baseline.stats;

@@ -186,6 +186,10 @@ pub trait EthApi<
         nonce: U64,
     ) -> RpcResult<Option<T>>;
 
+    /// Returns all transactions in the local pending pool.
+    #[method(name = "pendingTransactions")]
+    fn pending_transactions(&self) -> RpcResult<Vec<T>>;
+
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
     async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<R>>;
@@ -646,6 +650,12 @@ where
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
         Ok(EthTransactions::get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true)
             .await?)
+    }
+
+    /// Handler for: `eth_pendingTransactions`
+    fn pending_transactions(&self) -> RpcResult<Vec<RpcTransaction<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", "Serving eth_pendingTransactions");
+        Ok(EthTransactions::pending_transactions(self)?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
