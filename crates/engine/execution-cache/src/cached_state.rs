@@ -466,6 +466,7 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
 }
 
 impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
+    #[inline]
     fn storage(
         &self,
         account: Address,
@@ -480,13 +481,13 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
                     if let Some(stats) = &self.cache_stats {
                         stats.record_storage_miss();
                     }
-                    Ok(Some(value).filter(|v| !v.is_zero()))
+                    Ok(nonzero_storage_value(value))
                 }
                 CachedStatus::Cached(value) => {
                     if let Some(stats) = &self.cache_stats {
                         stats.record_storage_hit();
                     }
-                    Ok(Some(value).filter(|v| !v.is_zero()))
+                    Ok(nonzero_storage_value(value))
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
@@ -494,15 +495,33 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_hit();
             }
-            Ok(Some(value).filter(|v| !v.is_zero()))
+            Ok(nonzero_storage_value(value))
         } else {
-            self.metrics.storage_cache_misses.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_storage_miss();
-            }
-            self.state_provider.storage(account, storage_key)
+            storage_miss(self, account, storage_key)
         }
     }
+}
+
+#[inline]
+fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
+    if value.is_zero() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+#[cold]
+fn storage_miss<S: StateProvider, const PREWARM: bool>(
+    provider: &CachedStateProvider<S, PREWARM>,
+    account: Address,
+    storage_key: StorageKey,
+) -> ProviderResult<Option<StorageValue>> {
+    provider.metrics.storage_cache_misses.increment(1);
+    if let Some(stats) = &provider.cache_stats {
+        stats.record_storage_miss();
+    }
+    provider.state_provider.storage(account, storage_key)
 }
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
