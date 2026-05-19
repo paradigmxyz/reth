@@ -26,7 +26,9 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -381,16 +383,18 @@ where
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
             proof_handle,
             state_root_tx,
+            hashed_state_tx,
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -580,6 +584,7 @@ where
         &self,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -628,6 +633,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
                 sparse_state_trie,
@@ -894,6 +900,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a clone of the indexed transaction receiver.
     pub fn clone_transaction_receiver(&self) -> IndexedTxReceiver<Tx, Err> {
         self.transactions.clone()
+    }
+
+    /// Takes the hashed state receiver out of the handle for use with custom waiting logic
+    pub fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+        self.state_root_handle.as_mut().map(|handle| handle.take_hashed_state_rx())
     }
 }
 
