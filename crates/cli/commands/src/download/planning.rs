@@ -1,5 +1,6 @@
-use super::{manifest::*, verify::OutputVerifier};
+use super::manifest::*;
 use eyre::Result;
+use reth_fs_util as fs;
 use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
@@ -44,29 +45,44 @@ pub(crate) const fn archive_priority_rank(ty: SnapshotComponentType) -> u8 {
 /// Startup summary showing how much of the selected work can be reused.
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct DownloadStartupSummary {
-    /// Archives whose declared outputs already verify on disk.
-    pub(crate) reusable: usize,
+    /// Archives whose declared outputs exist and match the expected sizes.
+    pub(crate) maybe_reusable: usize,
     /// Archives that still need to be downloaded or retried.
     pub(crate) needs_download: usize,
 }
 
-/// Checks selected archives against existing output files before work begins.
+/// Checks selected archives against existing output metadata before work begins.
 pub(crate) fn summarize_download_startup(
     all_downloads: &[PlannedArchive],
     target_dir: &Path,
 ) -> Result<DownloadStartupSummary> {
     let mut summary = DownloadStartupSummary::default();
-    let verifier = OutputVerifier::new(target_dir);
 
     for planned in all_downloads {
-        if verifier.verify(&planned.archive.output_files)? {
-            summary.reusable += 1;
+        if output_files_match_expected_sizes(&planned.archive.output_files, target_dir) {
+            summary.maybe_reusable += 1;
         } else {
             summary.needs_download += 1;
         }
     }
 
     Ok(summary)
+}
+
+/// Returns `true` if all declared outputs exist and have the expected size.
+///
+/// Startup only needs a cheap estimate; full BLAKE3 integrity verification runs later with
+/// progress reporting for every archive that may be reusable.
+fn output_files_match_expected_sizes(
+    output_files: &[OutputFileChecksum],
+    target_dir: &Path,
+) -> bool {
+    !output_files.is_empty() &&
+        output_files.iter().all(|expected| {
+            fs::metadata(target_dir.join(&expected.path))
+                .map(|meta| meta.len() == expected.size)
+                .unwrap_or(false)
+        })
 }
 
 /// Converts a selection into the manifest distance form used for archive lookup.
@@ -141,12 +157,12 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn summarize_download_startup_counts_reusable_and_needs_download() {
+    fn summarize_download_startup_counts_maybe_reusable_and_needs_download() {
         let dir = tempdir().unwrap();
         let target_dir = dir.path();
         let ok_file = target_dir.join("ok.bin");
         std::fs::write(&ok_file, vec![1_u8; 4]).unwrap();
-        let ok_hash = blake3::hash(&[1_u8; 4]).to_hex().to_string();
+        let wrong_hash = blake3::hash(&[2_u8; 4]).to_hex().to_string();
 
         let planned = vec![
             PlannedArchive {
@@ -160,7 +176,7 @@ mod tests {
                     output_files: vec![OutputFileChecksum {
                         path: "ok.bin".to_string(),
                         size: 4,
-                        blake3: ok_hash,
+                        blake3: wrong_hash,
                     }],
                 },
             },
@@ -193,7 +209,7 @@ mod tests {
         ];
 
         let summary = summarize_download_startup(&planned, target_dir).unwrap();
-        assert_eq!(summary.reusable, 1);
+        assert_eq!(summary.maybe_reusable, 1);
         assert_eq!(summary.needs_download, 2);
     }
 
