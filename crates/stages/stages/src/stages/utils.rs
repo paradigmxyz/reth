@@ -151,17 +151,17 @@ where
         if block_number != current_block_number {
             current_block_number = block_number;
             flush_counter += 1;
-        }
 
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
+            if flush_counter > DEFAULT_CACHE_THRESHOLD {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = current_block_number.saturating_sub(start_block) + 1,
+                    current_block = current_block_number,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                flush_counter = 0;
+            }
         }
     }
     collect_indices(cache.into_iter(), insert_fn)?;
@@ -206,17 +206,17 @@ where
         if block_number != current_block_number {
             current_block_number = block_number;
             flush_counter += 1;
-        }
 
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
+            if flush_counter > DEFAULT_CACHE_THRESHOLD {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = current_block_number.saturating_sub(start_block) + 1,
+                    current_block = current_block_number,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                flush_counter = 0;
+            }
         }
     }
 
