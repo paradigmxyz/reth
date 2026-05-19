@@ -933,6 +933,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn delete_segment(&self, segment: StaticFileSegment) -> ProviderResult<Vec<SegmentHeader>> {
         let mut deleted_headers = Vec::new();
 
+        self.writers.remove(segment);
+
         while let Some(block_height) = self.get_highest_static_file_block(segment) {
             debug!(
                 target: "providers::static_file",

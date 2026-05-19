@@ -28,8 +28,8 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
-    StateReader,
+    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -363,7 +363,7 @@ where
         let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-            let stream_ctx = ctx.clone();
+            let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -371,26 +371,21 @@ where
                     "bal_hashed_state_stream",
                     bal_accounts = stream_bal.as_bal().len(),
                 );
-                let provider_parent_span = branch_span.clone();
+                let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each_init(
-                    || {
-                        (
-                            stream_ctx.clone(),
-                            None::<Box<dyn AccountReader>>,
-                            provider_parent_span.clone(),
-                        )
-                    },
-                    |(ctx, provider, parent_span), account_changes| {
+                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                    WorkerPool::with_worker_mut(|worker| {
+                        let provider =
+                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
                         ctx.send_bal_hashed_state(
-                            parent_span,
+                            &parent_span,
                             provider,
                             account_changes,
                             &to_sparse_trie_task,
                         );
-                    },
-                );
+                    });
+                });
 
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
                 let _ = stream_tx.send(());
@@ -407,24 +402,21 @@ where
                     "bal_prefetch_storage",
                     bal_accounts = prefetch_bal.as_bal().len(),
                 );
-                let provider_parent_span = branch_span.clone();
+                let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                prefetch_bal.as_bal().par_iter().for_each_init(
-                    || {
-                        (
-                            ctx.clone(),
-                            None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
-                            provider_parent_span.clone(),
-                        )
-                    },
-                    |(ctx, provider, parent_span), account| {
-                        if ctx.should_stop() {
-                            return;
-                        }
-                        ctx.prefetch_bal_storage(parent_span, provider, account);
-                    },
-                );
+                prefetch_bal.as_bal().par_iter().for_each(|account| {
+                    if ctx.should_stop() {
+                        return;
+                    }
+                    WorkerPool::with_worker_mut(|worker| {
+                        let provider = worker
+                            .get_or_init::<Option<CachedStateProvider<StateProviderBox, true>>>(
+                                || None,
+                            );
+                        ctx.prefetch_bal_storage(&parent_span, provider, account);
+                    });
+                });
 
                 let _ = prefetch_tx.send(());
             });
@@ -438,6 +430,10 @@ where
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
+
+        // Drop the per-thread providers
+        executor.bal_streaming_pool().clear();
+        executor.prewarming_pool().clear();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }

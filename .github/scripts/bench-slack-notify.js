@@ -1,4 +1,4 @@
-// Sends Slack notifications for reth-bench results.
+// Sends Slack notifications for benchmark results.
 //
 // Reads from environment:
 //   SLACK_BENCH_BOT_TOKEN  – Slack Bot User OAuth Token (xoxb-...)
@@ -18,7 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows } = require('./bench-utils');
+const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -62,6 +62,16 @@ function cell(text) {
   return { type: 'raw_text', text: s || ' ' };
 }
 
+function profileLinks(samplyUrls, prefix) {
+  return Object.entries(samplyUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Samply ${index}>`;
+    });
+}
+
 // Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
 const SLACK_VERDICT = {
   '⚠️': ':warning:',
@@ -87,16 +97,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   // Baseline/feature lines with samply profile links
   let baselineLine = `*Baseline:* ${baselineLink}`;
-  const bl1 = samplyUrls['baseline-1'];
-  const bl2 = samplyUrls['baseline-2'];
-  if (bl1) baselineLine += ` | <${bl1}|Samply 1>`;
-  if (bl2) baselineLine += ` | <${bl2}|Samply 2>`;
+  const baselineProfiles = profileLinks(samplyUrls, 'baseline');
+  if (baselineProfiles.length) baselineLine += ` | ${baselineProfiles.join(' | ')}`;
 
   let featureLine = `*Feature:* ${featureLink}`;
-  const fl1 = samplyUrls['feature-1'];
-  const fl2 = samplyUrls['feature-2'];
-  if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
-  if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
+  const featureProfiles = profileLinks(samplyUrls, 'feature');
+  if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
 
@@ -157,26 +163,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
     },
   ];
 
-  // Wait times as a separate table block (sent as threaded reply due to Slack one-table limit)
-  const threadBlocks = [];
-  const wtRows = waitTimeRows(summary);
-  if (wtRows.length > 0) {
-    const waitTableRows = [
-      [cell('Wait Time'), cell('Baseline'), cell('Feature')],
-      ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature)]),
-    ];
-    threadBlocks.push({
-      type: 'table',
-      column_settings: [
-        { align: 'left' },
-        { align: 'right' },
-        { align: 'right' },
-      ],
-      rows: waitTableRows,
-    });
-  }
-
-  return { blocks, threadBlocks };
+  return blocks;
 }
 
 function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, failedStep }) {
@@ -241,17 +228,8 @@ async function success({ core, context }) {
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
   const actorSlackId = slackUsers[actor];
 
-  const { blocks, threadBlocks } = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
+  const blocks = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
   const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
-
-  async function sendWithThread(ch) {
-    const res = await postToSlack(token, ch, blocks, text, core);
-    if (res.ok && res.ts && threadBlocks.length > 0) {
-      for (const tb of threadBlocks) {
-        await postToSlack(token, ch, [tb], 'Wait time breakdown', core, res.ts);
-      }
-    }
-  }
 
   const slackMode = process.env.BENCH_SLACK || 'always';
 
@@ -262,7 +240,7 @@ async function success({ core, context }) {
     const changes = summary.changes || {};
     const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
     if (hasImprovement) {
-      await sendWithThread(channel);
+      await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
     } else {
       core.info('No significant improvement, skipping public channel notification');
@@ -280,7 +258,7 @@ async function success({ core, context }) {
   // DM the actor only when results were not posted to the public channel
   if (!postedToChannel) {
     if (actorSlackId) {
-      await sendWithThread(actorSlackId);
+      await postToSlack(token, actorSlackId, blocks, text, core);
     } else {
       core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
     }
