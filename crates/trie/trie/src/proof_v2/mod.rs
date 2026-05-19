@@ -719,7 +719,7 @@ where
 
         // Loop over all keys in the range, calling `push_leaf` on each.
         while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
+            upper_bound.as_ref().is_none_or(|upper_bound| key < upper_bound)
         {
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
