@@ -718,13 +718,24 @@ where
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
-        while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
-        {
-            let (key, val) =
-                core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
-            self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+        if let Some(upper_bound) = upper_bound {
+            while let Some((key, _)) = hashed_cursor_current.as_ref() &&
+                key < &upper_bound
+            {
+                let (key, val) =
+                    core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
+                self.push_leaf(targets, key, val)?;
+                *hashed_cursor_current =
+                    self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            }
+        } else {
+            while hashed_cursor_current.is_some() {
+                let (key, val) = core::mem::take(hashed_cursor_current)
+                    .expect("while condition checks for Some");
+                self.push_leaf(targets, key, val)?;
+                *hashed_cursor_current =
+                    self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            }
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
