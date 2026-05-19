@@ -824,8 +824,49 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const { execSync } = require('child_process');
-            const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
+            const { execFileSync } = require('child_process');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const tryGit = (...args) => {
+              try {
+                return execFileSync('git', args, {
+                  encoding: 'utf8',
+                  stdio: ['ignore', 'pipe', 'ignore'],
+                }).trim();
+              } catch {
+                return '';
+              }
+            };
+            const displayRef = (ref) => ref.startsWith('gitref:') ? ref.slice('gitref:'.length) : ref;
+            const resolveRef = (input) => {
+              const ref = displayRef(input);
+              if (!ref) {
+                throw new Error('empty git ref');
+              }
+              if (/^pull\/[0-9]+\/(head|merge)$/.test(ref)) {
+                git('fetch', 'origin', ref, '--quiet');
+                return git('rev-parse', '--verify', 'FETCH_HEAD^{commit}');
+              }
+              let resolved = tryGit('rev-parse', '--verify', `${ref}^{commit}`);
+              if (resolved) {
+                return resolved;
+              }
+              tryGit('fetch', 'origin', `+refs/heads/${ref}:refs/remotes/origin/${ref}`, '--quiet');
+              resolved = tryGit('rev-parse', '--verify', `origin/${ref}^{commit}`);
+              if (resolved) {
+                return resolved;
+              }
+              tryGit('fetch', 'origin', `+refs/tags/${ref}:refs/tags/${ref}`, '--quiet');
+              resolved = tryGit('rev-parse', '--verify', `${ref}^{commit}`);
+              if (resolved) {
+                return resolved;
+              }
+              tryGit('fetch', 'origin', ref, '--quiet');
+              resolved = tryGit('rev-parse', '--verify', 'FETCH_HEAD^{commit}');
+              if (resolved) {
+                return resolved;
+              }
+              throw new Error(`Unable to resolve git ref: ${input}`);
+            };
 
             const baselineArg = '${{ needs.bench-ack.outputs.baseline }}';
             const featureArg = '${{ needs.bench-ack.outputs.feature }}';
@@ -833,16 +874,11 @@ jobs:
             let baselineRef, baselineName, featureRef, featureName;
 
             if (baselineArg) {
-              try { run(`git fetch origin "${baselineArg}" --quiet`); } catch {}
-              try {
-                baselineRef = run(`git rev-parse "${baselineArg}"`);
-              } catch {
-                baselineRef = run(`git rev-parse "origin/${baselineArg}"`);
-              }
-              baselineName = baselineArg;
+              baselineRef = resolveRef(baselineArg);
+              baselineName = displayRef(baselineArg);
             } else {
               try {
-                baselineRef = run('git merge-base HEAD origin/main');
+                baselineRef = git('merge-base', 'HEAD', 'origin/main');
               } catch {
                 baselineRef = '${{ github.sha }}';
               }
@@ -850,13 +886,8 @@ jobs:
             }
 
             if (featureArg) {
-              try { run(`git fetch origin "${featureArg}" --quiet`); } catch {}
-              try {
-                featureRef = run(`git rev-parse "${featureArg}"`);
-              } catch {
-                featureRef = run(`git rev-parse "origin/${featureArg}"`);
-              }
-              featureName = featureArg;
+              featureRef = resolveRef(featureArg);
+              featureName = displayRef(featureArg);
             } else {
               featureRef = '${{ steps.pr-info.outputs.head-sha }}';
               featureName = '${{ steps.pr-info.outputs.head-ref }}';
