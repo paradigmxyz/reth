@@ -202,10 +202,6 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
-    }
-
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
@@ -252,13 +248,6 @@ mod tests {
             store.get_by_hashes(&[hash0, hash1]).unwrap(),
             vec![Some(bal0.clone_inner()), Some(Bytes::from_static(b"bal1"))]
         );
-    }
-
-    #[test]
-    fn range_lookup_is_empty() {
-        let store = InMemoryBalStore::default();
-
-        assert!(store.get_by_range(1, 10).unwrap().is_empty());
     }
 
     #[test]
