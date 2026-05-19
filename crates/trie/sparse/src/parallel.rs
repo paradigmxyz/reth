@@ -3732,7 +3732,7 @@ mod tests {
             walker,
             HashedPostStateCursor::new_account(
                 NoopHashedCursor::<Account>::default(),
-                &hashed_post_state,
+                [&hashed_post_state],
             ),
         );
 

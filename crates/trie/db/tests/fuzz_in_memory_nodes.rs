@@ -68,8 +68,9 @@ proptest! {
                 let (state_root, trie_updates) = DbStateRoot::<_, A>::from_tx(provider.tx_ref())
                     .with_prefix_sets(hashed_state.construct_prefix_sets().freeze())
                     .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()), &trie_nodes.clone().into_sorted())
-                    )
+                        DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+                        [&trie_nodes.clone().into_sorted()],
+                    ))
                     .root_with_updates()
                     .unwrap();
 
@@ -126,7 +127,7 @@ proptest! {
                         .with_prefix_set(hashed_storage.construct_prefix_set().freeze())
                         .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
                             DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-                            &trie_nodes.into_sorted(),
+                            [&trie_nodes.into_sorted()],
                         ))
                         .root_with_updates()
                         .unwrap();

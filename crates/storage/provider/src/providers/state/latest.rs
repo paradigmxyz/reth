@@ -231,11 +231,11 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    &nodes_sorted,
+                    [&nodes_sorted],
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    &state_sorted,
+                    [&state_sorted],
                 ),
             )
             .with_prefix_sets_mut(input.prefix_sets)

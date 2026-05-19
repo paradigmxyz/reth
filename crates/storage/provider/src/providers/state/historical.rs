@@ -23,11 +23,11 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates,
+    updates::{TrieUpdates, TrieUpdatesSorted},
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
+    TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -314,7 +314,11 @@ where
         let Overlay { trie_updates, hashed_post_state } =
             overlay_builder.build_overlay(self.provider)?;
 
-        Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
+        Ok(TrieInputSorted::new(
+            TrieUpdatesSorted::merge_batch(trie_updates),
+            HashedPostStateSorted::merge_batch(hashed_post_state),
+            prefix_sets,
+        ))
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -616,11 +620,11 @@ where
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    nodes.as_ref(),
+                    [nodes.as_ref()],
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    state.as_ref(),
+                    [state.as_ref()],
                 ),
             )
             .with_prefix_sets_mut(prefix_sets)

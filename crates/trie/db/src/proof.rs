@@ -51,8 +51,11 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), [&nodes_sorted]),
+            HashedPostStateCursorFactory::new(
+                self.hashed_cursor_factory().clone(),
+                [&state_sorted],
+            ),
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .account_proof(address, slots)
@@ -66,8 +69,11 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), [&nodes_sorted]),
+            HashedPostStateCursorFactory::new(
+                self.hashed_cursor_factory().clone(),
+                [&state_sorted],
+            ),
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .multiproof(targets)
@@ -125,7 +131,10 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         );
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                [&state_sorted],
+            ),
             address,
         )
         .with_prefix_set_mut(prefix_set)
@@ -147,7 +156,10 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         );
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                [&state_sorted],
+            ),
             address,
         )
         .with_prefix_set_mut(prefix_set)
