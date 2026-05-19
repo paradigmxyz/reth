@@ -147,8 +147,7 @@ where
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
-            gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
-            gas_tracker.record_result(output.result.result());
+            gas_tracker.validate_and_record(output.tx_gas_limit, output.result.result())?;
             canonical_executor.evm_mut().db_mut().bump_bal_index();
 
             let _ = canonical_executor.commit_transaction(output.result);
@@ -267,7 +266,11 @@ impl BlockGasTracker {
         Self { block_gas_limit, is_amsterdam, cumulative_tx_gas_used: 0, block_regular_gas_used: 0 }
     }
 
-    fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
+    fn validate_and_record<H>(
+        &mut self,
+        tx_gas_limit: u64,
+        result: &ResultAndState<H>,
+    ) -> Result<(), BlockExecutionError> {
         let block_gas_used = if self.is_amsterdam {
             self.block_regular_gas_used
         } else {
@@ -284,14 +287,16 @@ impl BlockGasTracker {
             .into());
         }
 
-        Ok(())
-    }
-
-    fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
-        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
-        self.block_regular_gas_used =
-            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        if self.is_amsterdam {
+            self.block_regular_gas_used =
+                self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        } else {
+            self.cumulative_tx_gas_used =
+                self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
+        }
+
+        Ok(())
     }
 }
 
@@ -1159,17 +1164,17 @@ mod tests {
 
         // Non-Amsterdam: block_available_gas = 1_000_000 - 600_000 = 400_000 → reject 500_000.
         let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false);
-        non_amsterdam.record_result(&fake_result);
+        non_amsterdam.validate_and_record(0, &fake_result).unwrap();
         assert!(
-            non_amsterdam.validate_tx_limit(second_tx_gas_limit).is_err(),
+            non_amsterdam.validate_and_record(second_tx_gas_limit, &fake_result).is_err(),
             "non-Amsterdam tracker must reject tx that exceeds remaining cumulative gas",
         );
 
         // Amsterdam: block_available_gas = 1_000_000 - 0 = 1_000_000 → accept 500_000.
         let mut amsterdam = BlockGasTracker::new(block_gas_limit, true);
-        amsterdam.record_result(&fake_result);
+        amsterdam.validate_and_record(0, &fake_result).unwrap();
         assert!(
-            amsterdam.validate_tx_limit(second_tx_gas_limit).is_ok(),
+            amsterdam.validate_and_record(second_tx_gas_limit, &fake_result).is_ok(),
             "Amsterdam tracker must accept the same tx since block_regular_gas_used stays 0",
         );
     }
@@ -1188,9 +1193,20 @@ mod tests {
 
         // Case 1: fresh block, no prior gas consumed.
         // tx_min_gas_limit = TX_GAS_LIMIT_CAP (16_777_216) ≤ block_available_gas (30M) → Ok.
-        let tracker = BlockGasTracker::new(block_gas_limit, false);
+        let zero_gas = ResultGas::new_with_state_gas(0, 0, 0, 0);
+        let fake_result: ResultAndState<revm::context::result::HaltReason> =
+            ExecResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas: zero_gas,
+                    logs: vec![],
+                    output: Output::Call(Default::default()),
+                },
+                EvmState::default(),
+            );
+        let mut tracker = BlockGasTracker::new(block_gas_limit, false);
         assert!(
-            tracker.validate_tx_limit(oversized).is_ok(),
+            tracker.validate_and_record(oversized, &fake_result).is_ok(),
             "oversized tx must pass when capped limit fits in block gas",
         );
 
@@ -1210,9 +1226,9 @@ mod tests {
             );
 
         let mut tracker = BlockGasTracker::new(block_gas_limit, false);
-        tracker.record_result(&fake_result);
+        tracker.validate_and_record(0, &fake_result).unwrap();
         assert!(
-            tracker.validate_tx_limit(oversized).is_err(),
+            tracker.validate_and_record(oversized, &fake_result).is_err(),
             "oversized tx must be rejected when capped limit exceeds remaining block gas",
         );
     }
