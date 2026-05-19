@@ -133,13 +133,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::helpers::types::EthRpcConverter;
+    use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
     use alloy_primitives::{map::AddressMap, Address, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
@@ -212,6 +213,40 @@ mod tests {
 
         assert!(pool.get(&tx_1_result).is_some(), "tx1 not found in the pool");
         assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
+    }
+
+    #[tokio::test]
+    async fn resend_transaction_replaces_pending_transaction() {
+        let mut signers = DevSigner::random_signers::<TransactionSigned, TransactionRequest>(1);
+        let from = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            from,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().append(&mut signers);
+
+        let request = TransactionRequest {
+            from: Some(from),
+            to: Some(Address::random().into()),
+            nonce: Some(0),
+            gas: Some(21_000),
+            gas_price: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let original = eth_api.send_transaction_request(request.clone()).await.unwrap();
+        let replacement = eth_api
+            .resend_transaction(request, Some(U256::from(2_000_000_000u64)), None)
+            .await
+            .unwrap();
+
+        assert_ne!(original, replacement);
+        assert!(eth_api.pool().get(&original).is_none());
+
+        let tx = eth_api.pool().get_transaction_by_sender_and_nonce(from, 0).unwrap();
+        assert_eq!(*tx.hash(), replacement);
+        assert_eq!(tx.max_fee_per_gas(), 2_000_000_000);
     }
 
     #[tokio::test]

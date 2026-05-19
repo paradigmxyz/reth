@@ -370,6 +370,15 @@ pub trait EthApi<
     #[method(name = "sendTransaction")]
     async fn send_transaction(&self, request: TxReq) -> RpcResult<B256>;
 
+    /// Resends a pending transaction with an updated gas price or gas limit.
+    #[method(name = "resend")]
+    async fn resend(
+        &self,
+        request: TxReq,
+        gas_price: Option<U256>,
+        gas_limit: Option<U64>,
+    ) -> RpcResult<B256>;
+
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
@@ -890,6 +899,17 @@ where
     async fn send_transaction(&self, request: RpcTxReq<T::NetworkTypes>) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
         Ok(EthTransactions::send_transaction_request(self, request).await?)
+    }
+
+    /// Handler for: `eth_resend`
+    async fn resend(
+        &self,
+        request: RpcTxReq<T::NetworkTypes>,
+        gas_price: Option<U256>,
+        gas_limit: Option<U64>,
+    ) -> RpcResult<B256> {
+        trace!(target: "rpc::eth", ?request, ?gas_price, ?gas_limit, "Serving eth_resend");
+        Ok(EthTransactions::resend_transaction(self, request, gas_price, gas_limit).await?)
     }
 
     /// Handler for: `eth_sendRawTransaction`

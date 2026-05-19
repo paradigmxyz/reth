@@ -14,7 +14,7 @@ use alloy_consensus::{
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
@@ -497,6 +497,89 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 })?;
 
             // submit the transaction to the pool with a `Local` origin
+            let AddedTransactionOutcome { hash, .. } = self
+                .pool()
+                .add_transaction(TransactionOrigin::Local, pool_transaction)
+                .await
+                .map_err(Self::Error::from_eth_err)?;
+
+            Ok(hash)
+        }
+    }
+
+    /// Resends a pending transaction with an updated gas price or gas limit.
+    fn resend_transaction(
+        &self,
+        mut request: RpcTxReq<Self::NetworkTypes>,
+        gas_price: Option<U256>,
+        gas_limit: Option<U64>,
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send
+    where
+        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
+    {
+        async move {
+            let from = match request.as_ref().from() {
+                Some(from) => from,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+            let nonce = request.as_ref().nonce().ok_or_else(|| {
+                EthApiError::InvalidParams(
+                    "missing transaction nonce in transaction spec".to_string(),
+                )
+            })?;
+
+            if self.find_signer(&from).is_err() {
+                return Err(SignError::NoAccount.into_eth_err())
+            }
+            if self.pool().get_transaction_by_sender_and_nonce(from, nonce).is_none() {
+                return Err(EthApiError::TransactionNotFound.into())
+            }
+
+            let chain_id = self.chain_id();
+            request.as_mut().set_chain_id(chain_id.to());
+
+            if let Some(gas_price) = gas_price &&
+                !gas_price.is_zero()
+            {
+                request.as_mut().set_gas_price(gas_price.to());
+            }
+            if let Some(gas_limit) = gas_limit &&
+                gas_limit != U64::ZERO
+            {
+                request.as_mut().set_gas_limit(gas_limit.to());
+            }
+
+            if request.as_ref().gas_limit().is_none() {
+                let estimated_gas = self
+                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                    .await?;
+                request.as_mut().set_gas_limit(estimated_gas.to());
+            }
+            if gas_price.is_none() && request.as_ref().gas_price().is_none() {
+                let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
+                    tip
+                } else {
+                    let tip = self.suggested_priority_fee().await?.to::<u128>();
+                    request.as_mut().set_max_priority_fee_per_gas(tip);
+                    tip
+                };
+                if request.as_ref().max_fee_per_gas().is_none() {
+                    let header =
+                        self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                    let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                    request.as_mut().set_max_fee_per_gas(base_fee as u128 + tip);
+                }
+            }
+
+            let transaction = self.sign_request(&from, request).await?.with_signer(from);
+            let pool_transaction =
+                <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
+                    transaction,
+                )
+                .map_err(|e| {
+                    Self::Error::from_eth_err(TransactionConversionError::Other(e.to_string()))
+                })?;
+
             let AddedTransactionOutcome { hash, .. } = self
                 .pool()
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
