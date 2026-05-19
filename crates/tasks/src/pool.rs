@@ -222,6 +222,10 @@ impl WorkerPool {
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
+        if num_threads == 0 {
+            return;
+        }
+
         if num_threads >= self.pool().current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
             self.pool().broadcast(|_| {
