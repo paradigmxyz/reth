@@ -1850,7 +1850,18 @@ where
 
         // check if we need to run backfill again by comparing the most recent backfill target
         // height to the backfill height
-        let Some(target_hash) = self.backfill_target_hash() else { return Ok(()) };
+        let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
+        else {
+            return Ok(())
+        };
+        if !self.engine_kind.is_opstack() && sync_target_state.finalized_block_hash.is_zero() {
+            // no finalized block, can't check distance on non-OP Stack chains
+            return Ok(())
+        }
+        let target_hash = self.backfill_target_hash(sync_target_state);
+        if target_hash.is_zero() {
+            return Ok(())
+        }
         // get the block number of the backfill target block, if we have it buffered
         let newest_target = self.state.buffer.block(&target_hash).map(|block| block.number());
 
@@ -1874,10 +1885,6 @@ where
         };
 
         // Check if there are more blocks to sync between current head and FCU target
-        let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
-        else {
-            return Ok(())
-        };
         if let Some(lowest_buffered) =
             self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
         {
@@ -2527,24 +2534,17 @@ where
 
     /// Returns the block hash that backfill should target.
     ///
-    /// Defaults to the finalized block hash. The head block hash is used instead when:
-    /// * The chain is OP Stack — the CL finalizes in large batches and the finalized hash can lag
-    ///   the canonical tip by a wide margin; reorgs are rare in practice, so syncing to head is
-    ///   preferable to syncing to a stale finalized block. In addition, EL syncing is used to fill
-    ///   unsafe chain gaps on OP Stack.
-    /// * The finalized hash is zero — the CL has no finalized block yet (optimistic sync); fall
-    ///   back to head as the backfill target.
+    /// Defaults to the finalized block hash. On OP Stack, the CL finalizes in large batches and the
+    /// finalized hash can lag the canonical tip by a wide margin, so backfill targets the head.
     ///
-    /// Returns `None` if no forkchoice state has been received or the resolved target hash is
-    /// zero.
-    fn backfill_target_hash(&self) -> Option<B256> {
-        let state = self.state.forkchoice_state_tracker.sync_target_state()?;
-        let hash = if self.engine_kind.is_opstack() || state.finalized_block_hash.is_zero() {
+    /// The zero-finalized optimistic-sync fallback for non-OP Stack chains is handled by
+    /// [`Self::backfill_sync_target`].
+    const fn backfill_target_hash(&self, state: ForkchoiceState) -> B256 {
+        if self.engine_kind.is_opstack() {
             state.head_block_hash
         } else {
             state.finalized_block_hash
-        };
-        (!hash.is_zero()).then_some(hash)
+        }
     }
 
     /// Returns the target hash to sync to if the distance from the local tip is greater than the
@@ -2559,7 +2559,8 @@ where
         target_block_number: u64,
         downloaded_block: Option<BlockNumHash>,
     ) -> Option<B256> {
-        let target_hash = self.backfill_target_hash()?;
+        let state = self.state.forkchoice_state_tracker.sync_target_state()?;
+        let target_hash = self.backfill_target_hash(state);
 
         // check if the downloaded block is the tracked backfill target
         let exceeds_backfill_threshold = match downloaded_block.as_ref() {
@@ -2588,7 +2589,23 @@ where
                 None
             }
             // we don't have the block yet and the distance exceeds the allowed threshold
-            Ok(None) => Some(target_hash),
+            Ok(None) if !target_hash.is_zero() => Some(target_hash),
+            Ok(None) => {
+                // OPTIMISTIC SYNCING
+                //
+                // It can happen when the node is doing an
+                // optimistic sync, where the CL has no knowledge of the finalized hash,
+                // but is expecting the EL to sync as high
+                // as possible before finalizing.
+                //
+                // This usually doesn't happen on ETH mainnet since CLs use the more
+                // secure checkpoint syncing.
+                //
+                // However, optimism chains will do this. The risk of a reorg is however
+                // low.
+                debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                Some(state.head_block_hash)
+            }
             // we're fully synced to the target block
             Ok(Some(_)) => None,
         }
