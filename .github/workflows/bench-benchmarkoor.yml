@@ -6,11 +6,6 @@
 # page cache, and measures only the testing fixture replay.
 
 on:
-  # Temporary test trigger for branch-only workflow validation.
-  # Remove before merging this workflow.
-  push:
-    branches:
-      - dan/create-benchmarkoor-replay-workflow
   workflow_dispatch:
     inputs:
       pr:
@@ -423,11 +418,11 @@ jobs:
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
           DOWNLOAD_DIR="$(cd ../reth-download && pwd)"
 
-          .github/scripts/bench-reth-build.sh baseline "$BASELINE_DIR" "${{ steps.refs.outputs.baseline-ref }}" &
+          .github/scripts/bench-txgen-build.sh baseline "$BASELINE_DIR" "${{ steps.refs.outputs.baseline-ref }}" &
           PID_BASELINE=$!
-          .github/scripts/bench-reth-build.sh feature "$FEATURE_DIR" "${{ steps.refs.outputs.feature-ref }}" &
+          .github/scripts/bench-txgen-build.sh feature "$FEATURE_DIR" "${{ steps.refs.outputs.feature-ref }}" &
           PID_FEATURE=$!
-          .github/scripts/bench-reth-build.sh baseline "$DOWNLOAD_DIR" "${{ steps.refs.outputs.download-ref }}" &
+          .github/scripts/bench-txgen-build.sh baseline "$DOWNLOAD_DIR" "${{ steps.refs.outputs.download-ref }}" &
           PID_DOWNLOAD=$!
 
           FAIL=0

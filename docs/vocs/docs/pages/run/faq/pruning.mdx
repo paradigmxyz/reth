@@ -146,6 +146,8 @@ The following tables describe RPC methods available in the full node.
 
 | RPC                                 | Note                                                       |
 | ----------------------------------- | ---------------------------------------------------------- |
+| `debug_accountAt`                   | Only for the last 10064 blocks                             |
+| `debug_accountInfoAt`               | Only for the last 10064 blocks                             |
 | `debug_chainConfig`                 |                                                            |
 | `debug_codeByHash`                  | Only for the last 10064 blocks                             |
 | `debug_dbGet`                       |                                                            |
@@ -257,6 +259,8 @@ The following tables describe the requirements for prune segments, per RPC metho
 
 | RPC / Segment                       | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 | ----------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `debug_accountAt`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_accountInfoAt`               | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `debug_chainConfig`                 | ✅              | ✅                 | ✅       | ✅              | ✅              |
 | `debug_codeByHash`                  | ✅              | ✅                 | ✅       | ❌              | ✅              |
 | `debug_dbGet`                       | ✅              | ✅                 | ✅       | ✅              | ✅              |

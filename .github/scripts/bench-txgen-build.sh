@@ -1,21 +1,16 @@
 #!/usr/bin/env bash
 #
-# Builds the node binary for the txgen-backed PR benchmark path.
+# Builds the node binary used by benchmark workflows.
 #
 # Usage: bench-txgen-build.sh <baseline|feature> <source-dir> <commit>
 #
-# This intentionally does not build or install reth-bench. Big-block benchmarks
-# build reth-bb because txgen replays reth-bb's extended payload format.
+# Big-block benchmarks build reth-bb because txgen replays reth-bb's extended
+# payload format.
 set -euxo pipefail
 
 MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"
-
-if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
-  echo "::error::txgen path does not support BAL replay yet; use big-blocks with the reth-bench driver"
-  exit 1
-fi
 
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 if [ "$BIG_BLOCKS" = "true" ]; then
@@ -28,8 +23,15 @@ fi
 
 EXTRA_FEATURES=""
 EXTRA_RUSTFLAGS=""
+if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
+  EXTRA_FEATURES="otlp,otlp-logs"
+fi
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
-  EXTRA_FEATURES="tracy,tracy-client/ondemand"
+  if [ -n "$EXTRA_FEATURES" ]; then
+    EXTRA_FEATURES="${EXTRA_FEATURES},tracy,tracy-client/ondemand"
+  else
+    EXTRA_FEATURES="tracy,tracy-client/ondemand"
+  fi
   EXTRA_RUSTFLAGS=" -C force-frame-pointers=yes"
 fi
 

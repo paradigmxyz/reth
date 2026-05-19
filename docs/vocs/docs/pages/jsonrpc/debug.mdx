@@ -139,6 +139,22 @@ Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a bl
 | ------ | ---------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_executionWitnessByBlockHash", "params": [hash]}` |
 
+## `debug_accountAt`
+
+Returns account information, including the storage root, after replaying a block through the transaction at the given index.
+
+| Client | Method invocation                                                   |
+| ------ | ------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_accountAt", "params": [block_id, tx_index, address]}` |
+
+## `debug_accountInfoAt`
+
+Returns account information, without the storage root, after replaying a block through the transaction at the given index.
+
+| Client | Method invocation                                                       |
+| ------ | ----------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_accountInfoAt", "params": [block_id, tx_index, address]}` |
+
 ## `debug_dbGet`
 
 Retrieves a raw value from the database.
