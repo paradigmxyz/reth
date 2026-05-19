@@ -206,8 +206,14 @@ impl reth_codecs::Compact for PackedStoredNibbles {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
+        if nibble_count == 0 {
+            return (Self(Nibbles::new()), &buf[33..]);
+        }
+
         let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        let nibbles = Nibbles::unpack(&buf[..packed_len]);
+        let nibbles = if nibble_count == 64 { nibbles } else { nibbles.slice(..nibble_count) };
+        (Self(nibbles), &buf[33..])
     }
 }
 
@@ -290,8 +296,14 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
+        if nibble_count == 0 {
+            return (Self(Nibbles::new()), &buf[33..]);
+        }
+
         let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        let nibbles = Nibbles::unpack(&buf[..packed_len]);
+        let nibbles = if nibble_count == 64 { nibbles } else { nibbles.slice(..nibble_count) };
+        (Self(nibbles), &buf[33..])
     }
 }
 
