@@ -108,6 +108,10 @@ where
 
                     let _ = sender.send(result);
 
+                    if result_number.is_some() {
+                        self.flush_bal_store();
+                    }
+
                     if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
                         let _ = self
@@ -179,9 +183,6 @@ where
             }
 
             provider_rw.commit()?;
-            let _ = self.provider.bal_store().flush().inspect_err(|err| {
-                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-            });
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
         }
 
@@ -190,6 +191,12 @@ where
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
+    }
+
+    fn flush_bal_store(&self) {
+        let _ = self.provider.bal_store().flush().inspect_err(|err| {
+            warn!(target: "engine::persistence", ?err, "Failed to flush BAL store");
+        });
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
