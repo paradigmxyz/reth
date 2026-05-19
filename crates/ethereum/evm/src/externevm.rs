@@ -37,10 +37,10 @@ pub const API_CALL_ADDRESS: Address = {
 const API_CALL_GAS: u64 = 3_000;
 
 /// Maximum request body size in bytes.
-const MAX_BODY_SIZE: usize = 4096;
+const MAX_BODY_SIZE: usize = 16384;
 
 /// Maximum response body size in bytes.
-const MAX_RESPONSE_SIZE: usize = 32_768;
+const MAX_RESPONSE_SIZE: usize = 131072;
 
 /// HTTP timeout in milliseconds.
 const HTTP_TIMEOUT_MS: u64 = 5000;
