@@ -27,6 +27,7 @@ import random
 import sys
 
 BOOTSTRAP_ITERATIONS = 10_000
+P99_MIN_VERDICT_BLOCKS = 125
 PRACTICAL_FLOOR_PCT = {
     "mean": 0.70,
     "p50": 0.70,
@@ -403,14 +404,27 @@ def significance(pct: float, ci_pct: float, floor_pct: float, lower_is_better: b
     return "neutral"
 
 
-def change_str(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
+def is_informational_metric(metric: str, ci_stats: dict) -> bool:
+    return metric == "p99" and ci_stats["blocks"] < P99_MIN_VERDICT_BLOCKS
+
+
+def change_str(
+    pct: float,
+    ci_pct: float,
+    floor_pct: float,
+    lower_is_better: bool,
+    informational: bool = False,
+) -> str:
     """Format change% with CI significance.
 
     Significant if the confidence interval clears the practical floor.
     """
-    sig = significance(pct, ci_pct, floor_pct, lower_is_better)
+    sig = "neutral" if informational else significance(pct, ci_pct, floor_pct, lower_is_better)
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
-    return f"{pct:+.2f}% {emoji} (±{ci_pct:.2f}%, floor {floor_pct:.2f}%)"
+    details = [f"±{ci_pct:.2f}%", f"floor {floor_pct:.2f}%"]
+    if informational:
+        details.append(f"informational <{P99_MIN_VERDICT_BLOCKS} blocks")
+    return f"{pct:+.2f}% {emoji} ({', '.join(details)})"
 
 
 def compute_changes(
@@ -437,12 +451,17 @@ def compute_changes(
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
         c = ci_pct(ci_stats[ci_key], baseline_stats[base_key])
         floor = practical_floor_pct(name, baseline_stats[base_key])
+        informational = is_informational_metric(name, ci_stats)
+        sig = significance(p, c, floor, lower_is_better)
         changes[name] = {
             "pct": round(p, 4),
             "ci_pct": round(c, 4),
             "floor_pct": round(floor, 4),
-            "sig": significance(p, c, floor, lower_is_better),
+            "sig": "neutral" if informational else sig,
         }
+        if informational:
+            changes[name]["informational"] = True
+            changes[name]["raw_sig"] = sig
     return changes
 
 
@@ -495,6 +514,7 @@ def generate_comparison_table(
     mgas_floor = practical_floor_pct("mgas_s", run1["mean_mgas_s"])
     wall_floor = practical_floor_pct("wall_clock", run1["mean_total_lat_ms"])
     persist_floor = practical_floor_pct("persist_wait", run1["mean_persist_ms"])
+    p99_informational = is_informational_metric("p99", ci_stats)
 
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -506,7 +526,7 @@ def generate_comparison_table(
         f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, mean_floor, lower_is_better=True)} |",
         f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, p50_floor, lower_is_better=True)} |",
         f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, p90_floor, lower_is_better=True)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True)} |",
+        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True, informational=p99_informational)} |",
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
         f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, wall_floor, lower_is_better=True)} |",
         f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True)} |",
