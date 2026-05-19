@@ -799,6 +799,7 @@ def compute_target_metric_change(
     query: str,
     target: str,
     stat_name: str,
+    floor_pct: float,
 ) -> dict:
     if not baseline_runs or not feature_runs:
         return {
@@ -808,6 +809,7 @@ def compute_target_metric_change(
             "pct": 0.0,
             "ci": 0.0,
             "ci_pct": 0.0,
+            "floor_pct": floor_pct,
             "sig": "neutral",
             "significance_reason": "requires baseline and feature runs",
         }
@@ -843,7 +845,7 @@ def compute_target_metric_change(
     sig = significance(
         pct,
         ci_pct,
-        0.0,
+        floor_pct,
         lower_is_better=target == "decrease",
     )
     if significance_reason:
@@ -855,7 +857,7 @@ def compute_target_metric_change(
         "pct": round(pct, 4),
         "ci": round(ci, 6),
         "ci_pct": round(ci_pct, 4),
-        "floor_pct": 0.0,
+        "floor_pct": round(floor_pct, 4),
         "sig": sig,
         "ci_method": ci_method,
         "runs": {
@@ -1142,6 +1144,7 @@ def build_target_metric_entry(
     baseline_runs_by_stat: dict[str, list[dict]],
     feature_runs_by_stat: dict[str, list[dict]],
     pair_stats: tuple[str, ...],
+    floor_pct: float,
     include_pair_mean_values: bool = False,
 ) -> dict:
     changes = {
@@ -1151,6 +1154,7 @@ def build_target_metric_entry(
             display_query,
             target,
             stat_name,
+            floor_pct,
         )
         for stat_name in display_stats
     }
@@ -1161,6 +1165,7 @@ def build_target_metric_entry(
         "configured_query": configured_query,
         "identity_labels": identity_labels,
         "target": target,
+        "floor_pct": floor_pct,
         "display_stats": list(display_stats),
         "baseline": summarize_target_metric_runs(baseline_values, summary_fields),
         "feature": summarize_target_metric_runs(feature_values, summary_fields),
@@ -1191,6 +1196,7 @@ def compute_target_metric_summary(
     for counter in config.get("counters", []):
         query = counter["query"]
         target = counter["target"]
+        floor_pct = float(counter.get("floor_pct", 0.0))
         display_stats = TARGET_METRIC_COUNTER_STATS
         summary_fields = ("mean", "p50", "p90", "p99")
         identities = collect_query_metric_identities(
@@ -1265,6 +1271,7 @@ def compute_target_metric_summary(
                         stat_name: feature_runs_for_stats for stat_name in display_stats
                     },
                     pair_stats=summary_fields,
+                    floor_pct=floor_pct,
                     include_pair_mean_values=True,
                 )
             )
@@ -1272,6 +1279,7 @@ def compute_target_metric_summary(
     for histogram in config.get("histograms", []):
         query = histogram["query"]
         target = histogram["target"]
+        floor_pct = float(histogram.get("floor_pct", 0.0))
         display_stats = ("mean",)
         identities = collect_query_metric_identities(
             baseline_runs + feature_runs, "histograms", query
@@ -1330,6 +1338,7 @@ def compute_target_metric_summary(
                     baseline_runs_by_stat=baseline_runs_for_stats,
                     feature_runs_by_stat=feature_runs_for_stats,
                     pair_stats=display_stats,
+                    floor_pct=floor_pct,
                 )
             )
 
@@ -1484,7 +1493,10 @@ def generate_target_metric_table(target_metrics: dict | None) -> str:
 def target_metric_change_str(change: dict) -> str:
     sig = change.get("sig", "neutral")
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
-    return f"{change['pct']:+.2f}% {emoji} (±{change['ci_pct']:.2f}%)"
+    return (
+        f"{change['pct']:+.2f}% {emoji} "
+        f"(±{change['ci_pct']:.2f}%, floor {change['floor_pct']:.2f}%)"
+    )
 
 
 def generate_markdown(
