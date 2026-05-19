@@ -830,14 +830,7 @@ where
         let input = input.clone();
         let validator = self.validator.clone();
         let consensus = self.consensus.clone();
-        let parent_span = Span::current();
         self.payload_processor.executor().spawn_blocking_named("payload-convert", move || {
-            let _span = debug_span!(
-                target: "engine::tree::payload_validator",
-                parent: parent_span,
-                "convert_and_validate",
-            )
-            .entered();
             let block = match input {
                 BlockOrPayload::Block(block) => block,
                 BlockOrPayload::Payload(payload) => {
@@ -851,13 +844,11 @@ where
             }
 
             // now validate against the parent
-            let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
                 warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
-            drop(_enter);
 
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
