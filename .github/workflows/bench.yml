@@ -718,6 +718,27 @@ jobs:
         continue-on-error: true
       - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
 
+      - name: Mask OTLP endpoints
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const envName of ['BENCH_OTLP_TRACES_ENDPOINT', 'BENCH_OTLP_LOGS_ENDPOINT']) {
+              const endpoint = process.env[envName] || '';
+              if (!endpoint) {
+                continue;
+              }
+
+              core.setSecret(endpoint);
+              try {
+                const url = new URL(endpoint);
+                url.username = '';
+                url.password = '';
+                core.setSecret(url.toString());
+              } catch {
+                // The CLI parser will report malformed endpoints later; this step only masks.
+              }
+            }
+
       - name: Install dependencies
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}

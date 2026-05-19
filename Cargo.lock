@@ -10486,6 +10486,7 @@ dependencies = [
 name = "reth-tracing-otlp"
 version = "2.2.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "eyre",
  "opentelemetry",
