@@ -3,7 +3,7 @@ use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{Bundle, StateContext};
+use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -161,6 +161,26 @@ pub trait DebugApi<TxReq: RpcObject> {
         hash: B256,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness>;
+
+    /// Returns account information, including the storage root, at the state after executing the
+    /// transaction with the given index in the block.
+    #[method(name = "accountAt")]
+    async fn debug_account_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<Account>>;
+
+    /// Returns account information at the state after executing the transaction with the given
+    /// index in the block.
+    #[method(name = "accountInfoAt")]
+    async fn debug_account_info_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<AccountInfo>>;
 
     /// Enumerates all accounts at a given block with paging capability. `maxResults` are returned
     /// in the page and the items have keys that come after the `start` key (hashed address).

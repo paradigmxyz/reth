@@ -30,6 +30,9 @@ import sys
 
 BOOTSTRAP_ITERATIONS = 10_000
 EPSILON = 1e-9
+P99_MIN_VERDICT_BLOCKS = 125
+PERSIST_WAIT_MIN_VERDICT_MS = 0.5
+PERSIST_WAIT_MIN_TOTAL_PCT = 0.1
 TARGET_METRIC_BLOCK_HEIGHT_QUERY = "reth_blockchain_tree_canonical_chain_height"
 TARGET_METRIC_COUNTER_STATS = ("p50", "p90")
 TARGET_METRIC_MIN_PAIRED_OBSERVATIONS = 30
@@ -255,6 +258,24 @@ def compute_stats(combined: list[dict]) -> dict:
         "mean_total_lat_ms": mean_total_lat_ms,
         "mean_persist_ms": mean_persist_ms,
     }
+
+
+def compute_point_stats(runs: list[list[dict]]) -> dict:
+    """Compute displayed point estimates for one side of a comparison.
+
+    Cluster CIs estimate percentile changes from one percentile value per run.
+    Match that estimator for displayed percentile point estimates instead of
+    pooling repeated block rows into one percentile sample.
+    """
+    combined = [row for run in runs for row in run]
+    stats = compute_stats(combined)
+    if len(runs) < 2:
+        return stats
+
+    per_run_stats = [compute_stats(run) for run in runs if run]
+    for key in ("p50_ms", "p90_ms", "p99_ms"):
+        stats[key] = _mean([run_stats[key] for run_stats in per_run_stats])
+    return stats
 
 
 def compute_wait_stats(combined: list[dict], field: str) -> dict:
@@ -529,14 +550,51 @@ def significance(pct: float, ci_pct: float, floor_pct: float, lower_is_better: b
     return "neutral"
 
 
-def change_str(pct: float, ci_pct: float, floor_pct: float, lower_is_better: bool) -> str:
+def persist_wait_is_material(stats: dict) -> bool:
+    threshold = max(
+        PERSIST_WAIT_MIN_VERDICT_MS,
+        stats["mean_total_lat_ms"] * PERSIST_WAIT_MIN_TOTAL_PCT / 100.0,
+    )
+    return stats["mean_persist_ms"] >= threshold
+
+
+def informational_reason(
+    metric: str,
+    ci_stats: dict,
+    baseline_stats: dict,
+    feature_stats: dict,
+) -> str | None:
+    if metric == "p99" and ci_stats["blocks"] < P99_MIN_VERDICT_BLOCKS:
+        return f"informational <{P99_MIN_VERDICT_BLOCKS} blocks"
+    if (
+        metric == "persist_wait" and
+        not persist_wait_is_material(baseline_stats) and
+        not persist_wait_is_material(feature_stats)
+    ):
+        return (
+            f"informational <max({PERSIST_WAIT_MIN_VERDICT_MS:.1f}ms, "
+            f"{PERSIST_WAIT_MIN_TOTAL_PCT:.1f}% total latency)"
+        )
+    return None
+
+
+def change_str(
+    pct: float,
+    ci_pct: float,
+    floor_pct: float,
+    lower_is_better: bool,
+    informational: str | None = None,
+) -> str:
     """Format change% with CI significance.
 
     Significant if the confidence interval clears the practical floor.
     """
-    sig = significance(pct, ci_pct, floor_pct, lower_is_better)
+    sig = "neutral" if informational else significance(pct, ci_pct, floor_pct, lower_is_better)
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
-    return f"{pct:+.2f}% {emoji} (±{ci_pct:.2f}%, floor {floor_pct:.2f}%)"
+    details = [f"±{ci_pct:.2f}%", f"floor {floor_pct:.2f}%"]
+    if informational:
+        details.append("informational")
+    return f"{pct:+.2f}% {emoji} ({', '.join(details)})"
 
 
 def compute_changes(
@@ -563,12 +621,18 @@ def compute_changes(
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
         c = ci_pct(ci_stats[ci_key], baseline_stats[base_key])
         floor = practical_floor_pct(name, baseline_stats[base_key])
+        informational = informational_reason(name, ci_stats, baseline_stats, feature_stats)
+        sig = significance(p, c, floor, lower_is_better)
         changes[name] = {
             "pct": round(p, 4),
             "ci_pct": round(c, 4),
             "floor_pct": round(floor, 4),
-            "sig": significance(p, c, floor, lower_is_better),
+            "sig": "neutral" if informational else sig,
         }
+        if informational:
+            changes[name]["informational"] = True
+            changes[name]["informational_reason"] = informational
+            changes[name]["raw_sig"] = sig
     return changes
 
 
@@ -812,6 +876,8 @@ def compute_target_metric_change(
             "floor_pct": floor_pct,
             "sig": "neutral",
             "significance_reason": "requires baseline and feature runs",
+            "informational": True,
+            "informational_reason": "requires baseline and feature runs",
         }
 
     baseline_values = [
@@ -842,12 +908,13 @@ def compute_target_metric_change(
 
     pct = (diff / baseline_value * 100.0) if abs(baseline_value) > EPSILON else 0.0
     ci_pct = (ci / abs(baseline_value) * 100.0) if abs(baseline_value) > EPSILON else 0.0
-    sig = significance(
+    raw_sig = significance(
         pct,
         ci_pct,
         floor_pct,
         lower_is_better=target == "decrease",
     )
+    sig = raw_sig
     if significance_reason:
         sig = "neutral"
     result = {
@@ -869,6 +936,9 @@ def compute_target_metric_change(
         result["paired_observations"] = paired_observations
     if significance_reason:
         result["significance_reason"] = significance_reason
+        result["informational"] = True
+        result["informational_reason"] = significance_reason
+        result["raw_sig"] = raw_sig
     return result
 
 
@@ -1401,6 +1471,8 @@ def generate_comparison_table(
     mgas_floor = practical_floor_pct("mgas_s", run1["mean_mgas_s"])
     wall_floor = practical_floor_pct("wall_clock", run1["mean_total_lat_ms"])
     persist_floor = practical_floor_pct("persist_wait", run1["mean_persist_ms"])
+    p99_informational = informational_reason("p99", ci_stats, run1, run2)
+    persist_informational = informational_reason("persist_wait", ci_stats, run1, run2)
 
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -1412,10 +1484,10 @@ def generate_comparison_table(
         f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, mean_floor, lower_is_better=True)} |",
         f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, p50_floor, lower_is_better=True)} |",
         f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, p90_floor, lower_is_better=True)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True)} |",
+        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True, informational=p99_informational)} |",
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
         f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, wall_floor, lower_is_better=True)} |",
-        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True)} |",
+        f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True, informational=persist_informational)} |",
         "",
     ]
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
@@ -1491,11 +1563,14 @@ def generate_target_metric_table(target_metrics: dict | None) -> str:
 
 
 def target_metric_change_str(change: dict) -> str:
-    sig = change.get("sig", "neutral")
+    sig = "neutral" if change.get("informational") else change.get("sig", "neutral")
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
+    details = [f"±{change['ci_pct']:.2f}%", f"floor {change['floor_pct']:.2f}%"]
+    if change.get("informational"):
+        details.append("informational")
     return (
         f"{change['pct']:+.2f}% {emoji} "
-        f"(±{change['ci_pct']:.2f}%, floor {change['floor_pct']:.2f}%)"
+        f"({', '.join(details)})"
     )
 
 
@@ -1587,8 +1662,8 @@ def main():
     all_baseline = [r for run in baseline_runs for r in run]
     all_feature = [r for run in feature_runs for r in run]
 
-    baseline_stats = compute_stats(all_baseline)
-    feature_stats = compute_stats(all_feature)
+    baseline_stats = compute_point_stats(baseline_runs)
+    feature_stats = compute_point_stats(feature_runs)
     ci_stats = compute_ci_stats(baseline_runs, feature_runs)
 
     if not ci_stats:
