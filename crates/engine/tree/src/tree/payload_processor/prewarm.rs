@@ -249,7 +249,7 @@ where
             if index > 0 {
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                if !targets.is_empty() && let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
                 }
             }
@@ -813,7 +813,6 @@ where
 fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
     let mut targets = MultiProofTargetsV2::default();
     targets.account_targets.reserve(state.len());
-    targets.storage_targets.reserve(state.len());
     let mut storage_target_count = 0;
     for (addr, account) in state {
         // if the account was not touched, or if the account was selfdestructed, do not
