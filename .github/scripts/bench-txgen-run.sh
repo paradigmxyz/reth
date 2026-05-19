@@ -12,6 +12,7 @@
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_POST_WARMUP_SLEEP_SECONDS,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
 set -euxo pipefail
 
@@ -193,6 +194,22 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
+JIT_ENABLED=false
+for arg in "${RETH_ARGS[@]}"; do
+  if [ "$arg" = "--jit" ]; then
+    JIT_ENABLED=true
+    break
+  fi
+done
+
+if [ -n "${BENCH_POST_WARMUP_SLEEP_SECONDS:-}" ]; then
+  POST_WARMUP_SLEEP_SECONDS="$BENCH_POST_WARMUP_SLEEP_SECONDS"
+elif [ "$JIT_ENABLED" = "true" ]; then
+  POST_WARMUP_SLEEP_SECONDS=120
+else
+  POST_WARMUP_SLEEP_SECONDS=0
+fi
+
 SUDO_ENV=()
 if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
@@ -362,6 +379,11 @@ if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
     --report json:"$TXGEN_DIR/warmup-report.json" 2>&1 | sed -u "s/^/[bench] /"
 else
   echo "Skipping warmup (0 blocks)..."
+fi
+
+if [ "$WARMUP" -gt 0 ] 2>/dev/null && [ "$POST_WARMUP_SLEEP_SECONDS" -gt 0 ] 2>/dev/null; then
+  echo "Sleeping ${POST_WARMUP_SLEEP_SECONDS}s after warmup to let background JIT finish..."
+  sleep "$POST_WARMUP_SLEEP_SECONDS"
 fi
 
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
