@@ -9690,6 +9690,7 @@ dependencies = [
  "revm-database-interface",
  "revm-state",
  "rocksdb",
+ "smallvec",
  "strum",
  "tempfile",
  "tokio",
