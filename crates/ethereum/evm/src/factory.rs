@@ -17,8 +17,8 @@ use revmc::alloy_evm::JitEvmFactory;
 #[cfg(feature = "jit")]
 pub use revmc::{
     runtime::{
-        CompilationEvent, CompilationKind, JitBackend, RuntimeConfig, RuntimeStatsSnapshot,
-        RuntimeTuning,
+        maybe_run_jit_helper, CompilationEvent, CompilationKind, JitBackend, JitMode,
+        RuntimeConfig, RuntimeStatsSnapshot, RuntimeTuning,
     },
     CompileTimings,
 };

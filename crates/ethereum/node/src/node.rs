@@ -14,7 +14,7 @@ use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::factory::{
-    JitBackend, RethEvmFactory, RevmcMetrics, RuntimeConfig, RuntimeTuning,
+    JitBackend, JitMode, RethEvmFactory, RevmcMetrics, RuntimeConfig, RuntimeTuning,
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
@@ -62,6 +62,7 @@ use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
+pub use reth_evm_ethereum::factory::maybe_run_jit_helper;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -477,6 +478,9 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         jit_max_bytecode_len: jit.max_bytecode_len,
         jit_max_pending_jobs: jit.max_pending_jobs,
         jit_worker_count: jit.worker_count.unwrap_or(default_tuning.jit_worker_count),
+        jit_timeout: default_tuning.jit_timeout,
+        jit_helper_memory_limit_bytes: default_tuning.jit_helper_memory_limit_bytes,
+        jit_helper_cpu_count: default_tuning.jit_helper_cpu_count,
         resident_code_cache_bytes: jit.code_cache_bytes,
         idle_evict_duration: Some(jit.idle_evict_duration),
 
@@ -503,6 +507,8 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         no_dse: default_config.no_dse,
         gas_params: default_config.gas_params,
         aot: default_config.aot,
+        jit_mode: JitMode::OutOfProcess,
+        jit_helper_path: default_config.jit_helper_path,
         on_compilation: default_config.on_compilation,
     }
 }
@@ -528,12 +534,14 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     }));
 
     let tuning = config.tuning;
+    let jit_mode = config.jit_mode;
     let backend = JitBackend::new(config)?;
 
     if jit.enabled {
         warn!(target: "reth::cli",
             hot_threshold = tuning.jit_hot_threshold,
             workers = tuning.jit_worker_count,
+            mode = ?jit_mode,
             blocking = jit.blocking,
             "Started experimental revmc JIT backend; this may cause instability",
         );
