@@ -62,18 +62,22 @@ pub trait StorageTrieEntryLike: Sized {
 impl StorageTrieEntryLike for StorageTrieEntry {
     type SubKey = StoredNibblesSubKey;
 
+    #[inline]
     fn nibbles(&self) -> &Self::SubKey {
         &self.nibbles
     }
 
+    #[inline]
     fn node(&self) -> &BranchNodeCompact {
         &self.node
     }
 
+    #[inline]
     fn into_parts(self) -> (Self::SubKey, BranchNodeCompact) {
         (self.nibbles, self.node)
     }
 
+    #[inline]
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
         Self { nibbles, node }
     }
@@ -88,10 +92,12 @@ impl TrieKeyAdapter for LegacyKeyAdapter {
     type StorageSubKey = StoredNibblesSubKey;
     type StorageValue = StorageTrieEntry;
 
+    #[inline]
     fn account_key_to_nibbles(key: &Self::AccountKey) -> Nibbles {
         key.0
     }
 
+    #[inline]
     fn subkey_to_nibbles(subkey: &Self::StorageSubKey) -> Nibbles {
         subkey.0
     }
@@ -100,18 +106,22 @@ impl TrieKeyAdapter for LegacyKeyAdapter {
 impl StorageTrieEntryLike for PackedStorageTrieEntry {
     type SubKey = PackedStoredNibblesSubKey;
 
+    #[inline]
     fn nibbles(&self) -> &Self::SubKey {
         &self.nibbles
     }
 
+    #[inline]
     fn node(&self) -> &BranchNodeCompact {
         &self.node
     }
 
+    #[inline]
     fn into_parts(self) -> (Self::SubKey, BranchNodeCompact) {
         (self.nibbles, self.node)
     }
 
+    #[inline]
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
         Self { nibbles, node }
     }
@@ -126,10 +136,12 @@ impl TrieKeyAdapter for PackedKeyAdapter {
     type StorageSubKey = PackedStoredNibblesSubKey;
     type StorageValue = PackedStorageTrieEntry;
 
+    #[inline]
     fn account_key_to_nibbles(key: &Self::AccountKey) -> Nibbles {
         key.0
     }
 
+    #[inline]
     fn subkey_to_nibbles(subkey: &Self::StorageSubKey) -> Nibbles {
         subkey.0
     }
@@ -218,6 +230,7 @@ where
     A: TrieTableAdapter,
     C: DbCursorRO<A::AccountTrieTable> + Send,
 {
+    #[inline]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -228,6 +241,7 @@ where
             .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
     }
 
+    #[inline]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -238,10 +252,12 @@ where
             .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(self.0.next()?.map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
     }
 
+    #[inline]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| A::account_key_to_nibbles(&k)))
     }
@@ -317,6 +333,7 @@ where
     A: TrieTableAdapter,
     C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable> + Send,
 {
+    #[inline]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -324,14 +341,15 @@ where
         let subkey = A::StorageSubKey::from(key);
         Ok(self
             .cursor
-            .seek_by_key_subkey(self.hashed_address, subkey.clone())?
-            .filter(|e| *e.nibbles() == subkey)
+            .seek_by_key_subkey(self.hashed_address, subkey)?
+            .filter(|e| A::subkey_to_nibbles(e.nibbles()) == key)
             .map(|value| {
-                let (subkey, node) = value.into_parts();
-                (A::subkey_to_nibbles(&subkey), node)
+                let (_, node) = value.into_parts();
+                (key, node)
             }))
     }
 
+    #[inline]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -344,6 +362,7 @@ where
         ))
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(self.cursor.next_dup()?.map(|(_, value)| {
             let (subkey, node) = value.into_parts();
@@ -351,6 +370,7 @@ where
         }))
     }
 
+    #[inline]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(_, v)| A::subkey_to_nibbles(v.nibbles())))
     }
