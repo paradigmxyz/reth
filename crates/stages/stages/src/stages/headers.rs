@@ -594,7 +594,8 @@ mod tests {
                     processed,
                     total,
                 }
-            }))
+            })),
+            ..
         }, done: true }) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
@@ -666,7 +667,8 @@ mod tests {
                     processed,
                     total,
                 }
-            }))
+            })),
+            ..
         }, done: true }) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head

@@ -36,6 +36,8 @@ pub struct StateRoot<T, H> {
     pub hashed_cursor_factory: H,
     /// A set of prefix sets that have changed.
     pub prefix_sets: TriePrefixSets,
+    /// Whether every child under a branch whose path matches the prefix set should be walked.
+    walk_all_changed_branch_children: bool,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
@@ -56,6 +58,7 @@ impl<T, H> StateRoot<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: TriePrefixSets::default(),
+            walk_all_changed_branch_children: false,
             previous_state: None,
             threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
             #[cfg(feature = "metrics")]
@@ -66,6 +69,12 @@ impl<T, H> StateRoot<T, H> {
     /// Set the prefix sets.
     pub fn with_prefix_sets(mut self, prefix_sets: TriePrefixSets) -> Self {
         self.prefix_sets = prefix_sets;
+        self
+    }
+
+    /// Configures the state root walker to visit all children of changed branch paths.
+    pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
+        self.walk_all_changed_branch_children = enabled;
         self
     }
 
@@ -93,6 +102,7 @@ impl<T, H> StateRoot<T, H> {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            walk_all_changed_branch_children: self.walk_all_changed_branch_children,
             threshold: self.threshold,
             previous_state: self.previous_state,
             #[cfg(feature = "metrics")]
@@ -106,6 +116,7 @@ impl<T, H> StateRoot<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            walk_all_changed_branch_children: self.walk_all_changed_branch_children,
             threshold: self.threshold,
             previous_state: self.previous_state,
             #[cfg(feature = "metrics")]
@@ -178,6 +189,7 @@ where
                 account_root_state.walker_stack,
                 self.prefix_sets.account_prefix_set,
             )
+            .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
             .with_deletions_retained(retain_updates);
             let account_node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
                 .with_last_hashed_key(account_root_state.last_hashed_key);
@@ -213,6 +225,7 @@ where
                     self.metrics.storage_trie.clone(),
                 )
                 .with_intermediate_state(Some(storage_state.state))
+                .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
                 .with_threshold(remaining_threshold);
 
                 let storage_result = storage_root_calculator.calculate(retain_updates)?;
@@ -239,6 +252,7 @@ where
             // calculation
             let hash_builder = HashBuilder::default().with_updates(retain_updates);
             let walker = TrieWalker::state_trie(trie_cursor, self.prefix_sets.account_prefix_set)
+                .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
                 .with_deletions_retained(retain_updates);
             let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
             (hash_builder, node_iter)
@@ -272,6 +286,7 @@ where
                         #[cfg(feature = "metrics")]
                         self.metrics.storage_trie.clone(),
                     )
+                    .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
                     .with_threshold(remaining_threshold);
 
                     let storage_result = storage_root_calculator.calculate(retain_updates)?;
@@ -465,6 +480,8 @@ pub struct StorageRoot<T, H> {
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     pub prefix_set: PrefixSet,
+    /// Whether every child under a branch whose path matches the prefix set should be walked.
+    walk_all_changed_branch_children: bool,
     /// Previous intermediate state.
     previous_state: Option<IntermediateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
@@ -506,6 +523,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address,
             prefix_set,
+            walk_all_changed_branch_children: false,
             previous_state: None,
             threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
             #[cfg(feature = "metrics")]
@@ -516,6 +534,12 @@ impl<T, H> StorageRoot<T, H> {
     /// Set the changed prefixes.
     pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
         self.prefix_set = prefix_set;
+        self
+    }
+
+    /// Configures the storage root walker to visit all children of changed branch paths.
+    pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
+        self.walk_all_changed_branch_children = enabled;
         self
     }
 
@@ -544,6 +568,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            walk_all_changed_branch_children: self.walk_all_changed_branch_children,
             previous_state: self.previous_state,
             threshold: self.threshold,
             #[cfg(feature = "metrics")]
@@ -558,6 +583,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            walk_all_changed_branch_children: self.walk_all_changed_branch_children,
             previous_state: self.previous_state,
             threshold: self.threshold,
             #[cfg(feature = "metrics")]
@@ -641,6 +667,7 @@ where
                     state.walker_stack,
                     self.prefix_set,
                 )
+                .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
                 .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor)
                     .with_last_hashed_key(state.last_hashed_key);
@@ -649,6 +676,7 @@ where
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
+                    .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
                     .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
                 (hash_builder, node_iter)

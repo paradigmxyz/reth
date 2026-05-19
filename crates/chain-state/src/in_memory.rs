@@ -17,7 +17,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData};
+use reth_trie::{
+    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
+    TrieInputSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -317,6 +320,19 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
     pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
+        self.remove_persisted_blocks_until(persisted_num_hash, persisted_num_hash.number);
+    }
+
+    /// Removes blocks from the in-memory state through `remove_until` while still reporting the
+    /// provided block as the persisted tip.
+    ///
+    /// This is used when block bodies/plain state have been persisted further than trie data, so a
+    /// suffix still needs to remain in memory for trie-backed operations.
+    pub fn remove_persisted_blocks_until(
+        &self,
+        persisted_num_hash: BlockNumHash,
+        remove_until: BlockNumber,
+    ) {
         self.set_persisted(persisted_num_hash);
         // if the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
@@ -334,16 +350,15 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
 
-            let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
+            let remove_until = remove_until.min(persisted_num_hash.number);
 
             // clear all numbers
             numbers.clear();
 
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
+            // Drain all blocks and keep only the suffix that still has to stay in memory.
             let mut old_blocks = blocks
                 .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
+                .filter(|(_, b)| b.block_ref().recovered_block().number() > remove_until)
                 .map(|(_, b)| b.block.clone())
                 .collect::<Vec<_>>();
 
@@ -803,9 +818,10 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
     /// after the block was validated.
     ///
-    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state and
-    /// trie updates) to be performed outside the critical validation path. This can improve latency
-    /// for time-sensitive operations like block validation.
+    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
+    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
+    /// outside the critical validation path. This can improve latency for time-sensitive
+    /// operations like block validation.
     ///
     /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
     /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
@@ -872,6 +888,20 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().trie_updates
+    }
+
+    /// Returns the trie input anchored to the persisted ancestor.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
+        self.trie_data().trie_input().cloned()
+    }
+
+    /// Returns the anchor hash of the trie input, if present.
+    #[inline]
+    pub fn anchor_hash(&self) -> Option<B256> {
+        self.trie_data().anchor_hash()
     }
 
     /// Returns a [`BlockNumber`] of the block.
