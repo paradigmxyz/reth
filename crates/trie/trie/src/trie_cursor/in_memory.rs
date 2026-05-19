@@ -210,37 +210,39 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// node.
     fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
-            let mem_entry = self.in_memory_cursor.current().cloned();
-            let db_entry = self.db_cursor_state.entry();
+            if let Some((mem_key, mem_node)) = self.in_memory_cursor.current() {
+                let mem_key = *mem_key;
+                let db_key = self.db_cursor_state.entry().map(|(db_key, _)| *db_key);
 
-            match (mem_entry, db_entry) {
-                (Some((mem_key, None)), _)
-                    if db_entry.is_none_or(|(db_key, _)| &mem_key < db_key) =>
-                {
-                    // If overlay has a removed node but DB cursor is exhausted or ahead of the
-                    // in-memory cursor then move ahead in-memory, as there might be further
-                    // non-removed overlay nodes.
-                    self.in_memory_cursor.first_after(&mem_key);
+                match mem_node {
+                    None if db_key.is_none_or(|db_key| mem_key < db_key) => {
+                        // If overlay has a removed node but DB cursor is exhausted or ahead of the
+                        // in-memory cursor then move ahead in-memory, as there might be further
+                        // non-removed overlay nodes.
+                        self.in_memory_cursor.first_after(&mem_key);
+                        continue
+                    }
+                    None if db_key == Some(mem_key) => {
+                        // If overlay has a removed node which is returned from DB then move both
+                        // cursors ahead to the next key.
+                        self.in_memory_cursor.first_after(&mem_key);
+                        self.cursor_next()?;
+                        continue
+                    }
+                    Some(node) if db_key.is_none_or(|db_key| mem_key <= db_key) => {
+                        // If overlay returns a node prior to the DB's node, or the DB is exhausted,
+                        // then we return the overlay's node.
+                        return Ok(Some((mem_key, node.clone())))
+                    }
+                    _ => {}
                 }
-                (Some((mem_key, None)), Some((db_key, _))) if &mem_key == db_key => {
-                    // If overlay has a removed node which is returned from DB then move both
-                    // cursors ahead to the next key.
-                    self.in_memory_cursor.first_after(&mem_key);
-                    self.cursor_next()?;
-                }
-                (Some((mem_key, Some(node))), _)
-                    if db_entry.is_none_or(|(db_key, _)| &mem_key <= db_key) =>
-                {
-                    // If overlay returns a node prior to the DB's node, or the DB is exhausted,
-                    // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
-                }
-                // All other cases:
-                // - mem_key > db_key
-                // - overlay is exhausted
-                // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(db_entry.cloned()),
             }
+
+            // All other cases:
+            // - mem_key > db_key
+            // - overlay is exhausted
+            // Return the db_entry. If DB is also exhausted then this returns None.
+            return Ok(self.db_cursor_state.entry().cloned())
         }
     }
 }
