@@ -18,12 +18,12 @@ pub struct StaticFileAccountChangesetWalker<P> {
     provider: P,
     /// End block (exclusive). `None` means iterate until exhausted.
     end_block: Option<BlockNumber>,
-    /// Current block being processed
+    /// Next block to load from the provider.
     current_block: BlockNumber,
+    /// Block number for the currently buffered changesets.
+    current_changeset_block: BlockNumber,
     /// Changesets for current block
     current_changesets: Vec<AccountBeforeTx>,
-    /// Index within current block's changesets
-    changeset_index: usize,
 }
 
 impl<P> StaticFileAccountChangesetWalker<P> {
@@ -52,8 +52,8 @@ impl<P> StaticFileAccountChangesetWalker<P> {
             provider,
             end_block,
             current_block: start,
+            current_changeset_block: start,
             current_changesets: Vec::new(),
-            changeset_index: 0,
         }
     }
 }
@@ -65,28 +65,24 @@ where
     type Item = ProviderResult<(BlockNumber, AccountBeforeTx)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Yield remaining changesets from current block
-        if let Some(changeset) = self.current_changesets.get(self.changeset_index).cloned() {
-            self.changeset_index += 1;
-            return Some(Ok((self.current_block, changeset)));
-        }
-
-        // Advance to next block if we exhausted the previous one
-        //
-        // If we do not return from the previous condition, but the current changesets are
-        // non-empty, then we have run past the current changeset and must fetch the next
-        // changeset.
-        if !self.current_changesets.is_empty() {
-            self.current_block += 1;
+        // Yield remaining changesets from current block. The vector is reversed when it is loaded
+        // so popping preserves the provider's original order without cloning account entries.
+        if let Some(changeset) = self.current_changesets.pop() {
+            return Some(Ok((self.current_changeset_block, changeset)));
         }
 
         // Load next block with changesets
         while self.end_block.is_none_or(|end| self.current_block < end) {
             match self.provider.account_block_changeset(self.current_block) {
-                Ok(changesets) if !changesets.is_empty() => {
+                Ok(mut changesets) if !changesets.is_empty() => {
+                    self.current_changeset_block = self.current_block;
+                    self.current_block += 1;
+                    changesets.reverse();
                     self.current_changesets = changesets;
-                    self.changeset_index = 1;
-                    return Some(Ok((self.current_block, self.current_changesets[0].clone())));
+                    return self
+                        .current_changesets
+                        .pop()
+                        .map(|changeset| Ok((self.current_changeset_block, changeset)));
                 }
                 Ok(_) => self.current_block += 1,
                 Err(e) => {
