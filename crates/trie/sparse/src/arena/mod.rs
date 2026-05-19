@@ -9,7 +9,7 @@ use nodes::{
 };
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
-use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{B256Map, HashMap, HashSet},
@@ -77,13 +77,15 @@ const fn slotmap_slot_size<T>() -> usize {
 /// traversal.
 fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     let mut new_arena = SlotMap::with_capacity(arena.len());
-    let mut queue = VecDeque::new();
+    let mut queue = Vec::with_capacity(arena.len());
+    let mut queue_idx = 0;
 
     let root_node = arena.remove(*root).expect("root exists");
     let new_root = new_arena.insert(root_node);
-    queue.push_back(new_root);
+    queue.push(new_root);
 
-    while let Some(new_idx) = queue.pop_front() {
+    while let Some(&new_idx) = queue.get(queue_idx) {
+        queue_idx += 1;
         // Invariant: any node popped from `queue` has been moved into `new_arena` but
         // its Branch.children have not been rewritten yet — every Revealed(idx) here is
         // still an old-arena index, and the child is still present in `arena` because
@@ -106,7 +108,7 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
             let new_child_idx = new_arena.insert(child_node);
             let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
             b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-            queue.push_back(new_child_idx);
+            queue.push(new_child_idx);
         }
     }
 
@@ -243,16 +245,18 @@ impl ArenaSparseSubtrie {
         // avoids most reallocations without over-allocating when pruning is heavy.
         let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
         // Queue: (new_idx, path TO the node — excluding its own short_key)
-        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        let mut queue = Vec::with_capacity(retained_leaves.len().saturating_mul(2).max(1));
+        let mut queue_idx = 0;
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        queue.push_back((new_root, self.path));
+        queue.push((new_root, self.path));
 
-        while let Some((new_idx, node_path)) = queue.pop_front() {
+        while let Some(&(new_idx, node_path)) = queue.get(queue_idx) {
+            queue_idx += 1;
             new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
@@ -298,7 +302,7 @@ impl ArenaSparseSubtrie {
                         unreachable!()
                     };
                     b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-                    queue.push_back((new_child_idx, child_path));
+                    queue.push((new_child_idx, child_path));
                 } else {
                     // Not retained — blind the child slot in the new arena.
                     let rlp_node = self.arena[old_child_idx]
