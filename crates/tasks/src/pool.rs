@@ -222,14 +222,23 @@ impl WorkerPool {
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
-        if num_threads >= self.pool().current_num_threads() {
+        let pool = self.pool();
+        let pool_threads = pool.current_num_threads();
+
+        if num_threads >= pool_threads {
             // Fast path: run on every thread, no atomic coordination needed.
-            self.pool().broadcast(|_| {
+            pool.broadcast(|_| {
+                WORKER.with_borrow_mut(|worker| f(worker));
+            });
+        } else if num_threads == 1 {
+            // Fast path: run on exactly one worker without waking the whole pool only for all but
+            // one of them to lose the atomic claim below.
+            pool.install(|| {
                 WORKER.with_borrow_mut(|worker| f(worker));
             });
         } else {
             let remaining = AtomicUsize::new(num_threads);
-            self.pool().broadcast(|_| {
+            pool.broadcast(|_| {
                 // Atomically claim a slot; threads that can't decrement skip the closure.
                 let mut current = remaining.load(Ordering::Relaxed);
                 loop {
