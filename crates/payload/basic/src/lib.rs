@@ -47,6 +47,8 @@ mod stack;
 pub use better_payload_emitter::BetterPayloadEmitter;
 pub use stack::PayloadBuilderStack;
 
+const PAYLOAD_BUILDER_THREAD_NAME: &str = "payload-builder";
+
 /// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
 pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
 
@@ -240,6 +242,11 @@ impl PayloadTaskGuard {
     pub fn new(max_payload_tasks: usize) -> Self {
         Self(Arc::new(Semaphore::new(max_payload_tasks)))
     }
+
+    /// Acquires an owned permit for a payload build task.
+    async fn acquire_owned(&self) -> tokio::sync::OwnedSemaphorePermit {
+        self.0.clone().acquire_owned().await.expect("payload task semaphore closed")
+    }
 }
 
 /// Settings for the [`BasicPayloadJobGenerator`].
@@ -359,19 +366,25 @@ where
         let execution_cache = self.execution_cache.clone();
         let trie_handle = self.trie_handle.take();
         let builder = self.builder.clone();
-        self.executor.spawn_blocking_task(async move {
+        let executor = self.executor.clone();
+        self.executor.spawn_task(async move {
             // acquire the permit for executing the task
-            let _permit = guard.acquire().await;
-            let args = BuildArguments {
-                cached_reads,
-                execution_cache,
-                trie_handle,
-                config: payload_config,
-                cancel,
-                best_payload,
+            let permit = guard.acquire_owned().await;
+            let build = move || {
+                let _permit = permit;
+                let args = BuildArguments {
+                    cached_reads,
+                    execution_cache,
+                    trie_handle,
+                    config: payload_config,
+                    cancel,
+                    best_payload,
+                };
+                let result = builder.try_build(args);
+                let _ = tx.send(result);
             };
-            let result = builder.try_build(args);
-            let _ = tx.send(result);
+
+            executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, build);
         });
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
@@ -519,10 +532,11 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    self.executor.spawn_blocking_task(async move {
+                    let build = move || {
                         let res = builder.build_empty_payload(config);
                         let _ = tx.send(res);
-                    });
+                    };
+                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, build);
 
                     empty_payload = Some(rx);
                 }
@@ -530,9 +544,10 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    self.executor.spawn_blocking_task(async move {
+                    let build = move || {
                         let _ = tx.send(job());
-                    });
+                    };
+                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, build);
                     empty_payload = Some(rx);
                 }
             };
