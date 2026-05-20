@@ -621,7 +621,8 @@ impl Decodable for NewPooledTransactionHashes68 {
     }
 }
 
-/// Same as [`NewPooledTransactionHashes68`] but adds cell mask of B128.
+/// Same as [`NewPooledTransactionHashes68`] but adds the eth/72 `cell_mask` field from
+/// [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NewPooledTransactionHashes72 {
@@ -638,7 +639,12 @@ pub struct NewPooledTransactionHashes72 {
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
     pub hashes: Vec<B256>,
-    /// Cell mask for new transactions that have appeared on the network.
+    /// Cell availability mask for type 3 (blob) transactions announced by this message.
+    ///
+    /// Per [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070), this is a `B_16`
+    /// bitarray over `CELLS_PER_EXT_BLOB`; bit `i` is set when the announcer has column
+    /// `i` available for every type 3 transaction in the message. `None` encodes as RLP
+    /// `nil` and must be used when no type 3 transactions are announced.
     pub cell_mask: Option<B128>,
 }
 
