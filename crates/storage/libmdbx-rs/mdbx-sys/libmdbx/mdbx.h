@@ -3896,6 +3896,29 @@ MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API void *mdbx_env_get_userctx(const MDBX_env
 LIBMDBX_API int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, MDBX_txn **txn,
                                   void *context);
 
+/** \brief Create an independent read-only transaction over the same MVCC
+ * snapshot as an active source transaction.
+ * \ingroup c_transactions
+ *
+ * The cloned transaction owns a separate reader slot and has independent
+ * cursor state. Cursors are not cloned. The source transaction must be an
+ * active read-only transaction.
+ *
+ * The transaction handle may be discarded using \ref mdbx_txn_abort()
+ * or \ref mdbx_txn_commit().
+ *
+ * \param [in] source  An active read-only transaction handle.
+ *
+ * \param [out] target Address where the new \ref MDBX_txn handle
+ *                     will be stored.
+ *
+ * \param [in] context A pointer to application context to be associated with
+ *                     created transaction and could be retrieved by
+ *                     \ref mdbx_txn_get_userctx() until transaction finished.
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
+LIBMDBX_API int mdbx_txn_clone_readonly(const MDBX_txn *source, MDBX_txn **target, void *context);
+
 /** \brief Create a transaction for use with the environment.
  * \ingroup c_transactions
  *

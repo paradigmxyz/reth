@@ -506,6 +506,20 @@ impl Transaction<RW> {
 }
 
 impl Transaction<RO> {
+    /// Creates an independent read-only transaction over the same MDBX snapshot.
+    ///
+    /// This is not [`Clone`]. The returned transaction has its own raw MDBX transaction and
+    /// reader slot, while observing the same MVCC snapshot as `self`.
+    pub fn clone_snapshot(&self) -> Result<Self> {
+        let cloned = self.txn_execute(|txn| unsafe {
+            let mut cloned = ptr::null_mut();
+            mdbx_result(ffi::mdbx_txn_clone_readonly(txn, &mut cloned, ptr::null_mut()))
+                .map(|_| cloned)
+        })??;
+
+        Ok(Self::new_from_ptr(self.env().clone(), cloned))
+    }
+
     /// Closes the database handle.
     ///
     /// # Safety
@@ -720,6 +734,8 @@ unsafe impl Sync for TransactionPtr {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Environment;
+    use tempfile::TempDir;
 
     const fn assert_send_sync<T: Send + Sync>() {}
 
@@ -727,5 +743,118 @@ mod tests {
     const fn test_txn_send_sync() {
         assert_send_sync::<Transaction<RO>>();
         assert_send_sync::<Transaction<RW>>();
+    }
+
+    fn test_env() -> (TempDir, Environment) {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().set_max_readers(16).open(dir.path()).unwrap();
+        (dir, env)
+    }
+
+    fn write_key(env: &Environment, key: &[u8], value: &[u8]) {
+        let tx = env.begin_rw_txn().unwrap();
+        let db = tx.open_db(None).unwrap();
+        tx.put(db.dbi(), key, value, WriteFlags::empty()).unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn clone_snapshot_has_same_txnid_and_distinct_raw_txn() {
+        let (_dir, env) = test_env();
+        write_key(&env, b"key", b"value");
+
+        let source = env.begin_ro_txn().unwrap();
+        let cloned = source.clone_snapshot().unwrap();
+
+        assert_eq!(source.id().unwrap(), cloned.id().unwrap());
+        assert_ne!(source.txn(), cloned.txn());
+    }
+
+    #[test]
+    fn clone_snapshot_survives_source_drop_and_hides_later_writes() {
+        let (_dir, env) = test_env();
+        write_key(&env, b"key", b"old");
+
+        let source = env.begin_ro_txn().unwrap();
+        let cloned = source.clone_snapshot().unwrap();
+        drop(source);
+
+        write_key(&env, b"key", b"new");
+        write_key(&env, b"later", b"value");
+
+        let db = cloned.open_db(None).unwrap();
+        let old_value: Option<Vec<u8>> = cloned.get(db.dbi(), b"key").unwrap();
+        let later_value: Option<Vec<u8>> = cloned.get(db.dbi(), b"later").unwrap();
+
+        assert_eq!(old_value.as_deref(), Some(b"old".as_slice()));
+        assert!(later_value.is_none());
+    }
+
+    #[test]
+    fn clone_snapshot_reads_with_independent_cursors_on_worker_threads() {
+        let (_dir, env) = test_env();
+        for i in 0..32u8 {
+            write_key(&env, &[i], &[i + 1]);
+        }
+
+        let source = env.begin_ro_txn().unwrap();
+        let clones = (0..4).map(|_| source.clone_snapshot().unwrap()).collect::<Vec<_>>();
+
+        let workers = clones
+            .into_iter()
+            .map(|txn| {
+                std::thread::spawn(move || {
+                    let db = txn.open_db(None).unwrap();
+                    let mut cursor = txn.cursor_with_dbi(db.dbi()).unwrap();
+                    let mut count = 0usize;
+                    let mut item = cursor.first::<Vec<u8>, Vec<u8>>().unwrap();
+                    while item.is_some() {
+                        count += 1;
+                        item = cursor.next::<Vec<u8>, Vec<u8>>().unwrap();
+                    }
+                    count
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for worker in workers {
+            assert_eq!(worker.join().unwrap(), 32);
+        }
+    }
+
+    #[test]
+    fn clone_snapshot_reader_slots_are_reusable_after_drop() {
+        let (_dir, env) = test_env();
+        write_key(&env, b"key", b"value");
+
+        {
+            let source = env.begin_ro_txn().unwrap();
+            let clones = (0..8).map(|_| source.clone_snapshot().unwrap()).collect::<Vec<_>>();
+            drop(clones);
+        }
+
+        let txns = (0..16).map(|_| env.begin_ro_txn().unwrap()).collect::<Vec<_>>();
+        assert_eq!(txns.len(), 16);
+    }
+
+    #[cfg(feature = "read-tx-timeouts")]
+    #[test]
+    fn clone_snapshot_is_registered_for_read_timeout_tracking() {
+        use crate::MaxReadTransactionDuration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder()
+            .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(
+                Duration::from_millis(50),
+            ))
+            .open(dir.path())
+            .unwrap();
+        write_key(&env, b"key", b"value");
+
+        let source = env.begin_ro_txn().unwrap();
+        let cloned = source.clone_snapshot().unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+
+        assert!(matches!(cloned.id(), Err(Error::ReadTransactionTimeout)));
     }
 }

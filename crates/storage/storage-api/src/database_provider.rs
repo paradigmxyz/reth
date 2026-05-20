@@ -138,6 +138,12 @@ pub trait DBProvider: Sized {
     }
 }
 
+/// Provider backed by a read-only transaction that can be cloned at the same snapshot.
+pub trait ProviderSnapshotClone: DBProvider + Sized {
+    /// Creates a provider with an independent transaction over the same database snapshot.
+    fn clone_snapshot_provider(&self) -> ProviderResult<Self>;
+}
+
 /// Database provider factory.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait DatabaseProviderFactory: Send + Sync {

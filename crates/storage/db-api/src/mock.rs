@@ -12,7 +12,7 @@ use crate::{
     database::Database,
     database_metrics::DatabaseMetrics,
     table::{DupSort, Encode, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxSnapshot},
     DatabaseError,
 };
 use core::ops::Bound;
@@ -145,6 +145,12 @@ impl DbTx for TxMock {
     /// **Mock behavior**: No-op. This is a performance optimization that
     /// doesn't apply to the mock implementation.
     fn disable_long_read_transaction_safety(&mut self) {}
+}
+
+impl DbTxSnapshot for TxMock {
+    fn clone_snapshot(&self) -> Result<Self, DatabaseError> {
+        Ok(self.clone())
+    }
 }
 
 impl DbTxMut for TxMock {

@@ -34,8 +34,8 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    HashedPostStateProvider, NodePrimitivesProvider, ProviderSnapshotClone, StageCheckpointReader,
+    StateProofProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -299,6 +299,17 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
 
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+}
+
+impl<T, ChainSpec> ProviderSnapshotClone for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    T::Block: Clone,
+    ChainSpec: EthChainSpec + 'static,
+{
+    fn clone_snapshot_provider(&self) -> ProviderResult<Self> {
+        Ok(self.clone())
     }
 }
 

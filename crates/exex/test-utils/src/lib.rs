@@ -53,7 +53,7 @@ use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
-    BlockReader, EthStorage, ProviderFactory,
+    BlockReader, DatabaseProviderFactory, EthStorage, ProviderFactory, ProviderSnapshotClone,
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -129,6 +129,7 @@ impl NodeTypes for TestNode {
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<Types = Self>,
+    <N::Provider as DatabaseProviderFactory>::Provider: ProviderSnapshotClone + Sync,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

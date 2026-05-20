@@ -1290,7 +1290,9 @@ mod tests {
             OverlayStateProviderFactory::new(
                 provider_factory,
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
-            ),
+            )
+            .pin_snapshot()
+            .unwrap(),
             &TreeConfig::default(),
         );
 

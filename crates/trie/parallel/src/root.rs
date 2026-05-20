@@ -293,11 +293,6 @@ mod tests {
         let overlay_builder = reth_provider::providers::OverlayBuilder::<
             reth_ethereum_primitives::EthPrimitives,
         >::new(anchor_hash, changeset_cache);
-        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            factory.clone(),
-            overlay_builder.clone(),
-        );
-
         let mut rng = rand::rng();
         let mut state = (0..100)
             .map(|_| {
@@ -352,9 +347,15 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
+        let overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            factory.clone(),
+            overlay_builder.clone(),
+        );
+        let pinned_overlay_factory = overlay_factory.pin_snapshot().unwrap();
+
         let runtime = reth_tasks::Runtime::test();
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory.clone(), Default::default(), runtime.clone())
+            ParallelStateRoot::new(pinned_overlay_factory, Default::default(), runtime.clone())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -386,13 +387,14 @@ mod tests {
         }
 
         let prefix_sets = hashed_state.construct_prefix_sets();
-        overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
+        let overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
             factory,
             overlay_builder.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted()))),
         );
+        let pinned_overlay_factory = overlay_factory.pin_snapshot().unwrap();
 
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze(), runtime)
+            ParallelStateRoot::new(pinned_overlay_factory, prefix_sets.freeze(), runtime)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)

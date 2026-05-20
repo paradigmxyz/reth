@@ -7,9 +7,11 @@ use crate::{
 };
 use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxSnapshot},
 };
-use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_libmdbx::{
+    ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RO, RW,
+};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, instrument, trace, warn};
 use std::{
@@ -345,6 +347,16 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         }
 
         self.inner.disable_timeout();
+    }
+}
+
+impl DbTxSnapshot for Tx<RO> {
+    fn clone_snapshot(&self) -> Result<Self, DatabaseError> {
+        let env_metrics = self.metrics_handler.as_ref().map(|handler| handler.env_metrics.clone());
+        let inner = self.inner.clone_snapshot().map_err(|e| DatabaseError::InitTx(e.into()))?;
+
+        Self::new(inner, self.dbis.clone(), env_metrics)
+            .map_err(|e| DatabaseError::InitTx(e.into()))
     }
 }
 
