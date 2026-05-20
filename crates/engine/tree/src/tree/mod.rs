@@ -7,14 +7,14 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain,
+    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -36,11 +36,11 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{collections::HashMap, fmt::Debug, ops, sync::Arc, time::Duration};
+use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -156,6 +156,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
+        state_trie_overlay_worker_pool: Arc<WorkerPool>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -163,7 +164,11 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind),
+            tree_state: TreeState::new(
+                canonical_block,
+                engine_kind,
+                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
+            ),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -310,7 +315,7 @@ where
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
-    execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
+    execution_timing_stats: B256Map<Box<ExecutionTimingStats>>,
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
@@ -404,7 +409,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
-            execution_timing_stats: HashMap::new(),
+            execution_timing_stats: B256Map::default(),
             building_payload: false,
             runtime,
         }
@@ -445,6 +450,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
+            runtime.state_trie_overlay_worker_pool(),
         );
 
         let task = Self::new(
@@ -1505,19 +1511,7 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        // Invalidate cached overlay since the anchor has changed
-        self.state.tree_state.invalidate_cached_overlay();
-
         self.on_new_persisted_block()?;
-
-        // Re-prepare overlay for the current canonical head with the new anchor.
-        // Spawn a background task to trigger computation so it's ready when the next payload
-        // arrives.
-        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
-            self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = prepared.overlay.get(prepared.anchor_hash);
-            });
-        }
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
@@ -1848,33 +1842,33 @@ where
             self.canonical_in_memory_state.set_canonical_head(new_head);
         }
 
-        // check if we need to run backfill again by comparing the most recent finalized height to
-        // the backfill height
+        // check if we need to run backfill again by comparing the most recent backfill target
+        // height to the backfill height
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
         else {
             return Ok(())
         };
-        if sync_target_state.finalized_block_hash.is_zero() {
-            // no finalized block, can't check distance
+        if !self.engine_kind.is_opstack() && sync_target_state.finalized_block_hash.is_zero() {
+            // no finalized block, can't check distance on non-OP Stack chains
             return Ok(())
         }
-        // get the block number of the finalized block, if we have it
-        let newest_finalized = self
-            .state
-            .buffer
-            .block(&sync_target_state.finalized_block_hash)
-            .map(|block| block.number());
+        let target_hash = self.backfill_target_hash(sync_target_state);
+        if target_hash.is_zero() {
+            return Ok(())
+        }
+        // get the block number of the backfill target block, if we have it buffered
+        let newest_target = self.state.buffer.block(&target_hash).map(|block| block.number());
 
-        // The block number that the backfill finished at - if the progress or newest
-        // finalized is None then we can't check the distance anyways.
+        // The block number that the backfill finished at - if the progress or newest target is
+        // None then we can't check the distance anyways.
         //
-        // If both are Some, we perform another distance check and return the desired
-        // backfill target
+        // If both are Some, we perform another distance check and return the desired backfill
+        // target
         if let Some(backfill_target) =
-            ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
+            ctrl.block_number().zip(newest_target).and_then(|(progress, target_number)| {
                 // Determines whether or not we should run backfill again, in case
                 // the new gap is still large enough and requires running backfill again
-                self.backfill_sync_target(progress, finalized_number, None)
+                self.backfill_sync_target(progress, target_number, None)
             })
         {
             // request another backfill run
@@ -2189,9 +2183,7 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        // Skip building trie input and anchor for DB-loaded blocks.
-        let trie_data =
-            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
+        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
@@ -2532,85 +2524,83 @@ where
         }
     }
 
-    /// Returns the target hash to sync to if the distance from the local tip to the block is
-    /// greater than the threshold and we're not synced to the finalized block yet (if we've seen
-    /// that block already).
+    /// Returns the block hash that backfill should target.
     ///
-    /// If this is invoked after a new block has been downloaded, the downloaded block could be the
-    /// (missing) finalized block.
+    /// Defaults to the finalized block hash. On OP Stack, the CL finalizes in large batches and the
+    /// finalized hash can lag the canonical tip by a wide margin, so backfill targets the head.
+    ///
+    /// The zero-finalized optimistic-sync fallback for non-OP Stack chains is handled by
+    /// [`Self::backfill_sync_target`].
+    const fn backfill_target_hash(&self, state: ForkchoiceState) -> B256 {
+        if self.engine_kind.is_opstack() {
+            state.head_block_hash
+        } else {
+            state.finalized_block_hash
+        }
+    }
+
+    /// Returns the target hash to sync to if the distance from the local tip is greater than the
+    /// threshold and we're not yet synced to the backfill target (see
+    /// [`Self::backfill_target_hash`]).
+    ///
+    /// If this is invoked after a new block has been downloaded, the downloaded block could be
+    /// the (missing) target block.
     fn backfill_sync_target(
         &self,
         canonical_tip_num: u64,
         target_block_number: u64,
         downloaded_block: Option<BlockNumHash>,
     ) -> Option<B256> {
-        let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
+        let state = self.state.forkchoice_state_tracker.sync_target_state()?;
+        let target_hash = self.backfill_target_hash(state);
 
-        // check if the downloaded block is the tracked finalized block
-        let exceeds_backfill_threshold =
-            match (downloaded_block.as_ref(), sync_target_state.as_ref()) {
-                // if we downloaded the finalized block we can now check how far we're off
-                (Some(downloaded_block), Some(state))
-                    if downloaded_block.hash == state.finalized_block_hash =>
-                {
-                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
-                }
-                _ => match sync_target_state
-                    .as_ref()
-                    .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
-                {
-                    Some(buffered_finalized) => {
-                        // if we have buffered the finalized block, we should check how far we're
-                        // off
-                        self.exceeds_backfill_run_threshold(
-                            canonical_tip_num,
-                            buffered_finalized.number(),
-                        )
-                    }
-                    None => {
-                        // check if the distance exceeds the threshold for backfill sync
-                        self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
-                    }
-                },
-            };
-
-        // if the number of missing blocks is greater than the max, trigger backfill
-        if exceeds_backfill_threshold && let Some(state) = sync_target_state {
-            // if we have already canonicalized the finalized block, we should skip backfill
-            match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
-                Err(err) => {
-                    warn!(target: "engine::tree", %err, "Failed to get finalized block header");
-                }
-                Ok(None) => {
-                    // ensure the finalized block is known (not the zero hash)
-                    if !state.finalized_block_hash.is_zero() {
-                        // we don't have the block yet and the distance exceeds the allowed
-                        // threshold
-                        return Some(state.finalized_block_hash)
-                    }
-
-                    // OPTIMISTIC SYNCING
-                    //
-                    // It can happen when the node is doing an
-                    // optimistic sync, where the CL has no knowledge of the finalized hash,
-                    // but is expecting the EL to sync as high
-                    // as possible before finalizing.
-                    //
-                    // This usually doesn't happen on ETH mainnet since CLs use the more
-                    // secure checkpoint syncing.
-                    //
-                    // However, optimism chains will do this. The risk of a reorg is however
-                    // low.
-                    debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
-                    return Some(state.head_block_hash)
-                }
-                Ok(Some(_)) => {
-                    // we're fully synced to the finalized block
-                }
+        // check if the downloaded block is the tracked backfill target
+        let exceeds_backfill_threshold = match downloaded_block.as_ref() {
+            // if we downloaded the target block we can now check how far we're off
+            Some(downloaded_block) if downloaded_block.hash == target_hash => {
+                self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
             }
+            _ => match self.state.buffer.block(&target_hash) {
+                // if we have buffered the target block, we should check how far we're off
+                Some(buffered_target) => {
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_target.number())
+                }
+                // check if the distance exceeds the threshold for backfill sync
+                None => self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number),
+            },
+        };
+
+        if !exceeds_backfill_threshold {
+            return None
         }
 
-        None
+        // if we have already canonicalized the target block, we should skip backfill
+        match self.provider.header_by_hash_or_number(target_hash.into()) {
+            Err(err) => {
+                warn!(target: "engine::tree", %err, "Failed to get backfill target block header");
+                None
+            }
+            // we don't have the block yet and the distance exceeds the allowed threshold
+            Ok(None) if !target_hash.is_zero() => Some(target_hash),
+            Ok(None) => {
+                // OPTIMISTIC SYNCING
+                //
+                // It can happen when the node is doing an
+                // optimistic sync, where the CL has no knowledge of the finalized hash,
+                // but is expecting the EL to sync as high
+                // as possible before finalizing.
+                //
+                // This usually doesn't happen on ETH mainnet since CLs use the more
+                // secure checkpoint syncing.
+                //
+                // However, optimism chains will do this. The risk of a reorg is however
+                // low.
+                debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                Some(state.head_block_hash)
+            }
+            // we're fully synced to the target block
+            Ok(Some(_)) => None,
+        }
     }
 
     /// This method tries to detect whether on-disk and in-memory states have diverged. It might

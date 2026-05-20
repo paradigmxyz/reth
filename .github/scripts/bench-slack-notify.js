@@ -62,6 +62,16 @@ function cell(text) {
   return { type: 'raw_text', text: s || ' ' };
 }
 
+function profileLinks(samplyUrls, prefix) {
+  return Object.entries(samplyUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Samply ${index}>`;
+    });
+}
+
 // Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
 const SLACK_VERDICT = {
   '⚠️': ':warning:',
@@ -69,6 +79,32 @@ const SLACK_VERDICT = {
   '✅': ':white_check_mark:',
   '⚪': ':white_circle:',
 };
+
+function benchConfigLine() {
+  const parts = [];
+  const add = (label, value, defaultValue = '') => {
+    if (value && value !== defaultValue) {
+      parts.push(`\`${label}=${value}\``);
+    }
+  };
+
+  add('blocks', process.env.BENCH_BLOCKS);
+  add('warmup', process.env.BENCH_WARMUP_BLOCKS);
+  add('big-blocks', process.env.BENCH_BIG_BLOCKS, 'false');
+  add('big-blocks-target-gas', process.env.BENCH_BIG_BLOCKS_TARGET_GAS);
+  add('bal', process.env.BENCH_BAL, 'false');
+  add('samply', process.env.BENCH_SAMPLY, 'false');
+  add('slack', process.env.BENCH_SLACK, 'always');
+  add('cores', process.env.BENCH_CORES, '0');
+  add('run-pairs', process.env.BENCH_RUN_PAIRS);
+  add('run-order', process.env.BENCH_RUN_ORDER);
+  add('otlp', process.env.BENCH_OTLP, 'true');
+  add('wait-time', process.env.BENCH_WAIT_TIME);
+  add('baseline-args', process.env.BENCH_BASELINE_ARGS);
+  add('feature-args', process.env.BENCH_FEATURE_ARGS);
+
+  return parts.length ? `*Workflow:* ${parts.join(' ')}` : '';
+}
 
 function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls }) {
   const { emoji, label } = verdict(summary.changes);
@@ -87,18 +123,15 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   // Baseline/feature lines with samply profile links
   let baselineLine = `*Baseline:* ${baselineLink}`;
-  const bl1 = samplyUrls['baseline-1'];
-  const bl2 = samplyUrls['baseline-2'];
-  if (bl1) baselineLine += ` | <${bl1}|Samply 1>`;
-  if (bl2) baselineLine += ` | <${bl2}|Samply 2>`;
+  const baselineProfiles = profileLinks(samplyUrls, 'baseline');
+  if (baselineProfiles.length) baselineLine += ` | ${baselineProfiles.join(' | ')}`;
 
   let featureLine = `*Feature:* ${featureLink}`;
-  const fl1 = samplyUrls['feature-1'];
-  const fl2 = samplyUrls['feature-2'];
-  if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
-  if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
+  const featureProfiles = profileLinks(samplyUrls, 'feature');
+  if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
+  const configLine = benchConfigLine();
 
   const baselineArgs = process.env.BENCH_BASELINE_ARGS || '';
   const featureArgs = process.env.BENCH_FEATURE_ARGS || '';
@@ -106,7 +139,9 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (baselineArgs) argsLines.push(`*Baseline Args:* \`${baselineArgs}\``);
   if (featureArgs) argsLines.push(`*Feature Args:* \`${featureArgs}\``);
 
-  const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, ...argsLines, countsLine].join('\n');
+  const sectionText = [metaParts.join(' | '), configLine, '', baselineLine, featureLine, ...argsLines, countsLine]
+    .filter(line => line !== '')
+    .join('\n');
 
   // Action buttons
   const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -170,6 +205,7 @@ function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, faile
     `by ${actorMention}`,
     `failed while *${failedStep}*`,
   ].filter(Boolean);
+  const configLine = benchConfigLine();
 
   const buttons = [
     {
@@ -187,7 +223,7 @@ function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, faile
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: parts.join(' | ') },
+      text: { type: 'mrkdwn', text: [parts.join(' | '), configLine].filter(Boolean).join('\n') },
     },
     {
       type: 'actions',
@@ -232,7 +268,7 @@ async function success({ core, context }) {
   let postedToChannel = false;
   if (channel) {
     const changes = summary.changes || {};
-    const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
+    const hasImprovement = Object.values(changes).some(c => !c.informational && c.sig === 'good');
     if (hasImprovement) {
       await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
@@ -290,4 +326,4 @@ async function failure({ core, context, failedStep }) {
   // Only DM for failures, don't post to public channel
 }
 
-module.exports = { success, failure };
+module.exports = { success, failure, benchConfigLine, buildSuccessBlocks, buildFailureBlocks };

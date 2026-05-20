@@ -377,20 +377,48 @@ if [ -n "${CLICKHOUSE_URL:-}" ]; then
   CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
 fi
 
+METRICS_ARGS=()
+PROMETHEUS_REPORT=()
+PROMETHEUS_METADATA=()
+if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+  if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+    METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
+  fi
+  PROMETHEUS_REPORT+=(--report "victoriametrics:$BENCH_VICTORIAMETRICS_URL")
+
+  if [ -n "${BENCH_LABELS_FILE:-}" ] && [ -f "$BENCH_LABELS_FILE" ]; then
+    BENCHMARK_START=$(jq -r '.run_start_epoch // empty' "$BENCH_LABELS_FILE")
+    if [ -n "$BENCHMARK_START" ]; then
+      METRICS_ARGS+=(--metrics-align "$BENCHMARK_START")
+    fi
+
+    for key in benchmark_run run_type benchmark_id run_start_epoch reference_epoch bench_sha; do
+      value=$(jq -r --arg key "$key" '.[$key] // empty' "$BENCH_LABELS_FILE")
+      if [ -n "$value" ]; then
+        PROMETHEUS_METADATA+=(-m "$key=$value")
+      fi
+    done
+  fi
+fi
+
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
 $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   --engine http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
+  "${METRICS_ARGS[@]}" \
   --wait-for-persistence never \
   --report json:"$OUTPUT_DIR/report.json" \
   "${CLICKHOUSE_REPORT[@]}" \
+  "${PROMETHEUS_REPORT[@]}" \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
+  -m "job=github-reth-bench" \
   -m "platform=ethereum" \
   -m "scenario=replay" \
   -m "bal-mode=${BENCH_BAL:-false}" \
-  -m "bal-enabled=$USE_BAL" 2>&1 | sed -u "s/^/[bench] /"
+  -m "bal-enabled=$USE_BAL" \
+  "${PROMETHEUS_METADATA[@]}" 2>&1 | sed -u "s/^/[bench] /"
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"

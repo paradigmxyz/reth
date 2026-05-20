@@ -20,6 +20,7 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 
 # misc
+base64 = "0.22"
 clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
 url.workspace = true
