@@ -26,7 +26,7 @@ pub use log::{ColorMode, DefaultLogArgs, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
-pub use trace::{OtlpInitStatus, OtlpLogsStatus, TraceArgs};
+pub use trace::{DefaultTraceValues, OtlpInitStatus, OtlpLogsStatus, TraceArgs};
 
 /// `MetricArgs` to configure metrics.
 mod metric;

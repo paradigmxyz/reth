@@ -1,0 +1,96 @@
+---
+description: Default hot/cold storage architecture in Reth.
+---
+
+# Storage V2
+
+Reth uses the V2 hot/cold storage layout by default for new databases. This
+layout routes history indices and transaction hash lookups to RocksDB, writes
+account and storage changesets to static files, and avoids the legacy plain
+state tables.
+
+For normal node operation, you do not need to pass `--storage.v2`; the default
+is already `true`.
+
+## Defaults
+
+-   New databases initialize with storage V2 by default.
+-   Existing databases keep the storage mode persisted in their metadata. The
+    `--storage.v2` flag does not rewrite an initialized data directory.
+-   Legacy V1 storage can still be requested for a new database with
+    `--storage.v2=false`.
+-   Existing V1 databases can be migrated with [`reth db migrate-v2`](/cli/reth/db/migrate-v2),
+    restored from a V2 snapshot, or resynced from scratch.
+
+## Disk savings
+
+Measured on disk at block `24,396,823` on Ethereum mainnet:
+
+| Node Type | Legacy V1 storage | V2 storage | Savings |
+| --------- | ----------------- | ---------- | ------- |
+| Full      | 1.46 TB           | 1.02 TB    | **-30%** |
+| Minimal   | 449 GB            | 224 GB     | **-50%** |
+| Archive   | 2.99 TB           | 2.31 TB    | **-23%** |
+
+Snapshot download sizes are compressed and change with each published snapshot.
+For current download sizes, use [snapshots.reth.rs](https://snapshots.reth.rs)
+or `reth download --list`.
+
+## Quick start
+
+### Fresh sync
+
+Start Reth normally. A new data directory uses storage V2 automatically:
+
+```bash
+reth node \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+Combine storage V2 with node modes and RPC flags as usual:
+
+```bash
+reth node \
+    --full \
+    --http --http.api eth,trace \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+Use [`--minimal`](/run/storage/minimal) when disk usage matters more than
+retaining older historical RPC data:
+
+```bash
+reth node \
+    --minimal \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+### Using snapshots
+
+To avoid syncing from genesis, download a pre-built snapshot from
+[snapshots.reth.rs](https://snapshots.reth.rs) or the
+[`reth download`](/cli/reth/download) command:
+
+```bash
+reth download -y
+
+reth node \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+## Operational notes
+
+-   Storage mode is selected when a database is initialized. After that, Reth
+    reads the mode from database metadata.
+-   If you need to opt out for a new database, pass `--storage.v2=false` before
+    the first run.
+-   Storage V2 and pruning are separate controls: storage V2 changes where data
+    is stored, while pruning decides how much historical data is retained.
+
+## Further reading
+
+-   [Snapshots](/run/storage/snapshots) - start from public modular snapshots
+-   [Minimal Storage Mode](/run/storage/minimal) - run Reth with the smallest built-in storage profile
+-   [Pruning & Node Modes](/run/storage/pruning) - choose archive, full, minimal, or custom pruning
+-   [Configuration](/run/configuration) - general node configuration reference
+-   [`reth node` CLI reference](/cli/reth/node) - current storage and pruning flags

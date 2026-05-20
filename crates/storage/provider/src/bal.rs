@@ -184,18 +184,14 @@ impl BalStore for InMemoryBalStore {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         let inner = self.inner.read();
         let mut size = 0;
 
         for hash in block_hashes {
-            let bal = inner
-                .entries
-                .get(hash)
-                .map(|entry| entry.bal.clone())
-                .unwrap_or_else(|| Bytes::from_static(&[0xc0]));
-            size += bal.len();
+            let bal = inner.entries.get(hash).map(|entry| entry.bal.clone());
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
             out.push(bal);
 
             if limit.exceeds(size) {
@@ -204,10 +200,6 @@ impl BalStore for InMemoryBalStore {
         }
 
         Ok(())
-    }
-
-    fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
     }
 
     fn bal_stream(&self) -> BalNotificationStream {
@@ -259,13 +251,6 @@ mod tests {
     }
 
     #[test]
-    fn range_lookup_is_empty() {
-        let store = InMemoryBalStore::default();
-
-        assert!(store.get_by_range(1, 10).unwrap().is_empty());
-    }
-
-    #[test]
     fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
@@ -293,7 +278,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(limited, vec![bal0, bal1]);
+        assert_eq!(limited, vec![Some(bal0), Some(bal1)]);
     }
 
     #[test]
