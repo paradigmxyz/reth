@@ -768,11 +768,17 @@ impl AccountProof {
 
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
-            storage_hash.is_zero() &&
-            code_hash == KECCAK_EMPTY
+            (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
+            (code_hash == KECCAK_EMPTY || code_hash.is_zero())
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
+            //
+            // Note: geth (since v1.13.4, go-ethereum#28357) returns `B256::ZERO` for
+            // both `codeHash` and `storageHash` in exclusion proofs, while reth
+            // returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH`. We accept both formats here
+            // so that proofs obtained from any client can be deserialized correctly.
+            // See: https://github.com/ethereum/go-ethereum/issues/28441
             (EMPTY_ROOT_HASH, None)
         } else {
             (storage_hash, Some(Account { nonce, balance, bytecode_hash: code_hash.into() }))
@@ -1207,6 +1213,47 @@ mod tests {
         acc.info.take();
         acc.storage_root = EMPTY_ROOT_HASH;
         assert_eq!(acc, inverse);
+    }
+
+    #[test]
+    #[cfg(feature = "eip1186")]
+    fn from_eip1186_proof_accepts_geth_zero_hashes() {
+        // geth (since v1.13.4) returns B256::ZERO for codeHash and storageHash
+        // in exclusion proofs for non-existent accounts, instead of
+        // KECCAK_EMPTY / EMPTY_ROOT_HASH. Verify that from_eip1186_proof
+        // correctly recognizes this format as a non-existent account.
+        let geth_proof = alloy_rpc_types_eth::EIP1186AccountProofResponse {
+            address: Address::random(),
+            balance: U256::ZERO,
+            code_hash: B256::ZERO,
+            nonce: 0,
+            storage_hash: B256::ZERO,
+            account_proof: vec![],
+            storage_proof: vec![],
+        };
+
+        let acc: AccountProof = geth_proof.into();
+        // Should be interpreted as a non-existent account (info = None)
+        assert!(acc.info.is_none());
+        assert_eq!(acc.storage_root, EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "eip1186")]
+    fn from_eip1186_proof_accepts_empty_hashes() {
+        let proof = alloy_rpc_types_eth::EIP1186AccountProofResponse {
+            address: Address::random(),
+            balance: U256::ZERO,
+            code_hash: KECCAK_EMPTY,
+            nonce: 0,
+            storage_hash: EMPTY_ROOT_HASH,
+            account_proof: vec![],
+            storage_proof: vec![],
+        };
+
+        let acc: AccountProof = proof.into();
+        assert!(acc.info.is_none());
+        assert_eq!(acc.storage_root, EMPTY_ROOT_HASH);
     }
 
     #[test]
