@@ -25,6 +25,7 @@ use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
+    args::PruneConfigKind,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
@@ -115,7 +116,9 @@ impl EngineNodeLauncher {
             .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
                 let settings = this.provider_factory().cached_storage_settings();
-                info!(target: "reth::cli", ?settings, "Loaded storage settings");
+                let pruning_mode =
+                    PruneConfigKind::from_config(&this.prune_config(), this.chain_spec().as_ref()).as_str();
+                info!(target: "reth::cli", ?settings, ?pruning_mode, "Loaded storage settings");
             })
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
