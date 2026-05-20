@@ -20,7 +20,7 @@ use reth_cli_util::{get_secret_key, load_secret_key::SecretKeyError};
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
+    discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_banlist::IpFilter;
@@ -896,8 +896,10 @@ impl Default for DefaultDiscoveryArgs {
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,
             discv5_addr_ipv6: None,
-            discv5_port: Some(DEFAULT_DISCOVERY_V5_PORT),
-            discv5_port_ipv6: Some(DEFAULT_DISCOVERY_V5_PORT),
+            // Defaults to the discv4 port so discv5 shares the port advertised in the enode URL,
+            // matching geth's behavior.
+            discv5_port: None,
+            discv5_port_ipv6: None,
             discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_countdown: DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
@@ -958,13 +960,17 @@ pub struct DiscoveryArgs {
 
     /// The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv4, or `--discovery.v5.addr` is set.
+    ///
+    /// If not provided, discovery V5 defaults to the same port as discovery V4
+    /// (`--discovery.port`).
     #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT", default_value = Resettable::from(DefaultDiscoveryArgs::get_global().discv5_port.map(|p| OsStr::from(p.to_string()))))]
     pub discv5_port: Option<u16>,
 
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv6, or `--discovery.addr.ipv6` is set.
     ///
-    /// If not provided, discovery V5 defaults to same port as discovery V4 (--discovery.port).
+    /// If not provided, discovery V5 defaults to the same port as discovery V4
+    /// (`--discovery.port`).
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6", default_value = Resettable::from(DefaultDiscoveryArgs::get_global().discv5_port_ipv6.map(|p| OsStr::from(p.to_string()))))]
     pub discv5_port_ipv6: Option<u16>,
 
