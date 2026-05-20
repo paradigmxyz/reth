@@ -29,7 +29,8 @@ pub struct EthCapabilities {
 #[serde(rename_all = "camelCase")]
 pub struct EthCapabilitiesHead {
     /// Head block number.
-    pub number: U64,
+    #[serde(with = "alloy_serde::quantity")]
+    pub number: u64,
     /// Head block hash.
     pub hash: B256,
 }
@@ -101,7 +102,7 @@ mod tests {
     #[test]
     fn serializes_capabilities_schema_shape() {
         let capabilities = EthCapabilities {
-            head: EthCapabilitiesHead { number: U64::from(1), hash: B256::ZERO },
+            head: EthCapabilitiesHead { number: 1, hash: B256::ZERO },
             state: EthCapabilitiesResource::window(10, 90),
             tx: EthCapabilitiesResource::available_from(0),
             logs: EthCapabilitiesResource::available_from(0),

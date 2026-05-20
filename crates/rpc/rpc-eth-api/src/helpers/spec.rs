@@ -78,7 +78,7 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
 
         Ok(EthCapabilities {
             head: EthCapabilitiesHead {
-                number: U64::from(chain_info.best_number),
+                number: chain_info.best_number,
                 hash: chain_info.best_hash,
             },
             state,
