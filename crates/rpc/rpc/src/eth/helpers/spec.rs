@@ -13,8 +13,4 @@ where
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
     }
-
-    fn proof_window(&self) -> u64 {
-        self.inner.eth_proof_window()
-    }
 }

@@ -89,6 +89,9 @@ pub trait EthApi<
     async fn chain_id(&self) -> RpcResult<Option<U64>>;
 
     /// Returns effective routing capabilities for this node.
+    ///
+    /// See the `eth_capabilities` execution API proposal:
+    /// <https://github.com/ethereum/execution-apis/pull/755>.
     #[method(name = "capabilities")]
     fn capabilities(&self) -> RpcResult<EthCapabilities>;
 
