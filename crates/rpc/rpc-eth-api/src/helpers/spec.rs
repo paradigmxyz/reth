@@ -118,6 +118,15 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
     }
 }
 
+/// Derives the effective block availability for a capability resource from the prune checkpoints of
+/// all storage segments needed to serve it.
+///
+/// A resource is only available where every required segment is available, so the oldest available
+/// block is the maximum pruned checkpoint across the segments. If any segment is configured with a
+/// distance-based prune mode, expose the smallest retention window because that is the tightest
+/// limit callers can rely on.
+///
+/// See also: <https://github.com/ethereum/execution-apis/pull/755>
 fn effective_resource(
     provider: &impl PruneCheckpointReader,
     segments: &[PruneSegment],
