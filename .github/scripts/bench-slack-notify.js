@@ -62,6 +62,16 @@ function cell(text) {
   return { type: 'raw_text', text: s || ' ' };
 }
 
+function profileLinks(samplyUrls, prefix) {
+  return Object.entries(samplyUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Samply ${index}>`;
+    });
+}
+
 // Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
 const SLACK_VERDICT = {
   '⚠️': ':warning:',
@@ -87,16 +97,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   // Baseline/feature lines with samply profile links
   let baselineLine = `*Baseline:* ${baselineLink}`;
-  const bl1 = samplyUrls['baseline-1'];
-  const bl2 = samplyUrls['baseline-2'];
-  if (bl1) baselineLine += ` | <${bl1}|Samply 1>`;
-  if (bl2) baselineLine += ` | <${bl2}|Samply 2>`;
+  const baselineProfiles = profileLinks(samplyUrls, 'baseline');
+  if (baselineProfiles.length) baselineLine += ` | ${baselineProfiles.join(' | ')}`;
 
   let featureLine = `*Feature:* ${featureLink}`;
-  const fl1 = samplyUrls['feature-1'];
-  const fl2 = samplyUrls['feature-2'];
-  if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
-  if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
+  const featureProfiles = profileLinks(samplyUrls, 'feature');
+  if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
 
@@ -232,7 +238,7 @@ async function success({ core, context }) {
   let postedToChannel = false;
   if (channel) {
     const changes = summary.changes || {};
-    const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
+    const hasImprovement = Object.values(changes).some(c => !c.informational && c.sig === 'good');
     if (hasImprovement) {
       await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;

@@ -385,6 +385,7 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
+        _custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
@@ -395,9 +396,10 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let start = Instant::now();
-        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs, custody_columns).await;
         self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
     }
@@ -1277,9 +1279,12 @@ where
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
+        _custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
-        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, _custody_columns)
+            .await?)
     }
 
     /// Handler for `engine_getPayloadV1`
