@@ -89,6 +89,12 @@ pub struct ChunkedArchive {
     pub blocks_per_file: u64,
     /// Total number of blocks covered by this component.
     pub total_blocks: u64,
+    /// First block covered by the first available chunk.
+    ///
+    /// Archive snapshots start at 0. Pruned/full-node snapshots may start later because older
+    /// static-file chunks have already been removed from the source datadir.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub first_block: u64,
     /// Compressed size of each chunk in bytes, ordered from first to last.
     /// Computed during manifest generation. Older manifests may omit this.
     #[serde(default)]
@@ -285,8 +291,8 @@ impl SnapshotManifest {
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
-                let num_chunks = chunked.num_chunks();
-                (0..num_chunks)
+                let chunk_range = chunked.available_chunk_range();
+                (chunk_range.start..chunk_range.end)
                     .map(|i| {
                         let start = i * chunked.blocks_per_file;
                         let end = (i + 1) * chunked.blocks_per_file - 1;
@@ -314,20 +320,9 @@ impl SnapshotManifest {
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
-                let num_chunks = chunked.num_chunks();
+                let chunk_range = chunked.selected_chunk_range(distance);
 
-                // Calculate which chunks to include
-                let start_chunk = match distance {
-                    Some(dist) => {
-                        // We need chunks covering the last `dist` blocks
-                        let needed_blocks = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
-                    None => 0, // All chunks
-                };
-
-                (start_chunk..num_chunks)
+                (chunk_range.start..chunk_range.end)
                     .map(|i| {
                         let start = i * chunked.blocks_per_file;
                         let end = (i + 1) * chunked.blocks_per_file - 1;
@@ -360,33 +355,25 @@ impl SnapshotManifest {
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
-                let num_chunks = chunked.num_chunks();
+                let chunk_range = chunked.selected_chunk_range(distance);
 
-                let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed_blocks = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
-                    None => 0,
-                };
-
-                (start_chunk..num_chunks)
-                    .map(|i| {
+                (chunk_range.start..chunk_range.end)
+                    .filter_map(|i| {
+                        let offset = chunked.chunk_offset(i)?;
                         let start = i * chunked.blocks_per_file;
                         let end = (i + 1) * chunked.blocks_per_file - 1;
                         let file_name = format!("{key}-{start}-{end}.tar.zst");
-                        let size = chunked.chunk_sizes.get(i as usize).copied().unwrap_or_default();
+                        let size = chunked.chunk_sizes.get(offset).copied().unwrap_or_default();
                         let output_files =
-                            chunked.chunk_output_files.get(i as usize).cloned().unwrap_or_default();
+                            chunked.chunk_output_files.get(offset).cloned().unwrap_or_default();
 
-                        SnapshotArchive {
+                        Some(SnapshotArchive {
                             url: format!("{}/{}", self.base_url_or_empty(), file_name),
                             file_name,
                             size,
                             blake3: None,
                             output_files,
-                        }
+                        })
                     })
                     .collect()
             }
@@ -404,19 +391,14 @@ impl SnapshotManifest {
         match component {
             ComponentManifest::Single(s) => s.size,
             ComponentManifest::Chunked(chunked) => {
-                if chunked.chunk_sizes.is_empty() {
-                    return 0;
-                }
-                let num_chunks = chunked.chunk_sizes.len() as u64;
-                let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
-                    None => 0,
-                };
-                chunked.chunk_sizes[start_chunk as usize..].iter().sum()
+                let chunk_range = chunked.selected_chunk_range(distance);
+                (chunk_range.start..chunk_range.end)
+                    .filter_map(|index| {
+                        chunked
+                            .chunk_offset(index)
+                            .and_then(|offset| chunked.chunk_sizes.get(offset))
+                    })
+                    .sum()
             }
         }
     }
@@ -434,18 +416,11 @@ impl SnapshotManifest {
         match component {
             ComponentManifest::Single(single) => single.output_size(),
             ComponentManifest::Chunked(chunked) => {
-                let num_chunks = chunked.num_chunks();
-                let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
-                    None => 0,
-                };
-
-                (start_chunk..num_chunks)
-                    .map(|index| chunked.chunk_output_size(index as usize))
+                let chunk_range = chunked.selected_chunk_range(distance);
+                (chunk_range.start..chunk_range.end)
+                    .filter_map(|index| {
+                        chunked.chunk_offset(index).map(|offset| chunked.chunk_output_size(offset))
+                    })
                     .sum()
             }
         }
@@ -456,13 +431,8 @@ impl SnapshotManifest {
         let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
             return if self.component(ty).is_some() { 1 } else { 0 };
         };
-        match distance {
-            Some(dist) => {
-                let needed = dist.min(chunked.total_blocks);
-                needed.div_ceil(chunked.blocks_per_file)
-            }
-            None => chunked.num_chunks(),
-        }
+        let chunk_range = chunked.selected_chunk_range(distance);
+        chunk_range.end.saturating_sub(chunk_range.start)
     }
 }
 
@@ -488,6 +458,58 @@ impl ChunkedArchive {
     /// Returns the number of chunks.
     pub fn num_chunks(&self) -> u64 {
         self.total_blocks.div_ceil(self.blocks_per_file)
+    }
+
+    /// Returns the absolute chunk index for [`Self::first_block`].
+    pub fn first_chunk_index(&self) -> u64 {
+        self.first_block / self.blocks_per_file
+    }
+
+    /// Returns the number of chunks with metadata in this manifest.
+    pub fn available_chunk_count(&self) -> u64 {
+        let metadata_len = self
+            .chunk_sizes
+            .len()
+            .max(self.chunk_decompressed_sizes.len())
+            .max(self.chunk_output_files.len());
+
+        if metadata_len == 0 {
+            return self.num_chunks().saturating_sub(self.first_chunk_index());
+        }
+
+        metadata_len as u64
+    }
+
+    /// Returns the absolute chunk-index range available in this manifest.
+    pub fn available_chunk_range(&self) -> std::ops::Range<u64> {
+        let start = self.first_chunk_index().min(self.num_chunks());
+        let end = start.saturating_add(self.available_chunk_count()).min(self.num_chunks());
+        start..end
+    }
+
+    /// Returns the absolute chunk-index range selected for a distance.
+    pub fn selected_chunk_range(&self, distance: Option<u64>) -> std::ops::Range<u64> {
+        let available = self.available_chunk_range();
+        let selected_start = match distance {
+            Some(dist) => {
+                let needed = dist.min(self.total_blocks);
+                let needed_chunks = needed.div_ceil(self.blocks_per_file);
+                self.num_chunks().saturating_sub(needed_chunks)
+            }
+            None => available.start,
+        };
+
+        selected_start.max(available.start)..available.end
+    }
+
+    /// Converts an absolute chunk index into an index in the metadata arrays.
+    pub fn chunk_offset(&self, chunk_index: u64) -> Option<usize> {
+        let range = self.available_chunk_range();
+        if !range.contains(&chunk_index) {
+            return None;
+        }
+
+        Some(chunk_index.saturating_sub(range.start) as usize)
     }
 
     /// Returns the extracted plain-output size for one chunk.
@@ -593,6 +615,10 @@ pub fn generate_manifest(
                 .collect::<Result<Vec<_>>>()?;
 
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
+            let first_block = packaged_chunks
+                .first()
+                .map(|chunk| chunk.chunk_idx * blocks_per_file)
+                .unwrap_or_default();
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
                 packaged_chunks.into_iter().map(|chunk| chunk.output_files).collect::<Vec<_>>();
@@ -601,6 +627,7 @@ pub fn generate_manifest(
                 component = ty.display_name(),
                 chunks = chunk_sizes.len(),
                 total_blocks = block,
+                first_block,
                 size = %super::DownloadProgress::format_size(total_size),
                 "Found chunked component"
             );
@@ -609,6 +636,7 @@ pub fn generate_manifest(
                 ComponentManifest::Chunked(ChunkedArchive {
                     blocks_per_file,
                     total_blocks: block,
+                    first_block,
                     chunk_sizes,
                     chunk_decompressed_sizes: chunk_output_files
                         .iter()
@@ -924,6 +952,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
+                first_block: 0,
                 chunk_sizes: vec![80_000, 100_000, 120_000],
                 chunk_decompressed_sizes: vec![],
                 chunk_output_files: vec![vec![], vec![], vec![]],
@@ -934,6 +963,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
+                first_block: 0,
                 chunk_sizes: vec![40_000, 50_000, 60_000],
                 chunk_decompressed_sizes: vec![],
                 chunk_output_files: vec![vec![], vec![], vec![]],
@@ -967,6 +997,70 @@ mod tests {
         assert_eq!(urls.len(), 2);
         assert_eq!(urls[0], "https://example.com/transactions-500000-999999.tar.zst");
         assert_eq!(urls[1], "https://example.com/transactions-1000000-1499999.tar.zst");
+    }
+
+    #[test]
+    fn archive_urls_for_distance_respect_pruned_first_block() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_500_000,
+                first_block: 500_000,
+                chunk_sizes: vec![100_000, 120_000],
+                chunk_decompressed_sizes: vec![111, 222],
+                chunk_output_files: vec![
+                    vec![OutputFileChecksum {
+                        path: "static_files/static_file_transactions_500000_999999".to_string(),
+                        size: 111,
+                        blake3: "h1".to_string(),
+                    }],
+                    vec![OutputFileChecksum {
+                        path: "static_files/static_file_transactions_1000000_1499999".to_string(),
+                        size: 222,
+                        blake3: "h2".to_string(),
+                    }],
+                ],
+            }),
+        );
+        let m = SnapshotManifest {
+            block: 1_500_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        };
+
+        let all_urls = m.archive_urls_for_distance(SnapshotComponentType::Transactions, None);
+        assert_eq!(
+            all_urls,
+            [
+                "https://example.com/transactions-500000-999999.tar.zst",
+                "https://example.com/transactions-1000000-1499999.tar.zst",
+            ]
+        );
+
+        let tail_urls =
+            m.archive_urls_for_distance(SnapshotComponentType::Transactions, Some(100_000));
+        assert_eq!(tail_urls, ["https://example.com/transactions-1000000-1499999.tar.zst"]);
+
+        let tx = m.snapshot_archives_for_distance(SnapshotComponentType::Transactions, None);
+        assert_eq!(tx.len(), 2);
+        assert_eq!(tx[0].file_name, "transactions-500000-999999.tar.zst");
+        assert_eq!(tx[0].size, 100_000);
+        assert_eq!(tx[0].output_files[0].size, 111);
+        assert_eq!(m.size_for_distance(SnapshotComponentType::Transactions, None), 220_000);
+        assert_eq!(
+            m.size_for_distance(SnapshotComponentType::Transactions, Some(100_000)),
+            120_000
+        );
+        assert_eq!(m.output_size_for_distance(SnapshotComponentType::Transactions, None), 333);
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, None), 2);
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(100_000)), 1);
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(1_500_000)), 2);
     }
 
     #[test]
@@ -1058,6 +1152,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 24_396_822,
+                first_block: 0,
                 chunk_sizes: vec![100; 49], // 49 chunks
                 chunk_decompressed_sizes: vec![],
                 chunk_output_files: vec![vec![]; 49],
@@ -1127,6 +1222,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_000_000,
+                first_block: 0,
                 chunk_sizes: vec![80_000, 120_000],
                 chunk_decompressed_sizes: vec![111, 222],
                 chunk_output_files: vec![
@@ -1186,6 +1282,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_000_000,
+                first_block: 0,
                 chunk_sizes: vec![80_000, 120_000],
                 chunk_decompressed_sizes: vec![111, 222],
                 chunk_output_files: vec![
@@ -1271,5 +1368,44 @@ mod tests {
         assert!(!rocksdb.output_files.is_empty());
         assert_eq!(rocksdb.output_files[0].path, "rocksdb/CURRENT");
         assert!(output.path().join("rocksdb_indices.tar.zst").exists());
+    }
+
+    #[test]
+    fn generate_manifest_records_first_block_for_pruned_chunked_components() {
+        let source = tempdir().unwrap();
+        let output = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+
+        let static_files = source.path().join("static_files");
+        std::fs::create_dir_all(&static_files).unwrap();
+        std::fs::write(static_files.join("static_file_headers_0_499999"), b"h0").unwrap();
+        std::fs::write(static_files.join("static_file_headers_500000_999999"), b"h1").unwrap();
+        std::fs::write(static_files.join("static_file_transactions_500000_999999"), b"tx1")
+            .unwrap();
+
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 999_999, 1, 500_000).unwrap();
+
+        let headers = manifest.component(SnapshotComponentType::Headers).unwrap();
+        let ComponentManifest::Chunked(headers) = headers else {
+            panic!("headers should be chunked")
+        };
+        assert_eq!(headers.first_block, 0);
+        assert_eq!(headers.chunk_sizes.len(), 2);
+
+        let transactions = manifest.component(SnapshotComponentType::Transactions).unwrap();
+        let ComponentManifest::Chunked(transactions) = transactions else {
+            panic!("transactions should be chunked")
+        };
+        assert_eq!(transactions.first_block, 500_000);
+        assert_eq!(transactions.chunk_sizes.len(), 1);
+        assert_eq!(
+            transactions.chunk_output_files[0][0].path,
+            "static_files/static_file_transactions_500000_999999"
+        );
+        assert!(output.path().join("transactions-500000-999999.tar.zst").exists());
+        assert!(!output.path().join("transactions-0-499999.tar.zst").exists());
     }
 }

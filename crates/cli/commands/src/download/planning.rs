@@ -281,6 +281,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_000_000,
+                first_block: 0,
                 chunk_sizes: vec![20, 30],
                 chunk_decompressed_sizes: vec![200, 300],
                 chunk_output_files: vec![
