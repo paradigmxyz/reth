@@ -156,7 +156,17 @@ RETH_ARGS=(
 )
 
 SYNC_STATE_IDLE=false
-if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
+NODE_HELP="$("$BINARY" node --help 2>/dev/null || true)"
+
+supports_node_arg() {
+  grep -qF -- "$1" <<<"$NODE_HELP"
+}
+
+supports_hidden_node_arg() {
+  "$BINARY" node "$1" --help >/dev/null 2>&1
+}
+
+if supports_node_arg '--debug.startup-sync-state-idle'; then
   RETH_ARGS+=(--debug.startup-sync-state-idle)
   SYNC_STATE_IDLE=true
 fi
@@ -176,11 +186,20 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
 fi
 
 if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
-  if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
-    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench --tracing-otlp.service-version="${LABEL}")
+  if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ] && supports_node_arg '--tracing-otlp'; then
+    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}")
+    if supports_hidden_node_arg '--tracing-otlp.service-name=reth-bench'; then
+      RETH_ARGS+=(--tracing-otlp.service-name=reth-bench)
+    fi
+    if supports_hidden_node_arg "--tracing-otlp.service-version=${LABEL}"; then
+      RETH_ARGS+=(--tracing-otlp.service-version="${LABEL}")
+    fi
   fi
-  if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+  if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ] && supports_node_arg '--logs-otlp'; then
+    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}")
+    if supports_node_arg '--logs-otlp.filter'; then
+      RETH_ARGS+=(--logs-otlp.filter=debug)
+    fi
   fi
 fi
 
