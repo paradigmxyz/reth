@@ -34,11 +34,11 @@ pub use events::{
     PeerRequestSender,
 };
 
+use alloy_primitives::B128;
 use reth_eth_wire_types::{
     capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
     UnifiedStatus,
 };
-use alloy_primitives::B128;
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;
 use std::{
