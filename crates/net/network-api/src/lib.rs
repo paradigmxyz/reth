@@ -38,9 +38,33 @@ use reth_eth_wire_types::{
     capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
     UnifiedStatus,
 };
+use alloy_primitives::B128;
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;
-use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    future::Future,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    time::Instant,
+};
+
+/// Shared blob cell custody bitmap.
+#[derive(Debug, Clone, Default)]
+pub struct CellCustody {
+    inner: Arc<RwLock<B128>>,
+}
+
+impl CellCustody {
+    /// Returns the currently configured blob cell custody bitmap.
+    pub fn get(&self) -> B128 {
+        *self.inner.read().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// Updates the blob cell custody bitmap.
+    pub fn set(&self, custody_columns: B128) {
+        *self.inner.write().unwrap_or_else(|err| err.into_inner()) = custody_columns;
+    }
+}
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
@@ -85,6 +109,9 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns the chain id
     fn chain_id(&self) -> u64;
+
+    /// Returns the shared blob cell custody bitmap.
+    fn cell_custody(&self) -> &CellCustody;
 
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;

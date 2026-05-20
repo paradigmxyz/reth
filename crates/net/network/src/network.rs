@@ -16,7 +16,7 @@ use reth_ethereum_forks::Head;
 use reth_network_api::{
     events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
-    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    BlockDownloaderProvider, CellCustody, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
     PeersInfo,
 };
@@ -78,6 +78,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
+            cell_custody: CellCustody::default(),
             tx_gossip_disabled,
             discv4,
             discv5,
@@ -427,6 +428,10 @@ impl<N: NetworkPrimitives> NetworkInfo for NetworkHandle<N> {
         self.inner.chain_id.load(Ordering::Relaxed)
     }
 
+    fn cell_custody(&self) -> &CellCustody {
+        &self.inner.cell_custody
+    }
+
     fn is_syncing(&self) -> bool {
         SyncStateProvider::is_syncing(self)
     }
@@ -502,6 +507,8 @@ struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
+    /// Shared blob cell custody bitmap.
+    cell_custody: CellCustody,
     /// Whether to disable transaction gossip
     tx_gossip_disabled: bool,
     /// The instance of the discv4 service

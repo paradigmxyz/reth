@@ -11,7 +11,7 @@ use crate::{
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
-    PeersInfo,
+    PeersInfo, CellCustody,
 };
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
@@ -33,6 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub struct NoopNetwork<Net = EthNetworkPrimitives> {
     chain_id: u64,
     peers_handle: PeersHandle,
+    cell_custody: CellCustody,
     _marker: PhantomData<Net>,
 }
 
@@ -44,6 +45,7 @@ impl<Net> NoopNetwork<Net> {
         Self {
             chain_id: 1, // mainnet
             peers_handle: PeersHandle::new(tx),
+            cell_custody: CellCustody::default(),
             _marker: PhantomData,
         }
     }
@@ -87,6 +89,10 @@ where
 
     fn chain_id(&self) -> u64 {
         self.chain_id
+    }
+
+    fn cell_custody(&self) -> &CellCustody {
+        &self.cell_custody
     }
 
     fn is_syncing(&self) -> bool {

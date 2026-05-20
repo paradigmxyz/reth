@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
@@ -98,6 +98,7 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
+        let cell_custody = network.cell_custody().clone();
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -111,6 +112,7 @@ where
             tx_pool,
             validator,
             accept_execution_requests_hash,
+            cell_custody,
             is_syncing,
         });
         Self { inner }
@@ -385,10 +387,15 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
-        _custody_columns: Option<B128>,
+        custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
-            .await
+        let res = self
+            .validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
+            .await?;
+        if let Some(custody_columns) = custody_columns {
+            self.inner.cell_custody.set(custody_columns);
+        }
+        Ok(res)
     }
 
     /// Metrics version of `fork_choice_updated_v4`
@@ -1559,6 +1566,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// Engine validator.
     validator: Validator,
     accept_execution_requests_hash: bool,
+    /// Shared blob cell custody bitmap.
+    cell_custody: CellCustody,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
 }
@@ -1854,6 +1863,11 @@ mod tests {
 
         fn chain_id(&self) -> u64 {
             1
+        }
+
+        fn cell_custody(&self) -> &CellCustody {
+            static CELL_CUSTODY: std::sync::OnceLock<CellCustody> = std::sync::OnceLock::new();
+            CELL_CUSTODY.get_or_init(CellCustody::default)
         }
 
         fn is_syncing(&self) -> bool {
