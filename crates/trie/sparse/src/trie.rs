@@ -2,7 +2,7 @@ use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, Spars
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
 use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -79,6 +79,47 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
 
         Ok(self.as_revealed_mut().unwrap())
     }
+
+    /// Reveals a batch of V2 proof nodes into this trie.
+    ///
+    /// If `nodes` contains a node at the empty path it is used to reveal the root (transitioning
+    /// the trie from blind to revealed). Otherwise the trie must already be revealed.
+    ///
+    /// Reserves capacity for the expected number of nodes (including branch children) before
+    /// revealing them.
+    pub fn reveal_v2_proof_nodes(
+        &mut self,
+        nodes: &mut [ProofTrieNodeV2],
+        retain_updates: bool,
+    ) -> SparseTrieResult<()> {
+        let capacity = estimate_v2_proof_capacity(nodes);
+
+        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+        } else {
+            self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
+        trie.reserve_nodes(capacity);
+        trie.reveal_nodes(nodes)?;
+
+        Ok(())
+    }
+}
+
+/// Calculates capacity estimation for V2 proof nodes.
+///
+/// This counts nodes and their children (for branch nodes) to provide proper capacity hints for
+/// `reserve_nodes`.
+fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
+    let mut capacity = nodes.len();
+
+    for node in nodes {
+        if let TrieNodeV2::Branch(branch) = &node.node {
+            capacity += branch.state_mask.count_ones() as usize;
+        }
+    }
+
+    capacity
 }
 
 impl<T: SparseTrieTrait> RevealableSparseTrie<T> {

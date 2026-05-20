@@ -23,10 +23,14 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 use url::Url;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
+
 // Otlp http endpoint is expected to end with this path.
 // See also <https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/#otel_exporter_otlp_traces_endpoint>.
 const HTTP_TRACE_ENDPOINT: &str = "/v1/traces";
 const HTTP_LOGS_ENDPOINT: &str = "/v1/logs";
+const OTEL_EXPORTER_OTLP_TRACES_HEADERS: &str = "OTEL_EXPORTER_OTLP_TRACES_HEADERS";
+const OTEL_EXPORTER_OTLP_LOGS_HEADERS: &str = "OTEL_EXPORTER_OTLP_LOGS_HEADERS";
 
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
@@ -38,7 +42,8 @@ where
 {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = build_resource(otlp_config.service_name.clone());
+    let resource =
+        build_resource(otlp_config.service_name.clone(), otlp_config.service_version.as_deref());
 
     let span_builder = SpanExporter::builder();
 
@@ -85,7 +90,8 @@ pub fn log_layer(
     use opentelemetry_otlp::LogExporter;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
-    let resource = build_resource(otlp_config.service_name.clone());
+    let resource =
+        build_resource(otlp_config.service_name.clone(), otlp_config.service_version.as_deref());
 
     let log_builder = LogExporter::builder();
 
@@ -111,6 +117,8 @@ pub fn log_layer(
 pub struct OtlpConfig {
     /// Service name for trace identification
     service_name: String,
+    /// Optional service version override. Falls back to `CARGO_PKG_VERSION` if `None`.
+    service_version: Option<String>,
     /// Otlp endpoint URL
     endpoint: Url,
     /// Transport protocol, HTTP or gRPC
@@ -135,7 +143,20 @@ impl OtlpConfig {
             );
         }
 
-        Ok(Self { service_name: service_name.into(), endpoint, protocol, sample_ratio })
+        set_otlp_auth_header_from_endpoint(&endpoint, OTEL_EXPORTER_OTLP_TRACES_HEADERS)?;
+        Ok(Self {
+            service_name: service_name.into(),
+            service_version: None,
+            endpoint: endpoint_without_credentials(endpoint),
+            protocol,
+            sample_ratio,
+        })
+    }
+
+    /// Sets the service version for OTLP resource identification.
+    pub fn with_service_version(mut self, version: impl Into<String>) -> Self {
+        self.service_version = Some(version.into());
+        self
     }
 
     /// Returns the service name.
@@ -164,6 +185,8 @@ impl OtlpConfig {
 pub struct OtlpLogsConfig {
     /// Service name for log identification
     service_name: String,
+    /// Optional service version override. Falls back to `CARGO_PKG_VERSION` if `None`.
+    service_version: Option<String>,
     /// Otlp endpoint URL
     endpoint: Url,
     /// Transport protocol, HTTP or gRPC
@@ -177,7 +200,19 @@ impl OtlpLogsConfig {
         endpoint: Url,
         protocol: OtlpProtocol,
     ) -> eyre::Result<Self> {
-        Ok(Self { service_name: service_name.into(), endpoint, protocol })
+        set_otlp_auth_header_from_endpoint(&endpoint, OTEL_EXPORTER_OTLP_LOGS_HEADERS)?;
+        Ok(Self {
+            service_name: service_name.into(),
+            service_version: None,
+            endpoint: endpoint_without_credentials(endpoint),
+            protocol,
+        })
+    }
+
+    /// Sets the service version for OTLP resource identification.
+    pub fn with_service_version(mut self, version: impl Into<String>) -> Self {
+        self.service_version = Some(version.into());
+        self
     }
 
     /// Returns the service name.
@@ -197,11 +232,61 @@ impl OtlpLogsConfig {
 }
 
 // Builds OTLP resource with service information.
-fn build_resource(service_name: impl Into<Value>) -> Resource {
+fn build_resource(service_name: impl Into<Value>, service_version: Option<&str>) -> Resource {
+    let version = service_version.unwrap_or(env!("CARGO_PKG_VERSION"));
     Resource::builder()
         .with_service_name(service_name)
-        .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))], SCHEMA_URL)
+        .with_schema_url([KeyValue::new(SERVICE_VERSION, version.to_string())], SCHEMA_URL)
         .build()
+}
+
+/// Returns an OTLP endpoint URL with username and password removed.
+fn endpoint_without_credentials(mut endpoint: Url) -> Url {
+    if !endpoint.username().is_empty() {
+        endpoint.set_username("").ok();
+    }
+    if endpoint.password().is_some() {
+        endpoint.set_password(None).ok();
+    }
+    endpoint
+}
+
+/// Builds an OTLP `Authorization` header from endpoint `username:password` credentials.
+fn otlp_auth_header_from_endpoint(endpoint: &Url) -> eyre::Result<Option<String>> {
+    let username = endpoint.username();
+    if username.is_empty() && endpoint.password().is_none() {
+        return Ok(None);
+    }
+
+    let Some(password) = endpoint.password() else {
+        eyre::bail!("OTLP endpoint credentials must include both username and password");
+    };
+    if username.is_empty() {
+        eyre::bail!("OTLP endpoint credentials must include both username and password");
+    }
+
+    let credentials = format!("{username}:{password}");
+    let encoded = BASE64_STANDARD.encode(credentials.as_bytes());
+    Ok(Some(format!("Authorization=Basic {encoded}")))
+}
+
+/// Sets the OTLP signal-specific header env var from endpoint credentials if it is unset.
+fn set_otlp_auth_header_from_endpoint(endpoint: &Url, header_env: &str) -> eyre::Result<()> {
+    if std::env::var_os(header_env).is_some() {
+        return Ok(());
+    }
+
+    let Some(auth_header) = otlp_auth_header_from_endpoint(endpoint)? else {
+        return Ok(());
+    };
+
+    // SAFETY: OTLP exporters are initialized during process startup before exporter worker threads
+    // are spawned.
+    unsafe {
+        std::env::set_var(header_env, auth_header);
+    }
+
+    Ok(())
 }
 
 /// Builds the appropriate sampler based on the sample ratio.
@@ -260,5 +345,76 @@ impl OtlpProtocol {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_credentials_from_trace_endpoint_and_preserves_auth_header() {
+        let config = OtlpConfig::new(
+            "reth",
+            "https://user:pass@example.com/v1/traces".parse().unwrap(),
+            OtlpProtocol::Http,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(config.endpoint.as_str(), "https://example.com/v1/traces");
+        assert_eq!(
+            otlp_auth_header_from_endpoint(
+                &"https://user:pass@example.com/v1/traces".parse().unwrap()
+            )
+            .unwrap()
+            .as_deref(),
+            Some("Authorization=Basic dXNlcjpwYXNz")
+        );
+    }
+
+    #[test]
+    fn strips_credentials_from_logs_endpoint_and_preserves_auth_header() {
+        let config = OtlpLogsConfig::new(
+            "reth",
+            "https://logs:secret@example.com/v1/logs".parse().unwrap(),
+            OtlpProtocol::Http,
+        )
+        .unwrap();
+
+        assert_eq!(config.endpoint.as_str(), "https://example.com/v1/logs");
+        assert_eq!(
+            otlp_auth_header_from_endpoint(
+                &"https://logs:secret@example.com/v1/logs".parse().unwrap()
+            )
+            .unwrap()
+            .as_deref(),
+            Some("Authorization=Basic bG9nczpzZWNyZXQ=")
+        );
+    }
+
+    #[test]
+    fn leaves_endpoint_without_credentials_unchanged() {
+        let config = OtlpConfig::new(
+            "reth",
+            "https://example.com/v1/traces".parse().unwrap(),
+            OtlpProtocol::Http,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(config.endpoint.as_str(), "https://example.com/v1/traces");
+        assert_eq!(otlp_auth_header_from_endpoint(config.endpoint()).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_partial_credentials() {
+        assert!(OtlpConfig::new(
+            "reth",
+            "https://user@example.com/v1/traces".parse().unwrap(),
+            OtlpProtocol::Http,
+            None,
+        )
+        .is_err());
     }
 }

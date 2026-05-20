@@ -435,7 +435,7 @@ pub trait LoadPendingBlock:
         Ok(ExecutedBlock::new(
             block.into(),
             Arc::new(execution_outcome),
-            ComputedTrieData::without_trie_input(
+            ComputedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(trie_updates.into_sorted()),
             ),

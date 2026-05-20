@@ -26,7 +26,7 @@ reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-reth-tracing.workspace = true
+reth-tracing = { workspace = true, features = ["std"] }
 reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
 reth-discv5.workspace = true
