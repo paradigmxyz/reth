@@ -101,7 +101,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -1211,13 +1211,17 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = debug_span!(
-                target: "engine::tree",
-                "execute tx",
-                tx_index = senders.len() - 1,
-            )
-            .entered();
-            trace!(target: "engine::tree", "Executing transaction");
+            let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
+                debug_span!(
+                    target: "engine::tree",
+                    "execute tx",
+                    tx_index = senders.len() - 1,
+                )
+                .entered()
+            });
+            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
+                trace!(target: "engine::tree", "Executing transaction");
+            }
 
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
