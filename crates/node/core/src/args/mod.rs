@@ -80,5 +80,9 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 mod storage;
 pub use storage::{DefaultStorageValues, StorageArgs};
 
+/// `JitArgs` for configuring JIT compilation of EVM bytecode.
+mod jit;
+pub use jit::JitArgs;
+
 mod error;
 pub mod types;
