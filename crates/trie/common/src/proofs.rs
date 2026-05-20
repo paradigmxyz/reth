@@ -768,7 +768,7 @@ impl AccountProof {
 
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
-            storage_hash.is_zero() &&
+            (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
             (code_hash == KECCAK_EMPTY || code_hash.is_zero())
         {
             // Account does not exist in state. Return `None` here to prevent proof
@@ -1234,6 +1234,24 @@ mod tests {
 
         let acc: AccountProof = geth_proof.into();
         // Should be interpreted as a non-existent account (info = None)
+        assert!(acc.info.is_none());
+        assert_eq!(acc.storage_root, EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "eip1186")]
+    fn from_eip1186_proof_accepts_empty_hashes() {
+        let proof = alloy_rpc_types_eth::EIP1186AccountProofResponse {
+            address: Address::random(),
+            balance: U256::ZERO,
+            code_hash: KECCAK_EMPTY,
+            nonce: 0,
+            storage_hash: EMPTY_ROOT_HASH,
+            account_proof: vec![],
+            storage_proof: vec![],
+        };
+
+        let acc: AccountProof = proof.into();
         assert!(acc.info.is_none());
         assert_eq!(acc.storage_root, EMPTY_ROOT_HASH);
     }
