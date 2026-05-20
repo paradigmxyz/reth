@@ -3,84 +3,84 @@
     {
       "query": "sum(reth_database_transaction_opened_total{mode=\"read-write\"})",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "sum(reth_database_transaction_opened_total{mode=\"read-only\"})",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     }
   ],
   "histograms": [
     {
       "query": "reth_sync_block_validation_state_root_histogram",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_trie_proof_task_account_worker_idle_time_seconds",
       "target": "increase",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_trie_proof_task_storage_worker_idle_time_seconds",
       "target": "increase",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_tree_root_sparse_trie_idle_time_seconds",
       "target": "increase",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_tree_root_hashing_task_idle_time_seconds",
       "target": "increase",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_database_transaction_close_duration_seconds",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_pruner_duration_seconds",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_commit_mdbx",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_commit_rocksdb",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_commit_sf",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_mdbx",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_rocksdb",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_sf",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     },
     {
       "query": "reth_sync_block_validation_deferred_trie_compute_duration",
       "target": "decrease",
-      "floor_pct": 16.0
+      "floor_pct": 17.0
     }
   ]
 }
