@@ -1,48 +1,45 @@
 ---
-description: Pruning and full node options in Reth.
+description: Pruning and node modes in Reth.
 ---
 
-# Pruning & Full Node
+# Pruning & Node Modes
 
-:::info
-Pruning and full node are new features of Reth,
-and we will be happy to hear about your experience using them either
-on [GitHub](https://github.com/paradigmxyz/reth/issues) or in the [Telegram group](https://t.me/paradigm_reth).
-:::
+Reth supports archive, full, minimal, and custom-pruned nodes. Archive mode is
+the default when no pruning profile or pruning configuration is set.
 
-By default, Reth runs as an archive node. Such nodes have all historical blocks and the state at each of these blocks
-available for querying and tracing.
-
-Reth also supports pruning of historical data and running as a full node. This chapter will walk through
-the steps for running Reth as a full node, what caveats to expect and how to configure your own pruned node.
+For new databases, these modes run on the default [storage V2 layout](/run/storage).
+Storage V2 controls where data is stored; pruning controls how much historical
+data is retained.
 
 ## Basic concepts
 
--   Archive node – Reth node that has all historical data from genesis.
--   Pruned node – Reth node that has its historical data pruned partially or fully through
-    a [custom configuration](/run/configuration#the-prune-section).
--   Full Node – Reth node that has the latest state and historical data for only the last 10064 blocks available
-    for querying in the same way as an archive node.
+-   Archive node - retains all historical data from genesis.
+-   Full node - keeps current state and a 10,064-block historical state window,
+    while pruning selected historical data.
+-   Minimal node - uses the most aggressive built-in pruning profile for small
+    disk usage.
+-   Custom-pruned node - uses [custom pruning configuration](/run/configuration#the-prune-section)
+    or individual `--prune.*` flags.
 
-The node type that was chosen when first [running a node](/run/overview) **cannot** be changed after
-the initial sync. Turning Archive into Pruned, or Pruned into Full is not supported.
+Pruning is destructive. Once historical data has been pruned, Reth cannot serve
+that data again unless you restore it from a snapshot or resync with a mode that
+retains it.
 
 ## Modes
 
 ### Archive Node
 
-Default mode, follow the steps from the previous chapter on [how to run on mainnet or official testnets](/run/ethereum).
+Archive mode is the default. Follow the steps from
+[Running Reth on Ethereum Mainnet or testnets](/run/ethereum) and start Reth
+without a pruning profile:
 
-### Pruned Node
-
-To run Reth as a pruned node configured through a [custom configuration](/run/configuration#the-prune-section),
-modify the `reth.toml` file and run Reth in the same way as archive node by following the steps from
-the previous chapter on [how to run on mainnet or official testnets](/run/ethereum).
+```bash
+reth node
+```
 
 ### Full Node
 
-To run Reth as a full node, follow the steps from the previous chapter on
-[how to run on mainnet or official testnets](/run/ethereum), and add a `--full` flag. For example:
+Use `--full` to run the default full-node pruning profile:
 
 ```bash
 reth node \
@@ -52,10 +49,19 @@ reth node \
     --authrpc.port 8551
 ```
 
+Full mode configures:
+
+-   sender recovery pruning: full
+-   transaction lookup pruning: disabled
+-   receipts pruning: retain the last 10,064 blocks
+-   account history pruning: retain the last 10,064 blocks
+-   storage history pruning: retain the last 10,064 blocks
+-   bodies pruning: prune pre-Merge bodies on chains with a Paris activation
+
 ### Minimal Storage Mode
 
-To run Reth in minimal storage mode, follow the steps from the previous chapter on
-[how to run on mainnet or official testnets](/run/ethereum), and add a `--minimal` flag. For example:
+Use [`--minimal`](/run/storage/minimal) to run the most aggressive built-in
+pruning profile:
 
 ```bash
 reth node \
@@ -65,69 +71,31 @@ reth node \
     --authrpc.port 8551
 ```
 
-Minimal storage mode is a preconfigured pruned node profile that aims to minimize disk usage by fully
-pruning sender recovery, transaction lookup, and receipts, and by keeping only the last 10,064 blocks
-of account history, storage history, and block bodies with smaller static file segments.
+Minimal mode configures:
 
-## Size
+-   sender recovery pruning: full
+-   transaction lookup pruning: full
+-   receipts pruning: retain the last 64 blocks
+-   account history pruning: retain the last 10,064 blocks
+-   storage history pruning: retain the last 10,064 blocks
+-   bodies pruning: retain the last 10,064 blocks
+-   static file segments: 10,000 blocks per file
 
-All numbers are as of April 2024 at block number 19.6M for mainnet.
+### Custom Pruned Node
 
-### Archive Node
+Use `reth.toml` or individual `--prune.*` flags to configure each pruning
+segment yourself. See the [pruning configuration](/run/configuration#the-prune-section)
+reference for the TOML format.
 
-Archive node occupies at least 2.14TB.
+## Disk usage
 
-You can track the growth of Reth archive node size with our
-[public Ethereum Grafana dashboard](https://reth.ithaca.xyz/public-dashboards/a49fa110dc9149298fa6763d5c89c8c0).
-[public Base Grafana dashboard](https://reth.ithaca.xyz/public-dashboards/b3e9f2e668ee4b86960b7fac691b5e64).
-
-### Pruned Node
-
-Different segments take up different amounts of disk space.
-If pruned fully, this is the total freed space you'll get, per segment:
-
-| Segment            | Size  |
-| ------------------ | ----- |
-| Sender Recovery    | 85GB  |
-| Transaction Lookup | 200GB |
-| Receipts           | 250GB |
-| Account History    | 235GB |
-| Storage History    | 590GB |
-
-### Full Node
-
-Full node occupies at least 1.13TB.
-
-Essentially, the full node is the same as following configuration for the pruned node:
-
-```toml
-[prune]
-block_interval = 5
-
-[prune.segments]
-sender_recovery = "full"
-# transaction_lookup is not pruned
-receipts = { before = 11052984 } # Beacon Deposit Contract deployment block: https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-account_history = { distance = 10_064 }
-storage_history = { distance = 10_064 }
-
-[prune.segments.receipts_log_filter]
-# Prune all receipts, leaving only those which contain logs from address `0x00000000219ab540356cbb839cbe05303d7705fa`,
-# starting from the block 11052984. This leaves receipts with the logs from the Beacon Deposit Contract.
-"0x00000000219ab540356cbb839cbe05303d7705fa" = { before = 11052984 }
-```
-
-Meaning, it prunes:
-
--   Account History and Storage History up to the last 10064 blocks
--   All of Sender Recovery data. The caveat is that it's pruned gradually after the initial sync
-    is completed, so the disk space is reclaimed slowly.
--   Receipts up to the last 10064 blocks, preserving all receipts with the logs from Beacon Deposit Contract
+Disk usage changes as networks grow and depends on the selected node mode. For
+current storage V2 measurements, see [Storage V2](/run/storage#disk-savings).
 
 ## RPC support
 
-As it was mentioned in the [pruning configuration chapter](/run/configuration#the-prune-section), there are several segments which can be pruned
-independently of each other:
+The [pruning configuration](/run/configuration#the-prune-section) can prune
+several independent data segments:
 
 -   Sender Recovery
 -   Transaction Lookup
@@ -135,8 +103,8 @@ independently of each other:
 -   Account History
 -   Storage History
 
-Pruning of each of these segments disables different RPC methods, because the historical data or lookup indexes
-become unavailable.
+Pruning a segment limits RPC methods that need the removed historical data or
+lookup indexes.
 
 ### Full Node
 
@@ -156,7 +124,7 @@ The following tables describe RPC methods available in the full node.
 | `debug_getBadBlocks`                |                                                            |
 | `debug_getRawBlock`                 |                                                            |
 | `debug_getRawHeader`                |                                                            |
-| `debug_getRawReceipts`              | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `debug_getRawReceipts`              | Only for the last 10064 blocks                             |
 | `debug_getRawTransaction`           |                                                            |
 | `debug_getRawTransactions`          |                                                            |
 | `debug_stateRootWithUpdates`        | Only for the last 10064 blocks                             |
@@ -182,19 +150,19 @@ The following tables describe RPC methods available in the full node.
 | `eth_getBalance`                          | Only for the last 10064 blocks                             |
 | `eth_getBlockByHash`                      |                                                            |
 | `eth_getBlockByNumber`                    |                                                            |
-| `eth_getBlockReceipts`                    | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getBlockReceipts`                    | Only for the last 10064 blocks                             |
 | `eth_getBlockTransactionCountByHash`      |                                                            |
 | `eth_getBlockTransactionCountByNumber`    |                                                            |
 | `eth_getCode`                             |                                                            |
 | `eth_getFilterChanges`                    |                                                            |
-| `eth_getFilterLogs`                       | Only for the last 10064 blocks and Beacon Deposit Contract |
-| `eth_getLogs`                             | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getFilterLogs`                       | Only for the last 10064 blocks                             |
+| `eth_getLogs`                             | Only for the last 10064 blocks                             |
 | `eth_getStorageAt`                        | Only for the last 10064 blocks                             |
 | `eth_getTransactionByBlockHashAndIndex`   |                                                            |
 | `eth_getTransactionByBlockNumberAndIndex` |                                                            |
 | `eth_getTransactionByHash`                |                                                            |
 | `eth_getTransactionCount`                 | Only for the last 10064 blocks                             |
-| `eth_getTransactionReceipt`               | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getTransactionReceipt`               | Only for the last 10064 blocks                             |
 | `eth_getUncleByBlockHashAndIndex`         |                                                            |
 | `eth_getUncleByBlockNumberAndIndex`       |                                                            |
 | `eth_getUncleCountByBlockHash`            |                                                            |

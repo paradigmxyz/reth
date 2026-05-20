@@ -238,7 +238,7 @@ async function success({ core, context }) {
   let postedToChannel = false;
   if (channel) {
     const changes = summary.changes || {};
-    const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
+    const hasImprovement = Object.values(changes).some(c => !c.informational && c.sig === 'good');
     if (hasImprovement) {
       await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
