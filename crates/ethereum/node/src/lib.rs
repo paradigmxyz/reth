@@ -30,3 +30,5 @@ pub mod payload;
 
 pub mod engine;
 pub use engine::EthereumEngineValidator;
+
+pub mod engine_ssz_proxy;
