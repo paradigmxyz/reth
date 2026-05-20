@@ -724,18 +724,48 @@ pub struct AccountProof {
 
 #[cfg(feature = "eip1186")]
 impl AccountProof {
-    /// Convert into an EIP-1186 account proof response
+    /// Convert into an EIP-1186 account proof response.
+    ///
+    /// For non-existent accounts, this returns `KECCAK_EMPTY` for `codeHash` and
+    /// `EMPTY_ROOT_HASH` for `storageHash`, matching reth's default behavior.
+    ///
+    /// Use [`Self::into_eip1186_response_with`] to customize the behavior for
+    /// non-existent accounts (e.g. returning `B256::ZERO` for geth compatibility).
     pub fn into_eip1186_response(
         self,
         slots: Vec<alloy_serde::JsonStorageKey>,
     ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        self.into_eip1186_response_with(slots, false)
+    }
+
+    /// Convert into an EIP-1186 account proof response, with optional geth-compatible
+    /// zero hashes for non-existent accounts.
+    ///
+    /// When `zero_empty_account` is `true`, non-existent accounts return `B256::ZERO`
+    /// for both `codeHash` and `storageHash`, matching geth's behavior since v1.13.4
+    /// ([go-ethereum#28357](https://github.com/ethereum/go-ethereum/pull/28357)).
+    ///
+    /// When `false`, returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH` (reth default).
+    ///
+    /// See: <https://github.com/ethereum/go-ethereum/issues/28441>
+    pub fn into_eip1186_response_with(
+        self,
+        slots: Vec<alloy_serde::JsonStorageKey>,
+        zero_empty_account: bool,
+    ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        let is_non_existent = self.info.is_none();
         let info = self.info.unwrap_or_default();
+        let (code_hash, storage_hash) = if is_non_existent && zero_empty_account {
+            (B256::ZERO, B256::ZERO)
+        } else {
+            (info.get_bytecode_hash(), self.storage_root)
+        };
         alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: self.address,
             balance: info.balance,
-            code_hash: info.get_bytecode_hash(),
+            code_hash,
             nonce: info.nonce,
-            storage_hash: self.storage_root,
+            storage_hash,
             account_proof: self.proof,
             storage_proof: self
                 .storage_proofs
@@ -1254,6 +1284,50 @@ mod tests {
         let acc: AccountProof = proof.into();
         assert!(acc.info.is_none());
         assert_eq!(acc.storage_root, EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "eip1186")]
+    fn into_eip1186_response_zero_empty_account() {
+        // Non-existent account (info = None)
+        let acc = AccountProof {
+            address: Address::random(),
+            info: None,
+            proof: vec![],
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: vec![],
+        };
+
+        // Default behavior: KECCAK_EMPTY / EMPTY_ROOT_HASH
+        let rpc_default = acc.clone().into_eip1186_response(Vec::new());
+        assert_eq!(rpc_default.code_hash, KECCAK_EMPTY);
+        assert_eq!(rpc_default.storage_hash, EMPTY_ROOT_HASH);
+
+        // zero_empty_account = false: same as default
+        let rpc_compat_off = acc.clone().into_eip1186_response_with(Vec::new(), false);
+        assert_eq!(rpc_compat_off.code_hash, KECCAK_EMPTY);
+        assert_eq!(rpc_compat_off.storage_hash, EMPTY_ROOT_HASH);
+
+        // zero_empty_account = true: B256::ZERO (geth-compat)
+        let rpc_compat_on = acc.clone().into_eip1186_response_with(Vec::new(), true);
+        assert_eq!(rpc_compat_on.code_hash, B256::ZERO);
+        assert_eq!(rpc_compat_on.storage_hash, B256::ZERO);
+
+        // Existing account should NOT be affected by zero_empty_account
+        let existing_acc = AccountProof {
+            address: Address::random(),
+            info: Some(Account {
+                nonce: 42,
+                balance: U256::from(100),
+                bytecode_hash: Some(KECCAK_EMPTY),
+            }),
+            proof: vec![],
+            storage_root: B256::random(),
+            storage_proofs: vec![],
+        };
+        let rpc_existing = existing_acc.clone().into_eip1186_response_with(Vec::new(), true);
+        assert_eq!(rpc_existing.code_hash, KECCAK_EMPTY);
+        assert_eq!(rpc_existing.storage_hash, existing_acc.storage_root);
     }
 
     #[test]
