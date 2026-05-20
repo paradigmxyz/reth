@@ -1309,7 +1309,7 @@ mod tests {
         assert_eq!(rpc_compat_off.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = true: B256::ZERO (geth-compat)
-        let rpc_compat_on = acc.clone().into_eip1186_response_with(Vec::new(), true);
+        let rpc_compat_on = acc.into_eip1186_response_with(Vec::new(), true);
         assert_eq!(rpc_compat_on.code_hash, B256::ZERO);
         assert_eq!(rpc_compat_on.storage_hash, B256::ZERO);
 
