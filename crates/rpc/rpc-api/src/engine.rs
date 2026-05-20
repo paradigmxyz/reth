@@ -133,6 +133,15 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// `slotNumber` field in the `payloadAttributes`, if payload attributes
     /// are provided.
     ///
+    /// `custody_columns` maps to the third positional JSON-RPC parameter, `custodyColumns`,
+    /// the custody-column bitmask used for [EIP-8070] sparse blobpool signaling. It is
+    /// `DATA|null` and must be 16 bytes when set. When calling `engine_forkchoiceUpdatedV4`
+    /// with custody columns but without payload attributes, the second parameter must still
+    /// be supplied as `null`, for example:
+    /// `[forkchoiceState, null, custodyColumns]`.
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+    ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
     #[method(name = "forkchoiceUpdatedV4")]
     async fn fork_choice_updated_v4(
