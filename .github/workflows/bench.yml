@@ -386,6 +386,11 @@ jobs:
               return;
             }
 
+            const releaseRef = (ref) => /^v\d+\.\d+\.\d+/.test(ref || '');
+            if (releaseRef(baseline) || releaseRef(feature) || '${{ github.ref_type }}' === 'tag') {
+              otlp = 'false';
+            }
+
             // Resolve display names for baseline/feature
             let baselineName = baseline || 'main';
             let featureName = feature;
