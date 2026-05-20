@@ -811,9 +811,6 @@ pub trait DedupPayload {
 /// Value in [`PartiallyValidData`] map obtained from an announcement.
 pub type Eth68TxMetadata = Option<(u8, usize)>;
 
-/// Value in [`PartiallyValidData`] map obtained from an announcement.
-pub type Eth72TxMetadata = Option<(u8, usize)>;
-
 impl DedupPayload for NewPooledTransactionHashes {
     type Value = Eth68TxMetadata;
 
@@ -835,7 +832,7 @@ impl DedupPayload for NewPooledTransactionHashes {
 }
 
 impl DedupPayload for NewPooledTransactionHashes72 {
-    type Value = Eth72TxMetadata;
+    type Value = Eth68TxMetadata;
 
     fn is_empty(&self) -> bool {
         self.hashes.is_empty()
@@ -1017,7 +1014,7 @@ impl<V> PartiallyValidData<V> {
     }
 
     /// Returns the version of the message this data was received in if different versions of the
-    /// message exists, either [`Eth66`](EthVersion::Eth66) or [`Eth68`](EthVersion::Eth68).
+    /// message exist.
     pub const fn msg_version(&self) -> Option<EthVersion> {
         self.version
     }
