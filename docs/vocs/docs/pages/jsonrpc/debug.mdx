@@ -139,6 +139,16 @@ Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a bl
 | ------ | ---------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_executionWitnessByBlockHash", "params": [hash]}` |
 
+## `debug_intermediateRoots`
+
+Executes a block and returns a list of intermediate state roots: the state root after each transaction within the block. Accepts both canonical and non-canonical (bad or side) blocks by hash.
+
+The optional second argument accepts the same tracer options as [`debug_traceBlock`](#debug_traceblock).
+
+| Client | Method invocation                                                              |
+| ------ | ------------------------------------------------------------------------------ |
+| RPC    | `{"method": "debug_intermediateRoots", "params": [block_hash, opts]}` |
+
 ## `debug_accountAt`
 
 Returns account information, including the storage root, after replaying a block through the transaction at the given index.
@@ -170,3 +180,19 @@ Returns the storage at the given block height and transaction index. The result 
 | Client | Method invocation                                                                                 |
 | ------ | ------------------------------------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_storageRangeAt", "params": [block_hash, tx_index, address, key_start, limit]}` |
+
+## `debug_chainConfig`
+
+Returns the chain's genesis configuration as a `ChainConfig` object. Useful for confirming the active network parameters (chain ID, hard fork block numbers and timestamps, consensus settings) without parsing the genesis file manually.
+
+| Client | Method invocation                                    |
+| ------ | ---------------------------------------------------- |
+| RPC    | `{"method": "debug_chainConfig", "params": []}` |
+
+## `debug_codeByHash`
+
+Returns the contract bytecode associated with the given code hash at the specified block. If no block identifier is provided it defaults to `latest`. Returns `null` when no bytecode is found for the hash.
+
+| Client | Method invocation                                                        |
+| ------ | ------------------------------------------------------------------------ |
+| RPC    | `{"method": "debug_codeByHash", "params": [code_hash, block]}` |
