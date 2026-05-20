@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       blocks:
-        description: "Number of blocks to benchmark (default: 500, big blocks: 65)"
+        description: "Number of blocks to benchmark (default: 500, big blocks: 30)"
         required: false
         default: ""
         type: string
@@ -89,7 +89,7 @@ on:
       otlp:
         description: "Export OTLP traces and logs"
         required: false
-        default: "false"
+        default: "true"
         type: boolean
 
 env:
@@ -191,7 +191,7 @@ jobs:
               if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
               return null;
             };
-            const defaultBlocks = (isBigBlocks) => isBigBlocks ? '65' : '500';
+            const defaultBlocks = (isBigBlocks) => isBigBlocks ? '30' : '500';
             const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
             const defaultRunPairs = (isBigBlocks) => isBigBlocks ? '10' : '6';
             const benchRunOrder = (runPairs) => {
@@ -223,7 +223,7 @@ jobs:
               bal = '${{ github.event.inputs.bal }}' || 'false';
               var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
               explicitRunPairs = runPairs !== '';
-              var otlp = '${{ github.event.inputs.otlp }}' === 'true' ? 'true' : 'false';
+              var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -252,7 +252,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -631,7 +631,6 @@ jobs:
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      TXGEN_REV: f439eec4e0f6dbe0675dd3bac8192d9f0299d409
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
@@ -718,6 +717,27 @@ jobs:
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         continue-on-error: true
       - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
+
+      - name: Mask OTLP endpoints
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const envName of ['BENCH_OTLP_TRACES_ENDPOINT', 'BENCH_OTLP_LOGS_ENDPOINT']) {
+              const endpoint = process.env[envName] || '';
+              if (!endpoint) {
+                continue;
+              }
+
+              core.setSecret(endpoint);
+              try {
+                const url = new URL(endpoint);
+                url.username = '';
+                url.password = '';
+                core.setSecret(url.toString());
+              } catch {
+                // The CLI parser will report malformed endpoints later; this step only masks.
+              }
+            }
 
       - name: Install dependencies
         env:
@@ -1077,9 +1097,8 @@ jobs:
         id: metrics
         if: "!cancelled()"
         run: |
-          LAST_RUN_DURATION=$(( $(date +%s) - ${BENCH_LAST_RUN_START:-$BENCH_REFERENCE_EPOCH} ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
-          TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
+          TO_MS=$(( $(date +%s) * 1000 ))
           GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
