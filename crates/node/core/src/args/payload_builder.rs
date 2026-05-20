@@ -6,7 +6,7 @@ use clap::{
     Arg, Args, Command,
 };
 use reth_cli_util::{
-    parse_duration_from_secs, parse_duration_from_secs_or_ms,
+    parse_duration_from_secs, parse_non_zero_duration_from_secs_or_ms,
     parsers::format_duration_as_secs_or_ms,
 };
 use std::{ffi::OsStr, sync::OnceLock, time::Duration};
@@ -102,7 +102,7 @@ pub struct PayloadBuilderArgs {
     ///   * `1` -> 1 second
     #[arg(
         long = "builder.interval",
-        value_parser = parse_duration_from_secs_or_ms,
+        value_parser = parse_non_zero_duration_from_secs_or_ms,
         default_value = DefaultPayloadBuilderValues::get_global().interval.as_str(),
         value_name = "DURATION"
     )]
@@ -135,7 +135,7 @@ impl Default for PayloadBuilderArgs {
         let defaults = DefaultPayloadBuilderValues::get_global();
         Self {
             extra_data: Bytes::from(defaults.extra_data.as_bytes().to_vec()),
-            interval: parse_duration_from_secs_or_ms(defaults.interval.as_str()).unwrap(),
+            interval: parse_non_zero_duration_from_secs_or_ms(defaults.interval.as_str()).unwrap(),
             gas_limit: None,
             deadline: Duration::from_secs(defaults.deadline.parse().unwrap()),
             max_payload_tasks: defaults.max_payload_tasks,
@@ -327,5 +327,15 @@ mod tests {
             CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50ms"])
                 .args;
         assert_eq!(args.interval, Duration::from_millis(50));
+    }
+
+    #[test]
+    fn test_args_reject_zero_interval() {
+        assert!(CommandParser::<PayloadBuilderArgs>::try_parse_from([
+            "reth",
+            "--builder.interval",
+            "0"
+        ])
+        .is_err());
     }
 }

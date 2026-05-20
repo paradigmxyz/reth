@@ -31,6 +31,24 @@ pub fn parse_duration_from_secs_or_ms(
     }
 }
 
+/// Helper to parse a non-zero [`Duration`] from seconds.
+pub fn parse_non_zero_duration_from_secs(arg: &str) -> eyre::Result<Duration> {
+    ensure_non_zero_duration(parse_duration_from_secs(arg)?)
+}
+
+/// Helper to parse a non-zero [`Duration`] from seconds or milliseconds.
+pub fn parse_non_zero_duration_from_secs_or_ms(arg: &str) -> eyre::Result<Duration> {
+    ensure_non_zero_duration(parse_duration_from_secs_or_ms(arg)?)
+}
+
+fn ensure_non_zero_duration(duration: Duration) -> eyre::Result<Duration> {
+    if duration.is_zero() {
+        eyre::bail!("duration must be greater than zero")
+    }
+
+    Ok(duration)
+}
+
 /// Helper to format a [Duration] to the format that can be parsed by
 /// [`parse_duration_from_secs_or_ms`].
 pub fn format_duration_as_secs_or_ms(duration: Duration) -> String {

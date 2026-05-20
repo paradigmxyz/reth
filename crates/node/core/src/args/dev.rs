@@ -1,9 +1,8 @@
 //! clap [Args](clap::Args) for Dev testnet configuration
 
-use std::time::Duration;
-
 use clap::Args;
 use humantime::parse_duration;
+use std::time::Duration;
 
 const DEFAULT_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
@@ -37,7 +36,7 @@ pub struct DevArgs {
         long = "dev.block-time",
         help_heading = "Dev testnet",
         conflicts_with = "block_max_transactions",
-        value_parser = parse_duration,
+        value_parser = parse_non_zero_duration,
         verbatim_doc_comment
     )]
     pub block_time: Option<Duration>,
@@ -80,6 +79,15 @@ impl Default for DevArgs {
             dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
         }
     }
+}
+
+fn parse_non_zero_duration(arg: &str) -> eyre::Result<Duration> {
+    let duration = humantime::parse_duration(arg)?;
+    if duration.is_zero() {
+        eyre::bail!("duration must be greater than zero")
+    }
+
+    Ok(duration)
 }
 
 #[cfg(test)]
@@ -175,6 +183,14 @@ mod tests {
             "1s",
         ]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn test_parse_dev_args_reject_zero_block_time() {
+        let result =
+            CommandParser::<DevArgs>::try_parse_from(["reth", "--dev", "--dev.block-time", "0s"]);
+
+        assert!(result.is_err());
     }
 
     #[test]

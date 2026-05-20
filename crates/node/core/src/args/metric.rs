@@ -1,5 +1,5 @@
 use clap::Parser;
-use reth_cli_util::{parse_duration_from_secs, parse_socket_address};
+use reth_cli_util::{parse_non_zero_duration_from_secs, parse_socket_address};
 use std::{net::SocketAddr, time::Duration};
 
 /// Default push gateway interval in seconds.
@@ -30,7 +30,7 @@ pub struct MetricArgs {
     #[arg(
         long = "metrics.prometheus.push.interval",
         default_value = "5",
-        value_parser = parse_duration_from_secs,
+        value_parser = parse_non_zero_duration_from_secs,
         value_name = "SECONDS",
         help_heading = "Metrics"
     )]
@@ -44,5 +44,40 @@ impl Default for MetricArgs {
             push_gateway_url: None,
             push_gateway_interval: Duration::from_secs(DEFAULT_PUSH_GATEWAY_INTERVAL_SECS),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{Args, Parser};
+
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn metrics_push_interval_rejects_zero() {
+        let result = CommandParser::<MetricArgs>::try_parse_from([
+            "reth",
+            "--metrics.prometheus.push.interval",
+            "0",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn metrics_push_interval_accepts_positive_duration() {
+        let args = CommandParser::<MetricArgs>::parse_from([
+            "reth",
+            "--metrics.prometheus.push.interval",
+            "10",
+        ])
+        .args;
+
+        assert_eq!(args.push_gateway_interval, Duration::from_secs(10));
     }
 }

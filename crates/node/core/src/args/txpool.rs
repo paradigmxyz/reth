@@ -4,7 +4,9 @@ use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::{builder::Resettable, Args};
-use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
+use reth_cli_util::{
+    parse_non_zero_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms,
+};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
@@ -392,7 +394,7 @@ pub struct TxPoolArgs {
     pub max_new_pending_txs_notifications: usize,
 
     /// Maximum amount of time non-executable transaction are queued.
-    #[arg(long = "txpool.lifetime", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION", default_value = format_duration_as_secs_or_ms(DefaultTxPoolValues::get_global().max_queued_lifetime))]
+    #[arg(long = "txpool.lifetime", value_parser = parse_non_zero_duration_from_secs_or_ms, value_name = "DURATION", default_value = format_duration_as_secs_or_ms(DefaultTxPoolValues::get_global().max_queued_lifetime))]
     pub max_queued_lifetime: Duration,
 
     /// Path to store the local transaction backup at, to survive node restarts.
@@ -587,6 +589,14 @@ mod tests {
             CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
 
         assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
+    #[test]
+    fn txpool_parse_max_tx_lifetime_rejects_zero() {
+        let result =
+            CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "0"]);
+
+        assert!(result.is_err(), "Expected an error for zero duration");
     }
 
     #[test]
