@@ -167,6 +167,11 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 }
 
+/// Pauses JIT helper execution while validating imported payloads.
+///
+/// Validation still queues JIT work and can use resident compiled code, but helper execution is
+/// paused during validation to minimize latency. Queued work resumes when validation exits, so JIT
+/// compilation is biased toward idle periods instead of competing with payload validation.
 struct JitPauseGuard<Evm: ConfigureEvm>(Evm);
 
 impl<Evm: ConfigureEvm> JitPauseGuard<Evm> {
@@ -979,7 +984,7 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm_config = self.evm_config.clone().with_jit(true);
+            let evm_config = self.evm_config.clone().with_jit_support();
             let evm = evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)

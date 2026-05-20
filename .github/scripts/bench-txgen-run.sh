@@ -81,12 +81,12 @@ call_reth_jit() {
   local response
   if ! response=$(curl -sf http://127.0.0.1:8545 -X POST \
     -H 'Content-Type: application/json' \
-    -d "{\"jsonrpc\":\"2.0\",\"method\":\"debug_rethJit\",\"params\":[\"${action}\"],\"id\":1}"); then
-    echo "::error::debug_rethJit ${action} request failed"
+    -d "{\"jsonrpc\":\"2.0\",\"method\":\"reth_jit\",\"params\":[\"${action}\"],\"id\":1}"); then
+    echo "::error::reth_jit ${action} request failed"
     exit 1
   fi
   if jq -e '.error? != null' <<< "$response" > /dev/null 2>&1; then
-    echo "::error::debug_rethJit ${action} failed: ${response}"
+    echo "::error::reth_jit ${action} failed: ${response}"
     exit 1
   fi
 }

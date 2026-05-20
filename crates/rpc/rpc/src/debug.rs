@@ -24,7 +24,7 @@ use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
-use reth_rpc_api::{DebugApiServer, RethJitAction};
+use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -988,26 +988,6 @@ where
 
     async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
         Ok(self.provider().chain_spec().genesis().config.clone())
-    }
-
-    async fn debug_reth_jit(&self, action: RethJitAction) -> RpcResult<()> {
-        let Some(jit_backend) = self.eth_api().evm_config().jit_backend() else {
-            return Ok(());
-        };
-
-        match action {
-            RethJitAction::Enable => jit_backend
-                .set_enabled(true)
-                .map_err(|err| EthApiError::Internal(RethError::msg(err)))?,
-            RethJitAction::Disable => jit_backend
-                .set_enabled(false)
-                .map_err(|err| EthApiError::Internal(RethError::msg(err)))?,
-            RethJitAction::Pause => jit_backend.pause(),
-            RethJitAction::Unpause => jit_backend.resume(),
-            RethJitAction::Clear => jit_backend.clear(),
-        }
-
-        Ok(())
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {

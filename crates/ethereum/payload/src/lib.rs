@@ -187,7 +187,7 @@ where
         .with_bal_builder_if(is_amsterdam)
         .build();
 
-    let evm_config = evm_config.with_jit(true);
+    let evm_config = evm_config.with_jit_support();
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,

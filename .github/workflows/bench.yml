@@ -760,7 +760,7 @@ jobs:
           fi
 
           # llvm
-          sudo .github/scripts/install_llvm_ubuntu.sh
+          .github/scripts/install_llvm.sh ubuntu
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then

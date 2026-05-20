@@ -40,7 +40,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
-      - run: sudo .github/scripts/install_llvm_ubuntu.sh
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -94,7 +94,7 @@ jobs:
           URL="https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_TESTS_TAG}/fixtures_stable.tar.gz"
           curl -L "$URL" | tar -xz --strip-components=1 -C testing/ef-tests/execution-spec-tests
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
-      - run: sudo .github/scripts/install_llvm_ubuntu.sh
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@1f2425cdb59f8fffb99ee16a5968edf6f57a2b93 # v2.75.24
         with:
@@ -118,7 +118,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
-      - run: sudo .github/scripts/install_llvm_ubuntu.sh
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1

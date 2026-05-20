@@ -264,13 +264,27 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().evm_factory()
     }
 
-    /// Returns a config with JIT enabled or disabled for subsequently created EVMs, if supported.
+    /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
+    ///
+    /// This is one of three gates required before an EVM can execute JIT-compiled code: the binary
+    /// must be built with the `jit` feature, runtime compilation must be enabled by `--jit` or the
+    /// `reth_jit` RPC method, and this local support flag must be enabled for the config that
+    /// creates the EVM.
     #[auto_impl(keep_default_for(&, Arc))]
-    fn with_jit(self, _enabled: bool) -> Self
+    fn with_jit_support_enabled(self, _enabled: bool) -> Self
     where
         Self: Sized,
     {
         self
+    }
+
+    /// Returns a config with local JIT support enabled for subsequently created EVMs, if supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support(self) -> Self
+    where
+        Self: Sized,
+    {
+        self.with_jit_support_enabled(true)
     }
 
     /// Returns the JIT backend, if supported.
@@ -479,7 +493,7 @@ pub trait JitBackend: Send + Sync {
     /// Enables or disables JIT compilation.
     fn set_enabled(&self, enabled: bool) -> Result<(), String>;
 
-    /// Pauses background JIT work while keeping resident compiled code available.
+    /// Pauses JIT helper execution while keeping queueing and resident compiled code available.
     fn pause(&self);
 
     /// Resumes background JIT work.

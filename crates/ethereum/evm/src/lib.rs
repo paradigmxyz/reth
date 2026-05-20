@@ -158,7 +158,7 @@ where
         &self.block_assembler
     }
 
-    fn with_jit(self, enabled: bool) -> Self
+    fn with_jit_support_enabled(self, enabled: bool) -> Self
     where
         Self: Sized,
     {
@@ -169,7 +169,7 @@ where
             if let Some(factory) =
                 (&mut evm_factory as &mut dyn Any).downcast_mut::<factory::RethEvmFactory>()
             {
-                factory.set_jit(enabled);
+                factory.set_jit_support(enabled);
             }
             this.executor_factory = EthBlockExecutorFactory::new(
                 *this.executor_factory.receipt_builder(),
@@ -536,5 +536,34 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
         assert_eq!(evm.cfg, evm_env.cfg_env);
         assert_eq!(evm.tx, Default::default());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn test_jit_support_downcast_updates_reth_factory() {
+        let evm_config = EthEvmConfig::new_with_evm_factory(
+            MAINNET.clone(),
+            factory::RethEvmFactory::disabled(),
+        );
+
+        assert!(evm_config.jit_backend().is_some());
+        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let evm_config = evm_config.with_jit_support();
+        assert!(evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let evm_config = evm_config.with_jit_support_enabled(false);
+        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn test_jit_support_downcast_ignores_plain_factory() {
+        let evm_config = EthEvmConfig::mainnet();
+
+        assert!(evm_config.jit_backend().is_none());
+
+        let evm_config = evm_config.with_jit_support();
+        assert!(evm_config.jit_backend().is_none());
     }
 }

@@ -32,7 +32,15 @@ type Inner = alloy_evm::EthEvmFactory;
 
 /// Reth EVM factory.
 ///
-/// Wraps [`JitEvmFactory`].
+/// With the `jit` feature, this wraps [`JitEvmFactory`] and owns the shared revmc backend. The
+/// backend is constructed for every node so runtime RPC controls can enable it later.
+///
+/// An EVM can execute JIT-compiled code only when all three gates are enabled: the binary was built
+/// with the `jit` feature, runtime compilation was enabled with `--jit` or the `reth_jit` RPC
+/// method, and the local EVM config selected JIT support with
+/// [`ConfigureEvm::with_jit_support`](reth_evm::ConfigureEvm::with_jit_support).
+///
+/// Without the `jit` feature, this is a thin wrapper around [`alloy_evm::EthEvmFactory`].
 #[derive(Debug)]
 pub struct RethEvmFactory {
     inner: Inner,
@@ -41,7 +49,7 @@ pub struct RethEvmFactory {
     #[cfg(feature = "jit")]
     metrics: RevmcMetrics,
     #[cfg(feature = "jit")]
-    jit: bool,
+    jit_support: bool,
 }
 
 impl Clone for RethEvmFactory {
@@ -53,7 +61,7 @@ impl Clone for RethEvmFactory {
             #[cfg(feature = "jit")]
             metrics: self.metrics.clone(),
             #[cfg(feature = "jit")]
-            jit: self.jit,
+            jit_support: self.jit_support,
         }
     }
 }
@@ -85,11 +93,11 @@ impl RethEvmFactory {
             inner: JitEvmFactory::new(backend),
             disabled: JitBackend::disabled(),
             metrics,
-            jit: false,
+            jit_support: false,
         }
     }
 
-    /// Creates a [`RethEvmFactory`] with JIT disabled.
+    /// Creates a [`RethEvmFactory`] with JIT support and compilation disabled.
     pub fn disabled() -> Self {
         Self::default()
     }
@@ -99,12 +107,21 @@ impl RethEvmFactory {
         self.inner.backend()
     }
 
-    /// Enables or disables JIT for subsequently created EVMs.
-    pub const fn set_jit(&mut self, enabled: bool) {
-        self.jit = enabled;
+    /// Enables or disables local JIT support for subsequently created EVMs.
+    ///
+    /// Enabling support only selects the JIT-capable EVM factory path. An EVM still requires the
+    /// `jit` feature and runtime compilation enabled by `--jit` or `reth_jit` before it can execute
+    /// JIT-compiled code.
+    pub const fn set_jit_support(&mut self, enabled: bool) {
+        self.jit_support = enabled;
     }
 
-    /// Pauses background JIT promotion while keeping resident lookups enabled.
+    /// Returns whether subsequently created EVMs use the JIT-capable factory path.
+    pub const fn jit_support_enabled(&self) -> bool {
+        self.jit_support
+    }
+
+    /// Pauses JIT helper execution while keeping queueing and resident lookups enabled.
     fn pause_jit(&self) {
         let backend = self.inner.backend();
         let was_paused = backend.is_paused();
@@ -162,7 +179,7 @@ impl EvmFactory for RethEvmFactory {
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         #[cfg(feature = "jit")]
         {
-            if self.jit {
+            if self.jit_support {
                 self.inner.create_evm(db, input)
             } else {
                 JitEvmFactory::new(self.disabled.clone()).create_evm(db, input)
@@ -182,7 +199,7 @@ impl EvmFactory for RethEvmFactory {
     ) -> Self::Evm<DB, I> {
         #[cfg(feature = "jit")]
         {
-            if self.jit {
+            if self.jit_support {
                 self.inner.create_evm_with_inspector(db, input, inspector)
             } else {
                 JitEvmFactory::new(self.disabled.clone())

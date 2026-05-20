@@ -9,7 +9,6 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
-use serde::{Deserialize, Serialize};
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -208,10 +207,6 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "chainConfig")]
     async fn debug_chain_config(&self) -> RpcResult<ChainConfig>;
 
-    /// Controls the revmc JIT backend.
-    #[method(name = "rethJit")]
-    async fn debug_reth_jit(&self, action: RethJitAction) -> RpcResult<()>;
-
     /// Returns leveldb properties of the key-value database.
     #[method(name = "chaindbProperty")]
     async fn debug_chaindb_property(&self, property: String) -> RpcResult<()>;
@@ -371,20 +366,4 @@ pub trait DebugApi<TxReq: RpcObject> {
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
-}
-
-/// Supported `debug_rethJit` control actions.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RethJitAction {
-    /// Enable JIT compilation for the backend.
-    Enable,
-    /// Disable JIT compilation for the backend.
-    Disable,
-    /// Pause background JIT compilation.
-    Pause,
-    /// Resume background JIT compilation.
-    Unpause,
-    /// Clear resident and persisted JIT artifacts.
-    Clear,
 }

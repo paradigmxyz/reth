@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
 
-      - run: sudo .github/scripts/install_llvm_ubuntu.sh
+      - run: .github/scripts/install_llvm.sh ubuntu
 
       - uses: dtolnay/rust-toolchain@stable
 
