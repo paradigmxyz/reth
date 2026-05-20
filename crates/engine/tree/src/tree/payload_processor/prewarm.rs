@@ -178,9 +178,9 @@ where
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task &&
-                    let Some(withdrawals) = &ctx.env.withdrawals &&
-                    !withdrawals.is_empty()
+                if let Some(to_sparse_trie_task) = to_sparse_trie_task
+                    && let Some(withdrawals) = &ctx.env.withdrawals
+                    && !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -483,7 +483,7 @@ where
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
@@ -495,7 +495,7 @@ where
 
                     if final_execution_outcome.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
             }
@@ -569,7 +569,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return None;
             }
         };
 
@@ -710,10 +710,10 @@ where
             }
         });
 
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
+        if balance.is_none()
+            && nonce.is_none()
+            && code_hash.is_none()
+            && account_changes.storage_changes.is_empty()
         {
             return;
         }
@@ -757,8 +757,8 @@ where
         provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
-        if self.disable_bal_batch_io ||
-            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
+        if self.disable_bal_batch_io
+            || (account.storage_changes.is_empty() && account.storage_reads.is_empty())
         {
             return;
         }
@@ -795,6 +795,21 @@ where
             }
         };
 
+        // Skip storage prefetch for addresses that don't exist in the parent state.
+        //
+        // If the address has no account in the parent DB, reading its storage will cache
+        // `(address, slot) → 0`. This is dangerous when the address is CREATE2'd and
+        // SELFDESTRUCT'd within the same tx (EIP-6780 full delete) and then re-CREATE2'd:
+        // `insert_state` takes the `was_destroyed() && !had_code` fast-path which skips
+        // storage cache cleanup, so the stale zero survives into the next block's warm cache
+        // and poisons any SLOAD against the re-created contract.
+        //
+        // See: https://github.com/paradigmxyz/reth/issues/24300
+        match state_provider.basic_account(&account.address) {
+            Ok(Some(_)) => {}
+            _ => return,
+        }
+
         let start = Instant::now();
 
         for slot in &account.storage_changes {
@@ -824,7 +839,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         //
         // See: https://eips.ethereum.org/EIPS/eip-6780
         if !account.is_touched() || account.is_selfdestructed() {
-            continue
+            continue;
         }
 
         let hashed_address = keccak256(addr);
@@ -834,7 +849,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         for (key, slot) in account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
-                continue
+                continue;
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));

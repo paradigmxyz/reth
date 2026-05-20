@@ -851,7 +851,7 @@ impl ExecutionCache {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -874,7 +874,7 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.0.account_cache.remove(addr);
@@ -886,7 +886,7 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
@@ -1264,6 +1264,78 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    /// Regression test for <https://github.com/paradigmxyz/reth/issues/24300>
+    ///
+    /// When BAL prefetch caches `(addr, slot) → 0` for a non-existent account, and
+    /// that account is later CREATE2'd + SELFDESTRUCT'd + re-CREATE2'd in the same
+    /// block, `insert_state` takes the `was_destroyed() && !had_code` fast-path
+    /// which only removes the account entry but skips storage cleanup. This leaves
+    /// the stale prefetched zero in the storage cache, which poisons the next
+    /// block's SLOAD.
+    #[test]
+    fn test_insert_state_destroyed_codeless_account_stale_storage_from_prefetch() {
+        let caches = ExecutionCache::new(1000);
+
+        let addr = Address::random();
+        let storage_key = StorageKey::random();
+
+        // Simulate what BAL prefetch does: cache (addr, slot) → 0 for an address
+        // that doesn't exist in the parent state
+        caches.insert_storage(addr, storage_key, Some(U256::ZERO));
+
+        // Verify the stale entry exists
+        assert_eq!(
+            caches.0.storage_cache.get(&(addr, storage_key)),
+            Some(U256::ZERO),
+            "Prefetched zero should be in storage cache"
+        );
+
+        // Now simulate insert_state after block execution where the account was
+        // CREATE2'd → SSTORE(slot, 99) → SELFDESTRUCT'd (same tx) → re-CREATE2'd
+        // → SSTORE(slot, 99). The BundleState shows:
+        // - was_destroyed() = true (SELFDESTRUCT happened)
+        // - original_info = None (didn't exist in parent = no code hash)
+        // - current info exists (re-created)
+        // - storage has the final value
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    None, // No original info — account didn't exist in parent
+                    None, // Destroyed
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        // The account should be removed
+        assert!(caches.0.account_cache.get(&addr).is_none());
+
+        // CRITICAL: The stale storage entry from BAL prefetch should ideally also
+        // be removed. Currently, the `continue` in insert_state skips storage
+        // cleanup for codeless destroyed accounts, so this stale zero persists.
+        //
+        // The fix is applied at the prefetch site (prefetch_bal_storage) which
+        // gates on account existence in parent state, preventing the stale entry
+        // from being created in the first place. This test documents the
+        // insert_state behavior as-is.
+        //
+        // If insert_state is later hardened to also evict storage for destroyed
+        // accounts, this assertion should be flipped to is_none().
+        assert_eq!(
+            caches.0.storage_cache.get(&(addr, storage_key)),
+            Some(U256::ZERO),
+            "insert_state currently does not clean up storage for codeless destroyed accounts"
+        );
     }
 
     #[test]
