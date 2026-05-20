@@ -488,7 +488,8 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
-        let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
+        let changeset_provider = (!matches!(strategy, StateRootStrategy::TrustHeaderForBenchmark))
+            .then(|| self.spawn_changeset_provider_task(overlay_factory.clone()));
 
         // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
         // `provider_builder` (consumed by `spawn_payload_processor` below).
@@ -610,6 +611,31 @@ where
             block
         );
 
+        if matches!(strategy, StateRootStrategy::TrustHeaderForBenchmark) {
+            let root_elapsed = Duration::ZERO;
+            let timing_stats = state_provider_stats.map(|stats| {
+                self.calculate_timing_stats(
+                    &block,
+                    stats,
+                    cache_stats,
+                    &output,
+                    execution_duration,
+                    root_elapsed,
+                )
+            });
+
+            if let Some(valid_block_tx) = valid_block_tx {
+                let _ = valid_block_tx.send(());
+            }
+
+            let executed_block = ExecutedBlock::with_deferred_trie_data(
+                Arc::new(block),
+                output,
+                DeferredTrieData::unavailable_for_benchmark(),
+            );
+            return Ok(ValidationOutput::new(executed_block, timing_stats))
+        }
+
         let root_time = Instant::now();
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
@@ -721,6 +747,7 @@ where
                 );
                 maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
             }
+            StateRootStrategy::TrustHeaderForBenchmark => unreachable!("handled before root work"),
         }
 
         // Determine the state root.
@@ -799,6 +826,7 @@ where
 
         let changeset_provider = ensure_ok_post_block!(
             changeset_provider
+                .expect("changeset provider is spawned for state-root validation strategies")
                 .try_into_inner()
                 .ok()
                 .expect("changeset provider handle is not cloned"),
@@ -1633,7 +1661,8 @@ where
             }
             StateRootStrategy::Parallel |
             StateRootStrategy::Synchronous |
-            StateRootStrategy::Custom(_) => {
+            StateRootStrategy::Custom(_) |
+            StateRootStrategy::TrustHeaderForBenchmark => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -1685,7 +1714,9 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
-        if let Some(custom_state_root) = &self.custom_state_root {
+        if self.config.skip_state_root_validation_for_bench() {
+            StateRootStrategy::TrustHeaderForBenchmark
+        } else if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
         } else if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
@@ -1980,6 +2011,8 @@ enum StateRootStrategy<N: NodePrimitives> {
     Synchronous,
     /// Custom state root computation strategy.
     Custom(#[debug(skip)] CustomStateRoot<N>),
+    /// Benchmark-only mode that trusts the header state root without computing trie updates.
+    TrustHeaderForBenchmark,
 }
 
 /// Type that validates the payloads processed by the engine.

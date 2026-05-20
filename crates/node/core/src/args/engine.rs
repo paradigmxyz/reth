@@ -38,6 +38,7 @@ pub struct DefaultEngineValues {
     reserved_cpu_cores: usize,
     precompile_cache_disabled: bool,
     state_root_fallback: bool,
+    skip_state_root_validation_for_bench: bool,
     always_process_payload_attributes_on_canonical_head: bool,
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
@@ -154,6 +155,12 @@ impl DefaultEngineValues {
     /// Set whether to enable state root fallback by default
     pub const fn with_state_root_fallback(mut self, v: bool) -> Self {
         self.state_root_fallback = v;
+        self
+    }
+
+    /// Set whether to skip state-root validation for benchmark-only payload validation by default
+    pub const fn with_skip_state_root_validation_for_bench(mut self, v: bool) -> Self {
+        self.skip_state_root_validation_for_bench = v;
         self
     }
 
@@ -275,6 +282,7 @@ impl Default for DefaultEngineValues {
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
+            skip_state_root_validation_for_bench: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
@@ -403,6 +411,12 @@ pub struct EngineArgs {
     /// Enable state root fallback, useful for testing
     #[arg(long = "engine.state-root-fallback", default_value_t = DefaultEngineValues::get_global().state_root_fallback)]
     pub state_root_fallback: bool,
+
+    /// UNSAFE benchmark-only mode for `engine_newPayload` validation. Trusts header state roots,
+    /// skips state-root computation and validation, and must not be used for production
+    /// validation.
+    #[arg(long = "engine.skip-state-root-validation-for-bench", default_value_t = DefaultEngineValues::get_global().skip_state_root_validation_for_bench)]
+    pub skip_state_root_validation_for_bench: bool,
 
     /// Always process payload attributes and begin a payload build process even if
     /// `forkchoiceState.headBlockHash` is already the canonical head or an ancestor. See
@@ -567,6 +581,7 @@ impl Default for EngineArgs {
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
+            skip_state_root_validation_for_bench,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
             storage_worker_count,
@@ -604,6 +619,7 @@ impl Default for EngineArgs {
             precompile_cache_enabled: true,
             precompile_cache_disabled,
             state_root_fallback,
+            skip_state_root_validation_for_bench,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
             storage_worker_count,
@@ -670,6 +686,7 @@ impl EngineArgs {
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .without_precompile_cache(self.precompile_cache_disabled)
             .with_state_root_fallback(self.state_root_fallback)
+            .with_skip_state_root_validation_for_bench(self.skip_state_root_validation_for_bench)
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
             )
@@ -792,6 +809,7 @@ mod tests {
             precompile_cache_enabled: true,
             precompile_cache_disabled: true,
             state_root_fallback: true,
+            skip_state_root_validation_for_bench: true,
             always_process_payload_attributes_on_canonical_head: true,
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
@@ -837,6 +855,7 @@ mod tests {
             "4",
             "--engine.disable-precompile-cache",
             "--engine.state-root-fallback",
+            "--engine.skip-state-root-validation-for-bench",
             "--engine.always-process-payload-attributes-on-canonical-head",
             "--engine.allow-unwind-canonical-header",
             "--engine.storage-worker-count",
@@ -953,5 +972,20 @@ mod tests {
         .args;
         assert!(args.share_sparse_trie_with_payload_builder);
         assert!(args.tree_config().share_sparse_trie_with_payload_builder());
+    }
+
+    #[test]
+    fn test_parse_skip_state_root_validation_for_bench_flag() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.skip_state_root_validation_for_bench);
+        assert!(!args.tree_config().skip_state_root_validation_for_bench());
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.skip-state-root-validation-for-bench",
+        ])
+        .args;
+        assert!(args.skip_state_root_validation_for_bench);
+        assert!(args.tree_config().skip_state_root_validation_for_bench());
     }
 }

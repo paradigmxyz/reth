@@ -53,6 +53,8 @@ enum DeferredTrieDataInner {
     Pending(Option<PendingInputs>),
     /// Data has been computed and is ready.
     Ready(ComputedTrieData),
+    /// Trie data was intentionally not produced for benchmark-only validation.
+    UnavailableForBenchmark,
 }
 
 /// Inputs kept while a deferred trie computation is pending.
@@ -74,6 +76,10 @@ impl fmt::Debug for DeferredTrieData {
             DeferredTrieDataInner::Ready(_) => {
                 f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
             }
+            DeferredTrieDataInner::UnavailableForBenchmark => f
+                .debug_struct("DeferredTrieData")
+                .field("state", &"unavailable_for_benchmark")
+                .finish(),
         }
     }
 }
@@ -92,6 +98,19 @@ impl DeferredTrieData {
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
     pub fn ready(bundle: ComputedTrieData) -> Self {
         Self { state: Arc::new(Mutex::new(DeferredTrieDataInner::Ready(bundle))) }
+    }
+
+    /// Create a handle for benchmark-only validation where state-root computation was skipped.
+    ///
+    /// Accessing trie data through this handle panics instead of returning empty or fabricated
+    /// trie updates that persistence or proof paths could treat as valid.
+    pub fn unavailable_for_benchmark() -> Self {
+        Self { state: Arc::new(Mutex::new(DeferredTrieDataInner::UnavailableForBenchmark)) }
+    }
+
+    /// Returns true if trie data was intentionally not produced for benchmark-only validation.
+    pub fn is_unavailable_for_benchmark(&self) -> bool {
+        matches!(*self.state.lock(), DeferredTrieDataInner::UnavailableForBenchmark)
     }
 
     /// Sorts block execution outputs.
@@ -145,6 +164,11 @@ impl DeferredTrieData {
                 *state = DeferredTrieDataInner::Ready(computed.clone());
 
                 computed
+            }
+            DeferredTrieDataInner::UnavailableForBenchmark => {
+                panic!(
+                    "trie data is unavailable because benchmark-only state-root validation skipping is enabled; this mode must not persist blocks or serve trie-data consumers"
+                )
             }
         }
     }
@@ -248,5 +272,14 @@ mod tests {
         let _ = deferred.wait_cloned();
 
         assert!(start.elapsed() < Duration::from_millis(10));
+    }
+
+    #[test]
+    #[should_panic(expected = "trie data is unavailable")]
+    fn unavailable_for_benchmark_panics_on_access() {
+        let deferred = DeferredTrieData::unavailable_for_benchmark();
+
+        assert!(deferred.is_unavailable_for_benchmark());
+        let _ = deferred.wait_cloned();
     }
 }

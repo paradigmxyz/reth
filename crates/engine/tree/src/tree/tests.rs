@@ -2,13 +2,14 @@ use super::*;
 use crate::{
     persistence::PersistenceAction,
     tree::{
-        payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
+        payload_validator::{BasicEngineValidator, CustomStateRoot, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
     },
 };
 use reth_trie_db::ChangesetCache;
 
+use alloy_consensus::Header;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -23,18 +24,24 @@ use reth_chain_state::{
     test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_consensus::noop::NoopConsensus;
+use reth_db_common::init::init_genesis;
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm_ethereum::MockEvmConfig;
+use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
+use reth_evm_ethereum::{EthEvmConfig, MockEvmConfig};
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{
+    providers::BlockchainProvider,
+    test_utils::{create_test_provider_factory_with_chain_spec, MockEthProvider},
+};
 use reth_tasks::spawn_os_thread;
 use std::{
     collections::BTreeMap,
     str::FromStr,
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{Receiver, Sender},
         Arc,
     },
@@ -502,6 +509,169 @@ impl TestBlockFactory {
         let block = self.builder.generate_random_block(1, parent_hash).into_block();
         block.seal_slow()
     }
+}
+
+fn empty_child_block(parent: &SealedHeader<Header>, state_root: B256) -> SealedBlock<Block> {
+    let header = Header {
+        parent_hash: parent.hash(),
+        number: parent.number() + 1,
+        timestamp: parent.timestamp() + 1,
+        gas_limit: parent.gas_limit(),
+        gas_used: 0,
+        base_fee_per_gas: parent.base_fee_per_gas(),
+        state_root,
+        ..Default::default()
+    };
+
+    Block::new(header, BlockBody::default()).seal_slow()
+}
+
+fn validate_empty_child_block(
+    config: TreeConfig,
+    state_root: B256,
+    custom_state_root: Option<CustomStateRoot<EthPrimitives>>,
+) -> ValidationOutcome<EthPrimitives> {
+    let chain_spec = Arc::new(ChainSpec::default());
+    let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+    let genesis_hash = init_genesis(&factory).expect("genesis initializes");
+    let provider = BlockchainProvider::new(factory).expect("blockchain provider opens");
+
+    let parent_header = SealedHeader::seal_slow(chain_spec.genesis_header().clone());
+    assert_eq!(genesis_hash, parent_header.hash());
+
+    let runtime = reth_tasks::Runtime::test();
+    let changeset_cache = ChangesetCache::new();
+    let mut validator = BasicEngineValidator::new(
+        provider,
+        NoopConsensus::arc(),
+        EthEvmConfig::new(chain_spec),
+        MockEngineValidator,
+        config.clone(),
+        Box::new(NoopInvalidBlockHook::default()),
+        changeset_cache,
+        runtime.clone(),
+    );
+    if let Some(custom_state_root) = custom_state_root {
+        validator = validator.with_custom_state_root(custom_state_root);
+    }
+
+    let mut tree_state = EngineApiTreeState::new(
+        10,
+        10,
+        config.invalid_header_hit_eviction_threshold(),
+        parent_header.num_hash(),
+        EngineApiKind::Ethereum,
+        runtime.state_trie_overlay_worker_pool(),
+    );
+    let canonical_in_memory_state =
+        CanonicalInMemoryState::with_head(parent_header.clone(), None, None);
+    let ctx = TreeCtx::new(&mut tree_state, &canonical_in_memory_state);
+
+    validator.validate_block(empty_child_block(&parent_header, state_root), ctx)
+}
+
+#[test]
+fn skip_state_root_validation_for_bench_accepts_bad_root_and_skips_root_handler() {
+    reth_tracing::init_test_tracing();
+
+    let custom_root_calls = Arc::new(AtomicUsize::new(0));
+    let custom_root: CustomStateRoot<EthPrimitives> = {
+        let custom_root_calls = Arc::clone(&custom_root_calls);
+        Arc::new(move |_| {
+            custom_root_calls.fetch_add(1, Ordering::Relaxed);
+            panic!("custom root handler must not be called in benchmark skip mode")
+        })
+    };
+    let bad_state_root = B256::repeat_byte(0x42);
+
+    let output = validate_empty_child_block(
+        TreeConfig::default().with_skip_state_root_validation_for_bench(true),
+        bad_state_root,
+        Some(custom_root),
+    )
+    .expect("benchmark mode trusts the header state root");
+
+    assert_eq!(custom_root_calls.load(Ordering::Relaxed), 0);
+    assert!(output.executed_block.trie_data_handle().is_unavailable_for_benchmark());
+    assert_eq!(output.executed_block.recovered_block().header().state_root(), bad_state_root);
+    assert_eq!(output.executed_block.execution_outcome().result.gas_used, 0);
+    assert!(output.executed_block.execution_outcome().result.receipts.is_empty());
+}
+
+#[test]
+fn state_root_validation_rejects_bad_root_when_benchmark_skip_is_off() {
+    reth_tracing::init_test_tracing();
+
+    let result = validate_empty_child_block(
+        TreeConfig::default().with_state_root_fallback(true),
+        B256::repeat_byte(0x43),
+        None,
+    );
+
+    assert!(result.is_err(), "bad state root must be rejected without benchmark skip mode");
+}
+
+#[test]
+fn skip_state_root_validation_for_bench_does_not_record_state_root_metrics() {
+    let recorder = metrics_util::debugging::DebuggingRecorder::new();
+    let snapshotter = recorder.snapshotter();
+
+    let result = ::metrics::with_local_recorder(&recorder, || {
+        validate_empty_child_block(
+            TreeConfig::default().with_skip_state_root_validation_for_bench(true),
+            B256::repeat_byte(0x44),
+            None,
+        )
+    });
+
+    result.expect("benchmark skip validation should pass");
+
+    let snapshot = snapshotter.snapshot().into_vec();
+    let recorded_state_root_metrics = snapshot
+        .iter()
+        .filter(|(key, _, _, value)| {
+            let name = key.key().name();
+            if name.contains("state_root_duration") {
+                return true
+            }
+            if name.contains("state_root_storage_tries_updated_total") {
+                return matches!(value, metrics_util::debugging::DebugValue::Counter(value) if *value > 0)
+            }
+            if name.contains("state_root_histogram") ||
+                name.contains("state_root_gas_bucket_histogram")
+            {
+                return matches!(value, metrics_util::debugging::DebugValue::Histogram(values) if !values.is_empty())
+            }
+            false
+        })
+        .map(|(key, ..)| key.key().name().to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        recorded_state_root_metrics.is_empty(),
+        "state-root metrics should not be recorded in skip mode: {recorded_state_root_metrics:?}"
+    );
+}
+
+#[test]
+fn skip_state_root_validation_for_bench_suppresses_persistence_actions() {
+    let chain_spec = MAINNET.clone();
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+    test_harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(0)
+        .with_skip_state_root_validation_for_bench(true);
+
+    assert!(!test_harness.tree.should_persist());
+    test_harness.tree.advance_persistence().unwrap();
+    assert!(test_harness.action_rx.try_recv().is_err());
+
+    let blocks_to_persist =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Head).unwrap();
+    assert!(!blocks_to_persist.is_empty());
+    test_harness.tree.persist_blocks(blocks_to_persist);
+    assert!(test_harness.action_rx.try_recv().is_err());
 }
 
 #[test]
