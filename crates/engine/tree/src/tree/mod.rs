@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -40,7 +40,7 @@ use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{collections::HashMap, fmt::Debug, ops, sync::Arc, time::Duration};
+use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -315,7 +315,7 @@ where
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
-    execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
+    execution_timing_stats: B256Map<Box<ExecutionTimingStats>>,
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
@@ -409,7 +409,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
-            execution_timing_stats: HashMap::new(),
+            execution_timing_stats: B256Map::default(),
             building_payload: false,
             runtime,
         }
