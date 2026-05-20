@@ -481,12 +481,10 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
 if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
   record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
-  if [ -f "$OUTPUT_DIR/report.samples.ndjson" ]; then
-    jq -c 'select(.name | startswith("txgen_") | not)' \
-      "$OUTPUT_DIR/report.samples.ndjson" > "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
-  else
-    jq -c '.samples[] | select(.name | startswith("txgen_") | not)' \
-      "$OUTPUT_DIR/report.json" > "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+  rm -f "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+  if [ -f "$OUTPUT_DIR/report.samples.ndjson.gz" ]; then
+    gzip -dc "$OUTPUT_DIR/report.samples.ndjson.gz" | \
+      jq -c 'select(.name | startswith("txgen_") | not)' > "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
   fi
 fi
 
