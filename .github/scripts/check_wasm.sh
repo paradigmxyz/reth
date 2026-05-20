@@ -9,7 +9,6 @@ readarray -t crates < <(
 exclude_crates=(
   # The following require investigation if they can be fixed
   reth-basic-payload-builder
-  reth-bench
   reth-bench-compare
   reth-cli
   reth-cli-commands
