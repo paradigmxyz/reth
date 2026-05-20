@@ -1033,29 +1033,22 @@ def query_histogram_target_metric_run(
     metadata: dict,
 ) -> dict[tuple[tuple[str, str], ...], dict]:
     sum_query = histogram_counter_query(histogram["query"], "sum")
-    count_query = histogram_counter_query(histogram["query"], "count")
     sum_grouped_scrapes = [group_query_samples_by_identity(scrape["samples"], sum_query)[1] for scrape in relevant_scrapes]
-    count_grouped_scrapes = [group_query_samples_by_identity(scrape["samples"], count_query)[1] for scrape in relevant_scrapes]
     mean_identities = collect_metric_identities(sum_grouped_scrapes)
-    mean_identities.update(collect_metric_identities(count_grouped_scrapes))
 
     metrics_by_identity = {}
     for identity_key, identity_labels in sorted(mean_identities.items()):
         per_block_observations = []
         has_histogram_activity = False
         display_query = format_target_metric_identity(histogram["query"], identity_labels)
-        for previous_scrape, current_scrape, previous_sum_groups, current_sum_groups, previous_count_groups, current_count_groups in zip(
+        for previous_scrape, current_scrape, previous_sum_groups, current_sum_groups in zip(
             relevant_scrapes,
             relevant_scrapes[1:],
             sum_grouped_scrapes,
             sum_grouped_scrapes[1:],
-            count_grouped_scrapes,
-            count_grouped_scrapes[1:],
         ):
             current_sum = grouped_sample_value(current_sum_groups.get(identity_key), "single", allow_missing=True)
             previous_sum = grouped_sample_value(previous_sum_groups.get(identity_key), "single", allow_missing=True)
-            current_count = grouped_sample_value(current_count_groups.get(identity_key), "single", allow_missing=True)
-            previous_count = grouped_sample_value(previous_count_groups.get(identity_key), "single", allow_missing=True)
             current_block_height = float(current_scrape["block_height"])
             previous_block_height = float(previous_scrape["block_height"])
             block_delta = current_block_height - previous_block_height
@@ -1063,12 +1056,11 @@ def query_histogram_target_metric_run(
                 continue
 
             sum_delta = current_sum - previous_sum
-            count_delta = current_count - previous_count
-            if sum_delta < -EPSILON or count_delta < -EPSILON:
+            if sum_delta < -EPSILON:
                 raise ValueError(
-                    f"Histogram target metric '{display_query}' sum/count decreased within run '{run_label}'"
+                    f"Histogram target metric '{display_query}' sum decreased within run '{run_label}'"
                 )
-            if sum_delta > EPSILON or count_delta > EPSILON:
+            if sum_delta > EPSILON:
                 has_histogram_activity = True
             per_block_observations.append(
                 {
