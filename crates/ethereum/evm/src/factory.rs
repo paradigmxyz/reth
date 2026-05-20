@@ -3,6 +3,8 @@
 //! Re-exports types from `revmc::alloy_evm` and provides [`RethEvmFactory`], a newtype that
 //! implements [`Debug`].
 
+#[cfg(feature = "jit")]
+use alloc::string::String;
 use alloy_evm::{Database, EvmEnv, EvmFactory};
 use revm::{
     context::BlockEnv,
@@ -103,7 +105,7 @@ impl RethEvmFactory {
     }
 
     /// Pauses background JIT promotion while keeping resident lookups enabled.
-    pub fn pause_jit(&self) {
+    fn pause_jit(&self) {
         let backend = self.inner.backend();
         let was_paused = backend.is_paused();
         backend.pause();
@@ -115,7 +117,7 @@ impl RethEvmFactory {
     }
 
     /// Resumes background JIT promotion.
-    pub fn resume_jit(&self) {
+    fn resume_jit(&self) {
         let backend = self.inner.backend();
         let was_paused = backend.is_paused();
         backend.resume();
@@ -124,6 +126,25 @@ impl RethEvmFactory {
             self.metrics.resumes_total.increment(1);
         }
         self.metrics.paused.set(is_paused as u8 as f64);
+    }
+}
+
+#[cfg(feature = "jit")]
+impl reth_evm::JitBackend for RethEvmFactory {
+    fn set_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.inner.backend().set_enabled(enabled).map_err(|err| err.to_string())
+    }
+
+    fn pause(&self) {
+        self.pause_jit();
+    }
+
+    fn resume(&self) {
+        self.resume_jit();
+    }
+
+    fn clear(&self) {
+        self.inner.backend().clear_all();
     }
 }
 

@@ -30,7 +30,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    NextBlockEnvAttributes, TransactionEnvMut,
+    JitBackend, NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
@@ -186,22 +186,15 @@ where
         }
     }
 
-    fn pause_jit(&self) {
+    fn jit_backend(&self) -> Option<&dyn JitBackend> {
         #[cfg(feature = "jit")]
         if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
             .downcast_ref::<factory::RethEvmFactory>()
         {
-            factory.pause_jit();
+            return Some(factory);
         }
-    }
 
-    fn resume_jit(&self) {
-        #[cfg(feature = "jit")]
-        if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
-            .downcast_ref::<factory::RethEvmFactory>()
-        {
-            factory.resume_jit();
-        }
+        None
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {

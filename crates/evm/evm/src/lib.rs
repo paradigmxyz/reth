@@ -18,7 +18,7 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
@@ -273,13 +273,10 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self
     }
 
-    /// Pauses background JIT work, if supported, while keeping resident compiled code available.
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn pause_jit(&self) {}
-
-    /// Resumes background JIT work, if supported.
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn resume_jit(&self) {}
+    /// Returns the JIT backend, if supported.
+    fn jit_backend(&self) -> Option<&dyn JitBackend> {
+        None
+    }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
@@ -475,6 +472,21 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
+}
+
+/// JIT backend controls exposed by an EVM configuration.
+pub trait JitBackend: Send + Sync {
+    /// Enables or disables JIT compilation.
+    fn set_enabled(&self, enabled: bool) -> Result<(), String>;
+
+    /// Pauses background JIT work while keeping resident compiled code available.
+    fn pause(&self);
+
+    /// Resumes background JIT work.
+    fn resume(&self);
+
+    /// Clears JIT runtime state.
+    fn clear(&self);
 }
 
 /// Represents additional attributes required to configure the next block.

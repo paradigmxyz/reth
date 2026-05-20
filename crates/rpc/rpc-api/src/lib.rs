@@ -32,6 +32,7 @@ mod txpool;
 mod validation;
 mod web3;
 
+pub use debug::RethJitAction;
 pub use testing::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
 
 /// re-export of all server traits

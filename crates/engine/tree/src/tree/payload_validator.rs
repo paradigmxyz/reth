@@ -171,14 +171,18 @@ struct JitPauseGuard<Evm: ConfigureEvm>(Evm);
 
 impl<Evm: ConfigureEvm> JitPauseGuard<Evm> {
     fn new(evm_config: &Evm) -> Self {
-        evm_config.pause_jit();
+        if let Some(jit_backend) = evm_config.jit_backend() {
+            jit_backend.pause();
+        }
         Self(evm_config.clone())
     }
 }
 
 impl<Evm: ConfigureEvm> Drop for JitPauseGuard<Evm> {
     fn drop(&mut self) {
-        self.0.resume_jit();
+        if let Some(jit_backend) = self.0.jit_backend() {
+            jit_backend.resume();
+        }
     }
 }
 

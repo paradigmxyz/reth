@@ -76,6 +76,21 @@ bal_enabled_for_label() {
 USE_BAL="$(bal_enabled_for_label)"
 echo "BAL replay for ${LABEL}: ${USE_BAL} (mode=${BENCH_BAL:-false})"
 
+call_reth_jit() {
+  local action="$1"
+  local response
+  if ! response=$(curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"method\":\"debug_rethJit\",\"params\":[\"${action}\"],\"id\":1}"); then
+    echo "::error::debug_rethJit ${action} request failed"
+    exit 1
+  fi
+  if jq -e '.error? != null' <<< "$response" > /dev/null 2>&1; then
+    echo "::error::debug_rethJit ${action} failed: ${response}"
+    exit 1
+  fi
+}
+
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
   if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
@@ -148,6 +163,7 @@ RETH_ARGS=(
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
+  --http.api eth,net,web3,debug
   --http.port 8545
   --ws
   --ws.api all
@@ -421,6 +437,11 @@ if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
       fi
     done
   fi
+fi
+
+if [ "$JIT_ENABLED" = "true" ]; then
+  echo "Pausing JIT helper before measured benchmark..."
+  call_reth_jit pause
 fi
 
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
