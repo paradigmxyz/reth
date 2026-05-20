@@ -15,10 +15,10 @@ use crate::{
     DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
-    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    ProviderSnapshotClone, PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch,
+    RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -45,7 +45,7 @@ use reth_db_api::{
     },
     table::Table,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxSnapshot},
     BlockNumberList,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
@@ -1081,6 +1081,30 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
+    }
+}
+
+impl<TX: DbTxSnapshot + 'static, N: NodeTypesForProvider + 'static> ProviderSnapshotClone
+    for DatabaseProvider<TX, N>
+{
+    fn clone_snapshot_provider(&self) -> ProviderResult<Self> {
+        Ok(Self {
+            tx: self.tx.clone_snapshot()?,
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+            prune_modes: self.prune_modes.clone(),
+            storage: self.storage.clone(),
+            storage_settings: self.storage_settings.clone(),
+            rocksdb_provider: self.rocksdb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
+            runtime: self.runtime.clone(),
+            db_path: self.db_path.clone(),
+            pending_rocksdb_batches: Default::default(),
+            commit_order: self.commit_order,
+            minimum_pruning_distance: self.minimum_pruning_distance,
+            metrics: metrics::DatabaseProviderMetrics::default(),
+            reader_txn_tracker: self.reader_txn_tracker.clone(),
+        })
     }
 }
 

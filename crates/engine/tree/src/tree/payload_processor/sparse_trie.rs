@@ -893,10 +893,12 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
+    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_provider::{
         providers::{OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory,
-        ChainSpecProvider,
+        BlockWriter, ChainSpecProvider, ExecutionOutcome,
     };
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
@@ -986,6 +988,24 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            let genesis_block = RecoveredBlock::new_sealed(
+                SealedBlock::<Block>::seal_parts(
+                    provider_factory.chain_spec().genesis_header().clone(),
+                    BlockBody::default(),
+                ),
+                vec![],
+            );
+            provider_rw
+                .append_blocks_with_state(
+                    vec![genesis_block],
+                    &ExecutionOutcome::default(),
+                    Default::default(),
+                )
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
@@ -993,6 +1013,7 @@ mod tests {
                 ChangesetCache::new(),
             ),
         );
+        let overlay_factory = overlay_factory.pin_snapshot().unwrap();
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
 

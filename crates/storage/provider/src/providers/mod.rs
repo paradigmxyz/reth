@@ -20,7 +20,10 @@ pub use state::{
         HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
     },
     latest::{LatestStateProvider, LatestStateProviderRef},
-    overlay::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
+    overlay::{
+        OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
+        PinnedOverlayStateProviderFactory,
+    },
 };
 
 mod consistent_view;

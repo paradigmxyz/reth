@@ -13,7 +13,7 @@ use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    DatabaseProviderROFactory, ProviderSnapshotClone, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
@@ -28,6 +28,7 @@ use reth_trie_db::{
     PackedStoragesTrie,
 };
 use std::{
+    marker::PhantomData,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -496,6 +497,92 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         };
 
         Ok(overlay)
+    }
+
+    /// Pins the overlay to one captured database snapshot.
+    ///
+    /// Parallel workers should use the returned factory. Each worker gets an independent cloned
+    /// read transaction over the same MDBX snapshot and the same prebuilt overlay.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
+    pub fn pin_snapshot(&self) -> ProviderResult<PinnedOverlayStateProviderFactory<F::Provider, N>>
+    where
+        F: DatabaseProviderFactory,
+        F::Provider: StageCheckpointReader
+            + PruneCheckpointReader
+            + DBProvider
+            + BlockNumReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + ProviderSnapshotClone,
+    {
+        let overall_start = Instant::now();
+        let provider = {
+            let start = Instant::now();
+            let res = self.factory.database_provider_ro()?;
+            self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
+            res
+        };
+
+        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
+
+        Ok(PinnedOverlayStateProviderFactory {
+            provider: Arc::new(provider),
+            trie_updates,
+            hashed_post_state,
+            is_v2,
+            metrics: self.overlay_builder.metrics.clone(),
+            _marker: PhantomData,
+        })
+    }
+}
+
+/// Overlay factory pinned to one base provider snapshot.
+#[derive(Debug)]
+pub struct PinnedOverlayStateProviderFactory<Provider, N: NodePrimitives = EthPrimitives> {
+    provider: Arc<Provider>,
+    trie_updates: Arc<TrieUpdatesSorted>,
+    hashed_post_state: Arc<HashedPostStateSorted>,
+    is_v2: bool,
+    metrics: OverlayStateProviderMetrics,
+    _marker: PhantomData<fn(N)>,
+}
+
+impl<Provider, N: NodePrimitives> Clone for PinnedOverlayStateProviderFactory<Provider, N> {
+    fn clone(&self) -> Self {
+        Self {
+            provider: self.provider.clone(),
+            trie_updates: self.trie_updates.clone(),
+            hashed_post_state: self.hashed_post_state.clone(),
+            is_v2: self.is_v2,
+            metrics: self.metrics.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<Provider, N> DatabaseProviderROFactory for PinnedOverlayStateProviderFactory<Provider, N>
+where
+    N: NodePrimitives,
+    Provider: ProviderSnapshotClone + DBProvider,
+{
+    type Provider = OverlayStateProvider<Provider>;
+
+    /// Create a read-only [`OverlayStateProvider`] at the pinned snapshot.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        let start = Instant::now();
+        let provider = self.provider.clone_snapshot_provider()?;
+        self.metrics.database_provider_ro_duration.record(start.elapsed());
+
+        Ok(OverlayStateProvider::new(
+            provider,
+            self.trie_updates.clone(),
+            self.hashed_post_state.clone(),
+            self.is_v2,
+        ))
     }
 }
 

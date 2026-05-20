@@ -82,9 +82,9 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, ProviderSnapshotClone,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
@@ -215,7 +215,9 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + ProviderSnapshotClone
+                          + Sync,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -1246,6 +1248,7 @@ where
             provider_factory,
             overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted()),
         );
+        let overlay_factory = overlay_factory.pin_snapshot()?;
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
             .incremental_root_with_updates()
     }
@@ -1585,7 +1588,7 @@ where
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
 
-                // Use the pre-computed overlay factory for multiproofs
+                let overlay_factory = overlay_factory.pin_snapshot()?;
                 let handle = self.payload_processor.spawn(
                     env,
                     txs,
@@ -2092,7 +2095,9 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + ProviderSnapshotClone
+                          + Sync,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
@@ -2183,6 +2188,13 @@ where
             OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
                 .with_lazy_overlay(lazy_overlay),
         );
+        let overlay_factory = match overlay_factory.pin_snapshot() {
+            Ok(factory) => factory,
+            Err(err) => {
+                warn!(target: "engine::tree::payload_validator", %err, "Failed to pin overlay snapshot");
+                return None
+            }
+        };
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,

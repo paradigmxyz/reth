@@ -48,6 +48,12 @@ pub trait DbTx: Debug + Send {
     fn disable_long_read_transaction_safety(&mut self);
 }
 
+/// Read-only transaction that can open another transaction at the same snapshot.
+pub trait DbTxSnapshot: DbTx + Sized {
+    /// Creates an independent read-only transaction over the same database snapshot.
+    fn clone_snapshot(&self) -> Result<Self, DatabaseError>;
+}
+
 /// Read write transaction that allows writing to database
 pub trait DbTxMut: Send {
     /// Read-Write Cursor type
