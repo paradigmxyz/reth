@@ -34,7 +34,7 @@ P99_MIN_VERDICT_BLOCKS = 125
 PERSIST_WAIT_MIN_VERDICT_MS = 0.5
 PERSIST_WAIT_MIN_TOTAL_PCT = 0.1
 TARGET_METRIC_BLOCK_HEIGHT_QUERY = "reth_blockchain_tree_canonical_chain_height"
-TARGET_METRIC_COUNTER_STATS = ("p50", "p90")
+TARGET_METRIC_COUNTER_STATS = ("mean",)
 TARGET_METRIC_MIN_PAIRED_OBSERVATIONS = 30
 TARGET_METRIC_IGNORED_CARDINALITY_LABELS = frozenset(
     (
@@ -864,6 +864,8 @@ def compute_target_metric_change(
     target: str,
     stat_name: str,
     floor_pct: float,
+    materiality: dict | None,
+    block_latency_ms: float,
 ) -> dict:
     if not baseline_runs or not feature_runs:
         return {
@@ -915,6 +917,33 @@ def compute_target_metric_change(
         lower_is_better=target == "decrease",
     )
     sig = raw_sig
+    informational_reason = None
+    materiality_details = None
+    if materiality:
+        min_value_ms = float(materiality.get("min_value_ms", 0.0))
+        min_value_pct_total_latency = float(
+            materiality.get("min_value_pct_total_latency", 0.0)
+        )
+        threshold_ms = max(
+            min_value_ms,
+            block_latency_ms * min_value_pct_total_latency / 100.0,
+        )
+        baseline_ms = abs(baseline_value) * 1_000.0
+        feature_ms = abs(feature_value) * 1_000.0
+        materiality_details = {
+            "min_value_ms": round(min_value_ms, 6),
+            "min_value_pct_total_latency": round(min_value_pct_total_latency, 6),
+            "threshold_ms": round(threshold_ms, 6),
+            "baseline_ms": round(baseline_ms, 6),
+            "feature_ms": round(feature_ms, 6),
+            "block_latency_ms": round(block_latency_ms, 6),
+        }
+        if raw_sig != "neutral" and max(baseline_ms, feature_ms) < threshold_ms:
+            informational_reason = (
+                f"requires value >= max({min_value_ms:.3g}ms, "
+                f"{min_value_pct_total_latency:.3g}% total latency)"
+            )
+            sig = "neutral"
     if significance_reason:
         sig = "neutral"
     result = {
@@ -934,6 +963,12 @@ def compute_target_metric_change(
     }
     if paired_observations:
         result["paired_observations"] = paired_observations
+    if materiality_details:
+        result["materiality"] = materiality_details
+    if informational_reason:
+        result["informational"] = True
+        result["informational_reason"] = informational_reason
+        result["raw_sig"] = raw_sig
     if significance_reason:
         result["significance_reason"] = significance_reason
         result["informational"] = True
@@ -1209,6 +1244,8 @@ def build_target_metric_entry(
     feature_runs_by_stat: dict[str, list[dict]],
     pair_stats: tuple[str, ...],
     floor_pct: float,
+    materiality: dict | None,
+    block_latency_ms: float,
     include_pair_mean_values: bool = False,
 ) -> dict:
     changes = {
@@ -1219,6 +1256,8 @@ def build_target_metric_entry(
             target,
             stat_name,
             floor_pct,
+            materiality,
+            block_latency_ms,
         )
         for stat_name in display_stats
     }
@@ -1236,6 +1275,8 @@ def build_target_metric_entry(
         "changes": changes,
         "change": summarize_target_metric_change(changes, display_stats),
     }
+    if materiality:
+        entry["materiality"] = materiality
 
     pairs = target_metric_pair_rows(
         baseline_values, feature_values, pair_stats, include_pair_mean_values
@@ -1249,18 +1290,25 @@ def compute_target_metric_summary(
     config_path: str,
     baseline_csv_paths: list[str],
     feature_csv_paths: list[str],
+    baseline_stats: dict,
+    feature_stats: dict,
 ) -> dict:
     with open(config_path) as f:
         config = json.load(f)
 
     baseline_runs = [query_target_metric_run(path, config) for path in baseline_csv_paths]
     feature_runs = [query_target_metric_run(path, config) for path in feature_csv_paths]
+    block_latency_ms = max(
+        float(baseline_stats["mean_total_lat_ms"]),
+        float(feature_stats["mean_total_lat_ms"]),
+    )
 
     metrics = []
     for counter in config.get("counters", []):
         query = counter["query"]
         target = counter["target"]
         floor_pct = float(counter.get("floor_pct", 0.0))
+        materiality = counter.get("materiality")
         display_stats = TARGET_METRIC_COUNTER_STATS
         summary_fields = ("mean", "p50", "p90", "p99")
         identities = collect_query_metric_identities(
@@ -1336,6 +1384,8 @@ def compute_target_metric_summary(
                     },
                     pair_stats=summary_fields,
                     floor_pct=floor_pct,
+                    materiality=materiality,
+                    block_latency_ms=block_latency_ms,
                     include_pair_mean_values=True,
                 )
             )
@@ -1344,6 +1394,7 @@ def compute_target_metric_summary(
         query = histogram["query"]
         target = histogram["target"]
         floor_pct = float(histogram.get("floor_pct", 0.0))
+        materiality = histogram.get("materiality")
         display_stats = ("mean",)
         identities = collect_query_metric_identities(
             baseline_runs + feature_runs, "histograms", query
@@ -1403,12 +1454,15 @@ def compute_target_metric_summary(
                     feature_runs_by_stat=feature_runs_for_stats,
                     pair_stats=display_stats,
                     floor_pct=floor_pct,
+                    materiality=materiality,
+                    block_latency_ms=block_latency_ms,
                 )
             )
 
     changed = [metric for metric in metrics if metric["change"]["significant_stats"]]
     return {
         "config": config_path,
+        "block_latency_ms": round(block_latency_ms, 6),
         "metrics": metrics,
         "changed": changed,
         "improvements": [metric["name"] for metric in changed if metric["change"]["sig"] == "good"],
@@ -1560,6 +1614,8 @@ def target_metric_change_str(change: dict) -> str:
     sig = "neutral" if change.get("informational") else change.get("sig", "neutral")
     emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
     details = [f"±{change['ci_pct']:.2f}%", f"floor {change['floor_pct']:.2f}%"]
+    if materiality := change.get("materiality"):
+        details.append(f"materiality {materiality['threshold_ms']:.2f}ms")
     if change.get("informational"):
         details.append("informational")
     return (
@@ -1722,6 +1778,8 @@ def main():
             args.target_metrics_config,
             args.baseline_csv,
             args.feature_csv,
+            baseline_stats,
+            feature_stats,
         )
         target_metric_table = generate_target_metric_table(target_metric_summary)
 
