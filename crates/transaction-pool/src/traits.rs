@@ -71,7 +71,10 @@ use alloy_eips::{
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, TxKind, B128, B256, U256};
+use alloy_primitives::{
+    map::{AddressSet, B256Map},
+    Address, Bytes, TxHash, TxKind, B128, B256, U256,
+};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
@@ -79,7 +82,6 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fmt,
     fmt::Debug,
     future::Future,
@@ -830,7 +832,7 @@ impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
 
 /// Represents transactions that were propagated over the network.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
-pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
+pub struct PropagatedTransactions(pub B256Map<Vec<PropagateKind>>);
 
 impl PropagatedTransactions {
     /// Records a propagation of a transaction to a peer.
@@ -856,7 +858,7 @@ impl PropagatedTransactions {
 
 impl IntoIterator for PropagatedTransactions {
     type Item = (TxHash, Vec<PropagateKind>);
-    type IntoIter = std::collections::hash_map::IntoIter<TxHash, Vec<PropagateKind>>;
+    type IntoIter = alloy_primitives::map::hash_map::IntoIter<TxHash, Vec<PropagateKind>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
