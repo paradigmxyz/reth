@@ -1041,7 +1041,8 @@ def query_histogram_target_metric_run(
 
     metrics_by_identity = {}
     for identity_key, identity_labels in sorted(mean_identities.items()):
-        mean_observations = []
+        per_block_observations = []
+        has_histogram_activity = False
         display_query = format_target_metric_identity(histogram["query"], identity_labels)
         for previous_scrape, current_scrape, previous_sum_groups, current_sum_groups, previous_count_groups, current_count_groups in zip(
             relevant_scrapes,
@@ -1057,7 +1058,8 @@ def query_histogram_target_metric_run(
             previous_count = grouped_sample_value(previous_count_groups.get(identity_key), "single", allow_missing=True)
             current_block_height = float(current_scrape["block_height"])
             previous_block_height = float(previous_scrape["block_height"])
-            if current_block_height - previous_block_height <= EPSILON:
+            block_delta = current_block_height - previous_block_height
+            if block_delta <= EPSILON:
                 continue
 
             sum_delta = current_sum - previous_sum
@@ -1066,20 +1068,20 @@ def query_histogram_target_metric_run(
                 raise ValueError(
                     f"Histogram target metric '{display_query}' sum/count decreased within run '{run_label}'"
                 )
-            if count_delta <= EPSILON:
-                continue
-            mean_observations.append(
+            if sum_delta > EPSILON or count_delta > EPSILON:
+                has_histogram_activity = True
+            per_block_observations.append(
                 {
                     "block_height": current_block_height,
-                    "value": sum_delta / count_delta,
+                    "value": sum_delta / block_delta,
                 }
             )
 
-        if not mean_observations:
+        if not has_histogram_activity or not per_block_observations:
             continue
 
         stats = compute_target_metric_series_stats(
-            [observation["value"] for observation in mean_observations]
+            [observation["value"] for observation in per_block_observations]
         )
         metrics_by_identity[identity_key] = {
             "query": histogram["query"],
@@ -1087,17 +1089,17 @@ def query_histogram_target_metric_run(
             "identity_labels": identity_labels,
             "target": histogram["target"],
             "mean": {
-                "query": f"{sum_query} / {count_query}",
+                "query": f"delta({sum_query}) / delta({TARGET_METRIC_BLOCK_HEIGHT_QUERY})",
                 "value": stats["mean"],
-                "samples": len(mean_observations),
+                "samples": len(per_block_observations),
                 "scrapes": len(relevant_scrapes),
                 "duration_ms": int(metadata["duration_ms"]),
                 "range_start_ms": int(metadata["range_start_ms"]),
                 "range_end_ms": int(metadata["range_end_ms"]),
                 "benchmark_id": metadata["benchmark_id"],
                 "benchmark_run": metadata["benchmark_run"],
-                "_values": [observation["value"] for observation in mean_observations],
-                "_observations": mean_observations,
+                "_values": [observation["value"] for observation in per_block_observations],
+                "_observations": per_block_observations,
             },
         }
 
