@@ -59,7 +59,7 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
-    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -488,7 +488,8 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
-        let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
+        let changeset_provider = (!matches!(strategy, StateRootStrategy::TrustHeaderForBenchmark))
+            .then(|| self.spawn_changeset_provider_task(overlay_factory.clone()));
 
         // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
         // `provider_builder` (consumed by `spawn_payload_processor` below).
@@ -560,20 +561,26 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Spawn hashed post state computation in background so it runs concurrently with
-        // block conversion and receipt root computation. This is a pure CPU-bound task
-        // (keccak256 hashing of all changed addresses and storage slots).
-        let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState =
-            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_validator",
-                    "hashed_post_state",
-                )
-                .entered();
-                Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
-            });
+        let hashed_state = if matches!(strategy, StateRootStrategy::TrustHeaderForBenchmark) {
+            None
+        } else {
+            // Spawn hashed post state computation in background so it runs concurrently with
+            // block conversion and receipt root computation. This is a pure CPU-bound task
+            // (keccak256 hashing of all changed addresses and storage slots).
+            let hashed_state_output = output.clone();
+            let hashed_state_provider = self.provider.clone();
+            Some(self.payload_processor.executor().spawn_blocking_named(
+                "hash-post-state",
+                move || {
+                    let _span = debug_span!(
+                        target: "engine::tree::payload_validator",
+                        "hashed_post_state",
+                    )
+                    .entered();
+                    Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                },
+            ))
+        };
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
@@ -609,6 +616,31 @@ where
             ),
             block
         );
+
+        if matches!(strategy, StateRootStrategy::TrustHeaderForBenchmark) {
+            let root_elapsed = Duration::ZERO;
+            let timing_stats = state_provider_stats.map(|stats| {
+                self.calculate_timing_stats(
+                    &block,
+                    stats,
+                    cache_stats,
+                    &output,
+                    execution_duration,
+                    root_elapsed,
+                )
+            });
+
+            if let Some(valid_block_tx) = valid_block_tx {
+                let _ = valid_block_tx.send(());
+            }
+
+            let executed_block =
+                ExecutedBlock::new(Arc::new(block), output, ComputedTrieData::default());
+            return Ok(ValidationOutput::new(executed_block, timing_stats))
+        }
+
+        let hashed_state = hashed_state
+            .expect("hashed post-state is required when benchmark state-root skipping is disabled");
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -721,6 +753,7 @@ where
                 );
                 maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
             }
+            StateRootStrategy::TrustHeaderForBenchmark => unreachable!("handled before root work"),
         }
 
         // Determine the state root.
@@ -799,6 +832,7 @@ where
 
         let changeset_provider = ensure_ok_post_block!(
             changeset_provider
+                .expect("changeset provider is spawned for state-root validation strategies")
                 .try_into_inner()
                 .ok()
                 .expect("changeset provider handle is not cloned"),
@@ -1514,7 +1548,8 @@ where
     /// If `receipt_root_bloom` is provided, it will be used instead of computing the receipt root
     /// and logs bloom from the receipts.
     ///
-    /// The `hashed_state` handle wraps the background hashed post state computation.
+    /// The `hashed_state` handle wraps the background hashed post state computation when that
+    /// computation is required by the active validation mode.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::too_many_arguments)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
@@ -1524,9 +1559,9 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        hashed_state: LazyHashedPostState,
+        hashed_state: Option<LazyHashedPostState>,
         block_access_list_hash: Option<B256>,
-    ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
+    ) -> Result<Option<LazyHashedPostState>, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1550,19 +1585,22 @@ where
         }
         drop(_enter);
 
-        // Wait for the background keccak256 hashing task to complete. This blocks until
-        // all changed addresses and storage slots have been hashed.
-        let hashed_state_ref =
-            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                .in_scope(|| hashed_state.get());
+        if let Some(hashed_state) = &hashed_state {
+            // Wait for the background keccak256 hashing task to complete. This blocks until
+            // all changed addresses and storage slots have been hashed.
+            let hashed_state_ref =
+                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                    .in_scope(|| hashed_state.get());
 
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
-        {
-            // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
+            if let Err(err) = self
+                .validator
+                .validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
+            {
+                // call post-block hook
+                self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+                return Err(err.into())
+            }
         }
 
         // record post-execution validation duration
@@ -1633,7 +1671,8 @@ where
             }
             StateRootStrategy::Parallel |
             StateRootStrategy::Synchronous |
-            StateRootStrategy::Custom(_) => {
+            StateRootStrategy::Custom(_) |
+            StateRootStrategy::TrustHeaderForBenchmark => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -1685,7 +1724,9 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
-        if let Some(custom_state_root) = &self.custom_state_root {
+        if self.config.skip_state_root_validation_for_bench() {
+            StateRootStrategy::TrustHeaderForBenchmark
+        } else if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
         } else if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
@@ -1980,6 +2021,8 @@ enum StateRootStrategy<N: NodePrimitives> {
     Synchronous,
     /// Custom state root computation strategy.
     Custom(#[debug(skip)] CustomStateRoot<N>),
+    /// Benchmark-only mode that trusts the header state root without computing trie updates.
+    TrustHeaderForBenchmark,
 }
 
 /// Type that validates the payloads processed by the engine.

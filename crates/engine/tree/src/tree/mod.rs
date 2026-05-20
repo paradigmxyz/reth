@@ -3253,7 +3253,12 @@ where
             None
         };
 
-        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() {
+        let skip_state_root_validation_for_bench =
+            self.config.skip_state_root_validation_for_bench();
+
+        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() &&
+            !skip_state_root_validation_for_bench
+        {
             self.payload_validator.sparse_trie_handle_for(
                 state.head_block_hash,
                 head.state_root(),
@@ -3270,6 +3275,7 @@ where
             attributes,
             cache,
             trie_handle,
+            skip_state_root_validation_for_bench,
         });
 
         // Client software MUST respond to this method call in the following way:

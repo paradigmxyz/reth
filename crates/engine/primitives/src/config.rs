@@ -139,6 +139,9 @@ pub struct TreeConfig {
     precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,
+    /// Whether to skip state-root/trie work for benchmark-only block production and
+    /// `engine_newPayload` processing.
+    skip_state_root_validation_for_bench: bool,
     /// Whether to always process payload attributes and begin a payload build process
     /// even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor.
     ///
@@ -226,6 +229,7 @@ impl Default for TreeConfig {
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
+            skip_state_root_validation_for_bench: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
@@ -303,6 +307,7 @@ impl TreeConfig {
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
+            skip_state_root_validation_for_bench: false,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
             disable_cache_metrics,
@@ -416,6 +421,12 @@ impl TreeConfig {
     /// Returns whether to use state root fallback.
     pub const fn state_root_fallback(&self) -> bool {
         self.state_root_fallback
+    }
+
+    /// Returns whether state-root/trie work is skipped for benchmark-only block production and
+    /// payload validation.
+    pub const fn skip_state_root_validation_for_bench(&self) -> bool {
+        self.skip_state_root_validation_for_bench
     }
 
     /// Sets whether to always process payload attributes when the FCU head is already canonical.
@@ -571,6 +582,15 @@ impl TreeConfig {
     /// Setter for whether to use state root fallback, useful for testing.
     pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
         self.state_root_fallback = state_root_fallback;
+        self
+    }
+
+    /// Setter for benchmark-only state-root/trie skipping.
+    pub const fn with_skip_state_root_validation_for_bench(
+        mut self,
+        skip_state_root_validation_for_bench: bool,
+    ) -> Self {
+        self.skip_state_root_validation_for_bench = skip_state_root_validation_for_bench;
         self
     }
 
