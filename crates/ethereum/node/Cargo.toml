@@ -50,7 +50,7 @@ tokio = { workspace = true, features = ["sync"] }
 
 # revm with required ethereum features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
+revm = { workspace = true, features = ["memory_limit"] }
 
 # misc
 eyre.workspace = true
