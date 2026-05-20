@@ -272,15 +272,30 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
 
                 let block = SealedBlock::seal_slow(block);
 
-                // Validate standalone header
-                self.consensus.validate_header(block.sealed_header())?;
-                if let Some(parent) = &parent_header {
-                    self.consensus.validate_header_against_parent(block.sealed_header(), parent)?;
+                // Run consensus pre-checks. An invalid block here (e.g. mid-file in a
+                // BlockchainTest sequence that intentionally interleaves invalid block proposals
+                // with the valid chain) is not a hard failure: skip the block and keep decoding
+                // so the pipeline can still apply the valid prefix.
+                let validation =
+                    self.consensus.validate_header(block.sealed_header()).and_then(|_| {
+                        if let Some(parent) = &parent_header {
+                            self.consensus
+                                .validate_header_against_parent(block.sealed_header(), parent)?;
+                        }
+                        self.consensus.validate_block_pre_execution(&block)
+                    });
+                if let Err(err) = validation {
+                    warn!(target: "downloaders::file",
+                        block_number = block.number(),
+                        block_hash = %block.hash(),
+                        %err,
+                        "skipping invalid block while decoding file"
+                    );
+                    continue
+                }
+                if parent_header.is_some() {
                     parent_header = Some(block.sealed_header().clone());
                 }
-
-                // Validate block against header
-                self.consensus.validate_block_pre_execution(&block)?;
 
                 // add to the internal maps
                 let block_hash = block.hash();
