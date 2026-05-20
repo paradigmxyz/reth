@@ -139,7 +139,8 @@ pub struct TreeConfig {
     precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,
-    /// Whether to skip state-root validation for benchmark-only `engine_newPayload` processing.
+    /// Whether to skip state-root/trie work for benchmark-only block production and
+    /// `engine_newPayload` processing.
     skip_state_root_validation_for_bench: bool,
     /// Whether to always process payload attributes and begin a payload build process
     /// even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor.
@@ -422,7 +423,8 @@ impl TreeConfig {
         self.state_root_fallback
     }
 
-    /// Returns whether state-root validation is skipped for benchmark-only payload validation.
+    /// Returns whether state-root/trie work is skipped for benchmark-only block production and
+    /// payload validation.
     pub const fn skip_state_root_validation_for_bench(&self) -> bool {
         self.skip_state_root_validation_for_bench
     }
@@ -583,7 +585,7 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for benchmark-only state-root validation skipping.
+    /// Setter for benchmark-only state-root/trie skipping.
     pub const fn with_skip_state_root_validation_for_bench(
         mut self,
         skip_state_root_validation_for_bench: bool,

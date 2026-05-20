@@ -171,6 +171,7 @@ where
             cached_reads,
             execution_cache,
             trie_handle,
+            skip_state_root_validation_for_bench,
             config,
             cancel,
             best_payload,
@@ -183,6 +184,7 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    skip_state_root_validation_for_bench,
                     config: PayloadConfig { parent_header, attributes: left_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {
@@ -200,6 +202,7 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    skip_state_root_validation_for_bench,
                     config: PayloadConfig { parent_header, attributes: right_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {

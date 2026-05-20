@@ -59,7 +59,7 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
-    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -561,20 +561,26 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Spawn hashed post state computation in background so it runs concurrently with
-        // block conversion and receipt root computation. This is a pure CPU-bound task
-        // (keccak256 hashing of all changed addresses and storage slots).
-        let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState =
-            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_validator",
-                    "hashed_post_state",
-                )
-                .entered();
-                Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
-            });
+        let hashed_state = if matches!(strategy, StateRootStrategy::TrustHeaderForBenchmark) {
+            None
+        } else {
+            // Spawn hashed post state computation in background so it runs concurrently with
+            // block conversion and receipt root computation. This is a pure CPU-bound task
+            // (keccak256 hashing of all changed addresses and storage slots).
+            let hashed_state_output = output.clone();
+            let hashed_state_provider = self.provider.clone();
+            Some(self.payload_processor.executor().spawn_blocking_named(
+                "hash-post-state",
+                move || {
+                    let _span = debug_span!(
+                        target: "engine::tree::payload_validator",
+                        "hashed_post_state",
+                    )
+                    .entered();
+                    Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                },
+            ))
+        };
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
@@ -628,13 +634,13 @@ where
                 let _ = valid_block_tx.send(());
             }
 
-            let executed_block = ExecutedBlock::with_deferred_trie_data(
-                Arc::new(block),
-                output,
-                DeferredTrieData::unavailable_for_benchmark(),
-            );
+            let executed_block =
+                ExecutedBlock::new(Arc::new(block), output, ComputedTrieData::default());
             return Ok(ValidationOutput::new(executed_block, timing_stats))
         }
+
+        let hashed_state = hashed_state
+            .expect("hashed post-state is required when benchmark state-root skipping is disabled");
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -1542,7 +1548,8 @@ where
     /// If `receipt_root_bloom` is provided, it will be used instead of computing the receipt root
     /// and logs bloom from the receipts.
     ///
-    /// The `hashed_state` handle wraps the background hashed post state computation.
+    /// The `hashed_state` handle wraps the background hashed post state computation when that
+    /// computation is required by the active validation mode.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::too_many_arguments)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
@@ -1552,9 +1559,9 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        hashed_state: LazyHashedPostState,
+        hashed_state: Option<LazyHashedPostState>,
         block_access_list_hash: Option<B256>,
-    ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
+    ) -> Result<Option<LazyHashedPostState>, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1578,19 +1585,22 @@ where
         }
         drop(_enter);
 
-        // Wait for the background keccak256 hashing task to complete. This blocks until
-        // all changed addresses and storage slots have been hashed.
-        let hashed_state_ref =
-            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                .in_scope(|| hashed_state.get());
+        if let Some(hashed_state) = &hashed_state {
+            // Wait for the background keccak256 hashing task to complete. This blocks until
+            // all changed addresses and storage slots have been hashed.
+            let hashed_state_ref =
+                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                    .in_scope(|| hashed_state.get());
 
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
-        {
-            // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
+            if let Err(err) = self
+                .validator
+                .validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
+            {
+                // call post-block hook
+                self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+                return Err(err.into())
+            }
         }
 
         // record post-execution validation duration

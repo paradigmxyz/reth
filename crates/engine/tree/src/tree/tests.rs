@@ -592,7 +592,9 @@ fn skip_state_root_validation_for_bench_accepts_bad_root_and_skips_root_handler(
     .expect("benchmark mode trusts the header state root");
 
     assert_eq!(custom_root_calls.load(Ordering::Relaxed), 0);
-    assert!(output.executed_block.trie_data_handle().is_unavailable_for_benchmark());
+    let trie_data = output.executed_block.trie_data();
+    assert!(trie_data.hashed_state.is_empty());
+    assert!(trie_data.trie_updates.is_empty());
     assert_eq!(output.executed_block.recovered_block().header().state_root(), bad_state_root);
     assert_eq!(output.executed_block.execution_outcome().result.gas_used, 0);
     assert!(output.executed_block.execution_outcome().result.receipts.is_empty());
@@ -654,7 +656,7 @@ fn skip_state_root_validation_for_bench_does_not_record_state_root_metrics() {
 }
 
 #[test]
-fn skip_state_root_validation_for_bench_suppresses_persistence_actions() {
+fn skip_state_root_validation_for_bench_does_not_suppress_persistence_actions() {
     let chain_spec = MAINNET.clone();
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
@@ -663,15 +665,14 @@ fn skip_state_root_validation_for_bench_suppresses_persistence_actions() {
         .with_persistence_threshold(0)
         .with_skip_state_root_validation_for_bench(true);
 
-    assert!(!test_harness.tree.should_persist());
+    assert!(test_harness.tree.should_persist());
     test_harness.tree.advance_persistence().unwrap();
-    assert!(test_harness.action_rx.try_recv().is_err());
-
-    let blocks_to_persist =
-        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Head).unwrap();
-    assert!(!blocks_to_persist.is_empty());
-    test_harness.tree.persist_blocks(blocks_to_persist);
-    assert!(test_harness.action_rx.try_recv().is_err());
+    let action =
+        test_harness.action_rx.try_recv().expect("benchmark mode must still trigger persistence");
+    let PersistenceAction::SaveBlocks(saved_blocks, _) = action else {
+        panic!("expected save blocks action, got {action:?}");
+    };
+    assert!(!saved_blocks.is_empty());
 }
 
 #[test]

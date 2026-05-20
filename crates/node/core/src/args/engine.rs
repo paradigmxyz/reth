@@ -412,9 +412,9 @@ pub struct EngineArgs {
     #[arg(long = "engine.state-root-fallback", default_value_t = DefaultEngineValues::get_global().state_root_fallback)]
     pub state_root_fallback: bool,
 
-    /// UNSAFE benchmark-only mode for `engine_newPayload` validation. Trusts header state roots,
-    /// skips state-root computation and validation, and must not be used for production
-    /// validation.
+    /// UNSAFE benchmark-only mode for block production and `engine_newPayload` validation. Trusts
+    /// header state roots, skips state-root/trie computation, may write invalid non-reusable chain
+    /// data, and must not be used for production validation.
     #[arg(long = "engine.skip-state-root-validation-for-bench", default_value_t = DefaultEngineValues::get_global().skip_state_root_validation_for_bench)]
     pub skip_state_root_validation_for_bench: bool,
 

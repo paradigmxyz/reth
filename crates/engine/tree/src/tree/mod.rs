@@ -1370,14 +1370,6 @@ where
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
     fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock<N>>) {
-        if self.config.skip_state_root_validation_for_bench() {
-            warn!(
-                target: "engine::tree",
-                "skipping persistence because benchmark-only state-root validation skipping is enabled"
-            );
-            return
-        }
-
         if blocks_to_persist.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
             return
@@ -1431,14 +1423,6 @@ where
 
     /// Persists all remaining blocks until none are left.
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
-        if self.config.skip_state_root_validation_for_bench() {
-            warn!(
-                target: "engine::tree",
-                "skipping shutdown persistence because benchmark-only state-root validation skipping is enabled"
-            );
-            return Ok(())
-        }
-
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
@@ -2074,10 +2058,6 @@ where
     /// block is greater than or equal to the persistence threshold,
     /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
-        if self.config.skip_state_root_validation_for_bench() {
-            return false
-        }
-
         if self.building_payload {
             return false
         }
@@ -3273,7 +3253,12 @@ where
             None
         };
 
-        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() {
+        let skip_state_root_validation_for_bench =
+            self.config.skip_state_root_validation_for_bench();
+
+        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() &&
+            !skip_state_root_validation_for_bench
+        {
             self.payload_validator.sparse_trie_handle_for(
                 state.head_block_hash,
                 head.state_root(),
@@ -3290,6 +3275,7 @@ where
             attributes,
             cache,
             trie_handle,
+            skip_state_root_validation_for_bench,
         });
 
         // Client software MUST respond to this method call in the following way:

@@ -120,6 +120,7 @@ where
             Default::default(),
             Default::default(),
             None,
+            false,
             config,
             Default::default(),
             None,
@@ -162,6 +163,7 @@ where
         mut cached_reads,
         execution_cache,
         trie_handle,
+        skip_state_root_validation_for_bench,
         config,
         cancel,
         best_payload,
@@ -220,8 +222,10 @@ where
 
     // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
     // to the background trie pipeline for incremental state root computation.
-    if let Some(ref handle) = trie_handle {
-        builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+    if !skip_state_root_validation_for_bench {
+        if let Some(ref handle) = trie_handle {
+            builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+        }
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {
@@ -446,33 +450,42 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
-        mut handle,
-    ) = trie_handle
-    {
-        // Drop the state hook, which drops the StateHookSender and triggers
-        // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
-        builder.executor_mut().set_state_hook(None);
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
+        if skip_state_root_validation_for_bench {
+            debug!(
+                target: "payload_builder",
+                id=%payload_id,
+                parent_state_root=?parent_header.state_root,
+                "benchmark mode skipping payload state root computation"
+            );
+            builder.finish(
+                state_provider.as_ref(),
+                Some((parent_header.state_root, Default::default())),
+            )?
+        } else if let Some(mut handle) = trie_handle {
+            // Drop the state hook, which drops the StateHookSender and triggers
+            // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
+            builder.executor_mut().set_state_hook(None);
 
-        // The sparse trie has been computing incrementally alongside tx execution.
-        // This recv() waits for the final root hash — most work is already done.
-        // Fall back to sync state root if the trie pipeline fails.
-        match handle.state_root() {
-            Ok(outcome) => {
-                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
-                builder.finish(
-                    state_provider.as_ref(),
-                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
-                )?
+            // The sparse trie has been computing incrementally alongside tx execution.
+            // This recv() waits for the final root hash — most work is already done.
+            // Fall back to sync state root if the trie pipeline fails.
+            match handle.state_root() {
+                Ok(outcome) => {
+                    debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                    builder.finish(
+                        state_provider.as_ref(),
+                        Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+                    )?
+                }
+                Err(err) => {
+                    warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
+                    builder.finish(state_provider.as_ref(), None)?
+                }
             }
-            Err(err) => {
-                warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
-                builder.finish(state_provider.as_ref(), None)?
-            }
-        }
-    } else {
-        builder.finish(state_provider.as_ref(), None)?
-    };
+        } else {
+            builder.finish(state_provider.as_ref(), None)?
+        };
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

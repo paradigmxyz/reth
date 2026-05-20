@@ -546,6 +546,8 @@ pub struct BuildNewPayload<T> {
     pub cache: Option<SavedCache>,
     /// Optional handle to a background sparse trie task.
     pub trie_handle: Option<StateRootHandle>,
+    /// Benchmark-only mode that skips state root computation for built payloads.
+    pub skip_state_root_validation_for_bench: bool,
 }
 
 impl<T: PayloadAttributes> BuildNewPayload<T> {

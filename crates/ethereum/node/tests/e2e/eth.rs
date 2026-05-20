@@ -14,7 +14,7 @@ use reth_node_api::TreeConfig;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumNode};
-use reth_provider::BlockNumReader;
+use reth_provider::{BlockNumReader, HeaderProvider};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
 use reth_tasks::Runtime;
@@ -411,6 +411,45 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 
     let best_block = node.inner.provider.best_block_number()?;
     assert_eq!(best_block, num_blocks as u64, "Expected {} blocks, got {}", num_blocks, best_block);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_benchmark_skip_payload_builder_uses_parent_state_root() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let tree_config = TreeConfig::default()
+        .with_share_sparse_trie_with_payload_builder(true)
+        .with_skip_state_root_validation_for_bench(true);
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .prague_activated()
+                .build(),
+        ),
+        false,
+        tree_config,
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+    let parent_state_root = node.inner.provider.header_by_number(0)?.unwrap().state_root;
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.advance_block().await?;
+    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+
+    let built_header = node.inner.provider.header_by_number(1)?.unwrap();
+    assert_eq!(built_header.state_root, parent_state_root);
+    assert_eq!(node.inner.provider.best_block_number()?, 1);
 
     Ok(())
 }
