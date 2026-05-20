@@ -136,6 +136,7 @@ jobs:
       comment-id: ${{ steps.ack.outputs.comment-id }}
       pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
       pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
+      pr-head-repo: ${{ steps.args.outputs.pr-head-repo }}
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
@@ -397,6 +398,7 @@ jobs:
               });
               core.setOutput('pr-head-sha', prData.head.sha);
               core.setOutput('pr-head-ref', prData.head.ref);
+              core.setOutput('pr-head-repo', prData.head.repo.full_name);
               if (!featureName) featureName = prData.head.ref;
             } else {
               if (!featureName) featureName = '${{ github.ref_name }}';
@@ -612,6 +614,7 @@ jobs:
       BENCH_PR: ${{ needs.bench-ack.outputs.pr }}
       BENCH_PR_HEAD_SHA: ${{ needs.bench-ack.outputs.pr-head-sha }}
       BENCH_PR_HEAD_REF: ${{ needs.bench-ack.outputs.pr-head-ref }}
+      BENCH_PR_HEAD_REPO: ${{ needs.bench-ack.outputs.pr-head-repo }}
       BENCH_ACTOR: ${{ needs.bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.bench-ack.outputs.warmup }}
@@ -644,6 +647,7 @@ jobs:
         with:
           script: |
             if (!process.env.BENCH_PR) {
+              core.setOutput('repository', '${{ github.repository }}');
               core.setOutput('ref', '${{ github.ref }}');
               return;
             }
@@ -652,11 +656,14 @@ jobs:
               core.setFailed('BENCH_PR_HEAD_SHA is not set — ack job must pin the PR head SHA');
               return;
             }
-            core.info(`PR #${process.env.BENCH_PR}, using pinned head SHA ${sha}`);
+            const repository = process.env.BENCH_PR_HEAD_REPO || '${{ github.repository }}';
+            core.info(`PR #${process.env.BENCH_PR}, using ${repository}@${sha}`);
+            core.setOutput('repository', repository);
             core.setOutput('ref', sha);
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ steps.checkout-ref.outputs.repository }}
           persist-credentials: false
           submodules: true
           fetch-depth: 0
