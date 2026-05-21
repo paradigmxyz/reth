@@ -541,6 +541,7 @@ impl SparseStateTrie {
     ///
     /// Unlike [`Self::update_account`], this method:
     /// - Accepts `Option<Account>` — `None` removes the account leaf.
+    /// - Removes empty accounts with empty storage roots.
     /// - Falls back to [`EMPTY_ROOT_HASH`] for unrevealed accounts instead of returning
     ///   [`SparseTrieErrorKind::Blind`], since stateless validation operates with a sparse witness
     ///   where not all accounts are revealed.
@@ -566,6 +567,11 @@ impl SparseStateTrie {
         } else {
             EMPTY_ROOT_HASH
         };
+
+        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            trace!(target: "trie::sparse", ?address, "Removing empty account");
+            return self.remove_account_leaf(&nibbles, provider_factory);
+        }
 
         trace!(target: "trie::sparse", ?address, "Updating account");
         self.account_rlp_buf.clear();
@@ -948,6 +954,71 @@ mod tests {
         let mut nibbles = Nibbles::from_nibbles(suffix);
         nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![0; total_len - suffix.len()]));
         nibbles
+    }
+
+    #[test]
+    fn update_account_stateless_none_removes_existing_leaf() {
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let address = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+
+        sparse.update_account_stateless(address, Some(account), &provider_factory).unwrap();
+        assert!(sparse.get_account_value(&address).is_some(), "account should exist after insert");
+
+        sparse.update_account_stateless(address, None, &provider_factory).unwrap();
+        assert!(
+            sparse.get_account_value(&address).is_none(),
+            "account should be removed when stateless update receives None"
+        );
+    }
+
+    #[test]
+    fn update_account_stateless_matches_update_account_for_revealed_leaf() {
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let address = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+        let initial = Account { nonce: 1, balance: U256::from(10), bytecode_hash: None };
+        let updated_stateful = Account { nonce: 2, balance: U256::from(99), bytecode_hash: None };
+        let updated_stateless = Account { nonce: 2, balance: U256::from(99), bytecode_hash: None };
+
+        let mut stateful = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut stateless = SparseStateTrie::<ParallelSparseTrie>::default();
+
+        stateful.update_account_stateless(address, Some(initial), &provider_factory).unwrap();
+        stateless.update_account_stateless(address, Some(initial), &provider_factory).unwrap();
+
+        let should_keep =
+            stateful.update_account(address, updated_stateful, &provider_factory).unwrap();
+        assert!(should_keep, "stateful update should keep non-empty account leaf");
+
+        stateless
+            .update_account_stateless(address, Some(updated_stateless), &provider_factory)
+            .unwrap();
+
+        assert_eq!(
+            stateful.get_account_value(&address),
+            stateless.get_account_value(&address),
+            "stateful and stateless account updates should encode the same leaf for revealed accounts"
+        );
+    }
+
+    #[test]
+    fn update_account_stateless_removes_empty_account_with_empty_storage_root() {
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let address = b256!("0x3000000000000000000000000000000000000000000000000000000000000000");
+
+        let non_empty = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        sparse.update_account_stateless(address, Some(non_empty), &provider_factory).unwrap();
+        assert!(sparse.get_account_value(&address).is_some(), "account should exist after insert");
+
+        sparse
+            .update_account_stateless(address, Some(Account::default()), &provider_factory)
+            .unwrap();
+        assert!(
+            sparse.get_account_value(&address).is_none(),
+            "empty account with empty storage root should remove account leaf"
+        );
     }
 
     #[test]

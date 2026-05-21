@@ -893,6 +893,11 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
+    use reth_primitives_traits::Account;
+    use reth_trie_common::EMPTY_ROOT_HASH;
+    use reth_trie_sparse::{
+        provider::DefaultTrieNodeProviderFactory, ArenaParallelSparseTrie, SparseStateTrie,
+    };
     use reth_provider::{
         providers::{OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory,
@@ -982,6 +987,52 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_account_leaf_value_stateless_update_consistency() {
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let address = B256::from([0x11; 32]);
+        let initial = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        let updated = Account { nonce: 2, balance: U256::from(2), bytecode_hash: None };
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.update_account_stateless(address, Some(initial), &provider_factory).unwrap();
+        sparse.update_account_stateless(address, Some(updated), &provider_factory).unwrap();
+
+        let mut account_rlp_buf = Vec::new();
+        let expected =
+            encode_account_leaf_value(Some(updated), EMPTY_ROOT_HASH, &mut account_rlp_buf);
+        assert_eq!(
+            sparse.get_account_value(&address).cloned(),
+            Some(expected),
+            "stateless update should encode account leaves identically to engine helper"
+        );
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_empty_account_matches_stateless_removal() {
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let address = B256::from([0x22; 32]);
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.update_account_stateless(address, Some(account), &provider_factory).unwrap();
+
+        let mut account_rlp_buf = vec![0xCC];
+        let encoded = encode_account_leaf_value(
+            Some(Account::default()),
+            EMPTY_ROOT_HASH,
+            &mut account_rlp_buf,
+        );
+        assert!(encoded.is_empty(), "engine helper should encode empty account as deletion");
+
+        sparse
+            .update_account_stateless(address, Some(Account::default()), &provider_factory)
+            .unwrap();
+        assert!(
+            sparse.get_account_value(&address).is_none(),
+            "stateless update should remove leaf when account is empty and storage root is empty"
+        );
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
