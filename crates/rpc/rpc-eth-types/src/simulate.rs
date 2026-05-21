@@ -282,12 +282,18 @@ pub fn apply_precompile_overrides(
 ///
 /// Returns all executed transactions and the result of the execution.
 ///
+/// For each call without an explicit `gas` field, the remaining block gas is used as the default,
+/// optionally capped by `call_gas_cap` (an RPC-level per-call gas cap, ignored when zero). This
+/// matches the spec rule `"gasLimit: blockGasLimit - soFarUsedGasInBlock"` and geth's per-call
+/// `sanitizeCall` behavior.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
     calls: Vec<RpcTxReq<T::Network>>,
-    default_gas_limit: u64,
+    block_gas_limit: u64,
+    call_gas_cap: u64,
     chain_id: u64,
     converter: &T,
 ) -> Result<
@@ -304,7 +310,13 @@ where
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
+    let mut cumulative_gas_used: u64 = 0;
     for call in calls {
+        let mut default_gas_limit = block_gas_limit.saturating_sub(cumulative_gas_used);
+        if call_gas_cap > 0 {
+            default_gas_limit = default_gas_limit.min(call_gas_cap);
+        }
+
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
         let tx = resolve_transaction(
@@ -319,9 +331,10 @@ where
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
-        builder.execute_transaction_with_result_closure(tx, |result| {
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
             results.push(result.result().result.clone())
         })?;
+        cumulative_gas_used = cumulative_gas_used.saturating_add(gas_output.tx_gas_used());
     }
 
     // Pass noop provider to skip state root calculations.
