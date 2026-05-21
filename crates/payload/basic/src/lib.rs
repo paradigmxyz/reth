@@ -370,7 +370,7 @@ where
         self.executor.spawn_task(async move {
             // acquire the permit for executing the task
             let permit = guard.acquire_owned().await;
-            let build = move || {
+            executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
                 let _permit = permit;
                 let args = BuildArguments {
                     cached_reads,
@@ -382,9 +382,7 @@ where
                 };
                 let result = builder.try_build(args);
                 let _ = tx.send(result);
-            };
-
-            executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, build);
+            });
         });
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
@@ -532,11 +530,10 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    let build = move || {
+                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
                         let res = builder.build_empty_payload(config);
                         let _ = tx.send(res);
-                    };
-                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, build);
+                    });
 
                     empty_payload = Some(rx);
                 }
@@ -544,10 +541,9 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    let build = move || {
+                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
                         let _ = tx.send(job());
-                    };
-                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, build);
+                    });
                     empty_payload = Some(rx);
                 }
             };
