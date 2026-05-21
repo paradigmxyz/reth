@@ -728,6 +728,16 @@ where
                 return
             }
 
+            if let Some(cache) = cached.as_ref().filter(|cache| !cache.is_available()) {
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    usage_count = cache.usage_count(),
+                    "Execution cache is in use, skip updating cache with new state for inserted executed block",
+                );
+                return
+            }
+
             // Take existing cache (if any) or create fresh caches
             let caches = match cached.take() {
                 Some(existing) => existing.cache().clone(),
@@ -1010,6 +1020,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_cache::CachedStatus;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
@@ -1167,6 +1178,65 @@ mod tests {
         // Cache for block 3 should not exist
         let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
         assert!(cached3.is_none(), "New block cache should not be created on mismatch");
+    }
+
+    #[test]
+    fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
+        let payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let parent_hash = B256::from([1u8; 32]);
+        payload_processor
+            .execution_cache
+            .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
+
+        // Checking out the cache bumps its usage_guard refcount, marking the slot as in-use.
+        // The returned SavedCache shares the same underlying ExecutionCache Arc as the slot,
+        // so any writes through the slot are observable here
+        let checked_out = payload_processor
+            .execution_cache
+            .get_cache_for(parent_hash)
+            .expect("expected parent cache checkout to succeed");
+
+        let polluted_address = Address::random();
+        let bundle_state = BundleState::builder(2..=2)
+            .state_present_account_info(
+                polluted_address,
+                AccountInfo {
+                    balance: U256::from(1337),
+                    nonce: 7,
+                    code_hash: KECCAK_EMPTY,
+                    code: None,
+                    account_id: None,
+                },
+            )
+            .build();
+
+        // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
+        // the in-use guard specifically.
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: B256::from([2u8; 32]), number: 2 },
+            parent: parent_hash,
+        };
+
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+
+        // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
+        // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.
+        let account = checked_out
+            .cache()
+            .get_or_try_insert_account_with(polluted_address, || Ok::<_, ()>(None))
+            .expect("cache read should succeed");
+
+        assert_eq!(
+            account,
+            CachedStatus::NotCached(None),
+            "checked-out parent cache should not observe state from inserted local block"
+        );
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
