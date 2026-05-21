@@ -126,7 +126,7 @@ impl TrieTestHarness {
             once((self.hashed_address(), hashed_storage.into_sorted())).collect(),
         );
         let overlay_cursor_factory =
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), [&overlay]);
 
         let (root, _, updates) = StorageRoot::new_hashed(
             self.trie_cursor_factory.clone(),

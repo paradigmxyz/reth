@@ -210,7 +210,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), [post_state]),
         )
         .with_prefix_sets(prefix_sets)
         .root()
@@ -223,7 +223,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), [post_state]),
         )
         .with_prefix_sets(prefix_sets)
         .root_with_updates()
@@ -233,11 +233,11 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::<_, A>::new(tx),
-                input.nodes.as_ref(),
+                [input.nodes.as_ref()],
             ),
             HashedPostStateCursorFactory::new(
                 DatabaseHashedCursorFactory::new(tx),
-                input.state.as_ref(),
+                [input.state.as_ref()],
             ),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
@@ -251,11 +251,11 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::<_, A>::new(tx),
-                input.nodes.as_ref(),
+                [input.nodes.as_ref()],
             ),
             HashedPostStateCursorFactory::new(
                 DatabaseHashedCursorFactory::new(tx),
-                input.state.as_ref(),
+                [input.state.as_ref()],
             ),
         )
         .with_prefix_sets(input.prefix_sets.freeze())

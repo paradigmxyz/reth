@@ -156,7 +156,7 @@ where
     // Create an overlay cursor factory that has the trie state from after block-1
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
     let overlay_factory =
-        InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
+        InMemoryTrieCursorFactory::new(db_cursor_factory, [&cumulative_trie_updates_prev]);
 
     let changesets =
         compute_trie_changesets(&overlay_factory, &trie_updates).map_err(ProviderError::other)?;
@@ -262,7 +262,7 @@ where
     // Step 4: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
+    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, [&reverts]);
 
     // Step 5: Collect all account trie nodes that changed in the target block
     let account_nodes_ref = changesets.account_nodes_ref();

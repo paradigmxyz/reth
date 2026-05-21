@@ -57,8 +57,8 @@ pub(crate) struct OverlayStateProviderMetrics {
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
 #[derive(Debug, Clone)]
 pub(super) struct Overlay {
-    pub(super) trie_updates: Arc<TrieUpdatesSorted>,
-    pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
+    pub(super) trie_updates: Vec<Arc<TrieUpdatesSorted>>,
+    pub(super) hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -175,24 +175,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     fn resolve_overlays(
         &self,
         anchor_hash: BlockHash,
-    ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
+    ) -> ProviderResult<(Vec<Arc<TrieUpdatesSorted>>, Vec<Arc<HashedPostStateSorted>>)> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
                 let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
-                    (
-                        Arc::new(TrieUpdatesSorted::default()),
-                        Arc::new(HashedPostStateSorted::default()),
-                    )
+                    (Vec::new(), Vec::new())
                 } else {
                     manager
                         .overlay_for_parent(self.parent_hash, anchor_hash)
                         .map_err(ProviderError::other)?
                 };
 
-                if overlay_state.is_empty() {
-                    overlay_state = Arc::clone(state);
-                } else if !state.is_empty() {
-                    Arc::make_mut(&mut overlay_state).extend_ref_and_sort(state);
+                if !state.is_empty() {
+                    overlay_state.insert(0, Arc::clone(state));
                 }
 
                 Ok((trie, overlay_state))
@@ -204,12 +199,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         self.parent_hash
                     ))))
                 }
-                Ok((Arc::clone(trie), Arc::clone(state)))
+                let trie = (!trie.is_empty()).then(|| Arc::clone(trie)).into_iter().collect();
+                let state = (!state.is_empty()).then(|| Arc::clone(state)).into_iter().collect();
+                Ok((trie, state))
             }
-            None => Ok((
-                Arc::new(TrieUpdatesSorted::default()),
-                Arc::new(HashedPostStateSorted::default()),
-            )),
+            None => Ok((Vec::new(), Vec::new())),
         }
     }
 
@@ -333,7 +327,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             );
 
             // Collect trie reverts using changeset cache
-            let mut trie_reverts = {
+            let trie_reverts = {
                 let _guard =
                     debug_span!(target: "providers::state::overlay", "retrieving_trie_reverts")
                         .entered();
@@ -350,7 +344,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             };
 
             // Collect state reverts
-            let mut hashed_state_reverts = {
+            let hashed_state_reverts = {
                 let _guard = debug_span!(target: "providers::state::overlay", "retrieving_hashed_state_reverts").entered();
 
                 let start = Instant::now();
@@ -365,24 +359,24 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
-            } else if !overlay_trie.is_empty() {
-                trie_reverts.extend_ref_and_sort(&overlay_trie);
-                Arc::new(trie_reverts)
             } else {
-                Arc::new(trie_reverts)
+                let mut trie_updates = overlay_trie;
+                trie_updates.push(Arc::new(trie_reverts));
+                trie_updates
             };
 
             let hashed_state_updates = if hashed_state_reverts.is_empty() {
                 overlay_state
-            } else if !overlay_state.is_empty() {
-                hashed_state_reverts.extend_ref_and_sort(&overlay_state);
-                Arc::new(hashed_state_reverts)
             } else {
-                Arc::new(hashed_state_reverts)
+                let mut hashed_state_updates = overlay_state;
+                hashed_state_updates.push(Arc::new(hashed_state_reverts));
+                hashed_state_updates
             };
 
-            trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_state_updates.total_len();
+            trie_updates_total_len =
+                trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
+            hashed_state_updates_total_len =
+                hashed_state_updates.iter().map(|state| state.total_len()).sum::<usize>();
 
             debug!(
                 target: "providers::state::overlay",
@@ -398,8 +392,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
-            trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_state.total_len();
+            trie_updates_total_len =
+                trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
+            hashed_state_updates_total_len =
+                hashed_state.iter().map(|state| state.total_len()).sum::<usize>();
 
             (trie_updates, hashed_state)
         };
@@ -544,8 +540,8 @@ where
 #[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
-    trie_updates: Arc<TrieUpdatesSorted>,
-    hashed_post_state: Arc<HashedPostStateSorted>,
+    trie_updates: Vec<Arc<TrieUpdatesSorted>>,
+    hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
     is_v2: bool,
 }
 
@@ -555,10 +551,10 @@ where
 {
     /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
     /// it should be wrapped in an `Arc`.
-    pub const fn new(
+    pub fn new(
         provider: Provider,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        hashed_post_state: Arc<HashedPostStateSorted>,
+        trie_updates: Vec<Arc<TrieUpdatesSorted>>,
+        hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
         is_v2: bool,
     ) -> Self {
         Self { provider, trie_updates, hashed_post_state, is_v2 }
@@ -582,7 +578,6 @@ where
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let tx = self.provider.tx_ref();
-        let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                 tx.cursor_read::<PackedAccountsTrie>()?,
@@ -592,7 +587,7 @@ where
                 tx.cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
+        Ok(InMemoryTrieCursor::new_account(cursor, self.trie_updates.iter().map(Arc::as_ref)))
     }
 
     fn storage_trie_cursor(
@@ -600,7 +595,6 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let tx = self.provider.tx_ref();
-        let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                 tx.cursor_dup_read::<PackedStoragesTrie>()?,
@@ -612,7 +606,11 @@ where
                 hashed_address,
             ))
         };
-        Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
+        Ok(InMemoryTrieCursor::new_storage(
+            cursor,
+            self.trie_updates.iter().map(Arc::as_ref),
+            hashed_address,
+        ))
     }
 }
 
@@ -622,24 +620,27 @@ where
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
+        'a,
         DatabaseHashedCursorFactory<&'a Provider::Tx>,
-        &'a Arc<HashedPostStateSorted>,
+        Vec<&'a HashedPostStateSorted>,
     > as HashedCursorFactory>::AccountCursor<'a>
     where
         Self: 'a;
 
     type StorageCursor<'a>
         = <HashedPostStateCursorFactory<
+        'a,
         DatabaseHashedCursorFactory<&'a Provider::Tx>,
-        &'a Arc<HashedPostStateSorted>,
+        Vec<&'a HashedPostStateSorted>,
     > as HashedCursorFactory>::StorageCursor<'a>
     where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
+        let hashed_post_state = self.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
         let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
+            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
         hashed_cursor_factory.hashed_account_cursor()
     }
 
@@ -648,8 +649,9 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
+        let hashed_post_state = self.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
         let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
+            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
         hashed_cursor_factory.hashed_storage_cursor(hashed_address)
     }
 }
