@@ -53,6 +53,25 @@ mod tests {
             .collect()
     }
 
+    /// Generates test storage changeset data for a block.
+    fn generate_test_storage_changeset(
+        block_num: u64,
+        num_changes: usize,
+    ) -> Vec<reth_db::models::StorageBeforeTx> {
+        (0..num_changes)
+            .map(|i| {
+                let mut address = Address::ZERO;
+                address.0[0] = block_num as u8;
+                address.0[1] = i as u8;
+                reth_db::models::StorageBeforeTx {
+                    address,
+                    key: alloy_primitives::B256::with_last_byte(i as u8),
+                    value: U256::from(block_num * 1000 + i as u64),
+                }
+            })
+            .collect()
+    }
+
     /// Writes test blocks to the `AccountChangeSets` segment.
     /// Returns the path to the sidecar file.
     fn write_test_blocks(
@@ -882,5 +901,87 @@ mod tests {
         );
 
         drop(writer);
+    }
+
+    // ==================== SAME-BLOCK APPEND TESTS ====================
+
+    #[test]
+    fn account_changeset_multiple_appends_same_block() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let block = 0;
+
+        {
+            let mut writer = provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            writer.append_account_changeset(generate_test_changeset(block, 3), block).unwrap();
+            assert_eq!(writer.current_block_number(), Some(block), "block should not advance");
+
+            writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            assert_eq!(writer.current_block_number(), Some(block), "block should not advance");
+
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        assert_eq!(get_header_block_count(&provider, block), 1, "should be 1 block");
+    }
+
+    #[test]
+    fn storage_changeset_multiple_appends_same_block() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let block = 0;
+
+        {
+            let mut writer = provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            writer
+                .append_storage_changeset(generate_test_storage_changeset(block, 3), block)
+                .unwrap();
+            assert_eq!(writer.current_block_number(), Some(block), "block should not advance");
+
+            writer
+                .append_storage_changeset(generate_test_storage_changeset(block, 2), block)
+                .unwrap();
+            assert_eq!(writer.current_block_number(), Some(block), "block should not advance");
+
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::StorageChangeSets).unwrap(),
+            block,
+            "highest block should be 0"
+        );
+    }
+
+    #[test]
+    fn account_changeset_advances_on_new_block() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let block = 0;
+
+        {
+            let mut writer = provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            assert_eq!(writer.current_block_number(), Some(block));
+
+            writer
+                .append_account_changeset(generate_test_changeset(block + 1, 3), block + 1)
+                .unwrap();
+            assert_eq!(writer.current_block_number(), Some(block + 1));
+
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        assert_eq!(get_header_block_count(&provider, block), 2, "should be 2 blocks");
     }
 }
