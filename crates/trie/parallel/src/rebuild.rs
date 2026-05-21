@@ -178,6 +178,53 @@ struct StorageRootJobOutcome {
     progress: StorageRootProgress,
     stats: StorageRootPrefetchStats,
 }
+
+#[derive(Debug)]
+struct InlineStorageRootJob {
+    job: StorageRootJobOutcome,
+    walked: usize,
+}
+
+fn inline_empty_storage_root_job() -> InlineStorageRootJob {
+    InlineStorageRootJob {
+        walked: 0,
+        job: StorageRootJobOutcome {
+            progress: StorageRootProgress::Complete(
+                EMPTY_ROOT_HASH,
+                0,
+                StorageTrieUpdates::deleted(),
+            ),
+            stats: StorageRootPrefetchStats::default(),
+        },
+    }
+}
+
+fn inline_storage_root_from_slots(
+    slots: Vec<(B256, alloy_primitives::U256)>,
+) -> InlineStorageRootJob {
+    if slots.is_empty() {
+        return inline_empty_storage_root_job()
+    }
+
+    let walked = slots.len();
+    let mut hash_builder = HashBuilder::default().with_updates(true);
+    for (hashed_slot, value) in slots {
+        hash_builder
+            .add_leaf(Nibbles::unpack(hashed_slot), alloy_rlp::encode_fixed_size(&value).as_ref());
+    }
+    let root = hash_builder.root();
+    let mut updates = StorageTrieUpdates::default();
+    updates.finalize(hash_builder, Default::default());
+
+    InlineStorageRootJob {
+        walked,
+        job: StorageRootJobOutcome {
+            progress: StorageRootProgress::Complete(root, walked, updates),
+            stats: StorageRootPrefetchStats::default(),
+        },
+    }
+}
+
 fn calculate_storage_aware_account_prefix_rebuild<H>(
     hashed_cursor_factory: H,
     depth: usize,
@@ -785,6 +832,261 @@ fn account_prefix_apply_account(
     build.stats.account_leaf_duration += account_leaf_started.elapsed();
 
     Ok(true)
+}
+
+fn account_prefix_storage_probe<H>(
+    hashed_cursor_factory: &H,
+    storage_hints: Option<&[AccountPrefixStorageHint]>,
+    storage_hint_index: &mut usize,
+    storage_presence: &mut Option<StoragePresenceCursor<'_>>,
+    hashed_address: B256,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<FreshStorageProbe, ParallelRebuildStateRootError>
+where
+    H: HashedCursorFactory,
+{
+    let probe = if let Some(storage_hints) = storage_hints {
+        account_prefix_storage_hint_probe(
+            storage_hints,
+            storage_hint_index,
+            hashed_address,
+            config,
+            stats,
+        )
+    } else {
+        account_prefix_storage_presence_probe(storage_presence, hashed_address, config, stats)?
+    };
+    account_prefix_finish_storage_probe(hashed_cursor_factory, hashed_address, probe, config, stats)
+}
+
+fn account_prefix_finish_storage_probe<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    probe: FreshStorageProbe,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<FreshStorageProbe, ParallelRebuildStateRootError>
+where
+    H: HashedCursorFactory,
+{
+    match probe {
+        FreshStorageProbe::Miss(Some(FreshStorageSegmentation::Auto)) => {
+            account_prefix_inline_small_storage_probe(
+                hashed_cursor_factory,
+                hashed_address,
+                config,
+                stats,
+            )
+        }
+        probe => Ok(probe),
+    }
+}
+
+fn account_prefix_storage_hint_probe(
+    storage_hints: &[AccountPrefixStorageHint],
+    storage_hint_index: &mut usize,
+    hashed_address: B256,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+) -> FreshStorageProbe {
+    let started = std::time::Instant::now();
+    while storage_hints
+        .get(*storage_hint_index)
+        .is_some_and(|hint| hint.hashed_address < hashed_address)
+    {
+        *storage_hint_index += 1;
+        stats.storage_presence_skipped_keys += 1;
+    }
+    stats.storage_presence_duration += started.elapsed();
+    stats.storage_presence_checks += 1;
+
+    if storage_hints
+        .get(*storage_hint_index)
+        .is_some_and(|hint| hint.hashed_address == hashed_address)
+    {
+        let hint = storage_hints[*storage_hint_index];
+        *storage_hint_index += 1;
+        stats.storage_presence_present_hits += 1;
+        return account_prefix_probe_from_storage_presence(
+            AccountStoragePresence::Present { slots: hint.slots },
+            config,
+            stats,
+            false,
+        )
+    }
+
+    stats.storage_presence_empty_hits += 1;
+    account_prefix_probe_from_storage_presence(AccountStoragePresence::Empty, config, stats, false)
+}
+
+fn account_prefix_storage_presence_probe(
+    storage_presence: &mut Option<StoragePresenceCursor<'_>>,
+    hashed_address: B256,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<FreshStorageProbe, ParallelRebuildStateRootError> {
+    let Some(storage_presence) = storage_presence.as_mut() else {
+        return Ok(FreshStorageProbe::Miss(None))
+    };
+
+    let started = std::time::Instant::now();
+    let (presence, skipped_keys) = storage_presence.lookup(hashed_address)?;
+    stats.storage_presence_duration += started.elapsed();
+    stats.storage_presence_checks += 1;
+    stats.storage_presence_skipped_keys += skipped_keys;
+
+    match presence {
+        AccountStoragePresence::Empty => stats.storage_presence_empty_hits += 1,
+        AccountStoragePresence::Present { .. } => stats.storage_presence_present_hits += 1,
+    }
+
+    Ok(account_prefix_probe_from_storage_presence(presence, config, stats, true))
+}
+
+fn account_prefix_probe_from_storage_presence(
+    presence: AccountStoragePresence,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+    count_query: bool,
+) -> FreshStorageProbe {
+    match presence {
+        AccountStoragePresence::Empty => {
+            if config.inline_empty_storage_roots {
+                stats.inline_empty_storage_roots += 1;
+                return FreshStorageProbe::Inline(Box::new(inline_empty_storage_root_job()))
+            }
+            FreshStorageProbe::Miss(Some(account_prefix_serial_segmentation(config)))
+        }
+        AccountStoragePresence::Present { slots: Some(slots) } => {
+            if slots > 0 &&
+                config.inline_storage_root_slot_limit > 0 &&
+                slots <= config.inline_storage_root_slot_limit
+            {
+                return FreshStorageProbe::Miss(Some(FreshStorageSegmentation::Auto))
+            }
+            FreshStorageProbe::Miss(Some(account_prefix_known_fresh_storage_segmentation(
+                slots,
+                config,
+                stats,
+                count_query,
+            )))
+        }
+        AccountStoragePresence::Present { slots: None } => FreshStorageProbe::Miss(None),
+    }
+}
+
+fn account_prefix_inline_small_storage_probe<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<FreshStorageProbe, ParallelRebuildStateRootError>
+where
+    H: HashedCursorFactory,
+{
+    let started = std::time::Instant::now();
+    let Some(inline_job) = inline_storage_root_with_limit(
+        hashed_cursor_factory,
+        hashed_address,
+        config.inline_storage_root_slot_limit,
+    )?
+    else {
+        stats.inline_storage_root_check_duration += started.elapsed();
+        stats.inline_storage_root_checks += 1;
+        return Ok(FreshStorageProbe::Miss(Some(account_prefix_serial_segmentation(config))))
+    };
+    stats.inline_storage_root_check_duration += started.elapsed();
+    stats.inline_storage_root_checks += 1;
+    stats.inline_small_storage_roots += 1;
+    stats.inline_small_storage_slots += inline_job.walked;
+    Ok(FreshStorageProbe::Inline(Box::new(inline_job)))
+}
+
+fn inline_storage_root_with_limit<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    slot_limit: usize,
+) -> Result<Option<InlineStorageRootJob>, StorageRootError>
+where
+    H: HashedCursorFactory,
+{
+    let mut cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+    let mut slots = Vec::new();
+    let mut entry = cursor.seek(B256::ZERO)?;
+
+    while let Some((hashed_slot, value)) = entry {
+        if slots.len() >= slot_limit {
+            return Ok(None)
+        }
+        slots.push((hashed_slot, value));
+        entry = cursor.next()?;
+    }
+
+    Ok(Some(inline_storage_root_from_slots(slots)))
+}
+
+const fn account_prefix_serial_segmentation(
+    config: StorageRootPrefetchConfig,
+) -> FreshStorageSegmentation {
+    if config.storage_prefix_planner.is_some() && storage_prefix_gate_enabled(config) {
+        FreshStorageSegmentation::Serial
+    } else {
+        FreshStorageSegmentation::Auto
+    }
+}
+
+fn account_prefix_known_fresh_storage_segmentation(
+    slots: usize,
+    config: StorageRootPrefetchConfig,
+    stats: &mut StorageRootPrefetchStats,
+    count_query: bool,
+) -> FreshStorageSegmentation {
+    if config.storage_prefix_planner.is_none() || !storage_prefix_gate_enabled(config) {
+        return FreshStorageSegmentation::Auto
+    }
+
+    let started = std::time::Instant::now();
+    stats.segmented_storage_gate_probes += 1;
+    if count_query {
+        stats.segmented_storage_gate_count_queries += 1;
+        stats.segmented_storage_gate_counted_slots += slots;
+    }
+
+    let min_large_slots = config.storage_prefix_min_large_slots.max(1);
+    let segmentation = if slots >= min_large_slots {
+        stats.segmented_storage_gate_hits += 1;
+        let planner_config = storage_prefix_adaptive_planner_config(
+            config.storage_prefix_planner.expect("planner checked above"),
+            config.storage_prefix_min_large_slots,
+            Some(slots),
+        );
+        FreshStorageSegmentation::Segmented(planner_config)
+    } else {
+        stats.segmented_storage_gate_misses += 1;
+        FreshStorageSegmentation::Serial
+    };
+    stats.segmented_storage_gate_duration += started.elapsed();
+    segmentation
+}
+
+#[derive(Debug)]
+enum FreshStorageProbe {
+    Inline(Box<InlineStorageRootJob>),
+    Miss(Option<FreshStorageSegmentation>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FreshStorageSegmentation {
+    Auto,
+    Segmented(StoragePrefixPlannerConfig),
+    Serial,
+}
+
+impl FreshStorageSegmentation {
+    const fn allows_segmented_trigger(&self, config: StorageRootPrefetchConfig) -> bool {
+        matches!(self, Self::Auto) && !storage_prefix_gate_enabled(config)
+    }
 }
 /// Error during experimental parallel clean rebuild calculation.
 #[derive(Error, Debug)]
