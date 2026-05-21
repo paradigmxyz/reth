@@ -470,7 +470,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Transaction = T::Transaction;
 
@@ -817,8 +817,8 @@ where
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
 
-    fn blob_store(&self) -> Arc<dyn BlobStore> {
-        self.pool.blob_store_arc()
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        Box::new(self.pool.blob_store().clone())
     }
 }
 
@@ -827,7 +827,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Block = V::Block;
 

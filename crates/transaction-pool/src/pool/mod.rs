@@ -146,7 +146,7 @@ where
     /// Transaction validator.
     validator: V,
     /// Storage for blob transactions
-    blob_store: Arc<S>,
+    blob_store: S,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
@@ -185,19 +185,14 @@ where
             transaction_listener: Default::default(),
             blob_transaction_sidecar_listener: Default::default(),
             config,
-            blob_store: Arc::new(blob_store),
+            blob_store,
             blob_store_metrics: Default::default(),
         }
     }
 
     /// Returns the configured blob store.
-    pub fn blob_store(&self) -> &S {
+    pub const fn blob_store(&self) -> &S {
         &self.blob_store
-    }
-
-    /// Returns a shared handle to the configured blob store.
-    pub fn blob_store_arc(&self) -> Arc<S> {
-        Arc::clone(&self.blob_store)
     }
 
     /// Returns stats about the size of the pool.
