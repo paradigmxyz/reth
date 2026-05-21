@@ -13,6 +13,8 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+/// Shared blob cell custody state.
+pub mod custody;
 pub mod downloaders;
 /// Network Error
 pub mod error;
@@ -27,6 +29,7 @@ pub use alloy_rpc_types_admin::EthProtocolInfo;
 pub use reth_network_p2p::{BlockClient, HeadersClient};
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
+pub use custody::CellCustody;
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
 pub use events::{
@@ -34,22 +37,13 @@ pub use events::{
     PeerRequestSender,
 };
 
-use alloy_primitives::B128;
 use reth_eth_wire_types::{
     capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
     UnifiedStatus,
 };
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;
-use std::{
-    future::Future,
-    net::SocketAddr,
-    sync::{
-        atomic::{AtomicU64, AtomicU8, Ordering},
-        Arc,
-    },
-    time::Instant,
-};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
@@ -306,51 +300,4 @@ pub struct NetworkStatus {
     pub eth_protocol_info: EthProtocolInfo,
     /// The list of supported capabilities and their versions.
     pub capabilities: Vec<Capability>,
-}
-
-/// Shared blob cell custody bitmap.
-#[derive(Debug, Clone, Default)]
-pub struct CellCustody {
-    inner: Arc<CellCustodyInner>,
-}
-
-impl CellCustody {
-    /// Returns the currently configured blob cell custody bitmap.
-    pub fn get(&self) -> B128 {
-        match self.inner.state.load(Ordering::Relaxed) {
-            CELL_CUSTODY_NONE => B128::from(0u128),
-            CELL_CUSTODY_FULL => B128::from(u128::MAX),
-            _ => {
-                let high = self.inner.high.load(Ordering::Relaxed) as u128;
-                let low = self.inner.low.load(Ordering::Relaxed) as u128;
-
-                B128::from((high << 64) | low)
-            }
-        }
-    }
-
-    /// Updates the blob cell custody bitmap.
-    pub fn set(&self, custody_columns: B128) {
-        let custody_columns = u128::from(custody_columns);
-        match custody_columns {
-            0 => self.inner.state.store(CELL_CUSTODY_NONE, Ordering::Relaxed),
-            u128::MAX => self.inner.state.store(CELL_CUSTODY_FULL, Ordering::Relaxed),
-            _ => {
-                self.inner.high.store((custody_columns >> 64) as u64, Ordering::Relaxed);
-                self.inner.low.store(custody_columns as u64, Ordering::Relaxed);
-                self.inner.state.store(CELL_CUSTODY_CUSTOM, Ordering::Relaxed);
-            }
-        }
-    }
-}
-
-const CELL_CUSTODY_NONE: u8 = 0;
-const CELL_CUSTODY_FULL: u8 = 1;
-const CELL_CUSTODY_CUSTOM: u8 = 2;
-
-#[derive(Debug, Default)]
-struct CellCustodyInner {
-    state: AtomicU8,
-    high: AtomicU64,
-    low: AtomicU64,
 }
