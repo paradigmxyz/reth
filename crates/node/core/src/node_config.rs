@@ -154,6 +154,11 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All storage related arguments with --storage prefix
     pub storage: StorageArgs,
+
+    /// Pipeline stages to disable when launching through the SDK.
+    ///
+    /// This is intentionally SDK-only and is not exposed as CLI arguments.
+    pub disabled_stages: Vec<StageId>,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -186,6 +191,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era: EraArgs::default(),
             static_files: StaticFilesArgs::default(),
             storage: StorageArgs::default(),
+            disabled_stages: Vec::new(),
         }
     }
 
@@ -230,6 +236,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Sets pipeline stages to disable when launching the node.
+    pub fn with_disabled_stages(mut self, disabled_stages: impl Into<Vec<StageId>>) -> Self {
+        self.disabled_stages = disabled_stages.into();
+        self
+    }
+
     /// Set the config file for the node
     pub fn with_config(mut self, config: impl Into<PathBuf>) -> Self {
         self.config = Some(config.into());
@@ -261,6 +273,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era,
             static_files,
             storage,
+            disabled_stages,
             ..
         } = self;
         NodeConfig {
@@ -281,6 +294,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era,
             static_files,
             storage,
+            disabled_stages,
         }
     }
 
@@ -579,6 +593,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era: self.era,
             static_files: self.static_files,
             storage: self.storage,
+            disabled_stages: self.disabled_stages,
         }
     }
 
@@ -621,6 +636,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             era: self.era.clone(),
             static_files: self.static_files,
             storage: self.storage,
+            disabled_stages: self.disabled_stages.clone(),
         }
     }
 }

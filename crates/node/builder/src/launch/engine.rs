@@ -162,6 +162,7 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             ctx.era_import_source(),
+            &node_config.disabled_stages,
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
