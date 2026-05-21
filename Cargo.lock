@@ -9954,6 +9954,7 @@ dependencies = [
 name = "reth-rpc-eth-api"
 version = "2.2.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-eip7928",
@@ -10000,6 +10001,7 @@ dependencies = [
 name = "reth-rpc-eth-types"
 version = "2.2.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips 2.0.5",
  "alloy-evm",
