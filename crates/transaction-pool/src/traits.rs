@@ -51,7 +51,7 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::BlobStoreError,
+    blobstore::{BlobStore, BlobStoreError},
     error::{InvalidPoolTransactionError, PoolError, PoolResult},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -736,6 +736,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         versioned_hashes: &[B256],
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
+
+    /// Returns the blob store used by the pool.
+    fn blob_store(&self) -> Box<dyn BlobStore>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
