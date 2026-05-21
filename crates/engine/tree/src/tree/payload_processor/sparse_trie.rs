@@ -994,7 +994,7 @@ mod tests {
             ),
         );
         let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory));
 
         let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
             ArenaParallelSparseTrie::default(),

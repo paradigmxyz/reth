@@ -10333,6 +10333,7 @@ dependencies = [
  "reth-metrics",
  "thiserror 2.0.18",
  "thread-priority",
+ "threadpool",
  "tokio",
  "tracing",
  "tracing-futures",

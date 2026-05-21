@@ -159,18 +159,13 @@ impl ProofWorkerHandle {
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
         target = "trie::proof_task",
         skip_all
     )]
-    pub fn new<Factory>(
-        runtime: &Runtime,
-        task_ctx: ProofTaskCtx<Factory>,
-        halve_workers: bool,
-    ) -> Self
+    pub fn new<Factory>(runtime: &Runtime, task_ctx: ProofTaskCtx<Factory>) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
@@ -183,11 +178,8 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
+        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -196,7 +188,6 @@ impl ProofWorkerHandle {
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
-            halve_workers,
             "Spawning proof worker pools"
         );
 
@@ -209,7 +200,7 @@ impl ProofWorkerHandle {
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
-            storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
+            storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, move || {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span = debug_span!(target: "trie::proof_task", parent: storage_parent_span.clone(), "storage_worker", ?worker_id);
                 let _guard = span.enter();
@@ -247,7 +238,7 @@ impl ProofWorkerHandle {
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
-            account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
+            account_rt.proof_account_worker_pool().broadcast(account_worker_count, move || {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span = debug_span!(target: "trie::proof_task", parent: account_parent_span.clone(), "account_worker", ?worker_id);
                 let _guard = span.enter();
@@ -1180,7 +1171,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
