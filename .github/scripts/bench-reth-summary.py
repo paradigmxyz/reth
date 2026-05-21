@@ -1129,6 +1129,9 @@ def query_histogram_target_metric_run(
     for identity_key, identity_labels in sorted(mean_identities.items()):
         per_block_observations = []
         has_histogram_activity = False
+        pending_sum_delta = 0.0
+        total_sum_delta = 0.0
+        total_block_delta = 0.0
         display_query = format_target_metric_identity(histogram["query"], identity_labels)
         for previous_scrape, current_scrape, previous_sum_groups, current_sum_groups in zip(
             relevant_scrapes,
@@ -1141,9 +1144,6 @@ def query_histogram_target_metric_run(
             current_block_height = float(current_scrape["block_height"])
             previous_block_height = float(previous_scrape["block_height"])
             block_delta = current_block_height - previous_block_height
-            if block_delta <= EPSILON:
-                continue
-
             sum_delta = current_sum - previous_sum
             if sum_delta < -EPSILON:
                 raise ValueError(
@@ -1151,19 +1151,37 @@ def query_histogram_target_metric_run(
                 )
             if sum_delta > EPSILON:
                 has_histogram_activity = True
+                pending_sum_delta += sum_delta
+                total_sum_delta += sum_delta
+
+            if block_delta <= EPSILON:
+                continue
+
+            total_block_delta += block_delta
             per_block_observations.append(
                 {
                     "block_height": current_block_height,
-                    "value": sum_delta / block_delta,
+                    "sum_delta": pending_sum_delta,
+                    "block_delta": block_delta,
+                    "value": pending_sum_delta / block_delta,
                 }
             )
+            pending_sum_delta = 0.0
 
-        if not has_histogram_activity or not per_block_observations:
+        if pending_sum_delta > EPSILON and per_block_observations:
+            last_observation = per_block_observations[-1]
+            last_observation["sum_delta"] += pending_sum_delta
+            last_observation["value"] = (
+                last_observation["sum_delta"] / last_observation["block_delta"]
+            )
+
+        if not has_histogram_activity or not per_block_observations or total_block_delta <= EPSILON:
             continue
 
         stats = compute_target_metric_series_stats(
             [observation["value"] for observation in per_block_observations]
         )
+        stats["mean"] = total_sum_delta / total_block_delta
         metrics_by_identity[identity_key] = {
             "query": histogram["query"],
             "display_query": display_query,
@@ -1185,70 +1203,6 @@ def query_histogram_target_metric_run(
         }
 
     return metrics_by_identity
-
-
-def query_gauge_target_metric_run(
-    relevant_scrapes: list[dict],
-    gauge: dict,
-    run_label: str,
-    metadata: dict,
-    identity_label_keys: set[str],
-) -> dict[tuple[tuple[str, str], ...], dict]:
-    query = gauge["query"]
-    aggregate, _metric_name, _label_filters = parse_target_metric_query(query)
-    grouped_scrapes = [
-        group_query_samples_by_identity(scrape["samples"], query, identity_label_keys)[1]
-        for scrape in relevant_scrapes
-    ]
-    identities = collect_metric_identities(grouped_scrapes)
-    if not identities:
-        raise ValueError(
-            f"Gauge target metric '{query}' in run '{run_label}' had no sampled values"
-        )
-
-    results = {}
-    for identity_key, identity_labels in sorted(identities.items()):
-        observations = []
-        display_query = format_target_metric_identity(query, identity_labels)
-        for scrape, groups in zip(relevant_scrapes, grouped_scrapes):
-            if identity_key not in groups:
-                continue
-            observations.append(
-                {
-                    "block_height": float(scrape["block_height"]),
-                    "value": grouped_sample_value(groups.get(identity_key), aggregate),
-                }
-            )
-
-        if not observations:
-            raise ValueError(
-                f"Gauge target metric '{display_query}' in run '{run_label}' had no observations"
-            )
-
-        stats = compute_target_metric_series_stats(
-            [observation["value"] for observation in observations]
-        )
-        results[identity_key] = {
-            "query": query,
-            "display_query": display_query,
-            "identity_labels": identity_labels,
-            "target": gauge["target"],
-            "mean": {
-                "query": query,
-                "value": stats["mean"],
-                "samples": len(observations),
-                "scrapes": len(relevant_scrapes),
-                "duration_ms": int(metadata["duration_ms"]),
-                "range_start_ms": int(metadata["range_start_ms"]),
-                "range_end_ms": int(metadata["range_end_ms"]),
-                "benchmark_id": metadata["benchmark_id"],
-                "benchmark_run": metadata["benchmark_run"],
-                "_values": [observation["value"] for observation in observations],
-                "_observations": observations,
-            },
-        }
-
-    return results
 
 
 def load_target_metric_run_context(path: str) -> dict:
@@ -1283,18 +1237,6 @@ def collect_target_metric_identity_label_keys(
 
     for counter in config.get("counters", []):
         query = counter["query"]
-        identity_label_keys_by_query[query] = set().union(
-            *(
-                target_metric_variable_identity_label_keys(
-                    context["relevant_scrapes"],
-                    query,
-                )
-                for context in run_contexts
-            )
-        )
-
-    for gauge in config.get("gauges", []):
-        query = gauge["query"]
         identity_label_keys_by_query[query] = set().union(
             *(
                 target_metric_variable_identity_label_keys(
@@ -1351,18 +1293,7 @@ def query_target_metric_run(
             identity_label_keys_by_query[query],
         )
 
-    gauges = {}
-    for gauge in config.get("gauges", []):
-        query = gauge["query"]
-        gauges[gauge["query"]] = query_gauge_target_metric_run(
-            relevant_scrapes,
-            gauge,
-            run_label,
-            metadata,
-            identity_label_keys_by_query[query],
-        )
-
-    return run_label, {"counters": counters, "gauges": gauges, "histograms": histograms}
+    return run_label, {"counters": counters, "histograms": histograms}
 
 
 def run_label_from_path(path: str) -> str:
@@ -1622,76 +1553,7 @@ def compute_target_metric_summary(
                     min_value_pct_total_latency=counter_min_value_pct_total_latency,
                     block_latency_ms=block_latency_ms,
                     include_pair_mean_values=True,
-                )
-            )
-
-    for gauge in config.get("gauges", []):
-        query = gauge["query"]
-        target = gauge["target"]
-        floor_pct = float(gauge.get("floor_pct", 0.0))
-        gauge_min_value_pct_total_latency = target_metric_min_value_pct_total_latency(gauge)
-        display_stats = ("mean",)
-        identities = collect_query_metric_identities(
-            baseline_runs + feature_runs, "gauges", query
-        )
-
-        for identity_key, identity_labels in sorted(identities.items()):
-            baseline_values = []
-            feature_values = []
-            display_query = format_target_metric_identity(query, identity_labels)
-            baseline_run_metrics = []
-            feature_run_metrics = []
-            if not all(
-                identity_key in run_data["gauges"][query]
-                for _run_label, run_data in baseline_runs + feature_runs
-            ):
-                continue
-
-            for run_label, run_data in baseline_runs:
-                run_metric = run_data["gauges"][query][identity_key]
-                baseline_run_metrics.append((run_label, run_metric))
-
-            for run_label, run_data in feature_runs:
-                run_metric = run_data["gauges"][query][identity_key]
-                feature_run_metrics.append((run_label, run_metric))
-
-            baseline_runs_for_stats = {stat_name: [] for stat_name in display_stats}
-            feature_runs_for_stats = {stat_name: [] for stat_name in display_stats}
-
-            for run_label, run_metric in baseline_run_metrics:
-                run_values = {"run": run_label}
-                for stat_name in display_stats:
-                    run_stat = run_metric[stat_name]
-                    baseline_runs_for_stats[stat_name].append(run_stat)
-                    run_values[stat_name] = float(run_stat["value"])
-                baseline_values.append(run_values)
-
-            for run_label, run_metric in feature_run_metrics:
-                run_values = {"run": run_label}
-                for stat_name in display_stats:
-                    run_stat = run_metric[stat_name]
-                    feature_runs_for_stats[stat_name].append(run_stat)
-                    run_values[stat_name] = float(run_stat["value"])
-                feature_values.append(run_values)
-
-            metrics.append(
-                build_target_metric_entry(
-                    kind="gauge",
-                    configured_query=query,
-                    display_query=display_query,
-                    identity_labels=identity_labels,
-                    target=target,
-                    display_stats=display_stats,
-                    summary_fields=display_stats,
-                    baseline_values=baseline_values,
-                    feature_values=feature_values,
-                    baseline_runs_by_stat=baseline_runs_for_stats,
-                    feature_runs_by_stat=feature_runs_for_stats,
-                    pair_stats=display_stats,
-                    floor_pct=floor_pct,
-                    min_value_pct_total_latency=gauge_min_value_pct_total_latency,
-                    block_latency_ms=block_latency_ms,
-                    unit=gauge.get("unit"),
+                    unit=counter.get("unit"),
                 )
             )
 
@@ -1763,6 +1625,7 @@ def compute_target_metric_summary(
                     floor_pct=floor_pct,
                     min_value_pct_total_latency=histogram_min_value_pct_total_latency,
                     block_latency_ms=block_latency_ms,
+                    unit=histogram.get("unit"),
                 )
             )
 
