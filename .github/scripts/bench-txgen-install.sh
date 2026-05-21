@@ -4,9 +4,11 @@
 #
 # Optional env:
 #   TXGEN_REPO  – txgen repository URL (default: https://github.com/tempoxyz/txgen)
+#   TXGEN_REV   – txgen git revision (default: 2c7c8e2)
 set -euxo pipefail
 
 TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
+TXGEN_REV="${TXGEN_REV:-2c7c8e2}"
 
 # txgen is private. Prefer the deploy key secret; fall back to token auth for
 # local/manual runs. Use the git CLI so cargo honors the auth configuration.
@@ -27,4 +29,4 @@ elif [ -n "${TXGEN_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_PAT:-${DEREK_TOKEN:-}}}}" 
 fi
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-cargo install --git "$TXGEN_REPO" --locked txgen-ethereum bench-cli
+cargo install --git "$TXGEN_REPO" --rev "$TXGEN_REV" --locked txgen-ethereum bench-cli
