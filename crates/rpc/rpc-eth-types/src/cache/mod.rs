@@ -4,7 +4,7 @@ use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::{ BlockHashOrNumber};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -989,7 +989,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Header};
     use alloy_eip7928::BlockAccessIndex;
-use alloy_eips::{BlockHashOrNumber, NumHash};
+    use alloy_eips::{BlockHashOrNumber, NumHash};
     use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber};
     use core::ops::{RangeBounds, RangeInclusive};
     use reth_db_models::StoredBlockBodyIndices;
@@ -1118,7 +1118,11 @@ use alloy_eips::{BlockHashOrNumber, NumHash};
     fn cached_revm_bal_size_accounts_for_nested_allocations() {
         let mut account = RevmAccountBal::default();
         account.account_info.nonce.writes.push((BlockAccessIndex::new(1), 1));
-        account.account_info.balance.writes.push((BlockAccessIndex::new(2), StorageValue::from(1u64)));
+        account
+            .account_info
+            .balance
+            .writes
+            .push((BlockAccessIndex::new(2), StorageValue::from(1u64)));
         account.account_info.code.writes.push((
             BlockAccessIndex::new(3),
             (B256::repeat_byte(0xaa), Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))),

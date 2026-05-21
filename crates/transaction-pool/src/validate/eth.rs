@@ -34,7 +34,7 @@ use reth_primitives_traits::{
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderFactory};
 use reth_tasks::Runtime;
 use revm::context_interface::Cfg;
-use revm_primitives::{U256, eip8037::CPSB_GLAMSTERDAM};
+use revm_primitives::{eip8037::CPSB_GLAMSTERDAM, U256};
 use std::{
     fmt,
     marker::PhantomData,
