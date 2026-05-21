@@ -750,7 +750,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.update_pipeline_stages(last_block_number, false)?;
             timings.update_pipeline_stages = start.elapsed();
 
-            std::thread::sleep(std::time::Duration::from_millis(20));
             timings.mdbx = mdbx_start.elapsed();
 
             Ok::<_, ProviderError>(())
