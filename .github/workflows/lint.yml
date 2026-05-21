@@ -316,7 +316,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
-      - uses: taiki-e/cache-cargo-install-action@a8b9ecf8e0c0ea09d7481cfc583a5203ecd585b5 # v3.0.5
+      - uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
         with:
           tool: zepter
       - name: Eagerly pull dependencies
