@@ -530,10 +530,13 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
-                        let res = builder.build_empty_payload(config);
-                        let _ = tx.send(res);
-                    });
+                    self.executor.spawn_blocking_named_or_tokio(
+                        PAYLOAD_BUILDER_THREAD_NAME,
+                        move || {
+                            let res = builder.build_empty_payload(config);
+                            let _ = tx.send(res);
+                        },
+                    );
 
                     empty_payload = Some(rx);
                 }
@@ -541,9 +544,12 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    self.executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
-                        let _ = tx.send(job());
-                    });
+                    self.executor.spawn_blocking_named_or_tokio(
+                        PAYLOAD_BUILDER_THREAD_NAME,
+                        move || {
+                            let _ = tx.send(job());
+                        },
+                    );
                     empty_payload = Some(rx);
                 }
             };
