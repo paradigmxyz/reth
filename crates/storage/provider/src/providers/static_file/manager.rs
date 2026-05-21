@@ -2518,11 +2518,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Accepts any range type that implements `RangeBounds<BlockNumber>`, including:
     /// - `Range<BlockNumber>` (e.g., `0..100`)
     /// - `RangeInclusive<BlockNumber>` (e.g., `0..=99`)
-    /// - `RangeFrom<BlockNumber>` (e.g., `0..`) - iterates until exhausted
+    /// - `RangeFrom<BlockNumber>` (e.g., `0..`) - capped to the highest available static file block
+    ///   to avoid scanning past the static file tip forever
     pub fn walk_account_changeset_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> StaticFileAccountChangesetWalker<Self> {
+        let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
         StaticFileAccountChangesetWalker::new(self.clone(), range)
     }
 
@@ -2531,6 +2533,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> StaticFileStorageChangesetWalker<Self> {
+        let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         StaticFileStorageChangesetWalker::new(self.clone(), range)
     }
 }
@@ -3022,11 +3025,16 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
+    use alloy_primitives::{Address, B256, U256};
     use reth_chain_state::EthPrimitives;
     use reth_db::test_utils::create_test_static_files_dir;
+    use reth_db_api::models::{AccountBeforeTx, StorageBeforeTx};
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 
-    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder};
+    use crate::{
+        providers::{static_file::manager::StaticFileWriter, StaticFileProvider},
+        StaticFileProviderBuilder,
+    };
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
@@ -3144,6 +3152,68 @@ mod tests {
             sf_rw.find_fixed_range_with_block_index(segment, Some(&mixed_size_index), 550),
             SegmentRangeInclusive::new(550, 649)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn walk_account_changeset_range_bounds_unbounded_range_past_tip() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).build()?;
+
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets)?;
+            writer.append_account_changeset(vec![], 0)?;
+            writer.append_account_changeset(vec![], 1)?;
+            writer.append_account_changeset(
+                vec![AccountBeforeTx { address: Address::from([1u8; 20]), info: None }],
+                2,
+            )?;
+            writer.commit()?;
+        }
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = done_tx.send(sf_rw.walk_account_changeset_range(10..).next());
+        });
+
+        let result = done_rx.recv_timeout(std::time::Duration::from_secs(1))?;
+        assert!(result.is_none());
+        handle.join().unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    fn walk_storage_changeset_range_bounds_unbounded_range_past_tip() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).build()?;
+
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets)?;
+            writer.append_storage_changeset(vec![], 0)?;
+            writer.append_storage_changeset(vec![], 1)?;
+            writer.append_storage_changeset(
+                vec![StorageBeforeTx {
+                    address: Address::from([2u8; 20]),
+                    key: B256::with_last_byte(1),
+                    value: U256::ZERO,
+                }],
+                2,
+            )?;
+            writer.commit()?;
+        }
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = done_tx.send(sf_rw.walk_storage_changeset_range(10..).next());
+        });
+
+        let result = done_rx.recv_timeout(std::time::Duration::from_secs(1))?;
+        assert!(result.is_none());
+        handle.join().unwrap();
 
         Ok(())
     }
