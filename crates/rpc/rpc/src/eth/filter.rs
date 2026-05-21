@@ -19,11 +19,13 @@ use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
-    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
-    RpcNodeCoreExt, RpcTransaction,
+    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, LogsResponseWithCursor,
+    QueryLimits, RpcConvert, RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
+    logs_utils::{
+        self, append_matching_block_logs, canonical_filter_hash, LogsCursor, ProviderOrBlock,
+    },
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
@@ -282,7 +284,7 @@ where
                         (block_number, block_number)
                     }
                 };
-                let logs = self
+                let (logs, _) = self
                     .inner
                     .clone()
                     .get_logs_in_block_range(
@@ -290,6 +292,7 @@ where
                         from_block_number,
                         to_block_number,
                         self.inner.query_limits,
+                        false,
                     )
                     .await?;
                 Ok(FilterChanges::Logs(logs))
@@ -414,6 +417,94 @@ where
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
         Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
+    }
+
+    /// Returns logs matching given filter object with cursor-based pagination.
+    ///
+    /// Handler for `eth_getLogsWithCursor`.
+    async fn logs_with_cursor(
+        &self,
+        filter: Filter,
+        cursor: Option<String>,
+    ) -> RpcResult<LogsResponseWithCursor> {
+        trace!(target: "rpc::eth", "Serving eth_getLogsWithCursor");
+
+        let filter_hash = canonical_filter_hash(&filter);
+
+        // Decode the cursor (if any) and verify it was issued for this filter.
+        let cursor_start_block = match cursor.as_deref() {
+            Some(s) => {
+                let decoded = LogsCursor::decode(s).map_err(EthFilterError::from)?;
+                if decoded.filter_hash() != &filter_hash {
+                    return Err(EthFilterError::CursorFilterMismatch.into());
+                }
+                Some(decoded.next_block())
+            }
+            None => None,
+        };
+
+        let limits = self.inner.query_limits;
+
+        // Resolve the block range from the filter, matching `logs_for_filter`'s semantics.
+        let (resolved_from, to_block_number) = match filter.block_option {
+            FilterBlockOption::AtBlockHash(block_hash) => {
+                let block_number = self
+                    .provider()
+                    .block_number(block_hash)
+                    .map_err(EthApiError::from)?
+                    .ok_or_else(|| {
+                        EthApiError::from(ProviderError::HeaderNotFound(block_hash.into()))
+                    })?;
+                (block_number, block_number)
+            }
+            FilterBlockOption::Range { from_block, to_block } => {
+                let info = self.provider().chain_info().map_err(EthApiError::from)?;
+                let start_block = info.best_number;
+                let from = from_block
+                    .map(|num| self.provider().convert_block_number(num))
+                    .transpose()
+                    .map_err(EthApiError::from)?
+                    .flatten();
+                let to = to_block
+                    .map(|num| self.provider().convert_block_number(num))
+                    .transpose()
+                    .map_err(EthApiError::from)?
+                    .flatten();
+
+                if let Some(t) = to &&
+                    t > info.best_number
+                {
+                    return Err(EthFilterError::BlockRangeExceedsHead {
+                        requested: t,
+                        head: info.best_number,
+                    }
+                    .into());
+                }
+
+                logs_utils::get_filter_block_range(from, to, start_block, info)
+                    .map_err(EthFilterError::from)?
+            }
+        };
+
+        // Cursor overrides the resolved from_block; cursor was validated against the same
+        // filter so it's safe to trust its next_block here.
+        let from_block_number = cursor_start_block.unwrap_or(resolved_from);
+
+        // If the cursor points past the resolved to_block, the prior page already exhausted
+        // the range — return an empty terminal page.
+        if from_block_number > to_block_number {
+            return Ok(LogsResponseWithCursor { logs: Vec::new(), next_cursor: None });
+        }
+
+        let (logs, next_block) = self
+            .inner
+            .clone()
+            .get_logs_in_block_range(filter, from_block_number, to_block_number, limits, true)
+            .await?;
+
+        let next_cursor = next_block.map(|nb| LogsCursor::new(filter_hash, nb).encode());
+
+        Ok(LogsResponseWithCursor { logs, next_cursor })
     }
 }
 
@@ -586,8 +677,16 @@ where
                     return Err(EthApiError::PrunedHistoryUnavailable.into());
                 }
 
-                self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
-                    .await
+                let (logs, _) = self
+                    .get_logs_in_block_range(
+                        filter,
+                        from_block_number,
+                        to_block_number,
+                        limits,
+                        false,
+                    )
+                    .await?;
+                Ok(logs)
             }
         }
     }
@@ -627,7 +726,8 @@ where
         from_block: u64,
         to_block: u64,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+        paginated: bool,
+    ) -> Result<(Vec<Log>, Option<u64>), EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         // perform boundary checks first
@@ -644,8 +744,9 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.task_spawner.spawn_blocking_task(async move {
-            let res =
-                this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
+            let res = this
+                .get_logs_in_block_range_inner(&filter, from_block, to_block, limits, paginated)
+                .await;
             let _ = tx.send(res);
         });
 
@@ -666,7 +767,8 @@ where
         from_block: u64,
         to_block: u64,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+        paginated: bool,
+    ) -> Result<(Vec<Log>, Option<u64>), EthFilterError> {
         let mut all_logs = Vec::new();
         let mut matching_headers = Vec::new();
 
@@ -718,6 +820,7 @@ where
             range_mode.next().await?
         {
             let num_hash = header.num_hash();
+            let prev_len = all_logs.len();
             append_matching_block_logs(
                 &mut all_logs,
                 recovered_block
@@ -737,6 +840,24 @@ where
                 is_multi_block_range &&
                 all_logs.len() > max_logs_per_response
             {
+                // In paginated mode, keep the response within the per-response cap by
+                // excluding the block that would push us over and pointing the cursor at
+                // it for the next call. Single-block atomicity is preserved: if this block
+                // alone exceeds the cap (no prior blocks in the page), it is returned in
+                // full and the cursor advances past it.
+                if paginated {
+                    if prev_len > 0 {
+                        all_logs.truncate(prev_len);
+                        return Ok((all_logs, Some(num_hash.number)));
+                    }
+                    // Sole block in this page exceeds the cap. Return it in full; advance
+                    // the cursor past it (or terminate if it was the final block).
+                    if num_hash.number < to_block {
+                        return Ok((all_logs, Some(num_hash.number + 1)));
+                    }
+                    return Ok((all_logs, None));
+                }
+
                 let retry_to_block =
                     if num_hash.number == from_block { from_block } else { num_hash.number - 1 };
 
@@ -756,7 +877,7 @@ where
             }
         }
 
-        Ok(all_logs)
+        Ok((all_logs, None))
     }
 }
 
@@ -968,6 +1089,15 @@ pub enum EthFilterError {
         /// End block of the suggested retry range (last successfully processed block)
         to_block: u64,
     },
+    /// Cursor passed to `eth_getLogsWithCursor` could not be decoded.
+    #[error("invalid cursor")]
+    InvalidCursor,
+    /// Cursor was encoded with a version this server does not understand.
+    #[error("unsupported cursor version: {0}")]
+    UnsupportedCursorVersion(u8),
+    /// Cursor was issued for a different filter than the one passed in this call.
+    #[error("cursor was issued for a different filter")]
+    CursorFilterMismatch,
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
@@ -990,9 +1120,21 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
-            EthFilterError::BlockRangeExceedsHead { .. }) => {
+            EthFilterError::BlockRangeExceedsHead { .. } |
+            EthFilterError::InvalidCursor |
+            EthFilterError::UnsupportedCursorVersion(_) |
+            EthFilterError::CursorFilterMismatch) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
+        }
+    }
+}
+
+impl From<logs_utils::LogsCursorError> for EthFilterError {
+    fn from(err: logs_utils::LogsCursorError) -> Self {
+        match err {
+            logs_utils::LogsCursorError::Invalid => Self::InvalidCursor,
+            logs_utils::LogsCursorError::UnsupportedVersion(v) => Self::UnsupportedCursorVersion(v),
         }
     }
 }
@@ -1887,6 +2029,7 @@ mod tests {
                 100,
                 102,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
+                false,
             )
             .await
             .expect_err("range should exceed max logs");
@@ -1898,6 +2041,83 @@ mod tests {
         assert_eq!(max_logs, 2);
         assert_eq!(from_block, 100);
         assert_eq!(to_block, 101);
+    }
+
+    #[tokio::test]
+    async fn test_paginated_range_caps_response_at_max_logs() {
+        // Same fixture shape as the overflow-error test above: blocks 100, 101, 102 each
+        // with one matching log; max_logs_per_response = 2. In paginated mode, the response
+        // should be capped at 2 logs (blocks 100 + 101) with a cursor pointing at block 102.
+        use reth_db_api::models::StoredBlockBodyIndices;
+        let provider = MockEthProvider::default();
+        let tx_inner = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(alloy_primitives::Address::ZERO),
+            value: alloy_primitives::U256::ZERO,
+            input: alloy_primitives::Bytes::new(),
+        };
+        let signature = alloy_primitives::Signature::test_signature();
+        let tx =
+            reth_ethereum_primitives::TransactionSigned::new_unhashed(tx_inner.into(), signature);
+
+        let mock_log = alloy_primitives::Log {
+            address: alloy_primitives::Address::ZERO,
+            data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
+        };
+        let receipt = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![mock_log],
+            success: true,
+        };
+
+        let mut prev_hash = alloy_primitives::B256::default();
+        for (idx, block_number) in (100u64..=102).enumerate() {
+            let header = alloy_consensus::Header {
+                number: block_number,
+                parent_hash: prev_hash,
+                logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+                ..Default::default()
+            };
+            let hash = header.hash_slow();
+            prev_hash = hash;
+            let block = reth_ethereum_primitives::Block {
+                header,
+                body: reth_ethereum_primitives::BlockBody {
+                    transactions: vec![tx.clone()],
+                    ..Default::default()
+                },
+            };
+            provider.add_block(hash, block);
+            provider.add_receipts(block_number, vec![receipt.clone()]);
+            provider.add_block_body_indices(
+                block_number,
+                StoredBlockBodyIndices { first_tx_num: idx as u64, tx_count: 1 },
+            );
+        }
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let (logs, next_block) = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(
+                Filter::default(),
+                100,
+                102,
+                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
+                true, // paginated
+            )
+            .await
+            .expect("paginated range should succeed");
+
+        // Strict cap: response holds at most max_logs_per_response (=2), and the cursor
+        // points at the block we excluded so the caller can resume there.
+        assert_eq!(logs.len(), 2);
+        assert_eq!(next_block, Some(102));
     }
 
     #[tokio::test]
@@ -1987,10 +2207,10 @@ mod tests {
         let filter = Filter::default();
 
         // Get logs in the range - this will trigger the bloom filtering
-        let logs = eth_filter
+        let (logs, _) = eth_filter
             .inner
             .clone()
-            .get_logs_in_block_range(filter, 100, 103, QueryLimits::default())
+            .get_logs_in_block_range(filter, 100, 103, QueryLimits::default(), false)
             .await
             .expect("should succeed");
 
@@ -2003,5 +2223,39 @@ mod tests {
         // Each block hash should be the hash of its own header, not derived from any other header
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
+
+    #[tokio::test]
+    async fn logs_with_cursor_rejects_invalid_cursor() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let err = eth_filter
+            .logs_with_cursor(Filter::default(), Some("not-a-valid-cursor".to_string()))
+            .await
+            .expect_err("invalid cursor should be rejected");
+        assert_eq!(err.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+        assert!(err.message().contains("invalid cursor"));
+    }
+
+    #[tokio::test]
+    async fn logs_with_cursor_rejects_filter_mismatch() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        // Issue a cursor under filter A, then submit it with filter B.
+        let filter_a = Filter::new().from_block(100u64).to_block(200u64);
+        let filter_b = Filter::new().from_block(100u64).to_block(300u64);
+        let hash_a = canonical_filter_hash(&filter_a);
+        let cursor_for_a = LogsCursor::new(hash_a, 150).encode();
+
+        let err = eth_filter
+            .logs_with_cursor(filter_b, Some(cursor_for_a))
+            .await
+            .expect_err("cursor reuse against different filter should be rejected");
+        assert_eq!(err.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+        assert!(err.message().contains("cursor was issued for a different filter"));
     }
 }
