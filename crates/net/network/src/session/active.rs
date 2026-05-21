@@ -312,6 +312,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::PooledTransactions(resp) => {
                 on_response!(resp, GetPooledTransactions)
             }
+            EthMessage::PooledTransactions72(resp) => {
+                on_response!(resp, GetPooledTransactions)
+            }
             EthMessage::GetNodeData(req) => {
                 on_request!(req, NodeData, GetNodeData)
             }

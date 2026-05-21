@@ -148,6 +148,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a pooled transactions request.
         response: oneshot::Receiver<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     },
+    /// Represents a response to a request for pooled transactions for eth 72.
+    PooledTransactions72 {
+        /// The receiver channel for the response to a pooled transactions request.
+        response: oneshot::Receiver<RequestResult<PooledTransactions<N::PooledTransaction>>>,
+    },
     /// Represents a response to a request for `NodeData`.
     NodeData {
         /// The receiver channel for the response to a `NodeData` request.
@@ -209,6 +214,9 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             Self::PooledTransactions { response } => {
                 poll_request!(response, PooledTransactions, cx)
             }
+            Self::PooledTransactions72 { response } => {
+                poll_request!(response, PooledTransactions72, cx)
+            }
             Self::NodeData { response } => {
                 poll_request!(response, NodeData, cx)
             }
@@ -244,6 +252,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockBodies(RequestResult<Vec<N::BlockBody>>),
     /// Represents a result containing pooled transactions or an error.
     PooledTransactions(RequestResult<Vec<N::PooledTransaction>>),
+    /// Represents a result containing pooled transactions for eth/72 or an error.
+    PooledTransactions72(RequestResult<Vec<N::PooledTransaction>>),
     /// Represents a result containing node data or an error.
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
@@ -281,7 +291,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::BlockBodies(resp) => {
                 to_message!(resp, BlockBodies, id)
             }
-            Self::PooledTransactions(resp) => {
+            Self::PooledTransactions(resp) | Self::PooledTransactions72(resp) => {
                 to_message!(resp, PooledTransactions, id)
             }
             Self::NodeData(resp) => {
@@ -322,7 +332,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
         match self {
             Self::BlockHeaders(res) => res.as_ref().err(),
             Self::BlockBodies(res) => res.as_ref().err(),
-            Self::PooledTransactions(res) => res.as_ref().err(),
+            Self::PooledTransactions(res) | Self::PooledTransactions72(res) => res.as_ref().err(),
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
