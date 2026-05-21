@@ -125,6 +125,26 @@ pub(crate) struct DatabaseProviderMetrics {
     save_blocks_commit_sf_last: Gauge,
     /// Last duration of `RocksDB` commit in `save_blocks`
     save_blocks_commit_rocksdb_last: Gauge,
+    /// Number of account trie nodes added per `save_blocks`
+    save_blocks_account_trie_nodes_added: Histogram,
+    /// Number of account trie nodes removed per `save_blocks`
+    save_blocks_account_trie_nodes_removed: Histogram,
+    /// Total key bytes for added account trie nodes per `save_blocks`
+    save_blocks_account_trie_key_bytes_added: Histogram,
+    /// Total key bytes for removed account trie nodes per `save_blocks`
+    save_blocks_account_trie_key_bytes_removed: Histogram,
+    /// Total value bytes for added account trie nodes per `save_blocks`
+    save_blocks_account_trie_value_bytes_added: Histogram,
+    /// Number of storage trie nodes added per `save_blocks`
+    save_blocks_storage_trie_nodes_added: Histogram,
+    /// Number of storage trie nodes removed per `save_blocks`
+    save_blocks_storage_trie_nodes_removed: Histogram,
+    /// Total key bytes for added storage trie nodes per `save_blocks`
+    save_blocks_storage_trie_key_bytes_added: Histogram,
+    /// Total key bytes for removed storage trie nodes per `save_blocks`
+    save_blocks_storage_trie_key_bytes_removed: Histogram,
+    /// Total value bytes for added storage trie nodes per `save_blocks`
+    save_blocks_storage_trie_value_bytes_added: Histogram,
 }
 
 /// Timings collected during a `save_blocks` call.
@@ -141,6 +161,32 @@ pub(crate) struct SaveBlocksTimings {
     pub update_history_indices: Duration,
     pub update_pipeline_stages: Duration,
     pub batch_size: u64,
+    pub trie_stats: TrieNodePersistenceStats,
+}
+
+/// Stats about trie nodes persisted during a `save_blocks` call.
+#[derive(Debug, Default)]
+pub(crate) struct TrieNodePersistenceStats {
+    /// Number of account trie nodes added (upserted).
+    pub account_nodes_added: u64,
+    /// Number of account trie nodes removed (deleted).
+    pub account_nodes_removed: u64,
+    /// Total key size in bytes for account trie nodes added.
+    pub account_key_bytes_added: u64,
+    /// Total key size in bytes for account trie nodes removed.
+    pub account_key_bytes_removed: u64,
+    /// Total value size in bytes for account trie nodes added.
+    pub account_value_bytes_added: u64,
+    /// Number of storage trie nodes added (upserted).
+    pub storage_nodes_added: u64,
+    /// Number of storage trie nodes removed (deleted).
+    pub storage_nodes_removed: u64,
+    /// Total key size in bytes for storage trie nodes added.
+    pub storage_key_bytes_added: u64,
+    /// Total key size in bytes for storage trie nodes removed.
+    pub storage_key_bytes_removed: u64,
+    /// Total value size in bytes for storage trie nodes added.
+    pub storage_value_bytes_added: u64,
 }
 
 /// Timings collected during a `commit` call.
@@ -197,6 +243,18 @@ impl DatabaseProviderMetrics {
         self.save_blocks_update_pipeline_stages_last
             .set(timings.update_pipeline_stages.as_secs_f64());
         self.save_blocks_batch_size_last.set(timings.batch_size as f64);
+
+        let ts = &timings.trie_stats;
+        self.save_blocks_account_trie_nodes_added.record(ts.account_nodes_added as f64);
+        self.save_blocks_account_trie_nodes_removed.record(ts.account_nodes_removed as f64);
+        self.save_blocks_account_trie_key_bytes_added.record(ts.account_key_bytes_added as f64);
+        self.save_blocks_account_trie_key_bytes_removed.record(ts.account_key_bytes_removed as f64);
+        self.save_blocks_account_trie_value_bytes_added.record(ts.account_value_bytes_added as f64);
+        self.save_blocks_storage_trie_nodes_added.record(ts.storage_nodes_added as f64);
+        self.save_blocks_storage_trie_nodes_removed.record(ts.storage_nodes_removed as f64);
+        self.save_blocks_storage_trie_key_bytes_added.record(ts.storage_key_bytes_added as f64);
+        self.save_blocks_storage_trie_key_bytes_removed.record(ts.storage_key_bytes_removed as f64);
+        self.save_blocks_storage_trie_value_bytes_added.record(ts.storage_value_bytes_added as f64);
     }
 
     /// Records all commit timings.

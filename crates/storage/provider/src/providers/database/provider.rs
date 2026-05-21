@@ -733,6 +733,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let merged_trie =
                     TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
                 if !merged_trie.is_empty() {
+                    collect_trie_node_stats(&merged_trie, &mut timings.trie_stats);
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
                 timings.write_trie_updates += start.elapsed();
@@ -3119,6 +3120,57 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             cursor = db_storage_trie_cursor.cursor;
         }
         Ok(())
+    }
+}
+
+/// Returns the approximate byte size of a `BranchNodeCompact` value.
+///
+/// Layout: 3 × u16 masks (6 bytes) + hashes (32 bytes each) + optional root hash (32 bytes).
+fn branch_node_compact_byte_size(node: &reth_trie::BranchNodeCompact) -> u64 {
+    6 + node.hash_mask.count_ones() as u64 * 32 + if node.root_hash.is_some() { 32 } else { 0 }
+}
+
+/// Collects counts and byte sizes of trie nodes about to be persisted.
+fn collect_trie_node_stats(
+    trie_updates: &TrieUpdatesSorted,
+    stats: &mut metrics::TrieNodePersistenceStats,
+) {
+    // Account trie nodes (skip empty-key root entries, matching write_account_trie_updates).
+    for (key, updated_node) in trie_updates.account_nodes_ref() {
+        let key_bytes = key.len() as u64;
+        match updated_node {
+            Some(node) => {
+                if !key.is_empty() {
+                    stats.account_nodes_added += 1;
+                    stats.account_key_bytes_added += key_bytes;
+                    stats.account_value_bytes_added += branch_node_compact_byte_size(node);
+                }
+            }
+            None => {
+                stats.account_nodes_removed += 1;
+                stats.account_key_bytes_removed += key_bytes;
+            }
+        }
+    }
+
+    // Storage trie nodes (skip empty-key entries, matching write_storage_trie_updates_sorted).
+    for storage_trie in trie_updates.storage_tries_ref().values() {
+        for (key, updated_node) in
+            storage_trie.storage_nodes_ref().iter().filter(|(n, _)| !n.is_empty())
+        {
+            let key_bytes = key.len() as u64;
+            match updated_node {
+                Some(node) => {
+                    stats.storage_nodes_added += 1;
+                    stats.storage_key_bytes_added += key_bytes;
+                    stats.storage_value_bytes_added += branch_node_compact_byte_size(node);
+                }
+                None => {
+                    stats.storage_nodes_removed += 1;
+                    stats.storage_key_bytes_removed += key_bytes;
+                }
+            }
+        }
     }
 }
 
