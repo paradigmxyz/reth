@@ -173,14 +173,22 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
+    /// Returns `true` if a peer with `inflight` active requests is below its per-peer inflight
+    /// limit and therefore idle.
+    ///
+    /// Single source of truth for the idle threshold, shared by [`Self::is_idle`] and the
+    /// saturated-peer set built in
+    /// [`Self::find_any_idle_fallback_peer_for_any_pending_hash`], so the two cannot drift.
+    #[inline]
+    const fn is_inflight_count_idle(&self, inflight: u8) -> bool {
+        inflight < self.info.max_inflight_requests_per_peer
+    }
+
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
     #[inline]
     pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
-        if *inflight_count < self.info.max_inflight_requests_per_peer {
-            return true
-        }
-        false
+        self.is_inflight_count_idle(*inflight_count)
     }
 
     /// Returns any idle peer for the given hash.
@@ -189,6 +197,17 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
         fallback_peers.iter().find(|peer_id| self.is_idle(peer_id))
+    }
+
+    /// Returns the first idle fallback peer: the first peer in `fallback_peers` not present in
+    /// the precomputed `saturated` set (the complement of [`Self::is_idle`]). Kept in one place
+    /// so the saturated-set fast path in
+    /// [`Self::find_any_idle_fallback_peer_for_any_pending_hash`] stays consistent.
+    fn find_idle_fallback_peer(
+        fallback_peers: &LruCache<PeerId>,
+        saturated: &[PeerId],
+    ) -> Option<PeerId> {
+        fallback_peers.iter().copied().find(|peer_id| !saturated.contains(peer_id))
     }
 
     /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
@@ -201,16 +220,35 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         hashes_to_request: &mut RequestTxHashes,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
+        // Precompute the set of saturated peers (the complement of `is_idle`) once. Iterating
+        // `active_peers` walks the LRU's linked list without hashing, whereas a per-peer
+        // `is_idle` check hashes a 64-byte `PeerId` on every (pending hash, fallback peer) pair.
+        // With the outer loop scanning up to `budget` pending hashes and up to
+        // `DEFAULT_MAX_COUNT_FALLBACK_PEERS` peers each, that was thousands of redundant hashes
+        // per call, dominated by re-checking the same peers.
+        let mut saturated = Vec::with_capacity(self.active_peers.len());
+        saturated.extend(
+            self.active_peers
+                .iter()
+                .filter(|(_, inflight)| !self.is_inflight_count_idle(**inflight))
+                .map(|(peer_id, _)| *peer_id),
+        );
+
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
             let &hash = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash);
+            let idle_peer = match self.hashes_fetch_inflight_and_pending_fetch.peek(&hash) {
+                Some(TxFetchMetadata { fallback_peers, .. }) => {
+                    Self::find_idle_fallback_peer(fallback_peers, &saturated)
+                }
+                None => None,
+            };
 
-            if idle_peer.is_some() {
+            if let Some(peer_id) = idle_peer {
                 hashes_to_request.insert(hash);
-                break idle_peer.copied()
+                break Some(peer_id)
             }
 
             if let Some(ref mut bud) = budget {
@@ -1509,6 +1547,110 @@ mod test {
 
         // hash should be re-buffered, not lost
         assert_eq!(tx_fetcher.num_pending_hashes(), 1);
+    }
+
+    #[test]
+    fn find_any_idle_skips_saturated_only_fallback() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let max = tx_fetcher.info.max_inflight_requests_per_peer;
+
+        let hash = B256::from_slice(&[1; 32]);
+        let busy_peer = PeerId::new([1; 64]);
+
+        // `hash` is pending fetch with a single fallback peer...
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, busy_peer, 0, None);
+        // ...which is already at its inflight limit (saturated).
+        tx_fetcher.active_peers.insert(busy_peer, max);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        // the only fallback peer is busy, so nothing should be selected to request.
+        assert_eq!(found, None);
+        assert!(hashes_to_request.is_empty());
+    }
+
+    #[test]
+    fn find_any_idle_returns_idle_fallback() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+
+        let hash = B256::from_slice(&[1; 32]);
+        let idle_peer = PeerId::new([1; 64]);
+
+        // `hash` is pending fetch with a fallback peer that is idle (active_peers is empty).
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, idle_peer, 0, None);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        assert_eq!(found, Some(idle_peer));
+        assert!(hashes_to_request.contains(&hash));
+    }
+
+    #[test]
+    fn find_any_idle_prefers_idle_over_saturated_fallback() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let max = tx_fetcher.info.max_inflight_requests_per_peer;
+
+        let hash = B256::from_slice(&[1; 32]);
+        let busy_peer = PeerId::new([1; 64]);
+        let idle_peer = PeerId::new([2; 64]);
+
+        // `hash` has two fallback peers, one saturated and one idle.
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, busy_peer, 0, None);
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, idle_peer, 0, None);
+        tx_fetcher.active_peers.insert(busy_peer, max);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        // the saturated peer must be skipped in favor of the idle one.
+        assert_eq!(found, Some(idle_peer));
+        assert!(hashes_to_request.contains(&hash));
+    }
+
+    #[test]
+    fn find_any_idle_treats_below_limit_peer_as_idle() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        // allow more than one inflight request per peer.
+        tx_fetcher.info.max_inflight_requests_per_peer = 2;
+
+        let hash = B256::from_slice(&[1; 32]);
+        let peer = PeerId::new([1; 64]);
+
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, peer, 0, None);
+        // peer has 1 inflight request, still below its limit of 2, so it counts as idle.
+        tx_fetcher.active_peers.insert(peer, 1);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        assert_eq!(found, Some(peer));
+        assert!(hashes_to_request.contains(&hash));
+    }
+
+    #[test]
+    fn find_any_idle_respects_budget_exhaustion() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let max = tx_fetcher.info.max_inflight_requests_per_peer;
+
+        let hash = B256::from_slice(&[1; 32]);
+        let busy_peer = PeerId::new([1; 64]);
+
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, busy_peer, 0, None);
+        tx_fetcher.active_peers.insert(busy_peer, max);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        // budget of 1: the first hash has no idle peer, the budget hits 0 and the search stops.
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, Some(1));
+
+        assert_eq!(found, None);
+        assert!(hashes_to_request.is_empty());
     }
 
     #[test]
