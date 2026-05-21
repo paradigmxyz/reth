@@ -173,7 +173,7 @@ where
         >,
     >
     where
-        BS: BlobStore,
+        BS: BlobStore + Clone,
     {
         self.build_with_ordering_and_spawn_maintenance_task(
             CoinbaseTipOrdering::default(),
@@ -191,7 +191,7 @@ where
         pool_config: PoolConfig,
     ) -> eyre::Result<reth_transaction_pool::Pool<TransactionValidationTaskExecutor<V>, O, BS>>
     where
-        BS: BlobStore,
+        BS: BlobStore + Clone,
         O: TransactionOrdering<Transaction = V::Transaction>,
     {
         let TxPoolBuilder { ctx, validator, .. } = self;
