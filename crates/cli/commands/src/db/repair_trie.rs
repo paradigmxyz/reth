@@ -9,10 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
-use reth_node_core::{
-    dirs::{ChainPath, DataDirPath},
-    version::version_metadata,
-};
+use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     hooks::Hooks,
@@ -72,14 +69,7 @@ impl Command {
             let handle = task_executor.spawn_critical_task("metrics server", async move {
                 let config = MetricServerConfig::new(
                     listen_addr,
-                    VersionInfo {
-                        version: version_metadata().cargo_pkg_version.as_ref(),
-                        build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
-                        cargo_features: version_metadata().vergen_cargo_features.as_ref(),
-                        git_sha: version_metadata().vergen_git_sha.as_ref(),
-                        target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
-                        build_profile: version_metadata().build_profile_name.as_ref(),
-                    },
+                    VersionInfo::from_reth_metadata(),
                     ChainSpecInfo { name: chain_name },
                     executor,
                     Hooks::builder().build(),

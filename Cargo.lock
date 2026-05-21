@@ -9431,6 +9431,7 @@ dependencies = [
  "reqwest 0.13.3",
  "reth-fs-util",
  "reth-metrics",
+ "reth-node-core",
  "reth-tasks",
  "socket2",
  "tempfile",
