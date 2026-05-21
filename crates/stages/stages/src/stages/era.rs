@@ -4,7 +4,10 @@ use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era::{common::file_ops::StreamReader, era1::file::Era1Reader};
+use reth_era::{
+    common::file_ops::{EraFileType, StreamReader},
+    era1::file::Era1Reader,
+};
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
@@ -60,7 +63,8 @@ where
             ),
             Self::Url(url, folder) => {
                 let _ = reth_fs_util::create_dir_all(&folder);
-                let client = EraClient::new(Client::new(), url, folder);
+                let client =
+                    EraClient::new(Client::new(), url, folder).with_era_type(EraFileType::Era1);
 
                 Self::convert(EraStream::new(
                     client,

@@ -225,10 +225,19 @@ impl EraFileType {
         }
     }
 
-    /// Detect file type from URL
-    /// By default, it assumes `Era` type
+    /// Detect file type from URL.
+    ///
+    /// This is only a heuristic. Prefer an explicit override when the caller knows the expected
+    /// file type.
     pub fn from_url(url: &str) -> Self {
-        if url.contains("era1") {
+        if let Some(file_type) = Self::from_filename(url.rsplit('/').next().unwrap_or_default()) {
+            return file_type;
+        }
+
+        if url
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|part| part.eq_ignore_ascii_case("era1"))
+        {
             Self::Era1
         } else {
             Self::Era
@@ -241,5 +250,26 @@ pub fn format_hash(hash: Option<[u8; 4]>) -> String {
     match hash {
         Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
         None => "00000000".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EraFileType;
+
+    #[test]
+    fn detects_era1_urls_from_filenames_and_tokens() {
+        assert_eq!(
+            EraFileType::from_url("https://mirror.example.com/mainnet-00000-deadbeef.era1"),
+            EraFileType::Era1
+        );
+        assert_eq!(
+            EraFileType::from_url("https://mirror.example.com/snapshots/sepolia-era1/index.html"),
+            EraFileType::Era1
+        );
+        assert_eq!(
+            EraFileType::from_url("https://mirror.example.com/snapshots/notera1/index.html"),
+            EraFileType::Era
+        );
     }
 }
