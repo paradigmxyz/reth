@@ -64,6 +64,7 @@ pub fn buffer_hash_to_tx_fetcher(
         TxFetchMetadata::new(
             retries,
             LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+            None,
             tx_encoded_length,
         )
     }) {
