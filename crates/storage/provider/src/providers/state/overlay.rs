@@ -504,7 +504,9 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Pins the overlay to one captured database snapshot.
     ///
     /// Parallel workers should use the returned factory. Each worker gets an independent cloned
-    /// read transaction over the same MDBX snapshot and the same prebuilt overlay.
+    /// read transaction over the same MDBX snapshot. The overlay is built lazily on first worker
+    /// access and cached for the remaining workers, so the eager build does not sit on the
+    /// spawning thread's critical path.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     pub fn pin_snapshot(&self) -> ProviderResult<PinnedOverlayStateProviderFactory<F::Provider, N>>
     where
@@ -518,22 +520,15 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + StorageSettingsCache
             + ProviderSnapshotClone,
     {
-        let overall_start = Instant::now();
-        let provider = {
-            let start = Instant::now();
-            let res = self.factory.database_provider_ro()?;
-            self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
-            res
-        };
-
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let start = Instant::now();
+        let provider = self.factory.database_provider_ro()?;
         let is_v2 = provider.cached_storage_settings().is_v2();
-        self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
+        self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
 
         Ok(PinnedOverlayStateProviderFactory {
             provider: Arc::new(provider),
-            trie_updates,
-            hashed_post_state,
+            overlay_builder: self.overlay_builder.clone(),
+            overlay_cache: self.overlay_cache.clone(),
             is_v2,
             metrics: self.overlay_builder.metrics.clone(),
             _marker: PhantomData,
@@ -542,11 +537,18 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
 }
 
 /// Overlay factory pinned to one base provider snapshot.
+///
+/// The overlay is built lazily on first call to [`database_provider_ro`], with later calls
+/// served from `overlay_cache`. This keeps the upfront cost of [`pin_snapshot`] tiny while
+/// still pinning the MDBX snapshot all workers share.
+///
+/// [`pin_snapshot`]: OverlayStateProviderFactory::pin_snapshot
+/// [`database_provider_ro`]: DatabaseProviderROFactory::database_provider_ro
 #[derive(Debug)]
 pub struct PinnedOverlayStateProviderFactory<Provider, N: NodePrimitives = EthPrimitives> {
     provider: Arc<Provider>,
-    trie_updates: Arc<TrieUpdatesSorted>,
-    hashed_post_state: Arc<HashedPostStateSorted>,
+    overlay_builder: OverlayBuilder<N>,
+    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
     is_v2: bool,
     metrics: OverlayStateProviderMetrics,
     _marker: PhantomData<fn(N)>,
@@ -556,8 +558,8 @@ impl<Provider, N: NodePrimitives> Clone for PinnedOverlayStateProviderFactory<Pr
     fn clone(&self) -> Self {
         Self {
             provider: self.provider.clone(),
-            trie_updates: self.trie_updates.clone(),
-            hashed_post_state: self.hashed_post_state.clone(),
+            overlay_builder: self.overlay_builder.clone(),
+            overlay_cache: self.overlay_cache.clone(),
             is_v2: self.is_v2,
             metrics: self.metrics.clone(),
             _marker: PhantomData,
@@ -568,7 +570,14 @@ impl<Provider, N: NodePrimitives> Clone for PinnedOverlayStateProviderFactory<Pr
 impl<Provider, N> DatabaseProviderROFactory for PinnedOverlayStateProviderFactory<Provider, N>
 where
     N: NodePrimitives,
-    Provider: ProviderSnapshotClone + DBProvider,
+    Provider: ProviderSnapshotClone
+        + DBProvider
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StorageSettingsCache,
 {
     type Provider = OverlayStateProvider<Provider>;
 
@@ -579,12 +588,21 @@ where
         let provider = self.provider.clone_snapshot_provider()?;
         self.metrics.database_provider_ro_duration.record(start.elapsed());
 
-        Ok(OverlayStateProvider::new(
-            provider,
-            self.trie_updates.clone(),
-            self.hashed_post_state.clone(),
-            self.is_v2,
-        ))
+        // Lazy overlay build: the first caller pays the cost and populates the cache;
+        // subsequent callers (per block) hit the cache. Race-safe via DashMap.
+        let db_tip_block = self.overlay_builder.get_db_tip_block(&*self.provider)?;
+        let Overlay { trie_updates, hashed_post_state } =
+            match self.overlay_cache.entry(db_tip_block.hash) {
+                dashmap::Entry::Occupied(entry) => entry.get().clone(),
+                dashmap::Entry::Vacant(entry) => {
+                    self.metrics.overlay_cache_misses.increment(1);
+                    let overlay = self.overlay_builder.build_overlay(&*self.provider)?;
+                    entry.insert(overlay.clone());
+                    overlay
+                }
+            };
+
+        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, self.is_v2))
     }
 }
 
