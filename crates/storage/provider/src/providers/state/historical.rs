@@ -1,4 +1,4 @@
-use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
+use super::overlay::{OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -311,12 +311,11 @@ where
         let TrieInputSorted { nodes, state, prefix_sets } = input;
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
-        let Overlay { trie_updates, hashed_post_state } =
-            overlay_builder.build_overlay(self.provider)?;
+        let overlay = overlay_builder.build_overlay(self.provider)?;
 
         Ok(TrieInputSorted::new(
-            TrieUpdatesSorted::merge_batch(trie_updates),
-            HashedPostStateSorted::merge_batch(hashed_post_state),
+            TrieUpdatesSorted::merge_batch(overlay.trie_updates),
+            HashedPostStateSorted::merge_batch(overlay.hashed_post_state),
             prefix_sets,
         ))
     }

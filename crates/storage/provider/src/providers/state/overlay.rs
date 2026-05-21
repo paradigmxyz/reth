@@ -1,7 +1,7 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
-use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, StateTrieOverlay, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
@@ -50,15 +50,8 @@ pub(crate) struct OverlayStateProviderMetrics {
     hashed_state_size: Histogram,
     /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call
     database_provider_ro_duration: Histogram,
-    /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
+    /// Number of cache misses when fetching [`StateTrieOverlay`]s from the overlay cache.
     overlay_cache_misses: Counter,
-}
-
-/// Contains all fields required to initialize an [`OverlayStateProvider`].
-#[derive(Debug, Clone)]
-pub(super) struct Overlay {
-    pub(super) trie_updates: Vec<Arc<TrieUpdatesSorted>>,
-    pub(super) hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -172,14 +165,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
-    fn resolve_overlays(
-        &self,
-        anchor_hash: BlockHash,
-    ) -> ProviderResult<(Vec<Arc<TrieUpdatesSorted>>, Vec<Arc<HashedPostStateSorted>>)> {
+    fn resolve_overlays(&self, anchor_hash: BlockHash) -> ProviderResult<StateTrieOverlay> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
-                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
-                    (Vec::new(), Vec::new())
+                let mut overlay = if anchor_hash == self.parent_hash {
+                    StateTrieOverlay::default()
                 } else {
                     manager
                         .overlay_for_parent(self.parent_hash, anchor_hash)
@@ -187,10 +177,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 };
 
                 if !state.is_empty() {
-                    overlay_state.insert(0, Arc::clone(state));
+                    overlay.hashed_post_state.insert(0, Arc::clone(state));
                 }
 
-                Ok((trie, overlay_state))
+                Ok(overlay)
             }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.parent_hash {
@@ -201,9 +191,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 }
                 let trie = (!trie.is_empty()).then(|| Arc::clone(trie)).into_iter().collect();
                 let state = (!state.is_empty()).then(|| Arc::clone(state)).into_iter().collect();
-                Ok((trie, state))
+                Ok(StateTrieOverlay::new(trie, state))
             }
-            None => Ok((Vec::new(), Vec::new())),
+            None => Ok(StateTrieOverlay::default()),
         }
     }
 
@@ -272,7 +262,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Ok(Some(anchor_number + 1..=db_tip_block.number))
     }
 
-    /// Calculates a new [`Overlay`] given a transaction and the current db tip.
+    /// Calculates a new [`StateTrieOverlay`] given a transaction and the current db tip.
     #[instrument(
         level = "debug",
         target = "providers::state::overlay",
@@ -283,7 +273,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         provider: &Provider,
         db_tip_block: BlockNumHash,
-    ) -> ProviderResult<Overlay>
+    ) -> ProviderResult<StateTrieOverlay>
     where
         Provider: ChangeSetReader
             + StorageChangeSetReader
@@ -317,7 +307,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         };
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
-        let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
+        let overlay = if let Some(revert_blocks) =
             self.reverts_required(provider, db_tip_block, anchor_hash)?
         {
             debug!(
@@ -355,28 +345,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             // Resolve overlays and extend reverts with them.
             // If reverts are empty, use overlays directly to avoid cloning.
-            let (overlay_trie, overlay_state) = self.resolve_overlays(anchor_hash)?;
+            let mut overlay = self.resolve_overlays(anchor_hash)?;
 
-            let trie_updates = if trie_reverts.is_empty() {
-                overlay_trie
-            } else {
-                let mut trie_updates = overlay_trie;
-                trie_updates.push(Arc::new(trie_reverts));
-                trie_updates
-            };
+            if !trie_reverts.is_empty() {
+                overlay.trie_updates.push(Arc::new(trie_reverts));
+            }
 
-            let hashed_state_updates = if hashed_state_reverts.is_empty() {
-                overlay_state
-            } else {
-                let mut hashed_state_updates = overlay_state;
-                hashed_state_updates.push(Arc::new(hashed_state_reverts));
-                hashed_state_updates
-            };
+            if !hashed_state_reverts.is_empty() {
+                overlay.hashed_post_state.push(Arc::new(hashed_state_reverts));
+            }
 
             trie_updates_total_len =
-                trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
+                overlay.trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
             hashed_state_updates_total_len =
-                hashed_state_updates.iter().map(|state| state.total_len()).sum::<usize>();
+                overlay.hashed_post_state.iter().map(|state| state.total_len()).sum::<usize>();
 
             debug!(
                 target: "providers::state::overlay",
@@ -385,19 +367,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 "Reverted to anchor block",
             );
 
-            (trie_updates, hashed_state_updates)
+            overlay
         } else {
             // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
-            let (trie_updates, hashed_state) = self.resolve_overlays(db_tip_block.hash)?;
+            let overlay = self.resolve_overlays(db_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
             trie_updates_total_len =
-                trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
+                overlay.trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
             hashed_state_updates_total_len =
-                hashed_state.iter().map(|state| state.total_len()).sum::<usize>();
+                overlay.hashed_post_state.iter().map(|state| state.total_len()).sum::<usize>();
 
-            (trie_updates, hashed_state)
+            overlay
         };
 
         // Record metrics
@@ -410,12 +392,15 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(Overlay { trie_updates, hashed_post_state })
+        Ok(overlay)
     }
 
     /// Builds the effective overlay for the given provider.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    pub(super) fn build_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    pub(super) fn build_overlay<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<StateTrieOverlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -440,9 +425,10 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
-    /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    /// A cache which maps `db_tip -> StateTrieOverlay`. If the db tip changes during usage of the
+    /// factory then a new entry will get added to this, but in most cases only one entry is
+    /// present.
+    overlay_cache: Arc<DashMap<BlockHash, StateTrieOverlay>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -468,10 +454,10 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self
     }
 
-    /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
-    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    /// Fetches a [`StateTrieOverlay`] from the cache based on the current db tip block. If there is
+    /// no cached value then this calculates the [`StateTrieOverlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<StateTrieOverlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -524,11 +510,11 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let overlay = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(provider, overlay, is_v2))
     }
 }
 
@@ -540,8 +526,7 @@ where
 #[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
-    trie_updates: Vec<Arc<TrieUpdatesSorted>>,
-    hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
+    overlay: StateTrieOverlay,
     is_v2: bool,
 }
 
@@ -551,13 +536,8 @@ where
 {
     /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
     /// it should be wrapped in an `Arc`.
-    pub fn new(
-        provider: Provider,
-        trie_updates: Vec<Arc<TrieUpdatesSorted>>,
-        hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
-        is_v2: bool,
-    ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
+    pub const fn new(provider: Provider, overlay: StateTrieOverlay, is_v2: bool) -> Self {
+        Self { provider, overlay, is_v2 }
     }
 }
 
@@ -587,7 +567,10 @@ where
                 tx.cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account(cursor, self.trie_updates.iter().map(Arc::as_ref)))
+        Ok(InMemoryTrieCursor::new_account(
+            cursor,
+            self.overlay.trie_updates.iter().map(Arc::as_ref),
+        ))
     }
 
     fn storage_trie_cursor(
@@ -608,7 +591,7 @@ where
         };
         Ok(InMemoryTrieCursor::new_storage(
             cursor,
-            self.trie_updates.iter().map(Arc::as_ref),
+            self.overlay.trie_updates.iter().map(Arc::as_ref),
             hashed_address,
         ))
     }
@@ -638,7 +621,8 @@ where
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_post_state = self.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
+        let hashed_post_state =
+            self.overlay.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
         hashed_cursor_factory.hashed_account_cursor()
@@ -649,7 +633,8 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_post_state = self.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
+        let hashed_post_state =
+            self.overlay.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
         hashed_cursor_factory.hashed_storage_cursor(hashed_address)
@@ -668,9 +653,9 @@ mod tests {
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
 
-        let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
-        assert!(trie.is_empty());
-        assert!(state.is_empty());
+        let overlay = builder.resolve_overlays(parent_hash).unwrap();
+        assert!(overlay.trie_updates.is_empty());
+        assert!(overlay.hashed_post_state.is_empty());
     }
 
     #[test]
