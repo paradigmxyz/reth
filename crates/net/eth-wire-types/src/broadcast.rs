@@ -215,6 +215,8 @@ pub enum NewPooledTransactionHashes {
     ///
     /// Note: it is assumed that the payload is valid (all vectors have the same length)
     Eth68(NewPooledTransactionHashes68),
+    /// A list of transaction hashes valid from [72..]
+    Eth72(NewPooledTransactionHashes72),
 }
 
 // === impl NewPooledTransactionHashes ===
@@ -225,6 +227,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(_) => EthVersion::Eth66,
             Self::Eth68(_) => EthVersion::Eth68,
+            Self::Eth72(_) => EthVersion::Eth72,
         }
     }
 
@@ -237,12 +240,11 @@ impl NewPooledTransactionHashes {
             Self::Eth68(_) => {
                 matches!(
                     version,
-                    EthVersion::Eth68 |
-                        EthVersion::Eth69 |
-                        EthVersion::Eth70 |
-                        EthVersion::Eth71 |
-                        EthVersion::Eth72
+                    EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71
                 )
+            }
+            Self::Eth72(_) => {
+                matches!(version, EthVersion::Eth72)
             }
         }
     }
@@ -252,6 +254,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.iter(),
             Self::Eth68(msg) => msg.hashes.iter(),
+            Self::Eth72(msg) => msg.hashes.iter(),
         }
     }
 
@@ -260,6 +263,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => &msg.0,
             Self::Eth68(msg) => &msg.hashes,
+            Self::Eth72(msg) => &msg.hashes,
         }
     }
 
@@ -268,6 +272,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => &mut msg.0,
             Self::Eth68(msg) => &mut msg.hashes,
+            Self::Eth72(msg) => &mut msg.hashes,
         }
     }
 
@@ -276,6 +281,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.0,
             Self::Eth68(msg) => msg.hashes,
+            Self::Eth72(msg) => msg.hashes,
         }
     }
 
@@ -284,6 +290,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.into_iter(),
             Self::Eth68(msg) => msg.hashes.into_iter(),
+            Self::Eth72(msg) => msg.hashes.into_iter(),
         }
     }
 
@@ -297,6 +304,11 @@ impl NewPooledTransactionHashes {
                 msg.sizes.truncate(len);
                 msg.hashes.truncate(len);
             }
+            Self::Eth72(msg) => {
+                msg.types.truncate(len);
+                msg.sizes.truncate(len);
+                msg.hashes.truncate(len);
+            }
         }
     }
 
@@ -305,6 +317,7 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.0.is_empty(),
             Self::Eth68(msg) => msg.hashes.is_empty(),
+            Self::Eth72(msg) => msg.hashes.is_empty(),
         }
     }
 
@@ -313,13 +326,30 @@ impl NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.0.len(),
             Self::Eth68(msg) => msg.hashes.len(),
+            Self::Eth72(msg) => msg.hashes.len(),
+        }
+    }
+
+    /// Returns an immutable reference to the inner type if this is an eth68 announcement.
+    pub const fn as_eth72(&self) -> Option<&NewPooledTransactionHashes72> {
+        match self {
+            Self::Eth66(_) | Self::Eth68(_) => None,
+            Self::Eth72(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this is an eth68 announcement.
+    pub const fn as_eth72_mut(&mut self) -> Option<&mut NewPooledTransactionHashes72> {
+        match self {
+            Self::Eth66(_) | Self::Eth68(_) => None,
+            Self::Eth72(msg) => Some(msg),
         }
     }
 
     /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
-            Self::Eth66(_) => None,
+            Self::Eth66(_) | Self::Eth72(_) => None,
             Self::Eth68(msg) => Some(msg),
         }
     }
@@ -327,7 +357,7 @@ impl NewPooledTransactionHashes {
     /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
-            Self::Eth66(_) => None,
+            Self::Eth66(_) | Self::Eth72(_) => None,
             Self::Eth68(msg) => Some(msg),
         }
     }
@@ -336,14 +366,14 @@ impl NewPooledTransactionHashes {
     pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
-            Self::Eth68(_) => None,
+            Self::Eth68(_) | Self::Eth72(_) => None,
         }
     }
 
     /// Returns the inner type if this is an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
-            Self::Eth66(_) => None,
+            Self::Eth66(_) | Self::Eth72(_) => None,
             Self::Eth68(msg) => Some(mem::take(msg)),
         }
     }
@@ -352,7 +382,7 @@ impl NewPooledTransactionHashes {
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),
-            Self::Eth68(_) => None,
+            Self::Eth68(_) | Self::Eth72(_) => None,
         }
     }
 }
@@ -362,6 +392,7 @@ impl<N: NetworkPrimitives> From<NewPooledTransactionHashes> for EthMessage<N> {
         match value {
             NewPooledTransactionHashes::Eth66(msg) => Self::NewPooledTransactionHashes66(msg),
             NewPooledTransactionHashes::Eth68(msg) => Self::NewPooledTransactionHashes68(msg),
+            NewPooledTransactionHashes::Eth72(msg) => Self::NewPooledTransactionHashes72(msg),
         }
     }
 }
@@ -375,6 +406,12 @@ impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
 impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     fn from(hashes: NewPooledTransactionHashes68) -> Self {
         Self::Eth68(hashes)
+    }
+}
+
+impl From<NewPooledTransactionHashes72> for NewPooledTransactionHashes {
+    fn from(hashes: NewPooledTransactionHashes72) -> Self {
+        Self::Eth72(hashes)
     }
 }
 
@@ -795,7 +832,34 @@ impl DedupPayload for NewPooledTransactionHashes {
         match self {
             Self::Eth66(msg) => msg.dedup(),
             Self::Eth68(msg) => msg.dedup(),
+            Self::Eth72(msg) => msg.dedup(),
         }
+    }
+}
+
+impl DedupPayload for NewPooledTransactionHashes72 {
+    type Value = Eth68TxMetadata;
+
+    fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    fn dedup(self) -> PartiallyValidData<Self::Value> {
+        let Self { hashes, mut sizes, mut types, .. } = self;
+
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+
+        for hash in hashes.into_iter().rev() {
+            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
+                deduped_data.insert(hash, Some((ty, size)));
+            }
+        }
+
+        PartiallyValidData::from_raw_data_eth72(deduped_data)
     }
 }
 
@@ -922,6 +986,11 @@ impl<V> PartiallyValidData<V> {
         Self { data, version }
     }
 
+    /// Wraps raw data with version [`EthVersion::Eth72`].
+    pub const fn from_raw_data_eth72(data: HashMap<TxHash, V>) -> Self {
+        Self::from_raw_data(data, Some(EthVersion::Eth72))
+    }
+
     /// Wraps raw data with version [`EthVersion::Eth68`].
     pub const fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
@@ -930,6 +999,12 @@ impl<V> PartiallyValidData<V> {
     /// Wraps raw data with version [`EthVersion::Eth66`].
     pub const fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
+    }
+
+    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
+    /// announcement.
+    pub fn empty_eth72() -> Self {
+        Self::from_raw_data_eth72(HashMap::default())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
@@ -945,7 +1020,7 @@ impl<V> PartiallyValidData<V> {
     }
 
     /// Returns the version of the message this data was received in if different versions of the
-    /// message exists, either [`Eth66`](EthVersion::Eth66) or [`Eth68`](EthVersion::Eth68).
+    /// message exist.
     pub const fn msg_version(&self) -> Option<EthVersion> {
         self.version
     }
@@ -1075,6 +1150,12 @@ impl InMemorySize for NewPooledTransactionHashes {
                 msg.types.len() * core::mem::size_of::<u8>() +
                     msg.sizes.len() * core::mem::size_of::<usize>() +
                     msg.hashes.len() * core::mem::size_of::<B256>()
+            }
+            Self::Eth72(msg) => {
+                msg.types.len() * core::mem::size_of::<u8>() +
+                    msg.sizes.len() * core::mem::size_of::<usize>() +
+                    msg.hashes.len() * core::mem::size_of::<B256>() +
+                    core::mem::size_of::<B128>()
             }
         }
     }

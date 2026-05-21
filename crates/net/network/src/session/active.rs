@@ -294,6 +294,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
+            EthMessage::NewPooledTransactionHashes72(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
             }
@@ -1017,6 +1020,15 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             (
                 EthMessage::NewPooledTransactionHashes68(existing),
                 NewPooledTransactionHashes::Eth68(inc),
+            ) => {
+                existing.hashes.extend(inc.hashes);
+                existing.sizes.extend(inc.sizes);
+                existing.types.extend(inc.types);
+                None
+            }
+            (
+                EthMessage::NewPooledTransactionHashes72(existing),
+                NewPooledTransactionHashes::Eth72(inc),
             ) => {
                 existing.hashes.extend(inc.hashes);
                 existing.sizes.extend(inc.sizes);
