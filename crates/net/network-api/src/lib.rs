@@ -89,7 +89,12 @@ pub trait NetworkInfo: Send + Sync {
     /// Returns the chain id
     fn chain_id(&self) -> u64;
 
-    /// Returns the shared blob cell custody bitmap.
+    /// Returns shared blob cell custody state for [EIP-8070] sparse blobpool sampling.
+    ///
+    /// This is updated from non-null `custodyColumns` values received through
+    /// `engine_forkchoiceUpdatedV4` and should be treated as a lightweight sampling hint.
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
     fn cell_custody(&self) -> &CellCustody;
 
     /// Returns `true` if the network is undergoing sync.

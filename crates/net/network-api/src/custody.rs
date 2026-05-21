@@ -6,12 +6,14 @@ use std::sync::{
     Arc,
 };
 
-/// Shared blob cell custody bitmap.
+/// Shared blob cell custody bitmap for [EIP-8070] sparse blobpool sampling.
 ///
 /// This stores the latest `custodyColumns` value received from
 /// `engine_forkchoiceUpdatedV4`, so network components can align blob cell sampling with the
 /// consensus client's custody set. The value is a lightweight hint for sampling decisions, not a
 /// consensus-critical guard.
+///
+/// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
 #[derive(Debug, Clone, Default)]
 pub struct CellCustody {
     inner: Arc<CellCustodyInner>,
