@@ -14,7 +14,9 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-evm.workspace = true
 reth-rpc-api.workspace = true
+reth-revm = { workspace = true, features = ["witness"] }
 reth-storage-api.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-builder-primitives.workspace = true
@@ -24,6 +26,7 @@ reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 reth-network-api.workspace = true
+reth-trie-common.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

@@ -504,6 +504,9 @@ struct RpcSetupContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
     engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    /// Optional witness handler for the REST `/new-payload-with-witness` endpoint.
+    witness_handler:
+        Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
@@ -969,6 +972,7 @@ where
             on_rpc_started,
             engine_events,
             engine_handle,
+            witness_handler: _,
         } = setup_ctx;
 
         let server_config = config
@@ -1041,6 +1045,7 @@ where
             on_rpc_started,
             engine_events,
             engine_handle,
+            witness_handler,
         } = setup_ctx;
 
         let server_config = config
@@ -1049,7 +1054,14 @@ where
             .set_rpc_middleware(rpc_middleware)
             .with_tokio_runtime(tokio_runtime);
 
-        let auth_config = auth_config.with_http_middleware(auth_http_middleware);
+        // Layer the witness REST endpoint middleware if a handler was provided.
+        // We conditionally apply the layer using a match to avoid type-level branching
+        // (tower::util::Either doesn't implement Layer).
+        let witness_layer = reth_rpc_engine_api::rest::OptionalWitnessLayer::new(
+            witness_handler.map(reth_rpc_engine_api::rest::NewPayloadWithWitnessLayer::new),
+        );
+        let auth_config = auth_config
+            .with_http_middleware(Stack::new(auth_http_middleware, witness_layer));
 
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle
@@ -1098,7 +1110,7 @@ where
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
-        let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+        let (engine_api, witness_handler) = engine_api_builder.build_engine_api(&ctx).await?;
         let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
@@ -1177,6 +1189,7 @@ where
             on_rpc_started,
             engine_events,
             engine_handle: beacon_engine_handle,
+            witness_handler,
         })
     }
 
@@ -1371,10 +1384,18 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
     ///
     /// [`Self::EngineApi`] will be converted into the method handlers of the authenticated RPC
     /// server (engine API).
+    ///
+    /// Returns the engine API and an optional witness handler for the REST
+    /// `/new-payload-with-witness` endpoint.
     fn build_engine_api(
         self,
         ctx: &AddOnsContext<'_, Node>,
-    ) -> impl Future<Output = eyre::Result<Self::EngineApi>> + Send;
+    ) -> impl Future<
+        Output = eyre::Result<(
+            Self::EngineApi,
+            Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
+        )>,
+    > + Send;
 }
 
 /// Builder trait for creating payload validators specifically for the Engine API.
@@ -1507,7 +1528,13 @@ where
         <N::Types as NodeTypes>::ChainSpec,
     >;
 
-    async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
+    async fn build_engine_api(
+        self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<(
+        Self::EngineApi,
+        Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
+    )> {
         let Self { payload_validator_builder } = self;
 
         let engine_validator = payload_validator_builder.build(ctx).await?;
@@ -1518,7 +1545,7 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        Ok(EngineApi::new(
+        let engine_api = EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
             ctx.beacon_engine_handle.clone(),
@@ -1530,7 +1557,18 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
-        ))
+        );
+
+        // Create the witness handler by wrapping a clone of the engine API.
+        let witness_handler: Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler> =
+            Arc::new(reth_rpc_engine_api::EngineApiWithWitness::new(
+                engine_api.clone(),
+                ctx.node.provider().clone(),
+                ctx.node.evm_config().clone(),
+                ctx.node.task_executor().clone(),
+            ));
+
+        Ok((engine_api, Some(witness_handler)))
     }
 }
 
@@ -1546,8 +1584,14 @@ pub struct NoopEngineApiBuilder;
 impl<N: FullNodeComponents> EngineApiBuilder<N> for NoopEngineApiBuilder {
     type EngineApi = NoopEngineApi;
 
-    async fn build_engine_api(self, _ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
-        Ok(NoopEngineApi::default())
+    async fn build_engine_api(
+        self,
+        _ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<(
+        Self::EngineApi,
+        Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
+    )> {
+        Ok((NoopEngineApi::default(), None))
     }
 }
 

@@ -4,7 +4,7 @@
 //! `POST /new-payload-with-witness` on the authenticated Engine API server.
 //! Non-matching requests are forwarded to the inner JSON-RPC service.
 //!
-//! See the [Engine API REST spec](https://github.com/ethereum/execution-apis/blob/main/src/engine/rest.md).
+//! See the [Engine API REST spec](http://github.com/developeruche/execution-apis/blob/feat/new-payload-with-witness/src/engine/rest.md).
 
 use crate::{ssz_types::encode_new_payload_with_witness_response, EngineApiError};
 use alloy_eips::eip7685::RequestsOrHash;
@@ -39,12 +39,14 @@ fn json_error_response(
     http_status: StatusCode,
     code: i32,
     message: impl Into<String>,
-) -> Response<http_body_util::Full<bytes::Bytes>> {
+) -> Response<jsonrpsee_core::http_helpers::Body> {
     let body = serde_json::to_vec(&RestError { code, message: message.into() }).unwrap_or_default();
     Response::builder()
         .status(http_status)
         .header(header::CONTENT_TYPE, "application/json")
-        .body(http_body_util::Full::new(bytes::Bytes::from(body)))
+        .body(jsonrpsee_core::http_helpers::Body::new(
+            http_body_util::Full::new(bytes::Bytes::from(body)),
+        ))
         .expect("valid response")
 }
 
@@ -65,6 +67,22 @@ pub trait NewPayloadWithWitnessHandler: Send + Sync + 'static {
         >,
     >;
 
+    /// Generates an execution witness by re-executing the block identified by `block_hash`.
+    ///
+    /// This is called after `new_payload_v5` returns `VALID`. The implementation should
+    /// retrieve the block from the provider, re-execute it with state closure capture,
+    /// and produce the [`ExecutionWitness`].
+    fn generate_witness(
+        &self,
+        block_hash: B256,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ExecutionWitness, EngineApiError>>
+                + Send
+                + '_,
+        >,
+    >;
+
     /// Returns whether the engine accepts execution requests hash.
     fn accept_execution_requests_hash(&self) -> bool;
 }
@@ -73,19 +91,25 @@ pub trait NewPayloadWithWitnessHandler: Send + Sync + 'static {
 ///
 /// This layer wraps the inner HTTP service (typically the authenticated JSON-RPC server)
 /// and intercepts requests to the REST path. All other requests pass through unchanged.
-#[derive(Clone, Debug)]
-pub struct NewPayloadWithWitnessLayer<H> {
+#[derive(Debug)]
+pub struct NewPayloadWithWitnessLayer<H: ?Sized> {
     handler: Arc<H>,
 }
 
-impl<H> NewPayloadWithWitnessLayer<H> {
+impl<H: ?Sized> Clone for NewPayloadWithWitnessLayer<H> {
+    fn clone(&self) -> Self {
+        Self { handler: Arc::clone(&self.handler) }
+    }
+}
+
+impl<H: ?Sized> NewPayloadWithWitnessLayer<H> {
     /// Creates a new layer with the given handler.
     pub fn new(handler: Arc<H>) -> Self {
         Self { handler }
     }
 }
 
-impl<S, H> tower::Layer<S> for NewPayloadWithWitnessLayer<H>
+impl<S, H: ?Sized> tower::Layer<S> for NewPayloadWithWitnessLayer<H>
 where
     H: NewPayloadWithWitnessHandler,
 {
@@ -96,19 +120,59 @@ where
     }
 }
 
+/// Optional witness layer: applies the witness middleware when present, passes through otherwise.
+///
+/// Uses [`tower::util::Either`] so the resulting service always implements [`tower::Service`].
+#[derive(Debug)]
+pub struct OptionalWitnessLayer<H: ?Sized> {
+    inner: Option<NewPayloadWithWitnessLayer<H>>,
+}
+
+impl<H: ?Sized> Clone for OptionalWitnessLayer<H> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+impl<H: ?Sized> OptionalWitnessLayer<H> {
+    /// Creates from an optional layer.
+    pub fn new(inner: Option<NewPayloadWithWitnessLayer<H>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<S, H: ?Sized> tower::Layer<S> for OptionalWitnessLayer<H>
+where
+    H: NewPayloadWithWitnessHandler,
+{
+    type Service = tower::util::Either<NewPayloadWithWitnessService<S, H>, S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        match &self.inner {
+            Some(layer) => tower::util::Either::Left(layer.layer(inner)),
+            None => tower::util::Either::Right(inner),
+        }
+    }
+}
+
 /// The [`tower::Service`] that handles `POST /new-payload-with-witness`.
-#[derive(Clone, Debug)]
-pub struct NewPayloadWithWitnessService<S, H> {
+#[derive(Debug)]
+pub struct NewPayloadWithWitnessService<S, H: ?Sized> {
     inner: S,
     handler: Arc<H>,
 }
 
-impl<S, H, ReqBody> tower::Service<http::Request<ReqBody>>
-    for NewPayloadWithWitnessService<S, H>
+impl<S: Clone, H: ?Sized> Clone for NewPayloadWithWitnessService<S, H> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), handler: Arc::clone(&self.handler) }
+    }
+}
+
+impl<S, H: ?Sized, ReqBody> tower::Service<http::Request<ReqBody>> for NewPayloadWithWitnessService<S, H>
 where
     S: tower::Service<
             http::Request<ReqBody>,
-            Response = http::Response<http_body_util::Full<bytes::Bytes>>,
+            Response = http::Response<jsonrpsee_core::http_helpers::Body>,
             Error = tower::BoxError,
         > + Clone
         + Send
@@ -118,7 +182,7 @@ where
     ReqBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
     ReqBody::Error: std::fmt::Display,
 {
-    type Response = http::Response<http_body_util::Full<bytes::Bytes>>;
+    type Response = http::Response<jsonrpsee_core::http_helpers::Body>;
     type Error = tower::BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -141,11 +205,8 @@ where
             }
 
             // Check Content-Type
-            let content_type = req
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
+            let content_type =
+                req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
             if !content_type.starts_with("application/json") {
                 return Box::pin(async move {
                     Ok(json_error_response(
@@ -195,16 +256,12 @@ where
 /// Core handler for the REST endpoint.
 ///
 /// Parses the JSON body, calls `new_payload_v5`, and returns an SSZ response.
-async fn handle_new_payload_with_witness<H: NewPayloadWithWitnessHandler>(
+async fn handle_new_payload_with_witness<H: NewPayloadWithWitnessHandler + ?Sized>(
     handler: Arc<H>,
     body: bytes::Bytes,
-) -> Result<
-    http::Response<http_body_util::Full<bytes::Bytes>>,
-    tower::BoxError,
-> {
+) -> Result<http::Response<jsonrpsee_core::http_helpers::Body>, tower::BoxError> {
     trace!(target: "rpc::engine::rest", "Serving POST /new-payload-with-witness");
 
-    // Parse the JSON body: a JSON array of exactly 4 elements.
     let params: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -313,50 +370,56 @@ async fn handle_new_payload_with_witness<H: NewPayloadWithWitnessHandler>(
         "POST /new-payload-with-witness result"
     );
 
-    // TODO: When the status is VALID, generate the execution witness via re-execution.
-    // For now, we return None for the witness field. A follow-up will add witness generation
-    // by integrating with the block re-execution infrastructure (similar to debug_executionWitness).
-    let witness: Option<&ExecutionWitness> = None;
+    // When the status is VALID, generate the execution witness via re-execution.
+    let witness = if status.status.is_valid() {
+        if let Some(latest_valid_hash) = status.latest_valid_hash {
+            match handler.generate_witness(latest_valid_hash).await {
+                Ok(w) => Some(w),
+                Err(e) => {
+                    warn!(
+                        target: "rpc::engine::rest",
+                        %e,
+                        "Failed to generate execution witness, returning None"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // SSZ-encode the response.
-    let ssz_bytes = encode_new_payload_with_witness_response(&status, witness);
+    let ssz_bytes = encode_new_payload_with_witness_response(&status, witness.as_ref());
 
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
-        .body(http_body_util::Full::new(bytes::Bytes::from(ssz_bytes)))
+        .body(jsonrpsee_core::http_helpers::Body::new(
+            http_body_util::Full::new(bytes::Bytes::from(ssz_bytes)),
+        ))
         .expect("valid response"))
 }
 
 /// Maps an [`EngineApiError`] to an HTTP REST error response.
 fn map_engine_error_to_rest(
     error: EngineApiError,
-) -> http::Response<http_body_util::Full<bytes::Bytes>> {
+) -> http::Response<jsonrpsee_core::http_helpers::Body> {
     match &error {
         EngineApiError::EngineObjectValidationError(
             EngineObjectValidationError::UnsupportedFork,
-        ) => json_error_response(
-            StatusCode::BAD_REQUEST,
-            -38005,
-            error.to_string(),
-        ),
-        EngineApiError::EngineObjectValidationError(_) => json_error_response(
-            StatusCode::BAD_REQUEST,
-            -32602,
-            error.to_string(),
-        ),
-        EngineApiError::UnexpectedRequestsHash => json_error_response(
-            StatusCode::BAD_REQUEST,
-            -38003,
-            error.to_string(),
-        ),
+        ) => json_error_response(StatusCode::BAD_REQUEST, -38005, error.to_string()),
+        EngineApiError::EngineObjectValidationError(_) => {
+            json_error_response(StatusCode::BAD_REQUEST, -32602, error.to_string())
+        }
+        EngineApiError::UnexpectedRequestsHash => {
+            json_error_response(StatusCode::BAD_REQUEST, -38003, error.to_string())
+        }
         _ => {
             // Internal errors
-            json_error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                -32603,
-                error.to_string(),
-            )
+            json_error_response(StatusCode::INTERNAL_SERVER_ERROR, -32603, error.to_string())
         }
     }
 }

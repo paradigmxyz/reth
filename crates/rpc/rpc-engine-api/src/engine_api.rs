@@ -1570,6 +1570,153 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
+/// Wrapper around [`EngineApi`] that also implements
+/// [`NewPayloadWithWitnessHandler`](crate::rest::NewPayloadWithWitnessHandler).
+///
+/// This wrapper holds references to the provider and EVM configuration required for
+/// witness re-execution. The `EngineApi` itself is unchanged — we only need these
+/// additional components for the `generate_witness` method.
+#[expect(missing_debug_implementations)]
+pub struct EngineApiWithWitness<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec, Evm> {
+    /// The inner engine API.
+    engine_api: EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>,
+    /// The provider, used for block retrieval and state access during witness generation.
+    provider: Provider,
+    /// EVM configuration for creating block executors.
+    evm_config: Evm,
+    /// Task spawner for offloading blocking witness generation.
+    task_spawner: Runtime,
+}
+
+impl<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
+    EngineApiWithWitness<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
+where
+    PayloadT: PayloadTypes,
+{
+    /// Creates a new [`EngineApiWithWitness`].
+    pub fn new(
+        engine_api: EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>,
+        provider: Provider,
+        evm_config: Evm,
+        task_spawner: Runtime,
+    ) -> Self {
+        Self { engine_api, provider, evm_config, task_spawner }
+    }
+}
+
+impl<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
+    crate::rest::NewPayloadWithWitnessHandler
+    for EngineApiWithWitness<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
+where
+    Provider: BlockReader + HeaderProvider + StateProviderFactory + BalProvider + Clone + 'static,
+    Provider::Block: reth_primitives_traits::Block<Header: alloy_rlp::Encodable>,
+    PayloadT: PayloadTypes<ExecutionData = ExecutionData>,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<PayloadT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Evm: reth_evm::ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<Block = Provider::Block>>
+        + 'static,
+{
+    fn new_payload_v5(
+        &self,
+        payload: ExecutionData,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<PayloadStatus, EngineApiError>,
+                > + Send
+                + '_,
+        >,
+    > {
+        Box::pin(self.engine_api.new_payload_v5(payload))
+    }
+
+    fn generate_witness(
+        &self,
+        block_hash: B256,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<alloy_rpc_types_debug::ExecutionWitness, EngineApiError>,
+                > + Send
+                + '_,
+        >,
+    > {
+        use reth_evm::execute::Executor;
+        use reth_revm::witness::ExecutionWitnessRecord;
+        use reth_storage_api::TransactionVariant;
+        use reth_trie_common::ExecutionWitnessMode;
+
+        let provider = self.provider.clone();
+        let evm_config = self.evm_config.clone();
+        let task_spawner = self.task_spawner.clone();
+
+        Box::pin(async move {
+            // Offload the blocking re-execution to a blocking task.
+            let handle = task_spawner.spawn_blocking(move || {
+                use reth_primitives_traits::AlloyBlockHeader as _;
+
+                // 1. Retrieve the block by hash.
+                let block = provider
+                    .recovered_block(block_hash.into(), TransactionVariant::WithHash)
+                    .map_err(|e| EngineApiError::Internal(Box::new(e)))?
+                    .ok_or_else(|| {
+                        EngineApiError::Internal(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("Block {block_hash} not found for witness generation"),
+                        )))
+                    })?;
+
+                let block_number = block.header().number();
+                let parent_hash = block.header().parent_hash();
+
+                // 2. Get state at the parent block.
+                let state_provider = provider
+                    .state_by_block_hash(parent_hash)
+                    .map_err(|e| EngineApiError::Internal(Box::new(e)))?;
+
+                // 3. Create executor and re-execute the block with state closure.
+                let spd = reth_revm::database::StateProviderDatabase::new(state_provider);
+                let mut db = reth_revm::State::builder()
+                    .with_database(spd)
+                    .with_bundle_update()
+                    .build();
+
+                let block_executor = evm_config.executor(&mut db);
+                let mode = ExecutionWitnessMode::Legacy;
+
+                let mut witness_record = ExecutionWitnessRecord::default();
+                let _ = block_executor
+                    .execute_with_state_closure(
+                        &block,
+                        |statedb: &reth_revm::State<_>| {
+                            witness_record.record_executed_state(statedb, mode);
+                        },
+                    )
+                    .map_err(|e| EngineApiError::Internal(Box::new(e)))?;
+
+                // 4. Convert the record into a full ExecutionWitness.
+                // The inner database is accessible via db.database (the StateProviderDatabase).
+                // The StateProviderDatabase derefs to the inner DB which implements StateProvider.
+                witness_record
+                    .into_execution_witness(&*db.database, &provider, block_number, mode)
+                    .map_err(|e| EngineApiError::Internal(Box::new(e)))
+            });
+
+            handle.await.map_err(|e| {
+                EngineApiError::Internal(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    format!("Witness generation task failed: {e}"),
+                )))
+            })?
+        })
+    }
+
+    fn accept_execution_requests_hash(&self) -> bool {
+        self.engine_api.accept_execution_requests_hash()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

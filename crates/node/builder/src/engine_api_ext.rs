@@ -5,6 +5,7 @@
 use crate::rpc::EngineApiBuilder;
 use eyre::Result;
 use reth_node_api::{AddOnsContext, FullNodeComponents};
+use std::sync::Arc;
 
 /// Provides access to an `EngineApi` instance with a callback
 #[derive(Debug)]
@@ -32,13 +33,19 @@ where
     type EngineApi = B::EngineApi;
 
     /// Builds the `EngineApi` and executes the callback if present.
-    async fn build_engine_api(mut self, ctx: &AddOnsContext<'_, N>) -> Result<Self::EngineApi> {
-        let api = self.inner.build_engine_api(ctx).await?;
+    async fn build_engine_api(
+        mut self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> Result<(
+        Self::EngineApi,
+        Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
+    )> {
+        let (api, witness_handler) = self.inner.build_engine_api(ctx).await?;
 
         if let Some(callback) = self.callback.take() {
             callback(api.clone());
         }
 
-        Ok(api)
+        Ok((api, witness_handler))
     }
 }
