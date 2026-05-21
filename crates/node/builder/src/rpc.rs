@@ -505,8 +505,7 @@ struct RpcSetupContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
     /// Optional witness handler for the REST `/new-payload-with-witness` endpoint.
-    witness_handler:
-        Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
+    witness_handler: Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
@@ -1055,13 +1054,11 @@ where
             .with_tokio_runtime(tokio_runtime);
 
         // Layer the witness REST endpoint middleware if a handler was provided.
-        // We conditionally apply the layer using a match to avoid type-level branching
-        // (tower::util::Either doesn't implement Layer).
         let witness_layer = reth_rpc_engine_api::rest::OptionalWitnessLayer::new(
             witness_handler.map(reth_rpc_engine_api::rest::NewPayloadWithWitnessLayer::new),
         );
-        let auth_config = auth_config
-            .with_http_middleware(Stack::new(auth_http_middleware, witness_layer));
+        let auth_config =
+            auth_config.with_http_middleware(Stack::new(auth_http_middleware, witness_layer));
 
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle
