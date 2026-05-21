@@ -13,7 +13,7 @@
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
-#               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (default 200)
+#               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (optional txgen override)
 set -euxo pipefail
 
 LABEL="$1"
@@ -52,7 +52,7 @@ LOG="${OUTPUT_DIR}/node.log"
 TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
-BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-200}"
+BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-}"
 
 capture_unix_time_ms() {
   python3 -c 'import time; print(time.time_ns() // 1_000_000)'
@@ -87,6 +87,53 @@ with open(output_path, "w") as f:
     )
     f.write("\n")
 PY
+}
+
+extract_target_metric_scrapes() {
+  local samples_path="$1"
+  local output_path="$2"
+  local filter_output
+  local -a filter_lines
+  local sample_grep
+  local sample_names_json
+  local prefiltered_path
+  local -a pipe_status
+
+  : > "$output_path"
+
+  if [ ! -f "$samples_path" ]; then
+    echo "::error::Target metrics enabled but samples archive is missing: $samples_path"
+    return 1
+  fi
+
+  filter_output="$(python3 .github/scripts/bench-target-metric-sample-filter.py "$BENCH_TARGET_METRICS_CONFIG")"
+  mapfile -t filter_lines <<< "$filter_output"
+  sample_grep="${filter_lines[0]}"
+  sample_names_json="${filter_lines[1]}"
+  prefiltered_path="${output_path}.prefiltered"
+
+  set +e
+  gzip -dc "$samples_path" | grep -E -- "$sample_grep" > "$prefiltered_path"
+  pipe_status=("${PIPESTATUS[@]}")
+  set -e
+
+  if [ "${pipe_status[0]}" -ne 0 ]; then
+    echo "::error::Failed to decompress samples archive: $samples_path"
+    rm -f "$prefiltered_path"
+    return "${pipe_status[0]}"
+  fi
+  if [ "${pipe_status[1]}" -ne 0 ] && [ "${pipe_status[1]}" -ne 1 ]; then
+    echo "::error::Failed to prefilter target metric samples from: $samples_path"
+    rm -f "$prefiltered_path"
+    return "${pipe_status[1]}"
+  fi
+
+  jq -c --argjson metric_names "$sample_names_json" \
+    '. as $sample | select(($metric_names | index($sample.name)) != null)' \
+    "$prefiltered_path" > "$output_path"
+  rm -f "$prefiltered_path"
+
+  echo "Filtered $(wc -l < "$output_path" | tr -d ' ') target metric samples from $samples_path"
 }
 
 bal_enabled_for_label() {
@@ -432,7 +479,7 @@ fi
 
 if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
   TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
-  if [ "$METRICS_URL_ADDED" = true ]; then
+  if [ "$METRICS_URL_ADDED" = true ] && [ -n "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS" ]; then
     METRICS_ARGS+=(--scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS")
   fi
 fi
@@ -482,10 +529,9 @@ if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
   record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
   rm -f "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
-  if [ -f "$OUTPUT_DIR/report.samples.ndjson.gz" ]; then
-    gzip -dc "$OUTPUT_DIR/report.samples.ndjson.gz" | \
-      jq -c 'select(.name | startswith("txgen_") | not)' > "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
-  fi
+  extract_target_metric_scrapes \
+    "$OUTPUT_DIR/report.samples.ndjson.gz" \
+    "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
 fi
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
