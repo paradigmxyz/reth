@@ -37,6 +37,9 @@ def target_metric_sample_names(config: dict) -> list[str]:
     for counter in config.get("counters", []):
         names.add(parse_metric_name(counter["query"]))
 
+    for gauge in config.get("gauges", []):
+        names.add(parse_metric_name(gauge["query"]))
+
     for histogram in config.get("histograms", []):
         names.add(histogram_sum_name(histogram["query"]))
 

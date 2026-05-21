@@ -164,9 +164,13 @@ def histogram_counter_query(query: str, suffix: str) -> str:
     return format_target_metric_query(f"{metric_name}_{suffix}", label_filters)
 
 
-def target_metric_counter_encodes_seconds(query: str) -> bool:
+def target_metric_query_encodes_seconds(query: str) -> bool:
     _aggregate, metric_name, _label_filters = parse_target_metric_query(query)
-    return metric_name.endswith("_seconds_total") or "_duration_seconds" in metric_name
+    return "_seconds" in metric_name
+
+
+def target_metric_counter_encodes_seconds(query: str) -> bool:
+    return target_metric_query_encodes_seconds(query)
 
 
 def target_metric_min_value_pct_total_latency(config: dict) -> float | None:
@@ -517,6 +521,12 @@ def fmt_metric_value(v: float) -> str:
     if abs_v >= 1 and abs(v - round(v)) <= 0.00005:
         return f"{round(v):.0f}"
     return f"{v:.4f}".rstrip("0").rstrip(".")
+
+
+def fmt_target_metric_value(metric: dict, v: float) -> str:
+    if metric.get("unit") == "seconds":
+        return fmt_ms(v * 1_000.0)
+    return fmt_metric_value(v)
 
 
 def display_bal_mode(bal_mode: str | None) -> str | None:
@@ -1177,6 +1187,70 @@ def query_histogram_target_metric_run(
     return metrics_by_identity
 
 
+def query_gauge_target_metric_run(
+    relevant_scrapes: list[dict],
+    gauge: dict,
+    run_label: str,
+    metadata: dict,
+    identity_label_keys: set[str],
+) -> dict[tuple[tuple[str, str], ...], dict]:
+    query = gauge["query"]
+    aggregate, _metric_name, _label_filters = parse_target_metric_query(query)
+    grouped_scrapes = [
+        group_query_samples_by_identity(scrape["samples"], query, identity_label_keys)[1]
+        for scrape in relevant_scrapes
+    ]
+    identities = collect_metric_identities(grouped_scrapes)
+    if not identities:
+        raise ValueError(
+            f"Gauge target metric '{query}' in run '{run_label}' had no sampled values"
+        )
+
+    results = {}
+    for identity_key, identity_labels in sorted(identities.items()):
+        observations = []
+        display_query = format_target_metric_identity(query, identity_labels)
+        for scrape, groups in zip(relevant_scrapes, grouped_scrapes):
+            if identity_key not in groups:
+                continue
+            observations.append(
+                {
+                    "block_height": float(scrape["block_height"]),
+                    "value": grouped_sample_value(groups.get(identity_key), aggregate),
+                }
+            )
+
+        if not observations:
+            raise ValueError(
+                f"Gauge target metric '{display_query}' in run '{run_label}' had no observations"
+            )
+
+        stats = compute_target_metric_series_stats(
+            [observation["value"] for observation in observations]
+        )
+        results[identity_key] = {
+            "query": query,
+            "display_query": display_query,
+            "identity_labels": identity_labels,
+            "target": gauge["target"],
+            "mean": {
+                "query": query,
+                "value": stats["mean"],
+                "samples": len(observations),
+                "scrapes": len(relevant_scrapes),
+                "duration_ms": int(metadata["duration_ms"]),
+                "range_start_ms": int(metadata["range_start_ms"]),
+                "range_end_ms": int(metadata["range_end_ms"]),
+                "benchmark_id": metadata["benchmark_id"],
+                "benchmark_run": metadata["benchmark_run"],
+                "_values": [observation["value"] for observation in observations],
+                "_observations": observations,
+            },
+        }
+
+    return results
+
+
 def load_target_metric_run_context(path: str) -> dict:
     run_label = run_label_from_path(path)
     metadata = load_target_metric_range(path)
@@ -1209,6 +1283,18 @@ def collect_target_metric_identity_label_keys(
 
     for counter in config.get("counters", []):
         query = counter["query"]
+        identity_label_keys_by_query[query] = set().union(
+            *(
+                target_metric_variable_identity_label_keys(
+                    context["relevant_scrapes"],
+                    query,
+                )
+                for context in run_contexts
+            )
+        )
+
+    for gauge in config.get("gauges", []):
+        query = gauge["query"]
         identity_label_keys_by_query[query] = set().union(
             *(
                 target_metric_variable_identity_label_keys(
@@ -1265,7 +1351,18 @@ def query_target_metric_run(
             identity_label_keys_by_query[query],
         )
 
-    return run_label, {"counters": counters, "histograms": histograms}
+    gauges = {}
+    for gauge in config.get("gauges", []):
+        query = gauge["query"]
+        gauges[gauge["query"]] = query_gauge_target_metric_run(
+            relevant_scrapes,
+            gauge,
+            run_label,
+            metadata,
+            identity_label_keys_by_query[query],
+        )
+
+    return run_label, {"counters": counters, "gauges": gauges, "histograms": histograms}
 
 
 def run_label_from_path(path: str) -> str:
@@ -1349,6 +1446,7 @@ def build_target_metric_entry(
     min_value_pct_total_latency: float | None,
     block_latency_ms: float,
     include_pair_mean_values: bool = False,
+    unit: str | None = None,
 ) -> dict:
     changes = {
         stat_name: compute_target_metric_change(
@@ -1363,6 +1461,9 @@ def build_target_metric_entry(
         )
         for stat_name in display_stats
     }
+    metric_unit = unit or (
+        "seconds" if target_metric_query_encodes_seconds(configured_query) else None
+    )
     entry = {
         "kind": kind,
         "name": display_query,
@@ -1377,6 +1478,8 @@ def build_target_metric_entry(
         "changes": changes,
         "change": summarize_target_metric_change(changes, display_stats),
     }
+    if metric_unit:
+        entry["unit"] = metric_unit
     if min_value_pct_total_latency is not None:
         entry["materiality"] = {
             "min_value_pct_total_latency": min_value_pct_total_latency,
@@ -1519,6 +1622,76 @@ def compute_target_metric_summary(
                     min_value_pct_total_latency=counter_min_value_pct_total_latency,
                     block_latency_ms=block_latency_ms,
                     include_pair_mean_values=True,
+                )
+            )
+
+    for gauge in config.get("gauges", []):
+        query = gauge["query"]
+        target = gauge["target"]
+        floor_pct = float(gauge.get("floor_pct", 0.0))
+        gauge_min_value_pct_total_latency = target_metric_min_value_pct_total_latency(gauge)
+        display_stats = ("mean",)
+        identities = collect_query_metric_identities(
+            baseline_runs + feature_runs, "gauges", query
+        )
+
+        for identity_key, identity_labels in sorted(identities.items()):
+            baseline_values = []
+            feature_values = []
+            display_query = format_target_metric_identity(query, identity_labels)
+            baseline_run_metrics = []
+            feature_run_metrics = []
+            if not all(
+                identity_key in run_data["gauges"][query]
+                for _run_label, run_data in baseline_runs + feature_runs
+            ):
+                continue
+
+            for run_label, run_data in baseline_runs:
+                run_metric = run_data["gauges"][query][identity_key]
+                baseline_run_metrics.append((run_label, run_metric))
+
+            for run_label, run_data in feature_runs:
+                run_metric = run_data["gauges"][query][identity_key]
+                feature_run_metrics.append((run_label, run_metric))
+
+            baseline_runs_for_stats = {stat_name: [] for stat_name in display_stats}
+            feature_runs_for_stats = {stat_name: [] for stat_name in display_stats}
+
+            for run_label, run_metric in baseline_run_metrics:
+                run_values = {"run": run_label}
+                for stat_name in display_stats:
+                    run_stat = run_metric[stat_name]
+                    baseline_runs_for_stats[stat_name].append(run_stat)
+                    run_values[stat_name] = float(run_stat["value"])
+                baseline_values.append(run_values)
+
+            for run_label, run_metric in feature_run_metrics:
+                run_values = {"run": run_label}
+                for stat_name in display_stats:
+                    run_stat = run_metric[stat_name]
+                    feature_runs_for_stats[stat_name].append(run_stat)
+                    run_values[stat_name] = float(run_stat["value"])
+                feature_values.append(run_values)
+
+            metrics.append(
+                build_target_metric_entry(
+                    kind="gauge",
+                    configured_query=query,
+                    display_query=display_query,
+                    identity_labels=identity_labels,
+                    target=target,
+                    display_stats=display_stats,
+                    summary_fields=display_stats,
+                    baseline_values=baseline_values,
+                    feature_values=feature_values,
+                    baseline_runs_by_stat=baseline_runs_for_stats,
+                    feature_runs_by_stat=feature_runs_for_stats,
+                    pair_stats=display_stats,
+                    floor_pct=floor_pct,
+                    min_value_pct_total_latency=gauge_min_value_pct_total_latency,
+                    block_latency_ms=block_latency_ms,
+                    unit=gauge.get("unit"),
                 )
             )
 
@@ -1732,8 +1905,8 @@ def generate_target_metric_table(target_metrics: dict | None) -> str:
             lines.append(
                 "| `{}` | {} | {} | {} |".format(
                     f"{metric['name']} {stat_name}",
-                    fmt_metric_value(change["baseline"]),
-                    fmt_metric_value(change["feature"]),
+                    fmt_target_metric_value(metric, change["baseline"]),
+                    fmt_target_metric_value(metric, change["feature"]),
                     target_metric_change_str(change),
                 )
             )

@@ -25,6 +25,11 @@ function fmtMetricValue(v) {
   return v.toFixed(1).replace(/\.0$/, '');
 }
 
+function fmtTargetMetricValue(metric, v) {
+  if (metric.unit === 'seconds') return `${(v * 1000).toFixed(2)}ms`;
+  return fmtMetricValue(v);
+}
+
 module.exports = async function ({ core, context, chartSha, grafanaUrl, runId }) {
   let summary;
   try {
@@ -87,7 +92,7 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
       for (const statName of metric.display_stats || []) {
         const change = metric.changes?.[statName];
         if (!change || change.sig === 'neutral') continue;
-        md += `| \`${metric.name} ${statName}\` | ${fmtMetricValue(change.baseline)} | ${fmtMetricValue(change.feature)} | ${fmtChange(change)} |\n`;
+        md += `| \`${metric.name} ${statName}\` | ${fmtTargetMetricValue(metric, change.baseline)} | ${fmtTargetMetricValue(metric, change.feature)} | ${fmtChange(change)} |\n`;
       }
     }
     md += '\n';

@@ -13,6 +13,15 @@
       "min_value_pct_total_latency": 0.0
     }
   ],
+  "gauges": [
+    {
+      "query": "reth_storage_providers_database_save_blocks_mdbx_last",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    }
+  ],
   "histograms": [
     {
       "query": "reth_sync_block_validation_state_root_histogram",
@@ -35,7 +44,7 @@
     {
       "query": "reth_tree_root_sparse_trie_idle_time_seconds",
       "target": "increase",
-      "floor_pct": 5.0,
+      "floor_pct": 7.5,
       "min_value_pct_total_latency": 15.0
     },
     {
@@ -67,12 +76,6 @@
       "target": "decrease",
       "floor_pct": 2.5,
       "min_value_pct_total_latency": 0.8
-    },
-    {
-      "query": "reth_storage_providers_database_save_blocks_mdbx",
-      "target": "decrease",
-      "floor_pct": 20.0,
-      "min_value_pct_total_latency": 0.0
     },
     {
       "query": "reth_storage_providers_database_save_blocks_rocksdb",
