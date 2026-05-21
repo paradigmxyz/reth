@@ -159,6 +159,13 @@ pub fn apply_precompile_overrides(
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
 /// given [`BlockExecutor`].
 ///
+/// `remaining_budget` is the shared `eth_simulateV1` gas budget across the whole simulation,
+/// initialized to `--rpc.gascap` and depleted by each call's actual `gas_used`. Use [`u64::MAX`]
+/// to disable the budget. Before each call executes, an explicit `gas` above the remaining
+/// budget is clamped down to the budget, so the total gas consumed across every block and
+/// every call in one `eth_simulateV1` request cannot exceed `--rpc.gascap`. This mirrors the
+/// behavior geth/op-geth implements via a single shared gas pool.
+///
 /// Returns all executed transactions and the result of the execution.
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
@@ -169,6 +176,7 @@ pub fn execute_transactions<S, T>(
     default_gas_limit: u64,
     chain_id: u64,
     converter: &T,
+    remaining_budget: &mut u64,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -183,12 +191,29 @@ where
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
-    for call in calls {
-        // Resolve transaction, populate missing fields and enforce calls
-        // correctness.
+    for mut call in calls {
+        // Clamp per-call gas to the shared simulation budget. Without this, a caller can raise
+        // `blockOverrides.gasLimit` above `--rpc.gascap` and also set `calls[i].gas` above
+        // `--rpc.gascap`, amplifying the RPC DoS envelope beyond the operator's contract.
+        match call.as_ref().gas_limit() {
+            Some(gas) if gas > *remaining_budget => {
+                tracing::debug!(
+                    target: "rpc::eth::simulate",
+                    requested = gas,
+                    cap = *remaining_budget,
+                    "Caller gas above allowance, capping",
+                );
+                call.as_mut().set_gas_limit(*remaining_budget);
+            }
+            _ => {}
+        }
+
+        // Resolve transaction, populate missing fields and enforce calls correctness. Unset
+        // `gas` defaults to `default_gas_limit` clamped to the remaining budget, so the
+        // per-call ceiling is always `min(spec default, --rpc.gascap remaining)`.
         let tx = resolve_transaction(
             call,
-            default_gas_limit,
+            default_gas_limit.min(*remaining_budget),
             builder.evm().block().basefee(),
             chain_id,
             builder.evm_mut().db_mut(),
@@ -198,9 +223,16 @@ where
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
+        let mut call_gas_used = 0u64;
         builder.execute_transaction_with_result_closure(tx, |result| {
-            results.push(result.result().result.clone())
+            call_gas_used = result.result().result.tx_gas_used();
+            results.push(result.result().result.clone());
         })?;
+
+        // Debit the shared budget by the call's actual gas usage (net of refunds), matching
+        // geth's gas-pool accounting: the pool reserves `gas_limit` upfront and refunds what
+        // the call didn't consume, so the running deduction equals `gas_used`.
+        *remaining_budget = remaining_budget.saturating_sub(call_gas_used);
     }
 
     // Pass noop provider to skip state root calculations.
