@@ -111,7 +111,7 @@ where
             );
 
         ctx.task_executor().spawn_critical_os_thread(
-            "payload-builder",
+            "payload-service",
             "payload builder service",
             payload_service,
         );
@@ -141,7 +141,7 @@ where
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         ctx.task_executor().spawn_critical_os_thread(
-            "payload-builder",
+            "payload-service",
             "payload builder",
             async move {
                 #[expect(clippy::collection_is_never_read)]
