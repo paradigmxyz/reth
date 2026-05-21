@@ -60,7 +60,10 @@ use crate::{
     validate::ValidPoolTransaction,
     AddedTransactionOutcome, AllTransactionsEvents,
 };
-use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{
+    conditional::BlockConditionalAttributes, error::ValueError, transaction::TxHashRef,
+    BlockHeader, Signed, Typed2718,
+};
 use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
@@ -1097,6 +1100,21 @@ pub trait BestTransactions: Iterator + Send {
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
 
+    /// Sets the block attributes used for conditional transaction filtering.
+    ///
+    /// The default implementation is a no-op. Iterators that support conditional transactions can
+    /// use this to pre-filter transactions whose block constraints do not match.
+    fn set_block_attributes(&mut self, _block_attributes: BlockConditionalAttributes) {}
+
+    /// Convenience function for [`Self::set_block_attributes`] that returns the iterator again.
+    fn with_block_attributes(mut self, block_attributes: BlockConditionalAttributes) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_block_attributes(block_attributes);
+        self
+    }
+
     /// Convenience function for [`Self::skip_blobs`] that returns the iterator again.
     fn without_blobs(mut self) -> Self
     where
@@ -1138,6 +1156,10 @@ where
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         (**self).set_skip_blobs(skip_blobs);
+    }
+
+    fn set_block_attributes(&mut self, block_attributes: BlockConditionalAttributes) {
+        (**self).set_block_attributes(block_attributes);
     }
 }
 

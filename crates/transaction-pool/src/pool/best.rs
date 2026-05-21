@@ -4,7 +4,7 @@ use crate::{
     pool::pending::PendingTransaction,
     PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
-use alloy_consensus::Transaction;
+use alloy_consensus::{conditional::BlockConditionalAttributes, Transaction};
 use alloy_primitives::map::AddressSet;
 use core::fmt;
 use imbl::OrdMap;
@@ -46,6 +46,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         self.best.set_skip_blobs(skip_blobs)
+    }
+
+    fn set_block_attributes(&mut self, block_attributes: BlockConditionalAttributes) {
+        self.best.set_block_attributes(block_attributes)
     }
 }
 
@@ -347,6 +351,10 @@ where
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         self.best.set_skip_blobs(skip_blobs)
     }
+
+    fn set_block_attributes(&mut self, block_attributes: BlockConditionalAttributes) {
+        self.best.set_block_attributes(block_attributes)
+    }
 }
 
 impl<I: fmt::Debug, P> fmt::Debug for BestTransactionFilter<I, P> {
@@ -434,6 +442,10 @@ where
             self.buffer.retain(|tx| !tx.transaction.is_eip4844())
         }
         self.inner.set_skip_blobs(skip_blobs)
+    }
+
+    fn set_block_attributes(&mut self, block_attributes: BlockConditionalAttributes) {
+        self.inner.set_block_attributes(block_attributes)
     }
 }
 

@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{conditional::BlockConditionalAttributes, Transaction};
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -215,6 +215,10 @@ where
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
         builder.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
+    ))
+    .with_block_attributes(BlockConditionalAttributes::new(
+        parent_header.number.saturating_add(1),
+        attributes.timestamp(),
     ));
     let mut total_fees = U256::ZERO;
 
