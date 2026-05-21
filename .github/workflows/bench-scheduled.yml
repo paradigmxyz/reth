@@ -767,7 +767,7 @@ jobs:
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
 
             const mode = process.env.BENCH_MODE || 'nightly';
-            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
+            const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             let md = `# ${emoji} ${modeLabel}: ${label}\n\n`;
             md += `**Baseline:** ${baselineLink}\n`;
             md += `**Feature:** ${featureLink} ([diff](${diffUrl}))\n`;
@@ -796,7 +796,7 @@ jobs:
             const chartSha = '${{ steps.push-charts.outputs.sha }}';
             if (chartSha) {
               const runId = '${{ github.run_id }}';
-              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/nightly/${runId}`;
+              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/${mode}/${runId}`;
               const charts = [
                 { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
                 { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
