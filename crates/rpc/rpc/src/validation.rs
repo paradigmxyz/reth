@@ -190,37 +190,44 @@ where
 
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
-        let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let mut executor = self.evm_config.batch_executor(cached_db);
+        let (output, rebuilt_bal) = {
+            let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let mut executor = self.evm_config.batch_executor(cached_db);
 
-        let result = executor.execute_one(&block)?;
+            let result = executor.execute_one(&block)?;
 
-        let rebuilt_bal = if decoded_bal.is_some() {
-            Some(executor.take_bal().ok_or_else(|| {
-                BlockExecutionError::msg("missing rebuilt block access list after BAL execution")
-            })?)
-        } else {
-            None
-        };
+            let rebuilt_bal = if decoded_bal.is_some() {
+                Some(executor.take_bal().ok_or_else(|| {
+                    BlockExecutionError::msg(
+                        "missing rebuilt block access list after BAL execution",
+                    )
+                })?)
+            } else {
+                None
+            };
 
-        let output = {
-            let mut state = executor.into_state();
-            let mut accessed_blacklisted = None;
-            if !self.disallow.is_empty() {
-                // Check whether the submission interacted with any blacklisted account by scanning
-                // the `State`'s cache that records everything read from database during execution.
-                for account in state.cache.accounts.keys() {
-                    if self.disallow.contains(account) {
-                        accessed_blacklisted = Some(*account);
+            let output = {
+                let mut state = executor.into_state();
+                let mut accessed_blacklisted = None;
+                if !self.disallow.is_empty() {
+                    // Check whether the submission interacted with any blacklisted account by
+                    // scanning the `State`'s cache that records everything read
+                    // from database during execution.
+                    for account in state.cache.accounts.keys() {
+                        if self.disallow.contains(account) {
+                            accessed_blacklisted = Some(*account);
+                        }
                     }
                 }
-            }
 
-            if let Some(account) = accessed_blacklisted {
-                return Err(ValidationApiError::Blacklist(account))
-            }
+                if let Some(account) = accessed_blacklisted {
+                    return Err(ValidationApiError::Blacklist(account))
+                }
 
-            BlockExecutionOutput { state: state.take_bundle(), result }
+                BlockExecutionOutput { state: state.take_bundle(), result }
+            };
+
+            (output, rebuilt_bal)
         };
 
         if let Some((decoded_bal, rebuilt_bal)) = decoded_bal.as_ref().zip(rebuilt_bal.as_ref()) &&
