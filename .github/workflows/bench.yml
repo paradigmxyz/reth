@@ -639,6 +639,8 @@ jobs:
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
@@ -1251,6 +1253,9 @@ jobs:
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS

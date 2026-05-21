@@ -12,7 +12,8 @@
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
-#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
+#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
+#               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (default 200)
 set -euxo pipefail
 
 LABEL="$1"
@@ -48,8 +49,45 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
+TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-200}"
+
+capture_unix_time_ms() {
+  python3 -c 'import time; print(time.time_ns() // 1_000_000)'
+}
+
+record_target_metric_range() {
+  local start_ms="$1"
+  local end_ms="$2"
+  if [ -z "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+    return 0
+  fi
+
+  python3 - "$TARGET_METRICS_RANGE" "$start_ms" "$end_ms" "${BENCH_ID:-}" "$(basename "$OUTPUT_DIR")" <<'PY'
+import json
+import sys
+
+output_path, start_ms, end_ms, benchmark_id, benchmark_run = sys.argv[1:6]
+start_ms = int(start_ms)
+end_ms = int(end_ms)
+
+with open(output_path, "w") as f:
+    json.dump(
+        {
+            "benchmark_id": benchmark_id,
+            "benchmark_run": benchmark_run,
+            "range_start_ms": start_ms,
+            "range_end_ms": end_ms,
+            "duration_ms": end_ms - start_ms,
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+PY
+}
 
 bal_enabled_for_label() {
   case "${BENCH_BAL:-false}" in
@@ -372,6 +410,7 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
+TARGET_METRICS_START_MS=""
 CLICKHOUSE_REPORT=()
 if [ -n "${CLICKHOUSE_URL:-}" ]; then
   CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
@@ -380,8 +419,26 @@ fi
 METRICS_ARGS=()
 PROMETHEUS_REPORT=()
 PROMETHEUS_METADATA=()
+METRICS_URL_ADDED=false
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+  if [ -z "${BENCH_METRICS_ADDR:-}" ]; then
+    echo "::error::BENCH_METRICS_ADDR is required when benchmark metrics are enabled"
+    exit 1
+  fi
+
+  METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
+  METRICS_URL_ADDED=true
+fi
+
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+  TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
+  if [ "$METRICS_URL_ADDED" = true ]; then
+    METRICS_ARGS+=(--scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS")
+  fi
+fi
+
 if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
-  if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+  if [ "$METRICS_URL_ADDED" != true ] && [ -n "${BENCH_METRICS_ADDR:-}" ]; then
     METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
   fi
   PROMETHEUS_REPORT+=(--report "victoriametrics:$BENCH_VICTORIAMETRICS_URL")
@@ -420,5 +477,15 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   -m "bal-mode=${BENCH_BAL:-false}" \
   -m "bal-enabled=$USE_BAL" \
   "${PROMETHEUS_METADATA[@]}" 2>&1 | sed -u "s/^/[bench] /"
+
+if [ -n "$TARGET_METRICS_START_MS" ]; then
+  TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
+  record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
+  rm -f "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+  if [ -f "$OUTPUT_DIR/report.samples.ndjson.gz" ]; then
+    gzip -dc "$OUTPUT_DIR/report.samples.ndjson.gz" | \
+      jq -c 'select(.name | startswith("txgen_") | not)' > "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+  fi
+fi
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
