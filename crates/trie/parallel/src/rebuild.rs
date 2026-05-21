@@ -1088,6 +1088,1075 @@ impl FreshStorageSegmentation {
         matches!(self, Self::Auto) && !storage_prefix_gate_enabled(config)
     }
 }
+
+fn calculate_storage_root_job<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    threshold: u64,
+    state: Option<IntermediateRootState>,
+    config: StorageRootPrefetchConfig,
+    fresh_storage_segmentation: FreshStorageSegmentation,
+) -> Result<StorageRootJobOutcome, StorageRootError>
+where
+    H: HashedCursorFactory + Clone + Send + Sync,
+{
+    let started = std::time::Instant::now();
+    let mut outcome = calculate_storage_root_job_inner(
+        hashed_cursor_factory,
+        hashed_address,
+        threshold,
+        state,
+        config,
+        fresh_storage_segmentation,
+    )?;
+    outcome.stats.storage_root_job_duration += started.elapsed();
+    Ok(outcome)
+}
+
+fn calculate_storage_root_job_inner<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    threshold: u64,
+    state: Option<IntermediateRootState>,
+    config: StorageRootPrefetchConfig,
+    fresh_storage_segmentation: FreshStorageSegmentation,
+) -> Result<StorageRootJobOutcome, StorageRootError>
+where
+    H: HashedCursorFactory + Clone + Send + Sync,
+{
+    let mut stats = StorageRootPrefetchStats::default();
+    let fresh_storage = state.is_none();
+    if let (Some(planner_config), Some(state)) = (config.storage_prefix_planner, state.as_ref()) {
+        match calculate_segmented_storage_root(
+            hashed_cursor_factory.clone(),
+            hashed_address,
+            threshold,
+            Some(state),
+            planner_config,
+            &mut stats,
+        ) {
+            Ok(Some(progress)) => return Ok(StorageRootJobOutcome { progress, stats }),
+            Ok(None) => stats.segmented_storage_fallbacks += 1,
+            Err(err) => return Err(err),
+        }
+    }
+
+    let planner_config = config.storage_prefix_planner;
+    let fresh_storage_planner_config = if fresh_storage && planner_config.is_some() {
+        match fresh_storage_segmentation {
+            FreshStorageSegmentation::Segmented(planner_config) => Some(planner_config),
+            FreshStorageSegmentation::Serial => None,
+            FreshStorageSegmentation::Auto => {
+                if storage_prefix_gate_enabled(config) {
+                    let gate = storage_prefix_large_gate(
+                        &hashed_cursor_factory,
+                        hashed_address,
+                        config.storage_prefix_min_large_slots,
+                        &mut stats,
+                    )?;
+                    gate.large.then(|| {
+                        storage_prefix_adaptive_planner_config(
+                            planner_config.expect("planner checked above"),
+                            config.storage_prefix_min_large_slots,
+                            gate.slots,
+                        )
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+    } else {
+        None
+    };
+    if let (true, Some(planner_config)) = (fresh_storage, fresh_storage_planner_config) {
+        let mut segmented_stats = StorageRootPrefetchStats::default();
+        match calculate_segmented_storage_root(
+            hashed_cursor_factory.clone(),
+            hashed_address,
+            threshold,
+            None,
+            planner_config,
+            &mut segmented_stats,
+        ) {
+            Ok(Some(segmented_progress)) => {
+                stats.extend(segmented_stats);
+                return Ok(StorageRootJobOutcome { progress: segmented_progress, stats })
+            }
+            Ok(None) => {
+                stats.extend(segmented_stats);
+                stats.segmented_storage_fallbacks += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    let allow_segmented_trigger = fresh_storage &&
+        planner_config.is_some() &&
+        fresh_storage_segmentation.allows_segmented_trigger(config);
+    let serial_threshold = if allow_segmented_trigger {
+        threshold.min(config.storage_prefix_trigger_threshold.max(1))
+    } else {
+        threshold
+    };
+    let serial_started = std::time::Instant::now();
+    let progress = calculate_storage_root(
+        hashed_cursor_factory.clone(),
+        hashed_address,
+        serial_threshold,
+        state,
+    )?;
+    stats.serial_storage_root_duration += serial_started.elapsed();
+    if let (true, Some(planner_config), true, StorageRootProgress::Progress(..)) =
+        (fresh_storage, planner_config, allow_segmented_trigger, &progress)
+    {
+        if serial_threshold >= threshold {
+            return Ok(StorageRootJobOutcome { progress, stats })
+        }
+
+        let StorageRootProgress::Progress(_, walked, updates) = &progress else { unreachable!() };
+        stats.segmented_storage_trigger_progresses += 1;
+        stats.segmented_storage_trigger_discarded_slots += *walked;
+        stats.segmented_storage_trigger_discarded_updates += updates.len();
+
+        let mut segmented_stats = StorageRootPrefetchStats::default();
+        match calculate_segmented_storage_root(
+            hashed_cursor_factory,
+            hashed_address,
+            threshold,
+            None,
+            planner_config,
+            &mut segmented_stats,
+        ) {
+            Ok(Some(segmented_progress)) => {
+                stats.extend(segmented_stats);
+                return Ok(StorageRootJobOutcome { progress: segmented_progress, stats })
+            }
+            Ok(None) => {
+                stats.extend(segmented_stats);
+                stats.segmented_storage_fallbacks += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(StorageRootJobOutcome { progress, stats })
+}
+
+const fn storage_prefix_gate_enabled(config: StorageRootPrefetchConfig) -> bool {
+    config.storage_prefix_min_large_slots != usize::MAX
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StoragePrefixLargeGate {
+    large: bool,
+    slots: Option<usize>,
+}
+
+fn storage_prefix_large_gate<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    min_large_slots: usize,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<StoragePrefixLargeGate, StorageRootError>
+where
+    H: HashedCursorFactory,
+{
+    let started = std::time::Instant::now();
+    stats.segmented_storage_gate_probes += 1;
+    if let Some(mut cursor) = hashed_cursor_factory.hashed_storage_key_cursor()? {
+        let slots = if cursor.seek_storage_key(hashed_address)? == Some(hashed_address) {
+            cursor.current_storage_entry_count()?
+        } else {
+            Some(0)
+        };
+
+        if let Some(slots) = slots {
+            return Ok(storage_prefix_large_gate_from_count(slots, min_large_slots, stats, started))
+        }
+    }
+
+    let mut cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+    let mut slots = 0usize;
+    let mut entry = cursor.seek(B256::ZERO)?;
+
+    while let Some((_hashed_slot, _value)) = entry {
+        slots += 1;
+        if slots >= min_large_slots.max(1) {
+            stats.segmented_storage_gate_slots += slots;
+            stats.segmented_storage_gate_hits += 1;
+            stats.segmented_storage_gate_duration += started.elapsed();
+            return Ok(StoragePrefixLargeGate { large: true, slots: Some(slots) })
+        }
+        entry = cursor.next()?;
+    }
+
+    stats.segmented_storage_gate_slots += slots;
+    stats.segmented_storage_gate_misses += 1;
+    stats.segmented_storage_gate_duration += started.elapsed();
+    Ok(StoragePrefixLargeGate { large: false, slots: Some(slots) })
+}
+
+fn storage_prefix_large_gate_from_count(
+    slots: usize,
+    min_large_slots: usize,
+    stats: &mut StorageRootPrefetchStats,
+    started: std::time::Instant,
+) -> StoragePrefixLargeGate {
+    stats.segmented_storage_gate_count_queries += 1;
+    stats.segmented_storage_gate_counted_slots += slots;
+    if slots >= min_large_slots.max(1) {
+        stats.segmented_storage_gate_hits += 1;
+        stats.segmented_storage_gate_duration += started.elapsed();
+        return StoragePrefixLargeGate { large: true, slots: Some(slots) }
+    }
+
+    stats.segmented_storage_gate_misses += 1;
+    stats.segmented_storage_gate_duration += started.elapsed();
+    StoragePrefixLargeGate { large: false, slots: Some(slots) }
+}
+
+fn storage_prefix_adaptive_planner_config(
+    mut config: StoragePrefixPlannerConfig,
+    min_large_slots: usize,
+    slots: Option<usize>,
+) -> StoragePrefixPlannerConfig {
+    let Some(slots) = slots else { return config };
+    let min_large_slots = min_large_slots.max(1);
+    let depth_cap = if slots >= min_large_slots.saturating_mul(256) {
+        4
+    } else if slots >= min_large_slots.saturating_mul(16) {
+        3
+    } else {
+        2
+    };
+    config.max_depth = config.max_depth.min(depth_cap);
+    config
+}
+
+fn calculate_segmented_storage_root<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    threshold: u64,
+    state: Option<&IntermediateRootState>,
+    planner_config: StoragePrefixPlannerConfig,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<Option<StorageRootProgress>, StorageRootError>
+where
+    H: HashedCursorFactory + Clone + Send + Sync,
+{
+    let started = std::time::Instant::now();
+    if state.is_some_and(|state| !is_potential_segmented_storage_checkpoint(state)) {
+        stats.segmented_storage_total_duration += started.elapsed();
+        return Ok(None)
+    }
+
+    stats.segmented_storage_attempts += 1;
+
+    let Some(result) = build_segmented_storage_root(
+        hashed_cursor_factory,
+        hashed_address,
+        planner_config,
+        threshold,
+        state,
+        stats,
+    )?
+    else {
+        stats.segmented_storage_total_duration += started.elapsed();
+        return Ok(None)
+    };
+
+    if result.used_serial_fallback {
+        stats.segmented_storage_fallbacks += 1;
+    }
+    if result.completed_by_segmented {
+        stats.segmented_storage_roots += 1;
+    }
+    stats.segmented_storage_prefixes += result.segmented_prefixes;
+    stats.segmented_storage_slots += result.segmented_walked;
+    stats.segmented_storage_total_duration += started.elapsed();
+
+    Ok(Some(result.progress))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SegmentedStoragePlanUnsupportedReason {
+    SingleRange,
+    UnsupportedPrefix,
+}
+
+fn unsupported_segmented_storage_plan_reason(
+    plan: &StoragePrefixPlan,
+) -> Option<SegmentedStoragePlanUnsupportedReason> {
+    if plan.ranges.is_empty() && !plan.complete {
+        return Some(SegmentedStoragePlanUnsupportedReason::SingleRange)
+    }
+    if plan.ranges.iter().any(|range| range.prefix.is_empty() || range.prefix.len() >= 64) {
+        return Some(SegmentedStoragePlanUnsupportedReason::UnsupportedPrefix)
+    }
+
+    None
+}
+
+fn build_segmented_storage_root<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    planner_config: StoragePrefixPlannerConfig,
+    threshold: u64,
+    state: Option<&IntermediateRootState>,
+    stats: &mut StorageRootPrefetchStats,
+) -> Result<Option<SegmentedStorageBuildOutcome>, StorageRootError>
+where
+    H: HashedCursorFactory + Clone + Send + Sync,
+{
+    let resume_started = std::time::Instant::now();
+    let Some(resume) = segmented_storage_resume(&hashed_cursor_factory, hashed_address, state)?
+    else {
+        stats.segmented_storage_resume_duration += resume_started.elapsed();
+        stats.segmented_storage_resume_fallbacks += 1;
+        return Ok(None)
+    };
+    stats.segmented_storage_resume_duration += resume_started.elapsed();
+
+    if let Some(completed_prefix) = resume.cursor.completed_prefix {
+        debug_assert_eq!(resume.cursor.next_start_bound, storage_prefix_end(&completed_prefix));
+    }
+
+    let mut parent_hash_builder = resume.hash_builder;
+    let mut updates = StorageTrieUpdates::default();
+    let mut walked = 0usize;
+    let mut segmented_prefixes = 0usize;
+    let mut last_hashed_slot = resume.cursor.last_segment_slot;
+    let mut next_start_bound = resume.cursor.next_start_bound;
+    let wave_size = segmented_storage_wave_size();
+    let mut update_estimator = SegmentedStorageUpdateEstimator::default();
+
+    loop {
+        let plan_budget = segmented_storage_plan_budget(threshold, &update_estimator)
+            .map(|budget| StoragePrefixPlanBudget::new(update_estimator, budget))
+            .unwrap_or_else(StoragePrefixPlanBudget::unbounded);
+        let planning_started = std::time::Instant::now();
+        let mut plan = plan_storage_prefixes_after(
+            &hashed_cursor_factory,
+            hashed_address,
+            next_start_bound,
+            planner_config,
+            plan_budget,
+        )?;
+        stats.segmented_storage_planning_duration += planning_started.elapsed();
+        stats.record_storage_prefix_plan(&plan.stats);
+        if !plan.complete {
+            stats.segmented_storage_partial_plans += 1;
+            if plan.stats.too_many_prefixes == 0 {
+                stats.segmented_storage_budget_stops += 1;
+            }
+        }
+
+        if let Some(reason) = unsupported_segmented_storage_plan_reason(&plan) {
+            match reason {
+                SegmentedStoragePlanUnsupportedReason::SingleRange => {
+                    stats.segmented_storage_plan_single_range_fallbacks += 1;
+                }
+                SegmentedStoragePlanUnsupportedReason::UnsupportedPrefix => {
+                    stats.segmented_storage_plan_unsupported_prefix_fallbacks += 1;
+                }
+            }
+            return Ok(None)
+        }
+
+        plan.ranges.sort_unstable_by_key(|range| range.start);
+        if let Some(last_segment_slot) = last_hashed_slot &&
+            !segmented_storage_resume_matches_next_range(
+                &hashed_cursor_factory,
+                hashed_address,
+                plan.ranges.first(),
+                last_segment_slot,
+            )?
+        {
+            stats.segmented_storage_resume_fallbacks += 1;
+            return Ok(None)
+        }
+
+        if plan.ranges.is_empty() && plan.complete {
+            let root = parent_hash_builder.root();
+            extend_with_parent_updates(&mut updates, &mut parent_hash_builder, false);
+
+            return Ok(Some(SegmentedStorageBuildOutcome {
+                progress: StorageRootProgress::Complete(root, walked, updates),
+                segmented_prefixes,
+                segmented_walked: walked,
+                completed_by_segmented: true,
+                used_serial_fallback: false,
+            }))
+        }
+
+        let plan_complete = plan.complete;
+        let ranges = plan.ranges;
+        let mut next_range_index = 0usize;
+        while next_range_index < ranges.len() {
+            let wave_end = segmented_storage_wave_end(SegmentedStorageWaveEnd {
+                ranges: &ranges,
+                next_range_index,
+                wave_size,
+                updates: &updates,
+                hash_builder: &parent_hash_builder,
+                threshold,
+                update_estimator: &update_estimator,
+                stats,
+            });
+            let wave_len = wave_end - next_range_index;
+            let (tx, rx) = std::sync::mpsc::sync_channel(wave_len);
+
+            let wave_started = std::time::Instant::now();
+            rayon::scope(|scope| {
+                for (offset, range) in
+                    ranges[next_range_index..wave_end].iter().cloned().enumerate()
+                {
+                    let tx = tx.clone();
+                    let hashed_cursor_factory = hashed_cursor_factory.clone();
+                    scope.spawn(move |_| {
+                        let worker_started = std::time::Instant::now();
+                        let result = calculate_storage_prefix_root(
+                            hashed_cursor_factory,
+                            hashed_address,
+                            range,
+                        );
+                        let _ = tx.send((offset, worker_started.elapsed(), result));
+                    });
+                }
+            });
+            stats.segmented_storage_wave_compute_duration += wave_started.elapsed();
+            drop(tx);
+
+            let mut prefix_results = std::iter::repeat_with(|| None)
+                .take(wave_len)
+                .collect::<Vec<Option<SegmentedStoragePrefixResult>>>();
+            for _ in 0..wave_len {
+                let Ok((offset, worker_elapsed, result)) = rx.recv() else {
+                    stats.segmented_storage_missing_prefix_result_fallbacks += 1;
+                    return finish_segmented_storage_with_serial_fallback(
+                        hashed_cursor_factory,
+                        hashed_address,
+                        SegmentedStoragePartial {
+                            parent_hash_builder,
+                            last_hashed_slot,
+                            walked,
+                            updates,
+                            segmented_prefixes,
+                        },
+                        stats,
+                        threshold,
+                    )
+                };
+                stats.segmented_storage_prefix_worker_duration += worker_elapsed;
+                match result {
+                    Ok(SegmentedStoragePrefixOutcome::Complete(result)) => {
+                        prefix_results[offset] = Some(*result);
+                    }
+                    Ok(SegmentedStoragePrefixOutcome::InlineRoot) => {
+                        stats.segmented_storage_inline_fallbacks += 1;
+                        return finish_segmented_storage_with_serial_fallback(
+                            hashed_cursor_factory,
+                            hashed_address,
+                            SegmentedStoragePartial {
+                                parent_hash_builder,
+                                last_hashed_slot,
+                                walked,
+                                updates,
+                                segmented_prefixes,
+                            },
+                            stats,
+                            threshold,
+                        )
+                    }
+                    Ok(SegmentedStoragePrefixOutcome::UnsupportedRoot) => {
+                        stats.segmented_storage_prefix_unsupported_root_fallbacks += 1;
+                        return finish_segmented_storage_with_serial_fallback(
+                            hashed_cursor_factory,
+                            hashed_address,
+                            SegmentedStoragePartial {
+                                parent_hash_builder,
+                                last_hashed_slot,
+                                walked,
+                                updates,
+                                segmented_prefixes,
+                            },
+                            stats,
+                            threshold,
+                        )
+                    }
+                    Ok(SegmentedStoragePrefixOutcome::EmptyRange) => {
+                        stats.segmented_storage_prefix_empty_range_fallbacks += 1;
+                        return finish_segmented_storage_with_serial_fallback(
+                            hashed_cursor_factory,
+                            hashed_address,
+                            SegmentedStoragePartial {
+                                parent_hash_builder,
+                                last_hashed_slot,
+                                walked,
+                                updates,
+                                segmented_prefixes,
+                            },
+                            stats,
+                            threshold,
+                        )
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+
+            let merge_started = std::time::Instant::now();
+            for (offset, prefix_result) in prefix_results.into_iter().enumerate() {
+                let Some(prefix_result) = prefix_result else {
+                    stats.segmented_storage_missing_prefix_result_fallbacks += 1;
+                    stats.segmented_storage_prefix_merge_duration += merge_started.elapsed();
+                    return finish_segmented_storage_with_serial_fallback(
+                        hashed_cursor_factory,
+                        hashed_address,
+                        SegmentedStoragePartial {
+                            parent_hash_builder,
+                            last_hashed_slot,
+                            walked,
+                            updates,
+                            segmented_prefixes,
+                        },
+                        stats,
+                        threshold,
+                    )
+                };
+                let range_index = next_range_index + offset;
+                let has_more_after_prefix = range_index + 1 < ranges.len() || !plan_complete;
+                last_hashed_slot = Some(prefix_result.last_hashed_slot);
+                next_start_bound = storage_prefix_end(&prefix_result.prefix);
+
+                let children_are_in_trie = !prefix_result.updates.storage_nodes.is_empty();
+                parent_hash_builder.add_branch(
+                    prefix_result.prefix,
+                    prefix_result.root_hash,
+                    children_are_in_trie,
+                );
+                stats.segmented_storage_prefix_cached_slots += prefix_result.cached_slots;
+                update_estimator.record(prefix_result.walked, prefix_result.updates.len());
+                walked += prefix_result.walked;
+                segmented_prefixes += 1;
+                updates.extend(prefix_result.updates);
+
+                if has_more_after_prefix &&
+                    segmented_storage_threshold_reached(
+                        &updates,
+                        &parent_hash_builder,
+                        threshold,
+                    )
+                {
+                    stats.segmented_storage_prefix_merge_duration += merge_started.elapsed();
+                    return finish_segmented_storage_with_progress(SegmentedStoragePartial {
+                        parent_hash_builder,
+                        last_hashed_slot,
+                        walked,
+                        updates,
+                        segmented_prefixes,
+                    })
+                }
+            }
+            stats.segmented_storage_prefix_merge_duration += merge_started.elapsed();
+
+            next_range_index = wave_end;
+        }
+
+        if plan_complete {
+            let root = parent_hash_builder.root();
+            extend_with_parent_updates(&mut updates, &mut parent_hash_builder, false);
+
+            return Ok(Some(SegmentedStorageBuildOutcome {
+                progress: StorageRootProgress::Complete(root, walked, updates),
+                segmented_prefixes,
+                segmented_walked: walked,
+                completed_by_segmented: true,
+                used_serial_fallback: false,
+            }))
+        }
+    }
+}
+
+fn finish_segmented_storage_with_progress(
+    partial: SegmentedStoragePartial,
+) -> Result<Option<SegmentedStorageBuildOutcome>, StorageRootError> {
+    let SegmentedStoragePartial {
+        mut parent_hash_builder,
+        last_hashed_slot,
+        walked,
+        mut updates,
+        segmented_prefixes,
+    } = partial;
+    let Some(last_hashed_slot) = last_hashed_slot else { return Ok(None) };
+
+    extend_with_parent_updates(&mut updates, &mut parent_hash_builder, true);
+    let state = IntermediateRootState {
+        hash_builder: parent_hash_builder,
+        walker_stack: Vec::new(),
+        last_hashed_key: last_hashed_slot,
+    };
+
+    Ok(Some(SegmentedStorageBuildOutcome {
+        progress: StorageRootProgress::Progress(Box::new(state), walked, updates),
+        segmented_prefixes,
+        segmented_walked: walked,
+        completed_by_segmented: false,
+        used_serial_fallback: false,
+    }))
+}
+
+fn finish_segmented_storage_with_serial_fallback<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    partial: SegmentedStoragePartial,
+    stats: &mut StorageRootPrefetchStats,
+    threshold: u64,
+) -> Result<Option<SegmentedStorageBuildOutcome>, StorageRootError>
+where
+    H: HashedCursorFactory,
+{
+    let SegmentedStoragePartial {
+        mut parent_hash_builder,
+        last_hashed_slot,
+        walked,
+        mut updates,
+        segmented_prefixes,
+    } = partial;
+    let Some(last_hashed_slot) = last_hashed_slot else { return Ok(None) };
+
+    extend_with_parent_updates(&mut updates, &mut parent_hash_builder, true);
+    let remaining_threshold = threshold.saturating_sub(updates.len() as u64).max(1);
+    let state = IntermediateRootState {
+        hash_builder: parent_hash_builder,
+        walker_stack: Vec::new(),
+        last_hashed_key: last_hashed_slot,
+    };
+    let serial_started = std::time::Instant::now();
+    let progress = calculate_storage_root(
+        hashed_cursor_factory,
+        hashed_address,
+        remaining_threshold,
+        Some(state),
+    )?;
+    let serial_elapsed = serial_started.elapsed();
+    stats.segmented_storage_serial_fallback_duration += serial_elapsed;
+    stats.serial_storage_root_duration += serial_elapsed;
+
+    let progress = match progress {
+        StorageRootProgress::Complete(root, serial_walked, serial_updates) => {
+            updates.extend(serial_updates);
+            StorageRootProgress::Complete(root, walked + serial_walked, updates)
+        }
+        StorageRootProgress::Progress(state, serial_walked, serial_updates) => {
+            updates.extend(serial_updates);
+            StorageRootProgress::Progress(state, walked + serial_walked, updates)
+        }
+    };
+
+    Ok(Some(SegmentedStorageBuildOutcome {
+        progress,
+        segmented_prefixes,
+        segmented_walked: walked,
+        completed_by_segmented: false,
+        used_serial_fallback: true,
+    }))
+}
+
+fn segmented_storage_resume<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    state: Option<&IntermediateRootState>,
+) -> Result<Option<SegmentedStorageResume>, DatabaseError>
+where
+    H: HashedCursorFactory,
+{
+    let Some(state) = state else {
+        return Ok(Some(SegmentedStorageResume {
+            hash_builder: HashBuilder::default().with_updates(true),
+            cursor: SegmentedResumeCursor {
+                completed_prefix: None,
+                last_segment_slot: None,
+                next_start_bound: Some(B256::ZERO),
+            },
+        }))
+    };
+
+    let Some(cursor) = segmented_resume_cursor(hashed_cursor_factory, hashed_address, state)?
+    else {
+        return Ok(None)
+    };
+
+    Ok(Some(SegmentedStorageResume {
+        hash_builder: state.hash_builder.clone().with_updates(true),
+        cursor,
+    }))
+}
+
+fn segmented_resume_cursor<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    state: &IntermediateRootState,
+) -> Result<Option<SegmentedResumeCursor>, DatabaseError>
+where
+    H: HashedCursorFactory,
+{
+    if !is_potential_segmented_storage_checkpoint(state) {
+        return Ok(None)
+    }
+
+    let completed_prefix = state.hash_builder.key;
+    let last_segment_slot = state.last_hashed_key;
+    if !segmented_storage_completed_prefix_matches(
+        hashed_cursor_factory,
+        hashed_address,
+        &completed_prefix,
+        last_segment_slot,
+    )? {
+        return Ok(None)
+    }
+
+    Ok(Some(SegmentedResumeCursor {
+        completed_prefix: Some(completed_prefix),
+        last_segment_slot: Some(last_segment_slot),
+        next_start_bound: storage_prefix_end(&completed_prefix),
+    }))
+}
+
+const fn is_potential_segmented_storage_checkpoint(state: &IntermediateRootState) -> bool {
+    state.walker_stack.is_empty() &&
+        !state.hash_builder.key.is_empty() &&
+        state.hash_builder.key.len() < 64
+}
+
+fn segmented_storage_completed_prefix_matches<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    completed_prefix: &Nibbles,
+    last_hashed_slot: B256,
+) -> Result<bool, DatabaseError>
+where
+    H: HashedCursorFactory,
+{
+    let completed_range = StoragePrefixRange {
+        prefix: *completed_prefix,
+        start: storage_prefix_bound(completed_prefix),
+        end: storage_prefix_end(completed_prefix),
+        sampled_slots: 0,
+        sampled_entries: Vec::new(),
+    };
+    if !storage_slot_in_range(last_hashed_slot, &completed_range) {
+        return Ok(false)
+    }
+
+    storage_range_last_slot_matches(
+        hashed_cursor_factory,
+        hashed_address,
+        &completed_range,
+        last_hashed_slot,
+    )
+}
+
+fn storage_range_last_slot_matches<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    range: &StoragePrefixRange,
+    last_hashed_slot: B256,
+) -> Result<bool, DatabaseError>
+where
+    H: HashedCursorFactory,
+{
+    let mut cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+    let Some((found_slot, _)) = cursor.seek(last_hashed_slot)? else { return Ok(false) };
+    if found_slot != last_hashed_slot {
+        return Ok(false)
+    }
+
+    Ok(cursor.next()?.is_none_or(|(next_slot, _)| !storage_slot_in_range(next_slot, range)))
+}
+
+fn segmented_storage_resume_matches_next_range<H>(
+    hashed_cursor_factory: &H,
+    hashed_address: B256,
+    next_range: Option<&StoragePrefixRange>,
+    last_hashed_slot: B256,
+) -> Result<bool, DatabaseError>
+where
+    H: HashedCursorFactory,
+{
+    let mut cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+    let Some((found_slot, _)) = cursor.seek(last_hashed_slot)? else { return Ok(false) };
+    if found_slot != last_hashed_slot {
+        return Ok(false)
+    }
+
+    let Some((next_slot, _)) = cursor.next()? else { return Ok(next_range.is_none()) };
+    Ok(next_range.is_some_and(|range| storage_slot_in_range(next_slot, range)))
+}
+
+fn storage_slot_in_range(hashed_slot: B256, range: &StoragePrefixRange) -> bool {
+    hashed_slot >= range.start &&
+        range.end.is_none_or(|end| hashed_slot < end) &&
+        Nibbles::unpack(hashed_slot).starts_with(&range.prefix)
+}
+
+fn segmented_storage_wave_size() -> usize {
+    std::thread::available_parallelism().map_or(4, usize::from).clamp(1, 16)
+}
+
+fn segmented_storage_plan_budget(
+    threshold: u64,
+    update_estimator: &SegmentedStorageUpdateEstimator,
+) -> Option<u64> {
+    if threshold == u64::MAX {
+        return None
+    }
+
+    Some((threshold.saturating_mul(4) / 5).max(update_estimator.minimum_budget()))
+}
+
+struct SegmentedStorageWaveEnd<'a> {
+    ranges: &'a [StoragePrefixRange],
+    next_range_index: usize,
+    wave_size: usize,
+    updates: &'a StorageTrieUpdates,
+    hash_builder: &'a HashBuilder,
+    threshold: u64,
+    update_estimator: &'a SegmentedStorageUpdateEstimator,
+    stats: &'a mut StorageRootPrefetchStats,
+}
+
+fn segmented_storage_wave_end(input: SegmentedStorageWaveEnd<'_>) -> usize {
+    let SegmentedStorageWaveEnd {
+        ranges,
+        next_range_index,
+        wave_size,
+        updates,
+        hash_builder,
+        threshold,
+        update_estimator,
+        stats,
+    } = input;
+    let max_wave_end = (next_range_index + wave_size).min(ranges.len());
+    if threshold == u64::MAX {
+        return max_wave_end
+    }
+
+    let remaining = threshold.saturating_sub((updates.len() + hash_builder.updates_len()) as u64);
+    let target_budget = remaining.saturating_mul(4) / 5;
+    let mut estimated_updates = 0u64;
+    let mut wave_end = next_range_index;
+    while wave_end < max_wave_end {
+        let estimate = update_estimator.estimate(&ranges[wave_end]);
+        if wave_end > next_range_index && estimated_updates.saturating_add(estimate) > target_budget
+        {
+            stats.segmented_storage_budget_stops += 1;
+            break;
+        }
+        estimated_updates = estimated_updates.saturating_add(estimate);
+        wave_end += 1;
+    }
+
+    if wave_end == next_range_index {
+        stats.segmented_storage_budget_stops += 1;
+        (next_range_index + 1).min(ranges.len())
+    } else {
+        wave_end
+    }
+}
+
+fn segmented_storage_threshold_reached(
+    updates: &StorageTrieUpdates,
+    hash_builder: &HashBuilder,
+    threshold: u64,
+) -> bool {
+    threshold != u64::MAX && (updates.len() + hash_builder.updates_len()) as u64 >= threshold
+}
+
+fn extend_with_parent_updates(
+    updates: &mut StorageTrieUpdates,
+    hash_builder: &mut HashBuilder,
+    include_empty: bool,
+) {
+    let (split_hash_builder, parent_updates) = std::mem::take(hash_builder).split();
+    *hash_builder = split_hash_builder;
+    if include_empty {
+        updates.storage_nodes.extend(parent_updates);
+    } else {
+        updates
+            .storage_nodes
+            .extend(parent_updates.into_iter().filter(|(path, _)| !path.is_empty()));
+    }
+}
+
+#[derive(Debug)]
+struct SegmentedStorageResume {
+    hash_builder: HashBuilder,
+    cursor: SegmentedResumeCursor,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SegmentedResumeCursor {
+    completed_prefix: Option<Nibbles>,
+    last_segment_slot: Option<B256>,
+    next_start_bound: Option<B256>,
+}
+
+#[derive(Debug)]
+struct SegmentedStoragePartial {
+    parent_hash_builder: HashBuilder,
+    last_hashed_slot: Option<B256>,
+    walked: usize,
+    updates: StorageTrieUpdates,
+    segmented_prefixes: usize,
+}
+
+#[derive(Debug)]
+struct SegmentedStorageBuildOutcome {
+    progress: StorageRootProgress,
+    segmented_prefixes: usize,
+    segmented_walked: usize,
+    completed_by_segmented: bool,
+    used_serial_fallback: bool,
+}
+
+#[derive(Debug)]
+enum SegmentedStoragePrefixOutcome {
+    Complete(Box<SegmentedStoragePrefixResult>),
+    InlineRoot,
+    UnsupportedRoot,
+    EmptyRange,
+}
+
+#[derive(Debug)]
+struct SegmentedStoragePrefixResult {
+    prefix: Nibbles,
+    root_hash: B256,
+    last_hashed_slot: B256,
+    walked: usize,
+    cached_slots: usize,
+    updates: StorageTrieUpdates,
+}
+
+fn calculate_storage_prefix_root<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    range: StoragePrefixRange,
+) -> Result<SegmentedStoragePrefixOutcome, StorageRootError>
+where
+    H: HashedCursorFactory,
+{
+    let mut cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+    let mut hash_builder = HashBuilder::default().with_updates(true);
+    let mut walked = 0usize;
+    let mut cached_slots = 0usize;
+    let mut last_hashed_slot = None;
+
+    for (hashed_slot, value) in range.sampled_entries.iter().copied() {
+        if !storage_slot_in_range(hashed_slot, &range) {
+            break;
+        }
+        if add_storage_prefix_leaf(&mut hash_builder, &range, hashed_slot, value).is_err() {
+            return Ok(SegmentedStoragePrefixOutcome::UnsupportedRoot)
+        }
+        walked += 1;
+        cached_slots += 1;
+        last_hashed_slot = Some(hashed_slot);
+    }
+
+    let mut entry = if let Some(last_hashed_slot) = last_hashed_slot {
+        match cursor.seek(last_hashed_slot)? {
+            Some((found_slot, _)) if found_slot == last_hashed_slot => cursor.next()?,
+            _ => cursor.seek(range.start)?,
+        }
+    } else {
+        cursor.seek(range.start)?
+    };
+
+    while let Some((hashed_slot, value)) = entry {
+        if range.end.is_some_and(|end| hashed_slot >= end) {
+            break;
+        }
+
+        let path = Nibbles::unpack(hashed_slot);
+        if !path.starts_with(&range.prefix) {
+            break;
+        }
+
+        if add_storage_prefix_leaf(&mut hash_builder, &range, hashed_slot, value).is_err() {
+            return Ok(SegmentedStoragePrefixOutcome::UnsupportedRoot)
+        }
+        walked += 1;
+        last_hashed_slot = Some(hashed_slot);
+        entry = cursor.next()?;
+    }
+
+    if walked == 0 {
+        return Ok(SegmentedStoragePrefixOutcome::EmptyRange)
+    }
+
+    let _root = hash_builder.root();
+    let Some(root_hash) = hash_builder.stack.last().and_then(|node| node.as_hash()) else {
+        return Ok(SegmentedStoragePrefixOutcome::InlineRoot)
+    };
+    let (_, raw_updates) = hash_builder.split();
+
+    let mut updates = StorageTrieUpdates::default();
+    updates.storage_nodes.extend(raw_updates.into_iter().map(|(relative_path, mut node)| {
+        if relative_path.is_empty() {
+            node.root_hash = None;
+        }
+        (range.prefix.join(&relative_path), node)
+    }));
+
+    Ok(SegmentedStoragePrefixOutcome::Complete(Box::new(SegmentedStoragePrefixResult {
+        prefix: range.prefix,
+        root_hash,
+        last_hashed_slot: last_hashed_slot.expect("walked prefix range has a hashed slot"),
+        walked,
+        cached_slots,
+        updates,
+    })))
+}
+
+fn add_storage_prefix_leaf(
+    hash_builder: &mut HashBuilder,
+    range: &StoragePrefixRange,
+    hashed_slot: B256,
+    value: U256,
+) -> Result<(), SegmentedStoragePrefixOutcome> {
+    let path = Nibbles::unpack(hashed_slot);
+    let relative_path = path.slice(range.prefix.len()..);
+    if relative_path.is_empty() {
+        return Err(SegmentedStoragePrefixOutcome::UnsupportedRoot)
+    }
+
+    hash_builder.add_leaf(relative_path, alloy_rlp::encode_fixed_size(&value).as_ref());
+    Ok(())
+}
+
+fn calculate_storage_root<H>(
+    hashed_cursor_factory: H,
+    hashed_address: B256,
+    threshold: u64,
+    state: Option<IntermediateRootState>,
+) -> Result<StorageRootProgress, StorageRootError>
+where
+    H: HashedCursorFactory,
+{
+    StorageRoot::new_hashed(
+        NoopTrieCursorFactory::default(),
+        hashed_cursor_factory,
+        hashed_address,
+        PrefixSet::default(),
+        #[cfg(feature = "metrics")]
+        Default::default(),
+    )
+    .with_intermediate_state(state)
+    .with_threshold(threshold)
+    .calculate(true)
+}
+
 /// Error during experimental parallel clean rebuild calculation.
 #[derive(Error, Debug)]
 pub enum ParallelRebuildStateRootError {
