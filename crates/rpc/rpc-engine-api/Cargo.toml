@@ -43,8 +43,15 @@ async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+tower.workspace = true
+alloy-rpc-types-debug.workspace = true
 
 [dev-dependencies]
 reth-ethereum-engine-primitives.workspace = true

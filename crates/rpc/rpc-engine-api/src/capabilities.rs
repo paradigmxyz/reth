@@ -42,6 +42,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getBlobsV2",
     "engine_getBlobsV3",
     "engine_getBlobsV4",
+    "rest_engine_newPayloadWithWitness",
 ];
 
 /// Engine API capabilities set.

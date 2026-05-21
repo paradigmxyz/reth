@@ -29,6 +29,12 @@ pub use engine_api::{EngineApi, EngineApiSender};
 pub use error::*;
 pub use reth_engine_api::RethEngineApi;
 
+/// REST handler for `POST /new-payload-with-witness`.
+pub mod rest;
+
+/// SSZ types for the REST endpoint response serialization.
+pub mod ssz_types;
+
 // re-export server trait for convenience
 pub use reth_rpc_api::EngineApiServer;
 
