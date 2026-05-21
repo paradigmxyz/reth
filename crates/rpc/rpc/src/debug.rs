@@ -722,11 +722,12 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
-                for tx in block.transactions_recovered() {
+                for (tx_index, tx) in block.transactions_recovered().enumerate() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     {
                         let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                        evm.transact_commit(tx_env)
+                            .map_err(|e| Eth::Error::from_evm_err_at_index(e, tx_index))?;
                     }
                     // Merge transitions into cumulative bundle_state
                     db.merge_transitions(BundleRetention::PlainState);
