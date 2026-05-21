@@ -16,7 +16,8 @@ use reth_db_api::{
         StorageSettings,
     },
     table::{Compress, Decode, Decompress, Encode, Table},
-    tables, BlockNumberList, DatabaseError,
+    tables::{self, StoragesHistory},
+    BlockNumberList, DatabaseError,
 };
 use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
@@ -1578,6 +1579,88 @@ impl<'db> RocksReadSnapshot<'db> {
                     .unwrap_or(false)
             },
         )
+    }
+
+    /// Walks unique visible storage-history keys for the given account in plain-key order.
+    ///
+    /// Visibility is bounded by `visible_tip`, matching the MDBX snapshot this `RocksDB` snapshot
+    /// is paired with. The callback receives each unique plain storage key at most once and may
+    /// return `Ok(false)` to stop iteration early.
+    pub(crate) fn walk_visible_storage_history_keys(
+        &self,
+        address: Address,
+        visible_tip: BlockNumber,
+        mut on_key: impl FnMut(B256) -> ProviderResult<bool>,
+    ) -> ProviderResult<()> {
+        let cf = self.cf_handle::<StoragesHistory>()?;
+        let mut iter = self.inner.raw_iterator_cf(cf);
+        let start = StorageShardedKey::new(address, B256::ZERO, 0u64).encode();
+
+        iter.seek(start.as_ref());
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        let decode_key = |key_bytes: &[u8]| {
+            StorageShardedKey::decode(key_bytes)
+                .map_err(|_| ProviderError::Database(DatabaseError::Decode))
+        };
+        let decode_value = |value_bytes: &[u8]| {
+            BlockNumberList::decompress(value_bytes)
+                .map_err(|_| ProviderError::Database(DatabaseError::Decode))
+        };
+
+        while iter.valid() {
+            let Some(key_bytes) = iter.key() else {
+                break;
+            };
+            let key = decode_key(key_bytes)?;
+            if key.address != address {
+                break;
+            }
+
+            let storage_key = key.sharded_key.key;
+            let mut visible = iter
+                .value()
+                .map(decode_value)
+                .transpose()?
+                .and_then(|list| list.iter().next())
+                .is_some_and(|first| first <= visible_tip);
+
+            iter.next();
+            while iter.valid() {
+                let Some(next_key_bytes) = iter.key() else {
+                    break;
+                };
+                let next_key = decode_key(next_key_bytes)?;
+                if next_key.address != address || next_key.sharded_key.key != storage_key {
+                    break;
+                }
+                visible |= iter
+                    .value()
+                    .map(decode_value)
+                    .transpose()?
+                    .and_then(|list| list.iter().next())
+                    .is_some_and(|first| first <= visible_tip);
+                iter.next();
+            }
+
+            if visible && !on_key(storage_key)? {
+                break;
+            }
+        }
+
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        Ok(())
     }
 
     /// Generic history lookup using the snapshot's raw iterator.

@@ -4,7 +4,7 @@ use crate::{
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     table::Table,
@@ -15,8 +15,8 @@ use reth_db_api::{
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRangeEntry,
+    StorageRangeProvider, StorageRangeResult, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -33,7 +33,7 @@ use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
 };
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, sync::Arc};
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -244,7 +244,21 @@ where
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
-        match self.storage_history_lookup(address, lookup_key)? {
+        let history = self.storage_history_lookup(address, lookup_key)?;
+        self.storage_by_lookup_key_with_history_info(address, lookup_key, history)
+    }
+
+    /// Resolves a storage value using the provided historical lookup result.
+    fn storage_by_lookup_key_with_history_info(
+        &self,
+        address: Address,
+        lookup_key: B256,
+        history: HistoryInfo,
+    ) -> ProviderResult<Option<StorageValue>>
+    where
+        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+    {
+        match history {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
@@ -672,6 +686,77 @@ where
     }
 }
 
+impl<Provider, N> StorageRangeProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+{
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult> {
+        if max_slots == 0 {
+            return Ok(StorageRangeResult::empty())
+        }
+        if !self.provider.cached_storage_settings().storage_v2 {
+            return Err(ProviderError::UnsupportedProvider)
+        }
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        let visible_tip = self.provider.best_block_number()?;
+        let mut slots_by_hash = BTreeMap::new();
+
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let rocksdb = rocksdb_ref
+                .expect("storage_v2 historical range queries require a RocksDB snapshot");
+
+            rocksdb.walk_visible_storage_history_keys(account, visible_tip, |key| {
+                let history = rocksdb.storage_history_info(
+                    account,
+                    key,
+                    self.block_number,
+                    self.lowest_available_blocks.storage_history_block_number,
+                    visible_tip,
+                )?;
+                let Some(value) =
+                    self.storage_by_lookup_key_with_history_info(account, key, history)?
+                else {
+                    return Ok(true);
+                };
+                if value.is_zero() {
+                    return Ok(true);
+                }
+
+                let hash = keccak256(key);
+                slots_by_hash.insert(hash, StorageRangeEntry { hash, key, value });
+                Ok(true)
+            })
+        })?;
+
+        let mut slots = Vec::with_capacity(max_slots);
+        let mut next_key = None;
+        for (hash, entry) in slots_by_hash.range(start_key..) {
+            if slots.len() == max_slots {
+                next_key = Some(*hash);
+                break;
+            }
+            slots.push(entry.clone());
+        }
+
+        Ok(StorageRangeResult { slots, next_key })
+    }
+}
+
 impl<Provider, N> BytecodeReader for HistoricalStateProviderRef<'_, Provider, N>
 where
     Provider: DBProvider + BlockNumReader + NodePrimitivesProvider<Primitives = N>,
@@ -755,6 +840,27 @@ impl<
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
 reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
+
+impl<
+        Provider: DBProvider
+            + BlockNumReader
+            + BlockHashReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + RocksDBProviderFactory
+            + NodePrimitivesProvider,
+    > StorageRangeProvider for HistoricalStateProvider<Provider>
+{
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult> {
+        self.as_ref().storage_range(account, start_key, max_slots)
+    }
+}
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -888,7 +994,8 @@ mod tests {
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
         NodePrimitivesProvider, PruneCheckpointReader, StageCheckpointReader,
-        StorageChangeSetReader, StorageSettingsCache,
+        StorageChangeSetReader, StorageRangeEntry, StorageRangeProvider, StorageRangeResult,
+        StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
     use reth_trie_db::ChangesetCache;
@@ -1447,6 +1554,136 @@ mod tests {
             HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(1000)
         ));
+    }
+
+    #[test]
+    fn history_provider_storage_range_hashed_state() {
+        use crate::BlockWriter;
+        use alloy_primitives::keccak256;
+        use reth_db_api::{
+            models::StorageSettings,
+            tables::{HashedAccounts, HashedStorages},
+        };
+        use reth_execution_types::ExecutionOutcome;
+        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+        use revm_database::BundleState;
+        use revm_state::AccountInfo;
+        use std::collections::HashMap;
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let slot1_key = B256::with_last_byte(1);
+        let slot2_key = B256::with_last_byte(2);
+        let slot3_key = B256::with_last_byte(3);
+        let slot1 = U256::from_be_bytes(*slot1_key);
+        let slot2 = U256::from_be_bytes(*slot2_key);
+        let slot3 = U256::from_be_bytes(*slot3_key);
+
+        let account: AccountInfo =
+            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
+
+        let mut rng = generators::rng();
+        let blocks = random_block_range(
+            &mut rng,
+            0..=15,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        let mut addr_storage = HashMap::default();
+        addr_storage.insert(slot1, (U256::ZERO, U256::from(100)));
+        addr_storage.insert(slot2, (U256::ZERO, U256::from(200)));
+        addr_storage.insert(slot3, (U256::ZERO, U256::from(300)));
+
+        type Revert = Vec<(Address, Option<Option<AccountInfo>>, Vec<(U256, U256)>)>;
+        let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
+        reverts[5] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot1, U256::ZERO)])];
+        reverts[7] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot2, U256::ZERO)])];
+        reverts[12] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot3, U256::ZERO)])];
+
+        let bundle = BundleState::new([(ADDRESS, None, Some(account), addr_storage)], reverts, []);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                blocks
+                    .into_iter()
+                    .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                    .collect(),
+                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
+                Default::default(),
+            )
+            .unwrap();
+
+        let hashed_address = keccak256(ADDRESS);
+        provider_rw
+            .tx_ref()
+            .put::<HashedStorages>(
+                hashed_address,
+                StorageEntry { key: keccak256(slot1_key), value: U256::from(100) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<HashedStorages>(
+                hashed_address,
+                StorageEntry { key: keccak256(slot2_key), value: U256::from(200) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<HashedStorages>(
+                hashed_address,
+                StorageEntry { key: keccak256(slot3_key), value: U256::from(300) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<HashedAccounts>(
+                hashed_address,
+                Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+
+        let paged = HistoricalStateProviderRef::new(&db, 16, ChangesetCache::new())
+            .storage_range(ADDRESS, B256::ZERO, 2)
+            .unwrap();
+        assert_eq!(
+            paged,
+            StorageRangeResult {
+                slots: vec![
+                    StorageRangeEntry {
+                        hash: keccak256(slot2_key),
+                        key: slot2_key,
+                        value: U256::from(200),
+                    },
+                    StorageRangeEntry {
+                        hash: keccak256(slot1_key),
+                        key: slot1_key,
+                        value: U256::from(100),
+                    },
+                ],
+                next_key: Some(keccak256(slot3_key)),
+            }
+        );
+
+        let resumed = HistoricalStateProviderRef::new(&db, 16, ChangesetCache::new())
+            .storage_range(ADDRESS, paged.next_key.unwrap(), 10)
+            .unwrap();
+        assert_eq!(
+            resumed,
+            StorageRangeResult {
+                slots: vec![StorageRangeEntry {
+                    hash: keccak256(slot3_key),
+                    key: slot3_key,
+                    value: U256::from(300),
+                }],
+                next_key: None,
+            }
+        );
     }
 
     #[test]
