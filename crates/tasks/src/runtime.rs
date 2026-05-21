@@ -574,7 +574,7 @@ impl Runtime {
     where
         F: FnOnce() + Send + 'static,
     {
-        let func = std::sync::Arc::new(parking_lot::Mutex::new(Some(func)));
+        let func = Arc::new(parking_lot::Mutex::new(Some(func)));
         let named_func = func.clone();
 
         if self
