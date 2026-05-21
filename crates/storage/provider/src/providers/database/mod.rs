@@ -73,6 +73,18 @@ struct ReadOnlySyncState {
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
+///
+/// # Storage consistency
+///
+/// `ProviderFactory` provides access to both the database and static files, but constructing it
+/// directly does not run the node builder's startup storage consistency checks.
+///
+/// The node builder verifies database/static-file consistency when creating the provider factory
+/// and may run an unwind pipeline if healing requires it. Library users that construct a
+/// `ProviderFactory` directly and use write providers are responsible for performing equivalent
+/// startup checks, for example by calling [`StaticFileProvider::check_consistency`] and handling
+/// any returned unwind target before continuing to write.
+
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Database instance
     db: N::DB,
@@ -398,6 +410,13 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
+    ///
+    /// # Storage consistency
+    ///
+    /// This opens a writer over the database and static files, but does not perform startup
+    /// consistency verification between them. When using [`ProviderFactory`] outside the node
+    /// builder, callers should ensure storage consistency has been checked before opening writers,
+    /// especially after an ungraceful shutdown.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
         Ok(DatabaseProviderRW(
