@@ -189,7 +189,13 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
-        if account.is_touched() && !account.is_empty() {
+        if account.is_touched() {
+            if *account.original_info == account.info &&
+                account.storage.iter().all(|(_, value)| !value.is_changed())
+            {
+                continue;
+            }
+
             let hashed_address = keccak256(address);
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
