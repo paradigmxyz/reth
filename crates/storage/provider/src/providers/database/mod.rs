@@ -73,98 +73,6 @@ struct ReadOnlySyncState {
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
-///
-/// This contains the actual provider factory state and is reference-counted by
-/// [`ProviderFactory`] so cloning a factory is cheap.
-pub struct ProviderFactoryInner<N: NodeTypesWithDB> {
-    /// Database instance
-    db: N::DB,
-    /// Chain spec
-    chain_spec: Arc<N::ChainSpec>,
-    /// Static File Provider
-    static_file_provider: StaticFileProvider<N::Primitives>,
-    /// Optional pruning configuration
-    prune_modes: PruneModes,
-    /// The node storage handler.
-    storage: Arc<N::Storage>,
-    /// Storage configuration settings for this node
-    storage_settings: Arc<RwLock<StorageSettings>>,
-    /// `RocksDB` provider
-    rocksdb_provider: RocksDBProvider,
-    /// Changeset cache for trie unwinding
-    changeset_cache: ChangesetCache,
-    /// Store for block access lists.
-    bal_store: BalStoreHandle,
-    /// Task runtime for spawning parallel I/O work.
-    runtime: reth_tasks::Runtime,
-    /// Minimum distance from tip required before pruning can occur.
-    minimum_pruning_distance: u64,
-    /// State for on-demand syncing of `RocksDB` secondary and static file indexes.
-    ///
-    /// Only set for read-only factories. Can be disabled if there is no concurrent read-write
-    /// factory writing to the database (e.g as part of a running reth node).
-    read_only_sync: Option<Arc<ReadOnlySyncState>>,
-}
-
-impl<N> fmt::Debug for ProviderFactoryInner<N>
-where
-    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self {
-            db,
-            chain_spec,
-            static_file_provider,
-            prune_modes,
-            storage,
-            storage_settings,
-            rocksdb_provider,
-            changeset_cache,
-            bal_store,
-            runtime,
-            minimum_pruning_distance,
-            read_only_sync,
-        } = self;
-        f.debug_struct("ProviderFactoryInner")
-            .field("db", &db)
-            .field("chain_spec", &chain_spec)
-            .field("static_file_provider", &static_file_provider)
-            .field("prune_modes", &prune_modes)
-            .field("storage", &storage)
-            .field("storage_settings", &*storage_settings.read())
-            .field("rocksdb_provider", &rocksdb_provider)
-            .field("changeset_cache", &changeset_cache)
-            .field("bal_store", &bal_store)
-            .field("runtime", &runtime)
-            .field("minimum_pruning_distance", &minimum_pruning_distance)
-            .field(
-                "read_only_sync",
-                &read_only_sync.as_ref().map(|s| s.last_synced_txnid.load(Ordering::Relaxed)),
-            )
-            .finish()
-    }
-}
-
-impl<N: NodeTypesWithDB> Clone for ProviderFactoryInner<N> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            chain_spec: self.chain_spec.clone(),
-            static_file_provider: self.static_file_provider.clone(),
-            prune_modes: self.prune_modes.clone(),
-            storage: self.storage.clone(),
-            storage_settings: self.storage_settings.clone(),
-            rocksdb_provider: self.rocksdb_provider.clone(),
-            changeset_cache: self.changeset_cache.clone(),
-            bal_store: self.bal_store.clone(),
-            runtime: self.runtime.clone(),
-            minimum_pruning_distance: self.minimum_pruning_distance,
-            read_only_sync: self.read_only_sync.clone(),
-        }
-    }
-}
-
-/// A reference-counted provider factory for database and static file providers.
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     inner: Arc<ProviderFactoryInner<N>>,
 }
@@ -1077,6 +985,98 @@ where
                 &read_only_sync.as_ref().map(|s| s.last_synced_txnid.load(Ordering::Relaxed)),
             )
             .finish()
+    }
+}
+
+/// State shared by [`ProviderFactory`] clones.
+///
+/// This contains the actual provider factory state and is reference-counted by
+/// [`ProviderFactory`] so cloning a factory is cheap.
+pub struct ProviderFactoryInner<N: NodeTypesWithDB> {
+    /// Database instance
+    db: N::DB,
+    /// Chain spec
+    chain_spec: Arc<N::ChainSpec>,
+    /// Static File Provider
+    static_file_provider: StaticFileProvider<N::Primitives>,
+    /// Optional pruning configuration
+    prune_modes: PruneModes,
+    /// The node storage handler.
+    storage: Arc<N::Storage>,
+    /// Storage configuration settings for this node
+    storage_settings: Arc<RwLock<StorageSettings>>,
+    /// `RocksDB` provider
+    rocksdb_provider: RocksDBProvider,
+    /// Changeset cache for trie unwinding
+    changeset_cache: ChangesetCache,
+    /// Store for block access lists.
+    bal_store: BalStoreHandle,
+    /// Task runtime for spawning parallel I/O work.
+    runtime: reth_tasks::Runtime,
+    /// Minimum distance from tip required before pruning can occur.
+    minimum_pruning_distance: u64,
+    /// State for on-demand syncing of `RocksDB` secondary and static file indexes.
+    ///
+    /// Only set for read-only factories. Can be disabled if there is no concurrent read-write
+    /// factory writing to the database (e.g as part of a running reth node).
+    read_only_sync: Option<Arc<ReadOnlySyncState>>,
+}
+
+impl<N> fmt::Debug for ProviderFactoryInner<N>
+where
+    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            db,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            rocksdb_provider,
+            changeset_cache,
+            bal_store,
+            runtime,
+            minimum_pruning_distance,
+            read_only_sync,
+        } = self;
+        f.debug_struct("ProviderFactoryInner")
+            .field("db", &db)
+            .field("chain_spec", &chain_spec)
+            .field("static_file_provider", &static_file_provider)
+            .field("prune_modes", &prune_modes)
+            .field("storage", &storage)
+            .field("storage_settings", &*storage_settings.read())
+            .field("rocksdb_provider", &rocksdb_provider)
+            .field("changeset_cache", &changeset_cache)
+            .field("bal_store", &bal_store)
+            .field("runtime", &runtime)
+            .field("minimum_pruning_distance", &minimum_pruning_distance)
+            .field(
+                "read_only_sync",
+                &read_only_sync.as_ref().map(|s| s.last_synced_txnid.load(Ordering::Relaxed)),
+            )
+            .finish()
+    }
+}
+
+impl<N: NodeTypesWithDB> Clone for ProviderFactoryInner<N> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+            prune_modes: self.prune_modes.clone(),
+            storage: self.storage.clone(),
+            storage_settings: self.storage_settings.clone(),
+            rocksdb_provider: self.rocksdb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
+            bal_store: self.bal_store.clone(),
+            runtime: self.runtime.clone(),
+            minimum_pruning_distance: self.minimum_pruning_distance,
+            read_only_sync: self.read_only_sync.clone(),
+        }
     }
 }
 
