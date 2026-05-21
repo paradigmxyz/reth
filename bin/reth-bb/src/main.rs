@@ -32,7 +32,7 @@ use reth_node_ethereum::{
     EthereumNode, EthereumPayloadBuilder, EthereumPoolBuilder,
 };
 use reth_primitives_traits::SealedBlock;
-use reth_provider::EthStorage;
+use reth_provider::{DatabaseProviderFactory, EthStorage, ProviderSnapshotClone};
 use revm_primitives::Bytes;
 use tracing::info;
 
@@ -161,6 +161,7 @@ impl NodeTypes for BbNode {
 impl<N> Node<N> for BbNode
 where
     N: FullNodeTypes<Types = Self>,
+    <N::Provider as DatabaseProviderFactory>::Provider: ProviderSnapshotClone + Sync,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
