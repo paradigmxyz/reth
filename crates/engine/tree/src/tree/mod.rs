@@ -2609,17 +2609,24 @@ where
         let mut canonical = self.state.tree_state.current_canonical_head;
         let mut persisted = self.persistence_state.last_persisted_block;
 
-        let parent_num_hash = |num_hash: NumHash| -> ProviderResult<NumHash> {
+        let parent_num_hash = |hash: B256| -> ProviderResult<NumHash> {
+            // Check in-memory blocks first
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
+                return Ok(block.recovered_block().parent_num_hash())
+            }
+
+            // Fall back to database
             Ok(self
-                .sealed_header_by_hash(num_hash.hash)?
-                .ok_or(ProviderError::BlockHashNotFound(num_hash.hash))?
+                .provider
+                .header(hash)?
+                .ok_or(ProviderError::BlockHashNotFound(hash))?
                 .parent_num_hash())
         };
 
         // Happy path, canonical chain is ahead or equal to persisted chain.
         // Walk canonical chain back to make sure that it connects to persisted chain.
         while canonical.number > persisted.number {
-            canonical = parent_num_hash(canonical)?;
+            canonical = parent_num_hash(canonical.hash)?;
         }
 
         // If we've reached persisted tip by walking the canonical chain back, everything is fine.
@@ -2633,15 +2640,15 @@ where
 
         // Firstly, walk back until we reach the same height as `canonical`.
         while persisted.number > canonical.number {
-            persisted = parent_num_hash(persisted)?;
+            persisted = parent_num_hash(persisted.hash)?;
         }
 
         debug_assert_eq!(persisted.number, canonical.number);
 
         // Now walk both chains back until we find a common ancestor.
         while persisted.hash != canonical.hash {
-            canonical = parent_num_hash(canonical)?;
-            persisted = parent_num_hash(persisted)?;
+            canonical = parent_num_hash(canonical.hash)?;
+            persisted = parent_num_hash(persisted.hash)?;
         }
 
         debug!(target: "engine::tree", remove_above=persisted.number, "on-disk reorg detected");
@@ -2948,12 +2955,12 @@ where
         }
 
         // Ensure that the parent state is available.
-        match self.state_provider_builder(block_id.parent) {
+        match self.has_block(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block, err.into()).into());
             }
-            Ok(None) => {
+            Ok(false) => {
                 let block = convert_to_block(self, input)?;
 
                 // we don't have the state required to execute this block, buffering it and find the
@@ -2972,7 +2979,7 @@ where
                     missing_ancestor,
                 }))
             }
-            Ok(Some(_)) => {}
+            Ok(true) => {}
         }
 
         // determine whether we are on a fork chain by comparing the block number with the
@@ -3314,6 +3321,17 @@ where
             num,
         );
         Ok(())
+    }
+
+    /// Checks whether a block with the given hash is known, either in memory or in the database.
+    fn has_block(&self, hash: B256) -> ProviderResult<bool> {
+        // Lookup for in-memory blocks
+        if self.state.tree_state.contains_hash(&hash) {
+            return Ok(true)
+        }
+
+        // Fall back to DB header lookup
+        Ok(self.provider.header(hash)?.is_some())
     }
 
     /// Returns a builder for creating state providers for the given hash.
