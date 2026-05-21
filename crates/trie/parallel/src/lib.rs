@@ -17,6 +17,9 @@ pub mod stats;
 /// Implementation of parallel state root computation.
 pub mod root;
 
+/// Experimental implementation of parallel clean rebuild helpers.
+pub mod rebuild;
+
 /// Implementation of parallel proof computation.
 pub mod proof_task;
 
