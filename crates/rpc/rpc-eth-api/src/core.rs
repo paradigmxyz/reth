@@ -1,7 +1,9 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    helpers::{
+        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi, Trace,
+    },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -128,6 +130,15 @@ pub trait EthApi<
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
     async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<R>>>;
+
+    /// Returns the set of unique addresses that appear in a given block.
+    ///
+    /// The set includes the block beneficiary, transaction signers and
+    /// recipients, EIP-2930 access list entries, withdrawal recipients,
+    /// log emitters, and call/create targets and selfdestruct refund
+    /// recipients observed while replaying the block.
+    #[method(name = "getAddressesInBlock")]
+    async fn addresses_in_block(&self, block_id: BlockId) -> RpcResult<Option<Vec<Address>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
@@ -565,6 +576,13 @@ where
     ) -> RpcResult<Option<Vec<RpcReceipt<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
         Ok(EthBlocks::block_receipts(self, block_id).await?)
+    }
+
+    /// Handler for: `eth_getAddressesInBlock`
+    async fn addresses_in_block(&self, block_id: BlockId) -> RpcResult<Option<Vec<Address>>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getAddressesInBlock");
+        let _permit = self.tracing_task_guard().clone().acquire_owned().await;
+        Ok(Trace::addresses_in_block(self, block_id).await?.map(|set| set.into_iter().collect()))
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`

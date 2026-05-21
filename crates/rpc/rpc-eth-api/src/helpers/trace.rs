@@ -2,8 +2,8 @@
 
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_primitives::B256;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -20,7 +20,7 @@ use reth_rpc_eth_types::cache::db::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 /// Executes CPU heavy tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
@@ -420,5 +420,74 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .apply_pre_execution_changes()
             .map_err(Self::Error::from_eth_err)?;
         Ok(())
+    }
+
+    /// Returns all unique addresses that appear in the given block.
+    ///
+    /// Collects addresses from sources that do not require execution
+    /// (block beneficiary, transaction signers and recipients, access list
+    /// entries, withdrawal recipients) and then replays the block to pick up
+    /// addresses that are only visible at runtime: call/create targets,
+    /// selfdestruct refund recipients and log emitters.
+    ///
+    /// Implements the address set described by EIP draft `eth_getAddressesInBlock`.
+    fn addresses_in_block(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<Option<BTreeSet<Address>>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+    {
+        async move {
+            let Some(block) = self.recovered_block(block_id).await? else {
+                return Ok(None);
+            };
+
+            let mut addresses: BTreeSet<Address> = BTreeSet::new();
+            addresses.insert(block.beneficiary());
+            for tx in block.transactions_recovered() {
+                addresses.insert(tx.signer());
+                if let Some(to) = tx.to() {
+                    addresses.insert(to);
+                }
+                if let Some(access_list) = tx.access_list() {
+                    addresses.extend(access_list.iter().map(|item| item.address));
+                }
+            }
+            if let Some(withdrawals) = block.body().withdrawals() {
+                addresses.extend(withdrawals.iter().map(|w| w.address));
+            }
+
+            // Replay the block to collect runtime-only addresses.
+            let traced = self
+                .trace_block_with(
+                    block_id,
+                    Some(block),
+                    TracingInspectorConfig::default_parity(),
+                    |_tx_info, mut ctx| {
+                        let mut per_tx: BTreeSet<Address> = BTreeSet::new();
+                        for log in ctx.result.logs() {
+                            per_tx.insert(log.address);
+                        }
+                        for node in ctx.take_inspector().into_traces().into_nodes() {
+                            per_tx.insert(node.trace.caller);
+                            per_tx.insert(node.trace.address);
+                            if let Some(target) = node.trace.selfdestruct_refund_target {
+                                per_tx.insert(target);
+                            }
+                        }
+                        Ok(per_tx)
+                    },
+                )
+                .await?;
+
+            if let Some(per_tx_sets) = traced {
+                for set in per_tx_sets {
+                    addresses.extend(set);
+                }
+            }
+
+            Ok(Some(addresses))
+        }
     }
 }
