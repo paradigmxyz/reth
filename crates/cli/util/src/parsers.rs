@@ -179,4 +179,35 @@ mod tests {
         // Test invalid input fails
         assert!(parse_ether_value("abc").is_err());
     }
+
+    #[test]
+    fn format_duration_as_secs_or_ms_round_trips() {
+        // `format_duration_as_secs_or_ms` is documented as producing output that
+        // `parse_duration_from_secs_or_ms` can parse back, so the two must round-trip
+        // for second- and millisecond-granularity durations.
+        for duration in [Duration::ZERO, Duration::from_secs(5), Duration::from_millis(1500)] {
+            let formatted = format_duration_as_secs_or_ms(duration);
+            assert_eq!(parse_duration_from_secs_or_ms(&formatted).unwrap(), duration);
+        }
+
+        // Whole seconds drop the `ms` suffix; sub-second remainders keep it.
+        assert_eq!(format_duration_as_secs_or_ms(Duration::from_secs(2)), "2");
+        assert_eq!(format_duration_as_secs_or_ms(Duration::from_millis(1500)), "1500ms");
+    }
+
+    #[test]
+    fn parse_hash_or_num() {
+        // Anything that isn't a full 32-byte hash falls through to a decimal block number, so the
+        // two cases must stay distinguishable and malformed input must not silently parse.
+        let hash = B256::with_last_byte(1);
+        assert_eq!(
+            hash_or_num_value_parser(&hash.to_string()).unwrap(),
+            BlockHashOrNumber::Hash(hash)
+        );
+        assert_eq!(hash_or_num_value_parser("42").unwrap(), BlockHashOrNumber::Number(42));
+
+        // A short hex string is neither a valid 32-byte hash nor a decimal number.
+        assert!(hash_or_num_value_parser("0x01").is_err());
+        assert!(hash_or_num_value_parser("not-a-block").is_err());
+    }
 }
