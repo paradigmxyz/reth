@@ -9990,6 +9990,7 @@ dependencies = [
 name = "reth-rpc-eth-types"
 version = "2.2.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eip7928 0.4.1",
  "alloy-eips",
