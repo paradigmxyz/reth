@@ -17,6 +17,9 @@ use reth_stages_api::{
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use reth_trie_db::DatabaseStateRoot;
+use reth_trie_parallel::rebuild::{
+    ParallelRebuildStateRoot, StoragePrefixPlannerConfig, StorageRootPrefetchConfig,
+};
 
 use std::fmt::Debug;
 
@@ -53,6 +56,33 @@ pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
 /// new state root for this many blocks, in batches, repeating until we reach the desired block
 /// number.
 pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
+
+const PARALLEL_REBUILD_ENV: &str = "RETH_EXPERIMENTAL_PARALLEL_REBUILD";
+const PARALLEL_REBUILD_PROGRESS_THRESHOLD_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_PROGRESS_THRESHOLD";
+const PARALLEL_REBUILD_STORAGE_PREFIXES_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIXES";
+const PARALLEL_REBUILD_STORAGE_PREFIX_MAX_DEPTH_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIX_MAX_DEPTH";
+const PARALLEL_REBUILD_STORAGE_PREFIX_SAMPLE_LIMIT_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIX_SAMPLE_LIMIT";
+const PARALLEL_REBUILD_STORAGE_PREFIX_MAX_PREFIXES_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIX_MAX_PREFIXES";
+const PARALLEL_REBUILD_STORAGE_PREFIX_MIN_SPLIT_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIX_MIN_SPLIT";
+const PARALLEL_REBUILD_STORAGE_PREFIX_TRIGGER_THRESHOLD_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIX_TRIGGER_THRESHOLD";
+const PARALLEL_REBUILD_STORAGE_PREFIX_MIN_LARGE_SLOTS_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_STORAGE_PREFIX_MIN_LARGE_SLOTS";
+const PARALLEL_REBUILD_INLINE_EMPTY_STORAGE_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_INLINE_EMPTY_STORAGE";
+const PARALLEL_REBUILD_INLINE_STORAGE_SLOTS_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_INLINE_STORAGE_SLOTS";
+const PARALLEL_REBUILD_ACCOUNT_PREFIX_MAX_DEPTH_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_ACCOUNT_PREFIX_MAX_DEPTH";
+const PARALLEL_REBUILD_ACCOUNT_PREFIX_WINDOW_SIZE_ENV: &str =
+    "RETH_EXPERIMENTAL_PARALLEL_REBUILD_ACCOUNT_PREFIX_WINDOW_SIZE";
+const DEFAULT_PARALLEL_REBUILD_PROGRESS_THRESHOLD: u64 = 100_000;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -169,6 +199,7 @@ where
         + StorageSettingsCache
         + StageCheckpointReader
         + StageCheckpointWriter,
+    Provider::Tx: Sync,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -247,15 +278,73 @@ where
             });
 
             let tx = provider.tx_ref();
-            let progress = reth_trie_db::with_adapter!(provider, |A| {
-                DbStateRoot::<_, A>::from_tx(tx)
-                    .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
-                    .root_with_progress()
-            })
-            .map_err(|e| {
-                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                StageError::Fatal(Box::new(e))
-            })?;
+            let parallel_config = parallel_rebuild_config_from_env().filter(|_| {
+                let supported = parallel_rebuild_checkpoint_supported(checkpoint.as_ref());
+                if !supported {
+                    debug!(
+                        target: "sync::stages::merkle::exec",
+                        current = ?current_block_number,
+                        target = ?to_block,
+                        "Falling back to serial trie rebuild because checkpoint is not supported by experimental parallel rebuild"
+                    );
+                }
+                supported
+            });
+            let progress = if let Some(config) = parallel_config {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_block_number,
+                    target = ?to_block,
+                    progress_threshold = config.progress_threshold,
+                    inline_empty_storage_roots = config.inline_empty_storage_roots,
+                    inline_storage_root_slot_limit = config.inline_storage_root_slot_limit,
+                    storage_prefix_planner = config.storage_prefix_planner.is_some(),
+                    storage_prefix_trigger_threshold = config.storage_prefix_trigger_threshold,
+                    storage_prefix_min_large_slots = config.storage_prefix_min_large_slots,
+                    account_prefix_max_depth = config.account_prefix_max_depth,
+                    account_prefix_window_size = config.account_prefix_window_size,
+                    "Rebuilding trie with experimental account-prefix parallel rebuild"
+                );
+
+                let root_started = std::time::Instant::now();
+                let previous_state = checkpoint.map(IntermediateStateRootState::from);
+                let builder = ParallelRebuildStateRoot::new(
+                    reth_trie_db::DatabaseHashedCursorFactory::new(tx),
+                )
+                .with_config(config)
+                .with_intermediate_state(previous_state);
+                let outcome = builder.root_with_progress_and_stats().map_err(|e| {
+                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Parallel state root rebuild failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    StageError::Fatal(Box::new(e))
+                })?;
+                let root_duration = root_started.elapsed();
+
+                let (outcome_kind, hashed_entries_walked) = match &outcome.progress {
+                    StateRootProgress::Progress(_, walked, _) => ("progress", *walked),
+                    StateRootProgress::Complete(_, walked, _) => ("complete", *walked),
+                };
+                let stats = outcome.prefetch;
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    outcome = outcome_kind,
+                    hashed_entries_walked,
+                    root_duration = ?root_duration,
+                    ?stats,
+                    "Experimental parallel rebuild root calculation stats"
+                );
+                outcome.progress
+            } else {
+                reth_trie_db::with_adapter!(provider, |A| {
+                    DbStateRoot::<_, A>::from_tx(tx)
+                        .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+                        .root_with_progress()
+                })
+                .map_err(|e| {
+                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    StageError::Fatal(Box::new(e))
+                })?
+            };
+
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -432,6 +521,79 @@ where
     }
 }
 
+fn parallel_rebuild_config_from_env() -> Option<StorageRootPrefetchConfig> {
+    if !env_enabled(PARALLEL_REBUILD_ENV) {
+        return None
+    }
+
+    let mut config = StorageRootPrefetchConfig {
+        progress_threshold: DEFAULT_PARALLEL_REBUILD_PROGRESS_THRESHOLD,
+        ..StorageRootPrefetchConfig::default()
+    };
+    if let Some(progress_threshold) = env_parse(PARALLEL_REBUILD_PROGRESS_THRESHOLD_ENV) {
+        config.progress_threshold = progress_threshold;
+    }
+    if env_enabled(PARALLEL_REBUILD_INLINE_EMPTY_STORAGE_ENV) {
+        config.inline_empty_storage_roots = true;
+    }
+    if let Some(slot_limit) = env_parse(PARALLEL_REBUILD_INLINE_STORAGE_SLOTS_ENV) {
+        config.inline_storage_root_slot_limit = slot_limit;
+    }
+    if let Some(max_depth) = env_parse(PARALLEL_REBUILD_ACCOUNT_PREFIX_MAX_DEPTH_ENV) {
+        config.account_prefix_max_depth = max_depth;
+    }
+    if let Some(window_size) = env_parse(PARALLEL_REBUILD_ACCOUNT_PREFIX_WINDOW_SIZE_ENV) {
+        config.account_prefix_window_size = window_size;
+    }
+    if env_enabled(PARALLEL_REBUILD_STORAGE_PREFIXES_ENV) {
+        let mut planner = StoragePrefixPlannerConfig::default();
+        if let Some(max_depth) = env_parse(PARALLEL_REBUILD_STORAGE_PREFIX_MAX_DEPTH_ENV) {
+            planner.max_depth = max_depth;
+        }
+        if let Some(sample_limit) = env_parse(PARALLEL_REBUILD_STORAGE_PREFIX_SAMPLE_LIMIT_ENV) {
+            planner.sample_limit_per_prefix = sample_limit;
+        }
+        if let Some(max_prefixes) = env_parse(PARALLEL_REBUILD_STORAGE_PREFIX_MAX_PREFIXES_ENV) {
+            planner.max_prefixes = max_prefixes;
+        }
+        if let Some(min_split) = env_parse(PARALLEL_REBUILD_STORAGE_PREFIX_MIN_SPLIT_ENV) {
+            planner.min_sampled_slots_to_split = min_split;
+        }
+        if let Some(trigger_threshold) =
+            env_parse::<u64>(PARALLEL_REBUILD_STORAGE_PREFIX_TRIGGER_THRESHOLD_ENV)
+        {
+            config.storage_prefix_trigger_threshold = trigger_threshold.max(1);
+        }
+        if let Some(min_large_slots) =
+            env_parse::<usize>(PARALLEL_REBUILD_STORAGE_PREFIX_MIN_LARGE_SLOTS_ENV)
+        {
+            config.storage_prefix_min_large_slots = min_large_slots.max(1);
+        }
+        config.storage_prefix_planner = Some(planner);
+    }
+    (config.account_prefix_max_depth > 0).then_some(config)
+}
+
+fn env_enabled(name: &str) -> bool {
+    std::env::var(name).ok().is_some_and(|value| {
+        matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+    })
+}
+
+fn env_parse<T: std::str::FromStr>(name: &str) -> Option<T> {
+    std::env::var(name).ok()?.parse().ok()
+}
+
+fn parallel_rebuild_checkpoint_supported(checkpoint: Option<&MerkleCheckpoint>) -> bool {
+    checkpoint.is_none_or(|checkpoint| {
+        checkpoint.walker_stack.is_empty() &&
+            checkpoint
+                .storage_root_checkpoint
+                .as_ref()
+                .is_none_or(|checkpoint| checkpoint.walker_stack.is_empty())
+    })
+}
+
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
 fn validate_state_root<H: BlockHeader + Sealable + Debug>(
@@ -459,11 +621,13 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::{keccak256, Address, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives_traits::{SealedBlock, StorageEntry};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_primitives_traits::{Account, SealedBlock, StorageEntry};
+    use reth_provider::{
+        providers::StaticFileWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+    };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
@@ -616,6 +780,112 @@ mod tests {
             expected_root,
             "State root mismatch after chunked processing"
         );
+    }
+
+    #[test]
+    fn parallel_rebuild_segmented_checkpoint_roundtrip_through_stage_db() {
+        let db = TestStageDB::default();
+        let stage = MerkleStage::new_execution(1, 1);
+        let address = Address::repeat_byte(0x99);
+        let hashed_address = keccak256(address);
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        let storage = segmented_stage_storage();
+        let expected_root =
+            state_root_prehashed(BTreeMap::from([(hashed_address, (account, storage.clone()))]));
+
+        db.commit(|tx| {
+            tx.put::<tables::HashedAccounts>(hashed_address, account)?;
+            let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+            for (key, value) in &storage {
+                cursor.upsert(hashed_address, &StorageEntry { key: *key, value: *value })?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        let config = StorageRootPrefetchConfig {
+            progress_threshold: 1,
+            storage_prefix_planner: Some(StoragePrefixPlannerConfig {
+                max_depth: 1,
+                sample_limit_per_prefix: 256,
+                max_prefixes: 16,
+                min_sampled_slots_to_split: 256,
+            }),
+            storage_prefix_min_large_slots: 1,
+            ..StorageRootPrefetchConfig::default()
+        };
+
+        let mut saw_segmented_storage_checkpoint = false;
+        let root = run_parallel_rebuild_checkpoint_roundtrip(&db, &stage, config, |state| {
+            saw_segmented_storage_checkpoint |=
+                state.storage_root_state.as_ref().is_some_and(|storage_state| {
+                    storage_state.state.walker_stack.is_empty() &&
+                        !storage_state.state.hash_builder.key.is_empty() &&
+                        storage_state.state.hash_builder.key.len() < 64
+                });
+        });
+
+        assert!(saw_segmented_storage_checkpoint);
+        assert_eq!(root, expected_root);
+        let provider = db.factory.database_provider_rw().unwrap();
+        assert!(stage.get_execution_checkpoint(&provider).unwrap().is_none());
+        provider.commit().unwrap();
+    }
+
+    #[test]
+    fn parallel_rebuild_account_prefix_checkpoint_roundtrip_through_stage_db() {
+        let db = TestStageDB::default();
+        let stage = MerkleStage::new_execution(1, 1);
+        let mut expected_state = BTreeMap::new();
+
+        db.commit(|tx| {
+            let mut storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+            for prefix in 0..6u8 {
+                for child in 0..16u8 {
+                    let hashed_address = hashed_slot_with_prefix(&[prefix, child], 0);
+                    let account_index = prefix as u64 * 16 + child as u64;
+                    let account = Account {
+                        nonce: account_index + 1,
+                        balance: U256::from(account_index + 1),
+                        bytecode_hash: None,
+                    };
+                    let storage = vec![(
+                        hashed_slot_with_prefix(&[prefix, child, 0], 0),
+                        U256::from(account_index + 1),
+                    )];
+
+                    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
+                    for (key, value) in &storage {
+                        storage_cursor
+                            .upsert(hashed_address, &StorageEntry { key: *key, value: *value })?;
+                    }
+                    expected_state.insert(hashed_address, (account, storage));
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        let expected_root = state_root_prehashed(expected_state);
+        let config = StorageRootPrefetchConfig {
+            progress_threshold: 1,
+            account_prefix_max_depth: 2,
+            account_prefix_window_size: 4,
+            ..StorageRootPrefetchConfig::default()
+        };
+
+        let mut saw_account_prefix_checkpoint = false;
+        let root = run_parallel_rebuild_checkpoint_roundtrip(&db, &stage, config, |state| {
+            assert!(state.storage_root_state.is_none());
+            assert!(state.account_root_state.walker_stack.is_empty());
+            saw_account_prefix_checkpoint = true;
+        });
+
+        assert!(saw_account_prefix_checkpoint);
+        assert_eq!(root, expected_root);
+        let provider = db.factory.database_provider_rw().unwrap();
+        assert!(stage.get_execution_checkpoint(&provider).unwrap().is_none());
+        provider.commit().unwrap();
     }
 
     struct MerkleTestRunner {
@@ -847,5 +1117,103 @@ mod tests {
                 .unwrap();
             Ok(())
         }
+    }
+
+    fn run_parallel_rebuild_checkpoint_roundtrip(
+        db: &TestStageDB,
+        stage: &MerkleStage,
+        config: StorageRootPrefetchConfig,
+        mut inspect_progress: impl FnMut(&IntermediateStateRootState),
+    ) -> B256 {
+        let mut checkpoint = None;
+        loop {
+            let provider = db.factory.database_provider_rw().unwrap();
+            let outcome = ParallelRebuildStateRoot::new(
+                reth_trie_db::DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            )
+            .with_config(config)
+            .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+            .root_with_progress_and_stats()
+            .unwrap();
+
+            match outcome.progress {
+                StateRootProgress::Progress(state, _, updates) => {
+                    let state = *state;
+                    inspect_progress(&state);
+                    provider.write_trie_updates(updates).unwrap();
+                    stage
+                        .save_execution_checkpoint(
+                            &provider,
+                            Some(merkle_checkpoint_from_state(1, state)),
+                        )
+                        .unwrap();
+                    provider.commit().unwrap();
+
+                    let provider = db.factory.database_provider_rw().unwrap();
+                    checkpoint = stage.get_execution_checkpoint(&provider).unwrap();
+                    provider.commit().unwrap();
+                }
+                StateRootProgress::Complete(root, _, updates) => {
+                    provider.write_trie_updates(updates).unwrap();
+                    stage.save_execution_checkpoint(&provider, None).unwrap();
+                    provider.commit().unwrap();
+                    return root
+                }
+            }
+        }
+    }
+
+    fn merkle_checkpoint_from_state(
+        target_block: BlockNumber,
+        state: IntermediateStateRootState,
+    ) -> MerkleCheckpoint {
+        let mut checkpoint = MerkleCheckpoint::new(
+            target_block,
+            state.account_root_state.last_hashed_key,
+            state.account_root_state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
+            state.account_root_state.hash_builder.into(),
+        );
+
+        if let Some(storage_state) = state.storage_root_state {
+            checkpoint.storage_root_checkpoint = Some(StorageRootMerkleCheckpoint::new(
+                storage_state.state.last_hashed_key,
+                storage_state.state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
+                storage_state.state.hash_builder.into(),
+                storage_state.account.nonce,
+                storage_state.account.balance,
+                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+            ));
+        }
+
+        checkpoint
+    }
+
+    fn segmented_stage_storage() -> Vec<(B256, U256)> {
+        (0..4)
+            .flat_map(|prefix| {
+                (0..16).flat_map(move |child| {
+                    (0..4).map(move |leaf| {
+                        (
+                            hashed_slot_with_prefix(&[prefix, child, leaf], leaf as u64),
+                            U256::from(1),
+                        )
+                    })
+                })
+            })
+            .collect()
+    }
+
+    fn hashed_slot_with_prefix(prefix: &[u8], index: u64) -> B256 {
+        let mut bytes = [0u8; 32];
+        for (idx, nibble) in prefix.iter().copied().enumerate() {
+            let byte = &mut bytes[idx / 2];
+            if idx % 2 == 0 {
+                *byte |= nibble << 4;
+            } else {
+                *byte |= nibble;
+            }
+        }
+        bytes[24..].copy_from_slice(&index.to_be_bytes());
+        B256::from(bytes)
     }
 }
