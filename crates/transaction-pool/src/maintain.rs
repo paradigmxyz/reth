@@ -745,12 +745,22 @@ where
                 .collect()
         };
 
-    let inserted = futures_util::future::join_all(
+    let results = futures_util::future::join_all(
         pool_transactions.into_iter().map(|(origin, tx)| pool.add_transaction(origin, tx)),
     )
     .await;
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%inserted.len(), "Successfully reinserted local transactions from file");
+    let total = results.len();
+    let failures = results.iter().filter(|r| r.is_err()).count();
+
+    if failures > 0 {
+        for err in results.iter().filter_map(|r| r.as_ref().err()) {
+            debug!(target: "txpool", %err, "Failed to reinsert local transaction");
+        }
+        info!(target: "txpool", txs_file =?file_path, successful=%total.saturating_sub(failures), failed=%failures, total=%total, "Reinserted local transactions from file");
+    } else {
+        info!(target: "txpool", txs_file =?file_path, num_txs=%total, "Successfully reinserted local transactions from file");
+    }
     reth_fs_util::remove_file(file_path)?;
     Ok(())
 }
