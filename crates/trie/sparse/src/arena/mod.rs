@@ -2306,6 +2306,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         nodes.sort_unstable_by_key(|n| n.path);
 
         let threshold = self.parallelism_thresholds.min_revealed_nodes;
+        let parallelize_distributed_reveals = nodes.len() >= threshold.saturating_mul(4);
 
         // Take the cursor out to avoid borrow conflicts with `self`.
         let mut cursor = mem::take(&mut self.buffers.cursor);
@@ -2353,7 +2354,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     }
                     let num_subtrie_nodes = node_idx - subtrie_start;
 
-                    if num_subtrie_nodes >= threshold {
+                    if num_subtrie_nodes >= threshold || parallelize_distributed_reveals {
                         // Take subtrie for parallel reveal.
                         trace!(target: TRACE_TARGET, ?prefix, num_subtrie_nodes, "Taking subtrie for parallel reveal");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
@@ -2808,6 +2809,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         sorted.sort_unstable_by_key(|entry| entry.1);
 
         let threshold = self.parallelism_thresholds.min_updates;
+        let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2885,7 +2887,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
-                    if num_subtrie_updates >= threshold && !might_empty_subtrie {
+                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
+                        !might_empty_subtrie
+                    {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
