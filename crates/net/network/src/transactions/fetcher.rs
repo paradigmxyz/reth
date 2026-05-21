@@ -592,7 +592,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let conn_eth_version = peer.version;
 
-        if self.active_peers.len() >= self.info.max_inflight_requests {
+        if self.inflight_requests.len() >= self.info.max_inflight_requests {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*new_announced_hashes,
