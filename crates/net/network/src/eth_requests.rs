@@ -22,7 +22,6 @@ use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -52,6 +51,11 @@ pub const MAX_BODIES_SERVE: usize = 1024;
 /// Used to limit lookups.
 pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 
+/// Maximum number of cell lookups to serve.
+///
+/// Used to limit lookups.
+pub const MAX_CELLS_SERVE: usize = 1024;
+
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
@@ -64,7 +68,7 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
     /// Blob store used for serving blob cell requests.
-    blob_store: Arc<dyn BlobStore>,
+    blob_store: Box<dyn BlobStore>,
     /// Used for reporting peers.
     // TODO use to report spammers
     #[expect(dead_code)]
@@ -81,7 +85,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
-            blob_store: Arc::new(NoopBlobStore::default()),
+            blob_store: Box::<NoopBlobStore>::default(),
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
@@ -89,7 +93,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     }
 
     /// Set blob store for the request handler
-    pub fn with_blob_store(mut self, blob_store: Arc<dyn BlobStore>) -> Self {
+    pub fn with_blob_store(mut self, blob_store: Box<dyn BlobStore>) -> Self {
         self.blob_store = blob_store;
         self
     }
@@ -333,7 +337,7 @@ where
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
 
-        for hash in request.hashes {
+        for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
             let Some(cells) =
                 self.blob_store.get_cells(hash, request.cell_mask).unwrap_or_default()
             else {
@@ -532,4 +536,154 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel sender for the response containing cells.
         response: oneshot::Sender<RequestResult<Cells>>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::{
+        eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+        eip7594::{BlobTransactionSidecarVariant, Cell},
+    };
+    use alloy_primitives::{TxHash, B128, B256};
+    use reth_network_api::test_utils::PeersHandle;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_transaction_pool::blobstore::{BlobStoreCleanupStat, BlobStoreError};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tokio::sync::mpsc;
+
+    #[derive(Debug, Default)]
+    struct CountingBlobStore {
+        get_cells_calls: Arc<AtomicUsize>,
+    }
+
+    impl BlobStore for CountingBlobStore {
+        fn insert(
+            &self,
+            _tx: B256,
+            _data: BlobTransactionSidecarVariant,
+        ) -> Result<(), BlobStoreError> {
+            Ok(())
+        }
+
+        fn insert_all(
+            &self,
+            _txs: Vec<(B256, BlobTransactionSidecarVariant)>,
+        ) -> Result<(), BlobStoreError> {
+            Ok(())
+        }
+
+        fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {
+            Ok(())
+        }
+
+        fn delete_all(&self, _txs: Vec<B256>) -> Result<(), BlobStoreError> {
+            Ok(())
+        }
+
+        fn cleanup(&self) -> BlobStoreCleanupStat {
+            BlobStoreCleanupStat::default()
+        }
+
+        fn get(
+            &self,
+            _tx: B256,
+        ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+            Ok(None)
+        }
+
+        fn contains(&self, _tx: B256) -> Result<bool, BlobStoreError> {
+            Ok(false)
+        }
+
+        fn get_all(
+            &self,
+            _txs: Vec<B256>,
+        ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
+            Ok(vec![])
+        }
+
+        fn get_exact(
+            &self,
+            txs: Vec<B256>,
+        ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+            if txs.is_empty() {
+                return Ok(vec![])
+            }
+
+            Err(BlobStoreError::MissingSidecar(txs[0]))
+        }
+
+        fn get_by_versioned_hashes_v1(
+            &self,
+            versioned_hashes: &[B256],
+        ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+            Ok(vec![None; versioned_hashes.len()])
+        }
+
+        fn get_by_versioned_hashes_v2(
+            &self,
+            _versioned_hashes: &[B256],
+        ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+            Ok(None)
+        }
+
+        fn get_by_versioned_hashes_v3(
+            &self,
+            versioned_hashes: &[B256],
+        ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+            Ok(vec![None; versioned_hashes.len()])
+        }
+
+        fn get_by_versioned_hashes_v4(
+            &self,
+            versioned_hashes: &[B256],
+            _indices_bitarray: B128,
+        ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
+            Ok(vec![None; versioned_hashes.len()])
+        }
+
+        fn get_cells(
+            &self,
+            _tx_hash: TxHash,
+            _indices_bitarray: B128,
+        ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
+            self.get_cells_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(None)
+        }
+
+        fn data_size_hint(&self) -> Option<usize> {
+            Some(0)
+        }
+
+        fn blobs_len(&self) -> usize {
+            0
+        }
+    }
+
+    #[tokio::test]
+    async fn get_cells_request_limits_blob_store_lookups() {
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let get_cells_calls = Arc::new(AtomicUsize::new(0));
+        let blob_store = CountingBlobStore { get_cells_calls: Arc::clone(&get_cells_calls) };
+        let handler = EthRequestHandler::<NoopProvider>::new(
+            NoopProvider::default(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        )
+        .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request =
+            GetCells { hashes: vec![B256::ZERO; MAX_CELLS_SERVE + 1], cell_mask: B128::default() };
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert!(cells.hashes.is_empty());
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
 }

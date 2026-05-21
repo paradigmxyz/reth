@@ -389,8 +389,8 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         Ok(vec![None; versioned_hashes.len()])
     }
 
-    fn blob_store(&self) -> Arc<dyn BlobStore> {
-        Arc::new(NoopBlobStore)
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        Box::new(NoopBlobStore)
     }
 }
 
