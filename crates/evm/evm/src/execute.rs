@@ -5,8 +5,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{
     eip2718::WithEncoded,
-    eip7928::{compute_block_access_list_hash, BlockAccessList},
 };
+use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
@@ -506,7 +506,7 @@ where
 
         let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
+            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = match state_root_precomputed {

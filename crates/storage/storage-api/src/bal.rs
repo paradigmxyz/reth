@@ -1,5 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::state::bal::Bal as RevmBal;

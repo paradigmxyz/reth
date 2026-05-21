@@ -29,7 +29,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
-use revm::primitives::hardfork::SpecId;
+use revm::{primitives::hardfork::SpecId, state::bal::BlockAccessIndex};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
 /// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
 /// starting segment without a trait bound on `DB`.
 fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
-    state.bal_state.bal_index()
+    state.bal_state.bal_index().get()
 }
 
 /// Bumps the BAL index on a `&mut State<DB>`.
@@ -130,7 +130,7 @@ fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>
 /// a worker's incoming `bal_index = i + 1` into the boundary-padded space
 /// `i + 1 + 2*k` (where `k` is the worker's segment index).
 fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
-    state.set_bal_index(index);
+    state.set_bal_index(BlockAccessIndex::new(index));
 }
 
 // ---------------------------------------------------------------------------
