@@ -359,19 +359,22 @@ where
         let execution_cache = self.execution_cache.clone();
         let trie_handle = self.trie_handle.take();
         let builder = self.builder.clone();
-        self.executor.spawn_blocking_named_task("payload-builder", async move {
+        let executor = self.executor.clone();
+        self.executor.spawn_task(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args = BuildArguments {
-                cached_reads,
-                execution_cache,
-                trie_handle,
-                config: payload_config,
-                cancel,
-                best_payload,
-            };
-            let result = builder.try_build(args);
-            let _ = tx.send(result);
+            executor.spawn_blocking_named("payload-builder", move || {
+                let args = BuildArguments {
+                    cached_reads,
+                    execution_cache,
+                    trie_handle,
+                    config: payload_config,
+                    cancel,
+                    best_payload,
+                };
+                let result = builder.try_build(args);
+                let _ = tx.send(result);
+            });
         });
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
