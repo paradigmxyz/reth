@@ -187,6 +187,16 @@ def target_metric_counter_encodes_seconds(query: str) -> bool:
     return metric_name.endswith("_seconds_total") or "_duration_seconds" in metric_name
 
 
+def target_metric_min_value_pct_total_latency(config: dict) -> float | None:
+    value = config.get("min_value_pct_total_latency")
+    if value is None:
+        return None
+    value = float(value)
+    if value < 0.0:
+        raise ValueError("min_value_pct_total_latency must be non-negative")
+    return value
+
+
 def query_matches_sample(sample: dict, metric_name: str, label_filters: dict[str, str]) -> bool:
     return sample["name"] == metric_name and all(
         sample["labels"].get(key) == value for key, value in label_filters.items()
@@ -924,7 +934,7 @@ def compute_target_metric_change(
     sig = raw_sig
     informational_reason = None
     materiality_details = None
-    if min_value_pct_total_latency is not None:
+    if min_value_pct_total_latency is not None and min_value_pct_total_latency > 0.0:
         threshold_ms = block_latency_ms * min_value_pct_total_latency / 100.0
         baseline_ms = abs(baseline_value) * 1_000.0
         feature_ms = abs(feature_value) * 1_000.0
@@ -1294,12 +1304,6 @@ def compute_target_metric_summary(
     with open(config_path) as f:
         config = json.load(f)
 
-    min_value_pct_total_latency = config.get("min_value_pct_total_latency")
-    if min_value_pct_total_latency is not None:
-        min_value_pct_total_latency = float(min_value_pct_total_latency)
-        if min_value_pct_total_latency < 0.0:
-            raise ValueError("min_value_pct_total_latency must be non-negative")
-
     baseline_runs = [query_target_metric_run(path, config) for path in baseline_csv_paths]
     feature_runs = [query_target_metric_run(path, config) for path in feature_csv_paths]
     block_latency_ms = max(
@@ -1312,11 +1316,19 @@ def compute_target_metric_summary(
         query = counter["query"]
         target = counter["target"]
         floor_pct = float(counter.get("floor_pct", 0.0))
-        counter_min_value_pct_total_latency = (
-            min_value_pct_total_latency
-            if target_metric_counter_encodes_seconds(query)
-            else None
-        )
+        counter_min_value_pct_total_latency = target_metric_min_value_pct_total_latency(counter)
+        counter_encodes_seconds = target_metric_counter_encodes_seconds(query)
+        if (
+            counter_min_value_pct_total_latency is not None and
+            counter_min_value_pct_total_latency > 0.0 and
+            not counter_encodes_seconds
+        ):
+            raise ValueError(
+                f"Counter target metric '{query}' sets min_value_pct_total_latency "
+                "but does not encode seconds"
+            )
+        if not counter_encodes_seconds:
+            counter_min_value_pct_total_latency = None
         display_stats = TARGET_METRIC_COUNTER_STATS
         summary_fields = ("mean", "p50", "p90", "p99")
         identities = collect_query_metric_identities(
@@ -1402,6 +1414,9 @@ def compute_target_metric_summary(
         query = histogram["query"]
         target = histogram["target"]
         floor_pct = float(histogram.get("floor_pct", 0.0))
+        histogram_min_value_pct_total_latency = target_metric_min_value_pct_total_latency(
+            histogram
+        )
         display_stats = ("mean",)
         identities = collect_query_metric_identities(
             baseline_runs + feature_runs, "histograms", query
@@ -1461,7 +1476,7 @@ def compute_target_metric_summary(
                     feature_runs_by_stat=feature_runs_for_stats,
                     pair_stats=display_stats,
                     floor_pct=floor_pct,
-                    min_value_pct_total_latency=min_value_pct_total_latency,
+                    min_value_pct_total_latency=histogram_min_value_pct_total_latency,
                     block_latency_ms=block_latency_ms,
                 )
             )
@@ -1470,11 +1485,6 @@ def compute_target_metric_summary(
     return {
         "config": config_path,
         "block_latency_ms": round(block_latency_ms, 6),
-        "min_value_pct_total_latency": (
-            round(min_value_pct_total_latency, 6)
-            if min_value_pct_total_latency is not None
-            else None
-        ),
         "metrics": metrics,
         "changed": changed,
         "improvements": [metric["name"] for metric in changed if metric["change"]["sig"] == "good"],
