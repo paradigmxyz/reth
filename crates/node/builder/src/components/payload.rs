@@ -111,7 +111,7 @@ where
             );
 
         ctx.task_executor().spawn_critical_os_thread(
-            "payload-builder",
+            "payload-service",
             "payload builder service",
             payload_service,
         );

@@ -512,6 +512,39 @@ impl Runtime {
         self.spawn_task_as(fut, TaskKind::Blocking)
     }
 
+    /// Spawns a blocking task onto a named OS thread.
+    ///
+    /// The given future resolves as soon as the [Shutdown] signal is received.
+    ///
+    /// Unlike [`spawn_blocking_task`](Self::spawn_blocking_task), this creates a new OS thread
+    /// with the given `name`.
+    pub fn spawn_blocking_named_task<F>(&self, name: &'static str, fut: F) -> thread::JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.0.metrics.inc_regular_blocking_tasks();
+
+        let on_shutdown = self.0.on_shutdown.clone();
+        let finished_counter = self.0.metrics.finished_regular_blocking_tasks_total.clone();
+        let task = {
+            async move {
+                let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
+                let fut = pin!(fut);
+                let _ = select(on_shutdown, fut).await;
+            }
+        }
+        .in_current_span();
+
+        let handle = self.0.handle.clone();
+        thread::Builder::new()
+            .name(name.to_string())
+            .spawn(move || {
+                let _guard = handle.enter();
+                handle.block_on(task);
+            })
+            .unwrap_or_else(|e| panic!("failed to spawn blocking OS thread {name:?}: {e}"))
+    }
+
     /// Spawns a blocking closure directly on the tokio runtime, bypassing shutdown
     /// awareness. Useful for raw CPU-bound work.
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
