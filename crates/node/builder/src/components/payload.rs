@@ -142,7 +142,7 @@ where
 
         ctx.task_executor().spawn_critical_os_thread(
             "payload-service",
-            "payload builder",
+            "payload builder service",
             async move {
                 #[expect(clippy::collection_is_never_read)]
                 let mut subscriptions = Vec::new();
