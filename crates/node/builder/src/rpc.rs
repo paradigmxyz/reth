@@ -6,6 +6,8 @@ pub use jsonrpsee::{
 };
 use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+pub use reth_network_api::BlockDownloaderProvider;
+pub use reth_network_p2p::BlockClient;
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
@@ -16,15 +18,20 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
     ConsensusEngineHandle,
 };
+use alloy_primitives::BlockNumber;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_config::{config::StageConfig, PruneConfig};
+use reth_consensus::FullConsensus;
+use reth_exex::ExExManagerHandle;
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadTypes, PayloadValidator, PrimitivesTy,
+    TreeConfig,
 };
 use reth_node_core::{
     cli::config::RethTransactionPoolConfig,
@@ -32,6 +39,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_provider::{providers::NodeTypesForProvider, ProviderFactory};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -44,6 +52,9 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_stages::{stages::EraImportSource, MetricEventsSender, Pipeline};
+use reth_static_file::StaticFileProducer;
+use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -1475,6 +1486,97 @@ where
             changeset_cache,
             ctx.node.task_executor().clone(),
         ))
+    }
+}
+
+/// Builder trait for creating the staged sync [`Pipeline`] used by the consensus engine.
+///
+/// This trait abstracts construction of the networked pipeline so downstream nodes can inject
+/// custom stages (e.g. a custom state root stage) without reimplementing
+/// [`EngineNodeLauncher`](crate::launch::engine::EngineNodeLauncher).
+pub trait NetworkedPipelineBuilder<Node>: Send + Sync + Clone
+where
+    Node: FullNodeComponents<Types: NodeTypesForProvider>,
+    <Node::Network as BlockDownloaderProvider>::Client: BlockClient<Block = BlockTy<Node::Types>>,
+{
+    /// Builds the [`Pipeline`] wired to the network.
+    #[expect(clippy::too_many_arguments)]
+    fn build_networked_pipeline(
+        self,
+        config: &StageConfig,
+        client: <Node::Network as BlockDownloaderProvider>::Client,
+        consensus: Arc<dyn FullConsensus<PrimitivesTy<Node::Types>>>,
+        provider_factory: ProviderFactory<
+            NodeTypesWithDBAdapter<<Node as FullNodeTypes>::Types, <Node as FullNodeTypes>::DB>,
+        >,
+        task_executor: &TaskExecutor,
+        metrics_tx: MetricEventsSender,
+        prune_config: PruneConfig,
+        max_block: Option<BlockNumber>,
+        static_file_producer: StaticFileProducer<
+            ProviderFactory<
+                NodeTypesWithDBAdapter<<Node as FullNodeTypes>::Types, <Node as FullNodeTypes>::DB>,
+            >,
+        >,
+        evm_config: Node::Evm,
+        exex_manager_handle: ExExManagerHandle<PrimitivesTy<Node::Types>>,
+        era_import_source: Option<EraImportSource>,
+    ) -> eyre::Result<
+        Pipeline<
+            NodeTypesWithDBAdapter<<Node as FullNodeTypes>::Types, <Node as FullNodeTypes>::DB>,
+        >,
+    >;
+}
+
+/// The default [`NetworkedPipelineBuilder`] that delegates to
+/// [`build_networked_pipeline`](crate::setup::build_networked_pipeline).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DefaultPipelineBuilder;
+
+impl<Node> NetworkedPipelineBuilder<Node> for DefaultPipelineBuilder
+where
+    Node: FullNodeComponents<Types: NodeTypesForProvider>,
+    <Node::Network as BlockDownloaderProvider>::Client: BlockClient<Block = BlockTy<Node::Types>>,
+{
+    fn build_networked_pipeline(
+        self,
+        config: &StageConfig,
+        client: <Node::Network as BlockDownloaderProvider>::Client,
+        consensus: Arc<dyn FullConsensus<PrimitivesTy<Node::Types>>>,
+        provider_factory: ProviderFactory<
+            NodeTypesWithDBAdapter<<Node as FullNodeTypes>::Types, <Node as FullNodeTypes>::DB>,
+        >,
+        task_executor: &TaskExecutor,
+        metrics_tx: MetricEventsSender,
+        prune_config: PruneConfig,
+        max_block: Option<BlockNumber>,
+        static_file_producer: StaticFileProducer<
+            ProviderFactory<
+                NodeTypesWithDBAdapter<<Node as FullNodeTypes>::Types, <Node as FullNodeTypes>::DB>,
+            >,
+        >,
+        evm_config: Node::Evm,
+        exex_manager_handle: ExExManagerHandle<PrimitivesTy<Node::Types>>,
+        era_import_source: Option<EraImportSource>,
+    ) -> eyre::Result<
+        Pipeline<
+            NodeTypesWithDBAdapter<<Node as FullNodeTypes>::Types, <Node as FullNodeTypes>::DB>,
+        >,
+    > {
+        crate::setup::build_networked_pipeline(
+            config,
+            client,
+            consensus,
+            provider_factory,
+            task_executor,
+            metrics_tx,
+            prune_config,
+            max_block,
+            static_file_producer,
+            evm_config,
+            exex_manager_handle,
+            era_import_source,
+        )
     }
 }
 

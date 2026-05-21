@@ -3,8 +3,10 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
-    setup::build_networked_pipeline,
+    rpc::{
+        DefaultPipelineBuilder, EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder,
+        NetworkedPipelineBuilder, RethRpcAddOns, RpcHandle,
+    },
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
@@ -45,13 +47,16 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// The engine node launcher.
 #[derive(Debug)]
-pub struct EngineNodeLauncher {
+pub struct EngineNodeLauncher<PB = DefaultPipelineBuilder> {
     /// The task executor for the node.
     pub ctx: LaunchContext,
 
     /// Temporary configuration for engine tree.
     /// After engine is stabilized, this should be configured through node builder.
     pub engine_tree_config: TreeConfig,
+
+    /// Builder for the networked sync [`Pipeline`](reth_stages::Pipeline).
+    pub pipeline_builder: PB,
 }
 
 impl EngineNodeLauncher {
@@ -61,7 +66,25 @@ impl EngineNodeLauncher {
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
     ) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
+        Self {
+            ctx: LaunchContext::new(task_executor, data_dir),
+            engine_tree_config,
+            pipeline_builder: DefaultPipelineBuilder,
+        }
+    }
+}
+
+impl<PB> EngineNodeLauncher<PB> {
+    /// Replaces the [`NetworkedPipelineBuilder`] used to construct the sync pipeline.
+    pub fn with_pipeline_builder<NewPB>(
+        self,
+        pipeline_builder: NewPB,
+    ) -> EngineNodeLauncher<NewPB> {
+        EngineNodeLauncher {
+            ctx: self.ctx,
+            engine_tree_config: self.engine_tree_config,
+            pipeline_builder,
+        }
     }
 
     async fn launch_node<T, CB, AO>(
@@ -78,8 +101,9 @@ impl EngineNodeLauncher {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        PB: NetworkedPipelineBuilder<NodeAdapter<T, CB::Components>>,
     {
-        let Self { ctx, engine_tree_config } = self;
+        let Self { ctx, engine_tree_config, pipeline_builder } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             rocksdb_provider,
@@ -149,7 +173,7 @@ impl EngineNodeLauncher {
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        let pipeline = build_networked_pipeline(
+        let pipeline = pipeline_builder.build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
             consensus.clone(),
@@ -430,7 +454,7 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<T, CB, AO, PB> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher<PB>
 where
     T: FullNodeTypes<
         Types: NodeTypesForProvider,
@@ -442,6 +466,7 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
+    PB: NetworkedPipelineBuilder<NodeAdapter<T, CB::Components>> + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;
