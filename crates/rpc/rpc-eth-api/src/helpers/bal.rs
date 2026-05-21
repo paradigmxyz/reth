@@ -3,17 +3,13 @@ use alloy_consensus::BlockHeader;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
-use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, State};
-use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
-};
-use reth_storage_api::StateProviderFactory;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_rpc_eth_types::{bal::build_bal_for_block, error::FromEthApiError, EthApiError};
+use reth_storage_api::BalProvider;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
-    RpcNodeCore, RpcNodeCoreExt,
+    RpcNodeCoreExt,
 };
 
 /// Helper trait for `eth_blockAccessList` RPC method.
@@ -29,6 +25,9 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
 
+            ensure_block_access_list_available(self.provider().chain_spec(), block.timestamp())
+                .map_err(Self::Error::from_eth_err)?;
+
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
@@ -36,37 +35,18 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             }
 
             self.spawn_blocking_io(move |eth_api| {
-                let state = eth_api
+                if let Some(bal) = eth_api
                     .provider()
-                    .state_by_block_id(block.parent_hash().into())
-                    .map_err(Self::Error::from_eth_err)?;
-
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
-                    .with_bal_builder()
-                    .build();
-
-                let block_txs = block.transactions_recovered();
-                let mut executor = RpcNodeCore::evm_config(&eth_api)
-                    .executor_for_block(&mut db, block.sealed_block())
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?;
-
-                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
-                executor.evm_mut().db_mut().bump_bal_index();
-
-                // replay all transactions prior to the targeted transaction
-                for block_tx in block_txs {
-                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
-                    executor.evm_mut().db_mut().bump_bal_index();
+                    .bal_store()
+                    .get_decoded_by_hash(block.hash())
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    return Ok(Some(bal.split().0.into_inner()))
                 }
 
-                executor
-                    .apply_post_execution_changes()
-                    .map_err(|err| EthApiError::Internal(err.into()))?;
-
-                let bal = db.take_built_alloy_bal();
-                Ok(bal)
+                build_bal_for_block(eth_api.provider(), eth_api.evm_config(), &block)
+                    .map(Some)
+                    .map_err(Self::Error::from_eth_err)
             })
             .await
         }
@@ -91,5 +71,33 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
 
             Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
+    }
+}
+
+fn ensure_block_access_list_available(
+    chain_spec: impl EthereumHardforks,
+    timestamp: u64,
+) -> Result<(), EthApiError> {
+    if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+        return Ok(())
+    }
+
+    Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_chainspec::ChainSpecBuilder;
+
+    #[test]
+    fn block_access_list_is_unavailable_before_amsterdam() {
+        let chain_spec = ChainSpecBuilder::mainnet().with_amsterdam_at(10).build();
+
+        assert!(matches!(
+            ensure_block_access_list_available(&chain_spec, 9),
+            Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam)
+        ));
+        assert!(ensure_block_access_list_available(&chain_spec, 10).is_ok());
     }
 }
