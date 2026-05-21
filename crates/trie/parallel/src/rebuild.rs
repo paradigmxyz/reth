@@ -2186,3 +2186,1091 @@ pub enum ParallelRebuildStateRootError {
     InlineAccountPrefixRoot(Nibbles),
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
+    use reth_trie::{
+        hashed_cursor::mock::MockHashedCursorFactory, trie_cursor::noop::NoopTrieCursorFactory,
+        HashedPostState, HashedStorage, StateRoot,
+    };
+
+    fn complete_parallel_rebuild(
+        hashed_cursor_factory: MockHashedCursorFactory,
+        config: StorageRootPrefetchConfig,
+        initial_state: Option<IntermediateStateRootState>,
+    ) -> (B256, TrieUpdates, StorageRootPrefetchStats) {
+        let mut state = initial_state;
+        let mut combined_updates = TrieUpdates::default();
+        let mut combined_stats = StorageRootPrefetchStats::default();
+
+        loop {
+            let outcome = ParallelRebuildStateRoot::new(hashed_cursor_factory.clone())
+                .with_config(config)
+                .with_intermediate_state(state.take())
+                .root_with_progress_and_stats()
+                .unwrap();
+            combined_stats.extend(outcome.prefetch);
+            match outcome.progress {
+                StateRootProgress::Complete(root, _, updates) => {
+                    combined_updates.extend(updates);
+                    return (root, combined_updates, combined_stats)
+                }
+                StateRootProgress::Progress(next_state, _, updates) => {
+                    combined_updates.extend(updates);
+                    state = Some(*next_state);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn account_prefix_planner_weights_storage_size() {
+        let hashed_cursor_factory = account_prefix_weighted_fixture();
+        let plan = plan_account_prefixes_window(
+            &hashed_cursor_factory,
+            1,
+            StorageRootPrefetchConfig {
+                storage_prefix_min_large_slots: 4,
+                account_prefix_max_depth: 1,
+                ..StorageRootPrefetchConfig::default()
+            },
+            None,
+            16,
+        )
+        .unwrap();
+
+        let light = account_prefix_range(&plan, 0x0);
+        let heavy = account_prefix_range(&plan, 0x1);
+        let empty = account_prefix_range(&plan, 0x2);
+
+        assert_eq!(plan.stats.planned_ranges, 3);
+        assert_eq!(plan.stats.accounts, 3);
+        assert_eq!(plan.stats.storage_empty_hits, 1);
+        assert_eq!(plan.stats.storage_present_hits, 2);
+        assert_eq!(plan.stats.storage_count_queries, 2);
+        assert_eq!(plan.stats.storage_counted_slots, 10);
+        assert_eq!(plan.stats.large_storage_accounts, 1);
+        assert!(heavy.weight > light.weight);
+        assert!(light.weight > empty.weight);
+    }
+
+    #[test]
+    fn storage_aware_account_prefix_rebuild_matches_serial() {
+        let hashed_cursor_factory = account_prefix_weighted_fixture();
+
+        let (serial_root, serial_updates) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory.clone())
+                .root_with_updates()
+                .unwrap();
+
+        let (root, updates, stats) = complete_parallel_rebuild(
+            hashed_cursor_factory,
+            StorageRootPrefetchConfig {
+                storage_prefix_min_large_slots: 4,
+                account_prefix_max_depth: 1,
+                ..StorageRootPrefetchConfig::default()
+            },
+            None,
+        );
+
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_updates.into_sorted(), updates.into_sorted());
+        assert_eq!(stats.account_prefix_planned_ranges, 3);
+        assert_eq!(stats.account_prefix_planned_accounts, 3);
+        assert_eq!(stats.account_prefix_storage_counted_slots, 10);
+        assert_eq!(stats.account_prefix_large_storage_accounts, 1);
+    }
+
+    #[test]
+    fn storage_aware_account_prefix_progress_resumes_at_prefix_boundary() {
+        let hashed_cursor_factory = account_prefix_many_ranges_fixture();
+
+        let (serial_root, _) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory.clone())
+                .root_with_updates()
+                .unwrap();
+        let (one_shot_root, _, _) = complete_parallel_rebuild(
+            hashed_cursor_factory.clone(),
+            StorageRootPrefetchConfig {
+                account_prefix_window_size: 4,
+                ..StorageRootPrefetchConfig::default()
+            },
+            None,
+        );
+
+        let config = StorageRootPrefetchConfig {
+            progress_threshold: 1,
+            account_prefix_window_size: 4,
+            ..StorageRootPrefetchConfig::default()
+        };
+        let mut state = None;
+        let mut combined_updates = TrieUpdates::default();
+        let mut saw_boundary_checkpoint = false;
+        let root = loop {
+            let outcome = ParallelRebuildStateRoot::new(hashed_cursor_factory.clone())
+                .with_config(config)
+                .with_intermediate_state(state.take())
+                .root_with_progress_and_stats()
+                .unwrap();
+
+            match outcome.progress {
+                StateRootProgress::Progress(next_state, _, updates) => {
+                    saw_boundary_checkpoint = true;
+                    combined_updates.extend(updates);
+                    state = Some(*next_state);
+                    assert_eq!(outcome.prefetch.account_prefix_boundary_checkpoints, 1);
+                }
+                StateRootProgress::Complete(root, _, updates) => {
+                    combined_updates.extend(updates);
+                    break root
+                }
+            }
+        };
+
+        assert!(saw_boundary_checkpoint);
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_root, one_shot_root);
+    }
+
+    #[test]
+    fn account_prefix_window_resume_starts_after_completed_prefix_boundary() {
+        let hashed_cursor_factory = account_prefix_many_ranges_fixture();
+        let last_account_key = account_prefix_last_key(&Nibbles::from_nibbles([0x0]));
+        let plan = plan_account_prefixes_window(
+            &hashed_cursor_factory,
+            1,
+            StorageRootPrefetchConfig::default(),
+            Some(last_account_key),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.stats.accounts, 16);
+        assert_eq!(plan.items[0].start(), account_prefix_bound(&Nibbles::from_nibbles([0x1])));
+    }
+
+    #[test]
+    fn account_prefix_window_stops_at_progress_weight_budget() {
+        let hashed_cursor_factory = account_prefix_many_ranges_fixture();
+        let plan = plan_account_prefixes_window(
+            &hashed_cursor_factory,
+            1,
+            StorageRootPrefetchConfig {
+                progress_threshold: 40,
+                ..StorageRootPrefetchConfig::default()
+            },
+            None,
+            64,
+        )
+        .unwrap();
+
+        assert_eq!(plan.items.len(), 2);
+        assert_eq!(plan.stats.accounts, 32);
+        assert!(!plan.complete);
+    }
+
+    #[test]
+    fn storage_aware_account_prefix_uses_barrier_for_large_storage_budget() {
+        let hashed_cursor_factory = account_prefix_barrier_fixture();
+
+        let (serial_root, _) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory.clone())
+                .root_with_updates()
+                .unwrap();
+        let config = StorageRootPrefetchConfig {
+            progress_threshold: 1,
+            storage_prefix_min_large_slots: 4,
+            account_prefix_max_depth: 1,
+            ..StorageRootPrefetchConfig::default()
+        };
+        let mut state = None;
+        let mut saw_storage_progress = false;
+        let mut saw_barrier = false;
+        let root = loop {
+            let outcome = ParallelRebuildStateRoot::new(hashed_cursor_factory.clone())
+                .with_config(config)
+                .with_intermediate_state(state.take())
+                .root_with_progress_and_stats()
+                .unwrap();
+
+            saw_barrier |= outcome.prefetch.account_prefix_large_storage_barriers == 1;
+            match outcome.progress {
+                StateRootProgress::Progress(next_state, _, _) => {
+                    saw_storage_progress |= next_state.storage_root_state.is_some();
+                    state = Some(*next_state);
+                }
+                StateRootProgress::Complete(root, _, _) => break root,
+            }
+        };
+
+        assert!(saw_barrier);
+        assert!(saw_storage_progress);
+        assert_eq!(serial_root, root);
+    }
+
+    #[test]
+    fn adaptive_storage_prefix_planner_depth_scales_with_storage_size() {
+        let config = StoragePrefixPlannerConfig {
+            max_depth: 4,
+            sample_limit_per_prefix: 16,
+            max_prefixes: 4096,
+            min_sampled_slots_to_split: 16,
+        };
+
+        assert_eq!(storage_prefix_adaptive_planner_config(config, 64, Some(64)).max_depth, 2);
+        assert_eq!(storage_prefix_adaptive_planner_config(config, 64, Some(64 * 16)).max_depth, 3);
+        assert_eq!(storage_prefix_adaptive_planner_config(config, 64, Some(64 * 256)).max_depth, 4);
+
+        let capped = StoragePrefixPlannerConfig { max_depth: 3, ..config };
+        assert_eq!(storage_prefix_adaptive_planner_config(capped, 64, Some(64 * 256)).max_depth, 3);
+        assert_eq!(storage_prefix_adaptive_planner_config(config, 64, None).max_depth, 4);
+    }
+
+    #[test]
+    fn segmented_storage_root_matches_serial_for_skewed_prefixes() {
+        let (hashed_cursor_factory, hashed_address) = segmented_skewed_storage_fixture();
+        let StorageRootProgress::Complete(serial_root, _, serial_updates) =
+            calculate_storage_root(hashed_cursor_factory.clone(), hashed_address, u64::MAX, None)
+                .unwrap()
+        else {
+            panic!("serial storage root should complete")
+        };
+
+        let mut stats = StorageRootPrefetchStats::default();
+        let Some(StorageRootProgress::Complete(root, _, updates)) =
+            calculate_segmented_storage_root(
+                hashed_cursor_factory,
+                hashed_address,
+                u64::MAX,
+                None,
+                StoragePrefixPlannerConfig {
+                    max_depth: 2,
+                    sample_limit_per_prefix: 16,
+                    max_prefixes: 32,
+                    min_sampled_slots_to_split: 16,
+                },
+                &mut stats,
+            )
+            .unwrap()
+        else {
+            panic!("segmented storage root should complete")
+        };
+
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_updates.into_sorted(), updates.into_sorted());
+        assert_eq!(stats.segmented_storage_attempts, 1);
+        assert_eq!(stats.segmented_storage_roots, 1);
+        assert_eq!(stats.segmented_storage_fallbacks, 0);
+        assert!(stats.segmented_storage_prefixes > 0);
+        assert!(stats.segmented_storage_slots > 0);
+        assert!(stats.segmented_storage_plan_probes > 0);
+    }
+
+    #[test]
+    fn segmented_storage_root_preserves_deeper_prefix_updates() {
+        let (hashed_cursor_factory, hashed_address) = segmented_deeper_prefix_storage_fixture();
+        let StorageRootProgress::Complete(serial_root, _, serial_updates) =
+            calculate_storage_root(hashed_cursor_factory.clone(), hashed_address, u64::MAX, None)
+                .unwrap()
+        else {
+            panic!("serial storage root should complete")
+        };
+
+        let mut stats = StorageRootPrefetchStats::default();
+        let Some(StorageRootProgress::Complete(root, _, storage_updates)) =
+            calculate_segmented_storage_root(
+                hashed_cursor_factory,
+                hashed_address,
+                u64::MAX,
+                None,
+                StoragePrefixPlannerConfig {
+                    max_depth: 1,
+                    sample_limit_per_prefix: 8,
+                    max_prefixes: 16,
+                    min_sampled_slots_to_split: 8,
+                },
+                &mut stats,
+            )
+            .unwrap()
+        else {
+            panic!("segmented storage root should complete")
+        };
+
+        let prefix = Nibbles::from_nibbles([0x0]);
+        assert!(!storage_updates.storage_nodes.contains_key(&prefix));
+        assert!(storage_updates
+            .storage_nodes
+            .keys()
+            .any(|path| path.starts_with(&prefix) && path.len() > prefix.len()));
+
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_updates.into_sorted(), storage_updates.into_sorted());
+        assert_eq!(stats.segmented_storage_attempts, 1);
+        assert_eq!(stats.segmented_storage_roots, 1);
+        assert_eq!(stats.segmented_storage_fallbacks, 0);
+    }
+
+    #[test]
+    fn fresh_storage_root_skips_segmented_inline_fallback() {
+        let (hashed_cursor_factory, hashed_address) = segmented_inline_fallback_fixture();
+        let mut stats = StorageRootPrefetchStats::default();
+        let progress = calculate_segmented_storage_root(
+            hashed_cursor_factory,
+            hashed_address,
+            u64::MAX,
+            None,
+            StoragePrefixPlannerConfig {
+                max_depth: 63,
+                sample_limit_per_prefix: 2,
+                max_prefixes: 128,
+                min_sampled_slots_to_split: 2,
+            },
+            &mut stats,
+        )
+        .unwrap();
+
+        assert!(progress.is_none());
+        assert_eq!(stats.segmented_storage_attempts, 1);
+        assert_eq!(stats.segmented_storage_roots, 0);
+        assert_eq!(stats.segmented_storage_fallbacks, 0);
+        assert_eq!(stats.segmented_storage_inline_fallbacks, 1);
+    }
+
+    #[test]
+    fn segmented_storage_existing_checkpoint_resumes_by_prefix() {
+        let (hashed_cursor_factory, hashed_address) =
+            segmented_large_deeper_prefix_storage_fixture_with_address();
+
+        let (serial_root, serial_updates) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory.clone())
+                .root_with_updates()
+                .unwrap();
+
+        let planner_config = StoragePrefixPlannerConfig {
+            max_depth: 1,
+            sample_limit_per_prefix: 256,
+            max_prefixes: 16,
+            min_sampled_slots_to_split: 256,
+        };
+        let mut seed_stats = StorageRootPrefetchStats::default();
+        let Some(StorageRootProgress::Progress(storage_state, _, storage_updates)) =
+            calculate_segmented_storage_root(
+                hashed_cursor_factory.clone(),
+                hashed_address,
+                1,
+                None,
+                planner_config,
+                &mut seed_stats,
+            )
+            .unwrap()
+        else {
+            panic!("expected segmented storage checkpoint")
+        };
+        assert!(is_potential_segmented_storage_checkpoint(&storage_state));
+        let resume_cursor =
+            segmented_resume_cursor(&hashed_cursor_factory, hashed_address, &storage_state)
+                .unwrap()
+                .expect("segmented checkpoint should translate to a resume cursor");
+        assert_eq!(
+            resume_cursor.next_start_bound,
+            storage_prefix_end(&storage_state.hash_builder.key)
+        );
+        assert_eq!(resume_cursor.last_segment_slot, Some(storage_state.last_hashed_key));
+        let corrupted_state = IntermediateRootState {
+            hash_builder: storage_state.hash_builder.clone(),
+            walker_stack: Vec::new(),
+            last_hashed_key: storage_prefix_end(&storage_state.hash_builder.key)
+                .expect("test prefix should have an upper bound"),
+        };
+        assert!(segmented_resume_cursor(&hashed_cursor_factory, hashed_address, &corrupted_state)
+            .unwrap()
+            .is_none());
+
+        let mut combined_updates = TrieUpdates::default();
+        combined_updates.insert_storage_updates(hashed_address, storage_updates);
+
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        let mut state = Some(IntermediateStateRootState {
+            account_root_state: IntermediateRootState {
+                hash_builder: HashBuilder::default().with_updates(true),
+                walker_stack: Vec::new(),
+                last_hashed_key: hashed_address,
+            },
+            storage_root_state: Some(IntermediateStorageRootState {
+                state: *storage_state,
+                account,
+            }),
+        });
+        let mut segmented_storage_progresses = 1;
+        let mut segmented_attempts = seed_stats.segmented_storage_attempts;
+        let mut segmented_roots = seed_stats.segmented_storage_roots;
+        let mut segmented_fallbacks = seed_stats.segmented_storage_fallbacks;
+        let root = loop {
+            let outcome = ParallelRebuildStateRoot::new(hashed_cursor_factory.clone())
+                .with_config(StorageRootPrefetchConfig {
+                    progress_threshold: 1,
+                    storage_prefix_planner: Some(planner_config),
+                    ..StorageRootPrefetchConfig::default()
+                })
+                .with_intermediate_state(state.take())
+                .root_with_progress_and_stats()
+                .unwrap();
+
+            segmented_attempts += outcome.prefetch.segmented_storage_attempts;
+            segmented_roots += outcome.prefetch.segmented_storage_roots;
+            segmented_fallbacks += outcome.prefetch.segmented_storage_fallbacks;
+            match outcome.progress {
+                StateRootProgress::Progress(next_state, _, updates) => {
+                    let next_state = *next_state;
+                    if next_state.storage_root_state.as_ref().is_some_and(|storage_root_state| {
+                        is_potential_segmented_storage_checkpoint(&storage_root_state.state)
+                    }) {
+                        segmented_storage_progresses += 1;
+                    }
+                    combined_updates.extend(updates);
+                    state = Some(next_state);
+                }
+                StateRootProgress::Complete(root, _, updates) => {
+                    combined_updates.extend(updates);
+                    break root
+                }
+            }
+        };
+
+        assert!(
+            segmented_storage_progresses > 1,
+            "attempts={segmented_attempts}, roots={segmented_roots}, fallbacks={segmented_fallbacks}, segmented_progresses={segmented_storage_progresses}"
+        );
+        assert!(segmented_attempts > 1);
+        assert_eq!(segmented_roots, 1);
+        assert_eq!(segmented_fallbacks, 0);
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_updates.into_sorted(), combined_updates.into_sorted());
+    }
+
+    #[test]
+    fn segmented_storage_checkpoint_budget_limits_planned_frontier() {
+        let (hashed_cursor_factory, hashed_address) =
+            segmented_large_deeper_prefix_storage_fixture_with_address();
+        let planner_config = StoragePrefixPlannerConfig {
+            max_depth: 1,
+            sample_limit_per_prefix: 256,
+            max_prefixes: 16,
+            min_sampled_slots_to_split: 256,
+        };
+        let mut stats = StorageRootPrefetchStats::default();
+
+        let Some(progress) = calculate_segmented_storage_root(
+            hashed_cursor_factory,
+            hashed_address,
+            1,
+            None,
+            planner_config,
+            &mut stats,
+        )
+        .unwrap() else {
+            panic!("checkpoint budget should still emit segmented progress")
+        };
+
+        assert!(matches!(progress, StorageRootProgress::Progress(..)));
+        assert_eq!(stats.segmented_storage_plan_planned_prefixes, 1);
+        assert_eq!(stats.segmented_storage_partial_plans, 1);
+        assert_eq!(stats.segmented_storage_budget_stops, 1);
+        assert_eq!(stats.segmented_storage_fallbacks, 0);
+    }
+
+    #[test]
+    fn root_with_updates_resumes_segmented_checkpoint_without_progress() {
+        let (hashed_cursor_factory, hashed_address) =
+            segmented_large_deeper_prefix_storage_fixture_with_address();
+
+        let (serial_root, _) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory.clone())
+                .root_with_updates()
+                .unwrap();
+
+        let planner_config = StoragePrefixPlannerConfig {
+            max_depth: 1,
+            sample_limit_per_prefix: 256,
+            max_prefixes: 16,
+            min_sampled_slots_to_split: 256,
+        };
+        let mut seed_stats = StorageRootPrefetchStats::default();
+        let Some(StorageRootProgress::Progress(storage_state, _, _)) =
+            calculate_segmented_storage_root(
+                hashed_cursor_factory.clone(),
+                hashed_address,
+                1,
+                None,
+                planner_config,
+                &mut seed_stats,
+            )
+            .unwrap()
+        else {
+            panic!("expected segmented storage checkpoint")
+        };
+
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        let (root, _, stats) = complete_parallel_rebuild(
+            hashed_cursor_factory,
+            StorageRootPrefetchConfig {
+                storage_prefix_planner: Some(planner_config),
+                ..StorageRootPrefetchConfig::default()
+            },
+            Some(IntermediateStateRootState {
+                account_root_state: IntermediateRootState {
+                    hash_builder: HashBuilder::default().with_updates(true),
+                    walker_stack: Vec::new(),
+                    last_hashed_key: hashed_address,
+                },
+                storage_root_state: Some(IntermediateStorageRootState {
+                    state: *storage_state,
+                    account,
+                }),
+            }),
+        );
+
+        assert_eq!(root, serial_root);
+        assert_eq!(stats.segmented_storage_attempts, 1);
+        assert_eq!(stats.segmented_storage_fallbacks, 0);
+    }
+
+    #[test]
+    fn segmented_storage_partial_prefix_windows_match_serial() {
+        let (hashed_cursor_factory, hashed_address) =
+            segmented_large_deeper_prefix_storage_fixture_with_address();
+        let StorageRootProgress::Complete(serial_root, _, serial_updates) =
+            calculate_storage_root(hashed_cursor_factory.clone(), hashed_address, u64::MAX, None)
+                .unwrap()
+        else {
+            panic!("serial storage root should complete")
+        };
+
+        let planner_config = StoragePrefixPlannerConfig {
+            max_depth: 2,
+            sample_limit_per_prefix: 4,
+            max_prefixes: 2,
+            min_sampled_slots_to_split: 4,
+        };
+        let mut stats = StorageRootPrefetchStats::default();
+        let Some(progress) = calculate_segmented_storage_root(
+            hashed_cursor_factory,
+            hashed_address,
+            u64::MAX,
+            None,
+            planner_config,
+            &mut stats,
+        )
+        .unwrap() else {
+            panic!("partial prefix windows should keep segmented progress")
+        };
+        let StorageRootProgress::Complete(root, _, combined_updates) = progress else {
+            panic!("unbounded segmented build should continue across partial windows")
+        };
+
+        assert!(stats.segmented_storage_partial_plans > 0);
+        assert!(stats.segmented_storage_prefixes > planner_config.max_prefixes);
+        assert_eq!(stats.segmented_storage_roots, 1);
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_updates.into_sorted(), combined_updates.into_sorted());
+    }
+
+    #[test]
+    fn segmented_storage_serial_checkpoint_falls_back_to_serial_resume() {
+        let hashed_cursor_factory = large_storage_fixture().0;
+
+        let StateRootProgress::Progress(serial_state, _, updates) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory.clone())
+                .with_threshold(1)
+                .root_with_progress()
+                .unwrap()
+        else {
+            panic!("expected serial storage checkpoint")
+        };
+        assert!(serial_state.storage_root_state.is_some());
+
+        let mut combined_updates = TrieUpdates::default();
+        combined_updates.extend(updates);
+
+        let outcome = ParallelRebuildStateRoot::new(hashed_cursor_factory.clone())
+            .with_config(StorageRootPrefetchConfig {
+                progress_threshold: u64::MAX,
+                storage_prefix_planner: Some(StoragePrefixPlannerConfig {
+                    max_depth: 1,
+                    sample_limit_per_prefix: 256,
+                    max_prefixes: 16,
+                    min_sampled_slots_to_split: 256,
+                }),
+                ..StorageRootPrefetchConfig::default()
+            })
+            .with_intermediate_state(Some(*serial_state))
+            .root_with_progress_and_stats()
+            .unwrap();
+
+        let StateRootProgress::Complete(root, _, updates) = outcome.progress else {
+            panic!("expected serial-looking checkpoint to complete through serial resume")
+        };
+        combined_updates.extend(updates);
+
+        let (serial_root, serial_updates) =
+            StateRoot::new(NoopTrieCursorFactory::default(), hashed_cursor_factory)
+                .root_with_updates()
+                .unwrap();
+
+        assert_eq!(outcome.prefetch.segmented_storage_attempts, 0);
+        assert_eq!(outcome.prefetch.segmented_storage_fallbacks, 1);
+        assert_eq!(serial_root, root);
+        assert_eq!(serial_updates.into_sorted(), combined_updates.into_sorted());
+    }
+
+    #[test]
+    fn storage_prefix_planner_small_storage_returns_single_range() {
+        let (hashed_cursor_factory, hashed_address) =
+            storage_planner_fixture((0..3).map(|slot| hashed_slot_with_prefix(&[0x0], slot)));
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 4,
+                sample_limit_per_prefix: 8,
+                max_prefixes: 16,
+                min_sampled_slots_to_split: 8,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.ranges.len(), 1);
+        assert!(plan.ranges[0].prefix.is_empty());
+        assert_eq!(plan.ranges[0].sampled_slots, 3);
+        assert_eq!(plan.ranges[0].sampled_entries.len(), 3);
+        assert_eq!(plan.stats.probes, 1);
+        assert_eq!(plan.stats.sampled_slots, 3);
+        assert_eq!(plan.stats.reusable_sampled_slots, 3);
+        assert_eq!(plan.stats.split_prefixes, 0);
+    }
+
+    #[test]
+    fn storage_prefix_planner_even_distribution_splits_at_depth_one() {
+        let (hashed_cursor_factory, hashed_address) =
+            storage_planner_fixture((0..16).map(|nibble| hashed_slot_with_prefix(&[nibble], 0)));
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 1,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 16,
+                min_sampled_slots_to_split: 4,
+            },
+        )
+        .unwrap();
+
+        let prefixes = plan.ranges.iter().map(|range| range.prefix.to_vec()).collect::<Vec<_>>();
+        let expected = (0..16).map(|nibble| vec![nibble]).collect::<Vec<_>>();
+        assert_eq!(prefixes, expected);
+        assert_eq!(plan.stats.split_prefixes, 1);
+        assert_eq!(plan.stats.planned_prefixes, 16);
+        assert_eq!(plan.stats.max_depth_observed, 1);
+    }
+
+    #[test]
+    fn storage_prefix_planner_skewed_storage_recursively_splits() {
+        let (hashed_cursor_factory, hashed_address) = storage_planner_fixture(
+            (0..16).map(|nibble| hashed_slot_with_prefix(&[0x0, nibble], 0)),
+        );
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 2,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 64,
+                min_sampled_slots_to_split: 4,
+            },
+        )
+        .unwrap();
+
+        let prefixes = plan.ranges.iter().map(|range| range.prefix.to_vec()).collect::<Vec<_>>();
+        let expected = (0..16).map(|nibble| vec![0x0, nibble]).collect::<Vec<_>>();
+        assert_eq!(prefixes, expected);
+        assert_eq!(plan.stats.split_prefixes, 2);
+        assert!(plan.stats.empty_prefixes >= 15);
+        assert_eq!(plan.stats.max_depth_observed, 2);
+    }
+
+    #[test]
+    fn storage_prefix_planner_max_depth_emits_frontier_range() {
+        let (hashed_cursor_factory, hashed_address) = storage_planner_fixture(
+            (0..16).map(|nibble| hashed_slot_with_prefix(&[0x0, nibble], 0)),
+        );
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 1,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 64,
+                min_sampled_slots_to_split: 4,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.ranges.len(), 1);
+        assert_eq!(plan.ranges[0].prefix, Nibbles::from_nibbles([0x0]));
+        assert!(plan.complete);
+        assert_eq!(plan.stats.too_deep_prefixes, 1);
+    }
+
+    #[test]
+    fn storage_prefix_planner_max_prefixes_keeps_frontier_window() {
+        let (hashed_cursor_factory, hashed_address) =
+            storage_planner_fixture((0..16).map(|nibble| hashed_slot_with_prefix(&[nibble], 0)));
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 1,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 4,
+                min_sampled_slots_to_split: 4,
+            },
+        )
+        .unwrap();
+
+        let prefixes = plan.ranges.iter().map(|range| range.prefix.to_vec()).collect::<Vec<_>>();
+        assert_eq!(prefixes, vec![vec![0x0], vec![0x1], vec![0x2], vec![0x3]]);
+        assert!(!plan.complete);
+        assert!(plan.stats.too_many_prefixes > 0);
+    }
+
+    #[test]
+    fn storage_prefix_planner_empty_storage_emits_no_ranges() {
+        let (hashed_cursor_factory, hashed_address) = storage_planner_fixture([]);
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 2,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 16,
+                min_sampled_slots_to_split: 4,
+            },
+        )
+        .unwrap();
+
+        assert!(plan.ranges.is_empty());
+        assert!(plan.complete);
+        assert_eq!(plan.stats.probes, 1);
+        assert_eq!(plan.stats.sampled_slots, 0);
+        assert_eq!(plan.stats.empty_prefixes, 1);
+        assert_eq!(plan.stats.planned_prefixes, 0);
+    }
+
+    #[test]
+    fn storage_prefix_planner_normalizes_zero_max_prefixes() {
+        let (hashed_cursor_factory, hashed_address) =
+            storage_planner_fixture((0..16).map(|nibble| hashed_slot_with_prefix(&[nibble], 0)));
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 1,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 0,
+                min_sampled_slots_to_split: 4,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.ranges.len(), 1);
+        assert_eq!(plan.ranges[0].prefix, Nibbles::from_nibbles([0x0]));
+        assert!(!plan.complete);
+    }
+
+    #[test]
+    fn storage_prefix_planner_respects_split_minimum_above_sample_limit() {
+        let (hashed_cursor_factory, hashed_address) =
+            storage_planner_fixture((0..16).map(|nibble| hashed_slot_with_prefix(&[nibble], 0)));
+
+        let plan = plan_storage_prefixes(
+            &hashed_cursor_factory,
+            hashed_address,
+            StoragePrefixPlannerConfig {
+                max_depth: 2,
+                sample_limit_per_prefix: 4,
+                max_prefixes: 16,
+                min_sampled_slots_to_split: 8,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.ranges.len(), 1);
+        assert!(plan.ranges[0].prefix.is_empty());
+        assert_eq!(plan.ranges[0].sampled_slots, 4);
+        assert_eq!(plan.stats.split_prefixes, 0);
+    }
+
+    #[test]
+    fn storage_prefix_bounds_cover_nibble_edges() {
+        let odd = Nibbles::from_nibbles([0x0]);
+        assert_eq!(storage_prefix_bound(&odd), B256::ZERO);
+        assert_eq!(
+            storage_prefix_end(&odd),
+            Some(B256::from([
+                0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0
+            ]))
+        );
+
+        let even = Nibbles::from_nibbles([0x1, 0x2]);
+        assert_eq!(
+            storage_prefix_bound(&even),
+            B256::from([
+                0x12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0
+            ])
+        );
+        assert_eq!(
+            storage_prefix_end(&even),
+            Some(B256::from([
+                0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0
+            ]))
+        );
+
+        let crossing = Nibbles::from_nibbles([0x0, 0xf]);
+        assert_eq!(
+            storage_prefix_end(&crossing),
+            Some(B256::from([
+                0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0
+            ]))
+        );
+
+        let last = Nibbles::from_nibbles([0xf, 0xf]);
+        assert_eq!(storage_prefix_end(&last), None);
+        assert_eq!(storage_prefix_end(&Nibbles::new()), None);
+    }
+
+    fn account_prefix_weighted_fixture() -> MockHashedCursorFactory {
+        let mut hashed_state = HashedPostState::default();
+        let light_account = hashed_key_with_prefix(&[0x0], 0);
+        let heavy_account = hashed_key_with_prefix(&[0x1], 0);
+        let empty_account = hashed_key_with_prefix(&[0x2], 0);
+
+        for (index, hashed_address) in
+            [light_account, heavy_account, empty_account].into_iter().enumerate()
+        {
+            hashed_state.accounts.insert(
+                hashed_address,
+                Some(Account {
+                    nonce: index as u64 + 1,
+                    balance: U256::from(index as u64 + 1),
+                    bytecode_hash: None,
+                }),
+            );
+        }
+
+        hashed_state.storages.insert(
+            light_account,
+            HashedStorage::from_iter(
+                false,
+                (0..2).map(|slot| {
+                    (hashed_key_with_prefix(&[0x0, slot], 0), U256::from(slot as u64 + 1))
+                }),
+            ),
+        );
+        hashed_state.storages.insert(
+            heavy_account,
+            HashedStorage::from_iter(
+                false,
+                (0..8).map(|slot| {
+                    (hashed_key_with_prefix(&[0x1, slot], 0), U256::from(slot as u64 + 1))
+                }),
+            ),
+        );
+
+        MockHashedCursorFactory::from_hashed_post_state(hashed_state)
+    }
+
+    fn account_prefix_barrier_fixture() -> MockHashedCursorFactory {
+        let mut hashed_state = HashedPostState::default();
+        let large_account = hashed_key_with_prefix(&[0x0], 0);
+        let following_account = hashed_key_with_prefix(&[0x1], 0);
+
+        for (index, hashed_address) in [large_account, following_account].into_iter().enumerate() {
+            hashed_state.accounts.insert(
+                hashed_address,
+                Some(Account {
+                    nonce: index as u64 + 1,
+                    balance: U256::from(index as u64 + 1),
+                    bytecode_hash: None,
+                }),
+            );
+        }
+
+        hashed_state.storages.insert(
+            large_account,
+            HashedStorage::from_iter(
+                false,
+                (0u64..128).map(|slot| (keccak256(slot.to_be_bytes()), U256::from(slot + 1))),
+            ),
+        );
+        hashed_state.storages.insert(
+            following_account,
+            HashedStorage::from_iter(
+                false,
+                [(hashed_key_with_prefix(&[0x1, 0x0], 0), U256::from(1))],
+            ),
+        );
+
+        MockHashedCursorFactory::from_hashed_post_state(hashed_state)
+    }
+
+    fn account_prefix_many_ranges_fixture() -> MockHashedCursorFactory {
+        let mut hashed_state = HashedPostState::default();
+
+        for prefix in 0..6u8 {
+            for child in 0..16u8 {
+                let hashed_address = hashed_key_with_prefix(&[prefix, child], 0);
+                let account_index = prefix as u64 * 16 + child as u64;
+                hashed_state.accounts.insert(
+                    hashed_address,
+                    Some(Account {
+                        nonce: account_index + 1,
+                        balance: U256::from(account_index + 1),
+                        bytecode_hash: None,
+                    }),
+                );
+                hashed_state.storages.insert(
+                    hashed_address,
+                    HashedStorage::from_iter(
+                        false,
+                        [(
+                            hashed_key_with_prefix(&[prefix, child, 0x0], 0),
+                            U256::from(account_index + 1),
+                        )],
+                    ),
+                );
+            }
+        }
+
+        MockHashedCursorFactory::from_hashed_post_state(hashed_state)
+    }
+
+    fn account_prefix_range(plan: &AccountPrefixPlan, prefix: u8) -> &AccountPrefixRange {
+        let prefix = Nibbles::from_nibbles([prefix]);
+        plan.items
+            .iter()
+            .find_map(|item| match item {
+                AccountPrefixPlanItem::Range(range) if range.prefix == prefix => Some(range),
+                AccountPrefixPlanItem::Range(_) |
+                AccountPrefixPlanItem::Barrier(_) |
+                AccountPrefixPlanItem::Single(_) => None,
+            })
+            .expect("prefix exists")
+    }
+
+    fn large_storage_fixture() -> (MockHashedCursorFactory, B256) {
+        let mut hashed_state = HashedPostState::default();
+        let hashed_address = keccak256(Address::repeat_byte(0x42));
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        hashed_state.accounts.insert(hashed_address, Some(account));
+
+        let storage = (0u64..128)
+            .map(|slot| {
+                let hashed_slot = keccak256(slot.to_be_bytes());
+                (hashed_slot, U256::from(slot + 1))
+            })
+            .collect::<Vec<_>>();
+        hashed_state.storages.insert(hashed_address, HashedStorage::from_iter(false, storage));
+
+        (MockHashedCursorFactory::from_hashed_post_state(hashed_state), hashed_address)
+    }
+
+    fn segmented_skewed_storage_fixture() -> (MockHashedCursorFactory, B256) {
+        storage_planner_fixture((0..16).flat_map(|prefix| {
+            (0..4).map(move |child| hashed_slot_with_prefix(&[0x0, prefix, child], child as u64))
+        }))
+    }
+
+    fn segmented_deeper_prefix_storage_fixture() -> (MockHashedCursorFactory, B256) {
+        storage_planner_fixture((0..4).flat_map(|prefix| {
+            [
+                vec![prefix, 0x1, 0x0],
+                vec![prefix, 0x1, 0x1],
+                vec![prefix, 0x1, 0x1, 0x1],
+                vec![prefix, 0x1, 0x2],
+                vec![prefix, 0x1, 0x2, 0x2],
+                vec![prefix, 0x1, 0x3, 0x2],
+            ]
+            .into_iter()
+            .map(hashed_slot_from_nibbles)
+        }))
+    }
+
+    fn segmented_large_deeper_prefix_storage_fixture_with_address(
+    ) -> (MockHashedCursorFactory, B256) {
+        storage_planner_fixture((0..4).flat_map(|prefix| {
+            (0..16).flat_map(move |child| {
+                (0..4).map(move |leaf| hashed_slot_with_prefix(&[prefix, child, leaf], leaf as u64))
+            })
+        }))
+    }
+
+    fn segmented_inline_fallback_fixture() -> (MockHashedCursorFactory, B256) {
+        let mut first = vec![0x1; 62];
+        first.extend([0x0, 0x0]);
+        let mut second = vec![0x1; 62];
+        second.extend([0x1, 0x0]);
+        storage_planner_fixture([hashed_slot_from_nibbles(first), hashed_slot_from_nibbles(second)])
+    }
+
+    fn storage_planner_fixture(
+        slots: impl IntoIterator<Item = B256>,
+    ) -> (MockHashedCursorFactory, B256) {
+        let mut hashed_state = HashedPostState::default();
+        let hashed_address = keccak256(Address::repeat_byte(0x99));
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        hashed_state.accounts.insert(hashed_address, Some(account));
+
+        let storage = slots
+            .into_iter()
+            .enumerate()
+            .map(|(index, hashed_slot)| (hashed_slot, U256::from(index as u64 + 1)))
+            .collect::<Vec<_>>();
+        hashed_state.storages.insert(hashed_address, HashedStorage::from_iter(false, storage));
+
+        (MockHashedCursorFactory::from_hashed_post_state(hashed_state), hashed_address)
+    }
+
+    fn hashed_slot_with_prefix(prefix: &[u8], index: u64) -> B256 {
+        hashed_key_with_prefix(prefix, index)
+    }
+
+    fn hashed_key_with_prefix(prefix: &[u8], index: u64) -> B256 {
+        let prefix = Nibbles::from_nibbles(prefix);
+        let mut bytes = [0u8; 32];
+        let packed = prefix.pack();
+        bytes[..packed.len()].copy_from_slice(&packed);
+        bytes[24..].copy_from_slice(&index.to_be_bytes());
+        B256::from(bytes)
+    }
+
+    fn hashed_slot_from_nibbles(nibbles: impl AsRef<[u8]>) -> B256 {
+        let nibbles = Nibbles::from_nibbles(nibbles);
+        let mut bytes = [0u8; 32];
+        let packed = nibbles.pack();
+        bytes[..packed.len()].copy_from_slice(&packed);
+        B256::from(bytes)
+    }
+}
