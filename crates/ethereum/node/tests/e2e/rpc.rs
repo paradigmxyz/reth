@@ -1,7 +1,7 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, Sealable, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -369,6 +369,41 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .raw_request::<_, ()>(
             "flashbots_validateBuilderSubmissionV6".into(),
             (&invalid_bal_request,)
+        )
+        .await
+        .is_err());
+
+    let mut mismatched_bal_request = request.clone();
+    mismatched_bal_request.request.execution_payload.block_access_list =
+        Bytes::from_static(&[0xc0]);
+    let block_hash = alloy_rpc_types_engine::ExecutionPayload::V4(
+        mismatched_bal_request.request.execution_payload.clone(),
+    )
+    .try_into_block_with_sidecar::<reth_ethereum_primitives::TransactionSigned>(
+        &alloy_rpc_types_engine::ExecutionPayloadSidecar::v4(
+            alloy_rpc_types_engine::CancunPayloadFields {
+                parent_beacon_block_root: mismatched_bal_request.parent_beacon_block_root,
+                versioned_hashes: mismatched_bal_request.request.blobs_bundle.versioned_hashes(),
+            },
+            alloy_rpc_types_engine::PraguePayloadFields::new(
+                mismatched_bal_request.request.execution_requests.to_requests(),
+            ),
+        ),
+    )?
+    .seal_slow()
+    .hash();
+    mismatched_bal_request
+        .request
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .block_hash = block_hash;
+    mismatched_bal_request.request.message.block_hash = block_hash;
+    assert!(provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&mismatched_bal_request,)
         )
         .await
         .is_err());
