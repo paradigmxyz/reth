@@ -273,4 +273,37 @@ mod tests {
         .unwrap();
         assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
     }
+     #[test]
+    fn parse_datadir_after_subcommand() {
+        let path = format!("../{}", SUPPORTED_CHAINS[0]);
+
+        // --datadir after migrate-v2
+        let cmd = Command::<EthereumChainSpecParser>::try_parse_from([
+            "reth",
+            "migrate-v2",
+            "--datadir",
+            &path,
+        ])
+        .unwrap();
+        assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
+
+        // --datadir after stats
+        let cmd = Command::<EthereumChainSpecParser>::try_parse_from([
+            "reth",
+            "stats",
+            "--datadir",
+            &path,
+        ])
+        .unwrap();
+        assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
+
+        // --datadir after repair-trie (fixes #19586)
+        let cmd = Command::<EthereumChainSpecParser>::try_parse_from([
+            "reth",
+            "repair-trie",
+            "--datadir",
+            &path,
+        ]);
+        assert!(cmd.is_ok());
+    }
 }
