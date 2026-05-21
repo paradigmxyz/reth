@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use crate::tree::{
     multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
+        dispatch_with_chunking, evm_state_to_hashed_post_state, Source, StateRootComputeOutcome,
         StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -193,9 +194,15 @@ where
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                StateRootMessage::StateUpdate(_, state) => {
+                StateRootMessage::StateUpdate(source, state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
+                    // Only EVM transaction updates have reliable `original_info` set to the
+                    // pre-tx state. System call and post-block balance increment updates set
+                    // `original_info` equal to `info`, so we must not skip touched-but-equal
+                    // accounts for those — doing so would drop real state changes.
+                    let skip_unchanged =
+                        matches!(source, Source::Evm(StateChangeSource::Transaction(_)));
+                    let hashed = evm_state_to_hashed_post_state(state, skip_unchanged);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
