@@ -39,6 +39,13 @@ pub trait HashedCursorFactory {
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError>;
+
+    /// Returns a cursor over hashed accounts that have at least one storage entry.
+    fn hashed_storage_key_cursor(
+        &self,
+    ) -> Result<Option<Box<dyn HashedStorageKeyCursor + '_>>, DatabaseError> {
+        Ok(None)
+    }
 }
 
 /// The cursor for iterating over hashed entries.
@@ -74,4 +81,18 @@ pub trait HashedStorageCursor: HashedCursor {
     ///
     /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
     fn set_hashed_address(&mut self, hashed_address: B256);
+}
+
+/// The cursor for iterating over hashed account keys that have storage entries.
+pub trait HashedStorageKeyCursor {
+    /// Seek the first storage account key greater than or equal to `hashed_address`.
+    fn seek_storage_key(&mut self, hashed_address: B256) -> Result<Option<B256>, DatabaseError>;
+
+    /// Move to the next storage account key, skipping duplicate storage slots.
+    fn next_storage_key(&mut self) -> Result<Option<B256>, DatabaseError>;
+
+    /// Returns the number of storage entries for the current storage account key when supported.
+    fn current_storage_entry_count(&mut self) -> Result<Option<usize>, DatabaseError> {
+        Ok(None)
+    }
 }

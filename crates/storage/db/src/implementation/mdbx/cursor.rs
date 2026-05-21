@@ -191,6 +191,10 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
             .transpose()
     }
 
+    fn current_dup_count(&mut self) -> Result<Option<usize>, DatabaseError> {
+        self.inner.count_duplicates().map(Some).map_err(|e| DatabaseError::Read(e.into()))
+    }
+
     fn seek_by_key_subkey(
         &mut self,
         key: <T as Table>::Key,

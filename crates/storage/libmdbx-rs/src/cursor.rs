@@ -330,6 +330,15 @@ where
         Ok(Some((found, k.unwrap(), v)))
     }
 
+    /// Return count of duplicate values for the current key.
+    pub fn count_duplicates(&self) -> Result<usize> {
+        let mut count = 0usize;
+        mdbx_result(unsafe {
+            self.txn.txn_execute(|_| ffi::mdbx_cursor_count(self.cursor, &mut count))?
+        })?;
+        Ok(count)
+    }
+
     /// Returns an iterator over database items.
     ///
     /// The iterator will begin with item next after the cursor, and continue until the end of the

@@ -19,6 +19,7 @@ use reth_provider::{
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
+    hashed_cursor::HashedCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     triehash::KeccakHasher,
@@ -55,6 +56,64 @@ fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B2
         )
         .unwrap();
     }
+}
+
+#[test]
+fn hashed_storage_key_cursor_walks_non_empty_accounts() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+    let first = B256::with_last_byte(1);
+    let empty = B256::with_last_byte(2);
+    let second = B256::with_last_byte(3);
+
+    tx.tx_ref()
+        .put::<tables::HashedAccounts>(
+            first,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+        )
+        .unwrap();
+    tx.tx_ref()
+        .put::<tables::HashedAccounts>(
+            empty,
+            Account { nonce: 2, balance: U256::from(2), bytecode_hash: None },
+        )
+        .unwrap();
+    tx.tx_ref()
+        .put::<tables::HashedAccounts>(
+            second,
+            Account { nonce: 3, balance: U256::from(3), bytecode_hash: None },
+        )
+        .unwrap();
+    tx.tx_ref()
+        .put::<tables::HashedStorages>(
+            first,
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(11) },
+        )
+        .unwrap();
+    tx.tx_ref()
+        .put::<tables::HashedStorages>(
+            first,
+            StorageEntry { key: B256::with_last_byte(2), value: U256::from(12) },
+        )
+        .unwrap();
+    tx.tx_ref()
+        .put::<tables::HashedStorages>(
+            second,
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(31) },
+        )
+        .unwrap();
+
+    let cursor_factory = DatabaseHashedCursorFactory::new(tx.tx_ref());
+    let mut cursor = cursor_factory
+        .hashed_storage_key_cursor()
+        .unwrap()
+        .expect("database supports storage key iteration");
+
+    assert_eq!(cursor.seek_storage_key(B256::ZERO).unwrap(), Some(first));
+    assert_eq!(cursor.current_storage_entry_count().unwrap(), Some(2));
+    assert_eq!(cursor.seek_storage_key(empty).unwrap(), Some(second));
+    assert_eq!(cursor.current_storage_entry_count().unwrap(), Some(1));
+    assert_eq!(cursor.next_storage_key().unwrap(), None);
 }
 
 fn incremental_vs_full_root(inputs: &[&str], modified: &str) {

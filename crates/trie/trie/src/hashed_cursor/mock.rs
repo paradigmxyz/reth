@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
 use crate::mock::{KeyVisit, KeyVisitType};
 
-use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
+use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor, HashedStorageKeyCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
@@ -107,6 +107,15 @@ impl HashedCursorFactory for MockHashedCursorFactory {
             self.visited_storage_keys.clone(),
             hashed_address,
         )
+    }
+
+    fn hashed_storage_key_cursor(
+        &self,
+    ) -> Result<Option<Box<dyn HashedStorageKeyCursor + '_>>, DatabaseError> {
+        Ok(Some(Box::new(MockHashedStorageKeyCursor {
+            all_storage_values: self.hashed_storage_tries.clone(),
+            current_hashed_address: None,
+        })))
     }
 }
 
@@ -251,5 +260,51 @@ impl<T: Debug + Clone> HashedStorageCursor for MockHashedCursor<T> {
                 panic!("set_hashed_address called on account cursor")
             }
         }
+    }
+}
+
+#[derive(Debug)]
+struct MockHashedStorageKeyCursor<T> {
+    all_storage_values: Arc<B256Map<BTreeMap<B256, T>>>,
+    current_hashed_address: Option<B256>,
+}
+
+impl<T: Debug + Clone> MockHashedStorageKeyCursor<T> {
+    fn storage_key_at_or_after(&self, hashed_address: B256) -> Option<B256> {
+        self.all_storage_values
+            .iter()
+            .filter_map(|(key, storage)| {
+                (*key >= hashed_address && !storage.is_empty()).then_some(*key)
+            })
+            .min()
+    }
+}
+
+impl<T: Debug + Clone> HashedStorageKeyCursor for MockHashedStorageKeyCursor<T> {
+    fn seek_storage_key(&mut self, hashed_address: B256) -> Result<Option<B256>, DatabaseError> {
+        self.current_hashed_address = self.storage_key_at_or_after(hashed_address);
+        Ok(self.current_hashed_address)
+    }
+
+    fn next_storage_key(&mut self) -> Result<Option<B256>, DatabaseError> {
+        let Some(current_hashed_address) = self.current_hashed_address else {
+            return self.seek_storage_key(B256::ZERO)
+        };
+
+        self.current_hashed_address = self
+            .all_storage_values
+            .iter()
+            .filter_map(|(key, storage)| {
+                (*key > current_hashed_address && !storage.is_empty()).then_some(*key)
+            })
+            .min();
+        Ok(self.current_hashed_address)
+    }
+
+    fn current_storage_entry_count(&mut self) -> Result<Option<usize>, DatabaseError> {
+        Ok(self
+            .current_hashed_address
+            .and_then(|hashed_address| self.all_storage_values.get(&hashed_address))
+            .map(BTreeMap::len))
     }
 }

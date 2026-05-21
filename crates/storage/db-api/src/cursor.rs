@@ -77,6 +77,11 @@ pub trait DbDupCursorRO<T: DupSort> {
     /// Positions the cursor at the next duplicate value of the current key.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T>;
 
+    /// Returns duplicate count for the current key when supported by the backend.
+    fn current_dup_count(&mut self) -> Result<Option<usize>, DatabaseError> {
+        Ok(None)
+    }
+
     /// Positions the cursor at the entry greater than or equal to the provided key/subkey pair.
     ///
     /// # Note

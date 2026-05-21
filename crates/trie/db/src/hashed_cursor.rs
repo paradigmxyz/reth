@@ -6,7 +6,9 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_primitives_traits::Account;
-use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
+use reth_trie::hashed_cursor::{
+    HashedCursor, HashedCursorFactory, HashedStorageCursor, HashedStorageKeyCursor,
+};
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug, Clone)]
@@ -41,6 +43,14 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
             self.0.cursor_dup_read::<tables::HashedStorages>()?,
             hashed_address,
         ))
+    }
+
+    fn hashed_storage_key_cursor(
+        &self,
+    ) -> Result<Option<Box<dyn HashedStorageKeyCursor + '_>>, DatabaseError> {
+        Ok(Some(Box::new(DatabaseHashedStorageKeyCursor(
+            self.0.cursor_dup_read::<tables::HashedStorages>()?,
+        ))))
     }
 }
 
@@ -122,5 +132,26 @@ where
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
+    }
+}
+
+/// The structure wrapping a database cursor for hashed storage account keys.
+#[derive(Debug)]
+struct DatabaseHashedStorageKeyCursor<C>(C);
+
+impl<C> HashedStorageKeyCursor for DatabaseHashedStorageKeyCursor<C>
+where
+    C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
+{
+    fn seek_storage_key(&mut self, hashed_address: B256) -> Result<Option<B256>, DatabaseError> {
+        Ok(self.0.seek(hashed_address)?.map(|(hashed_address, _)| hashed_address))
+    }
+
+    fn next_storage_key(&mut self) -> Result<Option<B256>, DatabaseError> {
+        Ok(self.0.next_no_dup()?.map(|(hashed_address, _)| hashed_address))
+    }
+
+    fn current_storage_entry_count(&mut self) -> Result<Option<usize>, DatabaseError> {
+        self.0.current_dup_count()
     }
 }
