@@ -208,6 +208,21 @@ where
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
 }
 
+impl<P, Evm, V> BasicEngineValidator<P, Evm, V>
+where
+    Evm: ConfigureEvm,
+{
+    /// Returns a clone of the internal [`PayloadProcessor`].
+    pub fn payload_processor(&self) -> PayloadProcessor<Evm> {
+        self.payload_processor.clone()
+    }
+
+    /// Returns a reference to the changeset cache.
+    pub fn changeset_cache(&self) -> ChangesetCache {
+        self.changeset_cache.clone()
+    }
+}
+
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
@@ -1596,7 +1611,7 @@ where
         fields(?strategy)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
-        &mut self,
+        &self,
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
