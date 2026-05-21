@@ -105,6 +105,11 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// State is temporarily unavailable because a pipeline sync is in progress and plain state
+    /// has been modified past this block. The block was fully executed in a prior pipeline run,
+    /// but its state cannot be safely read until the current run completes.
+    #[error("state at block #{_0} is temporarily unavailable, pipeline sync in progress")]
+    StateUnavailableDuringSync(BlockNumber),
     /// State is not available because the block has not been executed yet.
     #[error("state at block #{requested} is not available, block has not been executed yet (latest executed: #{executed})")]
     BlockNotExecuted {

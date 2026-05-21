@@ -101,6 +101,13 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Only set for read-only factories. Can be disabled if there is no concurrent read-write
     /// factory writing to the database (e.g as part of a running reth node).
     read_only_sync: Option<Arc<ReadOnlySyncState>>,
+    /// Tracks the latest block number whose plain state has been written by the Execution stage.
+    ///
+    /// During pipeline sync, the Execution stage can commit plain state ahead of the Finish
+    /// checkpoint. This tracker allows [`ConsistentProvider`] to detect that window and reject
+    /// state requests that would return stale data, without reading stage checkpoints from the
+    /// database on every request.
+    execution_tip: Arc<AtomicU64>,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
@@ -158,6 +165,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             read_only_sync: None,
+            execution_tip: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -205,6 +213,26 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = distance;
         self
+    }
+
+    /// Returns the current execution tip tracked in memory.
+    ///
+    /// This is the latest block number whose plain state has been committed by the Execution
+    /// stage. During pipeline sync, this may be ahead of `StageId::Finish`.
+    pub fn execution_tip(&self) -> BlockNumber {
+        self.execution_tip.load(Ordering::Relaxed)
+    }
+
+    /// Updates the in-memory execution tip.
+    ///
+    /// Should be called by the pipeline after `StageId::Execution` commits a new checkpoint.
+    pub fn set_execution_tip(&self, block_number: BlockNumber) {
+        self.execution_tip.store(block_number, Ordering::Relaxed);
+    }
+
+    /// Returns a shared reference to the execution tip tracker.
+    pub fn execution_tip_tracker(&self) -> Arc<AtomicU64> {
+        self.execution_tip.clone()
     }
 
     /// Enables on-demand syncing of `RocksDB` secondary and static file indexes for read-only
@@ -974,6 +1002,7 @@ where
             runtime,
             minimum_pruning_distance,
             read_only_sync,
+            execution_tip,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -991,6 +1020,7 @@ where
                 "read_only_sync",
                 &read_only_sync.as_ref().map(|s| s.last_synced_txnid.load(Ordering::Relaxed)),
             )
+            .field("execution_tip", &execution_tip.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -1010,6 +1040,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             runtime: self.runtime.clone(),
             minimum_pruning_distance: self.minimum_pruning_distance,
             read_only_sync: self.read_only_sync.clone(),
+            execution_tip: self.execution_tip.clone(),
         }
     }
 }

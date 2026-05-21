@@ -49,6 +49,12 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
     head_block: Option<Arc<BlockState<N::Primitives>>>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    /// Snapshot of the execution tip at time of creation.
+    ///
+    /// This is the latest block number whose plain state has been committed by the Execution
+    /// stage. If this is ahead of `StageId::Finish` (the visible best block), then plain state
+    /// is dirty and state at the Finish-tip block cannot be safely served.
+    execution_tip: BlockNumber,
 }
 
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
@@ -70,7 +76,10 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // entirely. Resulting in gaps on the range.
         let head_block = state.head_state();
         let storage_provider = storage_provider_factory.database_provider_ro()?;
-        Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
+        // Snapshot the execution tip *after* opening the DB snapshot. This makes the guard
+        // conservative: the execution tip can only be >= the actual DB state, never behind it.
+        let execution_tip = storage_provider_factory.execution_tip();
+        Ok(Self { storage_provider, head_block, canonical_in_memory_state: state, execution_tip })
     }
 
     // Helper function to convert range bounds
@@ -119,7 +128,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
         self.get_in_memory_or_storage_by_block(
             block_hash.into(),
-            |_| self.storage_provider.history_by_block_hash(block_hash),
+            |_| {
+                // Falling through to DB — check that plain state is safe to read
+                if let Some(block_number) = self.storage_provider.block_number(block_hash)? {
+                    self.ensure_db_state_available(block_number)?;
+                }
+                self.storage_provider.history_by_block_hash(block_hash)
+            },
             |block_state| {
                 let state_provider = self.block_state_provider_ref(block_state)?;
                 Ok(Box::new(state_provider))
@@ -449,7 +464,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         self.ensure_canonical_block(block_number)?;
 
-        let Self { storage_provider, head_block, .. } = self;
+        let Self { storage_provider, head_block, execution_tip, .. } = self;
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
@@ -460,6 +475,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
+
+        // Falling through to DB — check that plain state is safe to read
+        let best_block = storage_provider.best_block_number()?;
+        if block_number == best_block && execution_tip > best_block {
+            return Err(ProviderError::StateUnavailableDuringSync(block_number));
+        }
+
         storage_provider.try_into_history_at_block(block_number)
     }
 }
@@ -481,6 +503,24 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         } else {
             Ok(())
         }
+    }
+
+    /// Ensures that the database state can be safely read for the given block.
+    ///
+    /// During pipeline sync, the Execution stage commits plain state independently from the
+    /// Finish stage. If execution has moved past the visible best block (Finish checkpoint),
+    /// neither `LatestStateProvider` nor `HistoricalStateProvider` can return correct state
+    /// because plain state is already at a higher block.
+    ///
+    /// This check uses the in-memory execution tip (snapshotted at provider creation) instead
+    /// of reading `StageId::Execution` from the database on every request.
+    #[inline]
+    fn ensure_db_state_available(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        let best_block = self.storage_provider.best_block_number()?;
+        if block_number == best_block && self.execution_tip > best_block {
+            return Err(ProviderError::StateUnavailableDuringSync(block_number));
+        }
+        Ok(())
     }
 }
 
@@ -606,7 +646,10 @@ impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.head_block.as_ref().map(|b| Ok(b.number())).unwrap_or_else(|| self.last_block_number())
+        self.head_block
+            .as_ref()
+            .map(|b| Ok(b.number()))
+            .unwrap_or_else(|| self.storage_provider.best_block_number())
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
