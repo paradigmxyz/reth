@@ -175,6 +175,7 @@ fn evm_to_precompiles_map(
     let precompiles = evm.precompiles();
     precompiles
         .addresses()
+        .iter()
         .filter_map(|address| {
             Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
         })

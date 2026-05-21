@@ -3,7 +3,6 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
@@ -22,10 +21,7 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    database::{states::bundle_state::BundleRetention, BundleState, State},
-    state::bal::Bal,
-};
+use revm::database::{states::bundle_state::BundleRetention, BundleState, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -149,9 +145,6 @@ pub trait Executor<DB: Database>: Sized {
     ///
     /// This is used to optimize DB commits depending on the size of the state.
     fn size_hint(&self) -> usize;
-
-    /// Takes built [`BlockAccessList`] from executor.
-    fn take_bal(&mut self) -> Option<BlockAccessList>;
 }
 
 /// Input for block building. Consumed by [`BlockAssembler`].
@@ -214,8 +207,6 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_provider: &'b dyn StateProvider,
     /// State root for this block.
     pub state_root: B256,
-    /// Block access list hash (EIP-7928, Amsterdam).
-    pub block_access_list_hash: Option<B256>,
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
@@ -233,7 +224,6 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         bundle_state: &'a BundleState,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
-        block_access_list_hash: Option<B256>,
     ) -> Self {
         Self {
             evm_env,
@@ -244,7 +234,6 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             bundle_state,
             state_provider,
             state_root,
-            block_access_list_hash,
         }
     }
 }
@@ -314,8 +303,6 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// Block access list built during execution (EIP-7928, Amsterdam).
-    pub block_access_list: Option<BlockAccessList>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -468,10 +455,7 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes()?;
-        self.executor.evm_mut().db_mut().bump_bal_index();
-
-        Ok(())
+        self.executor.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -484,7 +468,6 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
-            self.executor.evm_mut().db_mut().bump_bal_index();
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -501,10 +484,6 @@ where
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
-
-        let block_access_list = db.take_built_alloy_bal();
-        let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = match state_root_precomputed {
@@ -526,18 +505,11 @@ where
             bundle_state: &db.bundle_state,
             state_provider: &state,
             state_root,
-            block_access_list_hash,
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        Ok(BlockBuilderOutcome {
-            execution_result: result,
-            hashed_state,
-            trie_updates,
-            block,
-            block_access_list,
-        })
+        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
@@ -584,33 +556,11 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut executor = self
+        let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?;
-
-        let has_bal = block.header().block_access_list_hash().is_some();
-
-        if has_bal {
-            executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
-        } else {
-            executor.evm_mut().db_mut().bal_state.bal_builder = None;
-        }
-
-        executor.apply_pre_execution_changes()?;
-
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
-
-        for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
-            }
-        }
-
-        let result = executor.apply_post_execution_changes()?;
+            .map_err(BlockExecutionError::other)?
+            .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -643,10 +593,6 @@ where
 
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
-    }
-
-    fn take_bal(&mut self) -> Option<BlockAccessList> {
-        self.db.take_built_alloy_bal()
     }
 }
 
@@ -745,10 +691,6 @@ mod tests {
 
         fn size_hint(&self) -> usize {
             0
-        }
-
-        fn take_bal(&mut self) -> Option<BlockAccessList> {
-            None
         }
     }
 

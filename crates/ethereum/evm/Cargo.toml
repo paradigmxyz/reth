@@ -23,8 +23,10 @@ reth-storage-errors.workspace = true
 
 # Alloy
 alloy-primitives.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
+alloy-rlp.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 

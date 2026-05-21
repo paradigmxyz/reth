@@ -307,9 +307,10 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.34.0"
-source = "git+https://github.com/alloy-rs/evm?branch=main#3c4805ad7b68a0777e8775535c659c1570dcfd5c"
+source = "git+https://github.com/alloy-rs/evm?rev=cc45f5b#cc45f5b73b88fddeab8c01eaf864dbce6793316e"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
@@ -8322,7 +8323,6 @@ dependencies = [
  "revm",
  "revm-database-interface",
  "revm-primitives",
- "revm-state",
  "schnellru",
  "serde_json",
  "thiserror 2.0.18",
@@ -8698,10 +8698,12 @@ name = "reth-evm-ethereum"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "reth-chainspec",
  "reth-ethereum-forks",

@@ -14,20 +14,17 @@ use alloy_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         ExecutableTx, GasOutput, OnStateHook, StateChangeSource, StateDB,
     },
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
+    eth::{EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
     Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::B256;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm::evm::BalEvm;
 use reth_evm_ethereum::RethReceiptBuilder;
 use revm::{
-    context::{BlockEnv, TxEnv},
-    context_interface::result::{EVMError, HaltReason},
-    handler::PrecompileProvider,
-    interpreter::InterpreterResult,
-    primitives::hardfork::SpecId,
-    Inspector,
+    context::TxEnv, context_interface::result::HaltReason, handler::PrecompileProvider,
+    interpreter::InterpreterResult, state::bal::BlockAccessIndex, Inspector,
 };
 use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
@@ -93,37 +90,6 @@ impl<'a> BbEvmPlan<'a> {
 /// segment boundaries without requiring additional trait bounds on `DB`.
 pub(crate) type BlockHashSeeder<DB> = fn(&mut DB, &[(u64, B256)]);
 
-/// Function pointer that reads the BAL index from the DB.
-///
-/// Injected from `ConfigureEvm::create_executor` where the concrete
-/// `State<DB>` type is known. `BbBlockExecutor` calls this lazily on first
-/// use to decide which segment to start at: `0` means canonical execution
-/// from segment 0, `n > 0` means a BAL worker that runs only the n-th
-/// transaction (in whichever segment contains it).
-pub(crate) type BalIndexReader<DB> = fn(&DB) -> u64;
-
-/// Function pointer that bumps the BAL index in the DB.
-///
-/// Injected from `ConfigureEvm::create_executor` like the other DB callbacks
-/// so `BbBlockExecutor` can advance `bal_index` between sub-events of a
-/// segment boundary (post-N's `finish()` and pre-N+1's
-/// `apply_pre_execution_changes()`) without requiring additional trait bounds
-/// on `DB`. The renumbering scheme places these on consecutive `bal_indexes` so
-/// workers reading the BAL overlay see post-N's writes via the strict
-/// less-than `BalWrites::get` semantic.
-pub(crate) type BalIndexBumper<DB> = fn(&mut DB);
-
-/// Function pointer that overwrites the BAL index in the DB.
-///
-/// Used in `BbBlockExecutor::initialize` to map a worker's incoming
-/// `bal_index = i + 1` (the standard "tx i + 1" convention from
-/// `execute_block_in_pool`) onto the renumbered space `i + 1 + 2k`, where
-/// `k` is the segment index containing tx `i`. Renumbering reserves two
-/// extra `bal_indexes` per segment boundary (one for each segment's
-/// post-execution and one for the next segment's pre-execution), so workers'
-/// strict less-than reads can see those boundary writes.
-pub(crate) type BalIndexSetter<DB> = fn(&mut DB, u64);
-
 /// Block executor that wraps [`EthBlockExecutor`] and handles segment-boundary
 /// changes for big-block execution.
 ///
@@ -159,16 +125,6 @@ where
     /// Callback to reseed block hashes into the DB's cache at segment
     /// boundaries. See [`BlockHashSeeder`].
     block_hash_seeder: Option<BlockHashSeeder<DB>>,
-    /// Callback to read `bal_index` from the DB. See [`BalIndexReader`].
-    bal_index_reader: Option<BalIndexReader<DB>>,
-    /// Callback to bump `bal_index` on the DB. See [`BalIndexBumper`]. Used at
-    /// segment boundaries to put post-N's writes and pre-N+1's writes on
-    /// consecutive `bal_indexes`.
-    bal_index_bumper: Option<BalIndexBumper<DB>>,
-    /// Callback to set `bal_index` on the DB. See [`BalIndexSetter`]. Used in
-    /// [`Self::initialize`] to renumber a worker's incoming `bal_index` into
-    /// the boundary-padded space.
-    bal_index_setter: Option<BalIndexSetter<DB>>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
 }
@@ -179,26 +135,14 @@ where
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    EthEvm<DB, I, P>: Evm<
-        DB = DB,
-        Tx = TxEnv,
-        HaltReason = HaltReason,
-        Error = EVMError<DB::Error>,
-        Spec = SpecId,
-        BlockEnv = BlockEnv,
-    >,
     TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         evm: EthEvm<DB, I, P>,
         plan: BbEvmPlan<'a>,
         spec: Spec,
         receipt_builder: RethReceiptBuilder,
         block_hash_seeder: Option<BlockHashSeeder<DB>>,
-        bal_index_reader: Option<BalIndexReader<DB>>,
-        bal_index_bumper: Option<BalIndexBumper<DB>>,
-        bal_index_setter: Option<BalIndexSetter<DB>>,
     ) -> Self {
         let inner = EthBlockExecutor::new(evm, plan.segments[0].ctx.clone(), spec, receipt_builder);
         Self {
@@ -209,9 +153,6 @@ where
             blob_gas_used_offset: 0,
             shared_hook: Arc::new(Mutex::new(None)),
             block_hash_seeder,
-            bal_index_reader,
-            bal_index_bumper,
-            bal_index_setter,
             initialized: false,
         }
     }
@@ -225,29 +166,16 @@ where
     /// segment containing the `(bal_index - 1)`-th transaction and drops the
     /// plan so segment boundaries don't fire — a BAL worker only runs one
     /// transaction in its segment.
-    fn initialize(&mut self) -> Result<(), BlockExecutionError> {
+    fn initialize(&mut self, index: Option<usize>) -> Result<(), BlockExecutionError> {
         if self.initialized {
             return Ok(());
         }
 
-        let segment_idx = if let Some(bal_index) = self
-            .bal_index_reader
-            .map(|reader| reader(self.inner().evm().db()))
-            .filter(|bal_index| *bal_index > 0)
-        {
-            let segment_idx = self.plan.segment_index_for_tx((bal_index - 1) as usize);
+        let segment_idx = if let Some(index) = index {
+            let segment_idx = self.plan.segment_index_for_tx(index);
 
-            // Renumber the worker's bal_index from the raw "tx i + 1"
-            // convention to "tx i + 1 + 2k" where k is the segment index.
-            // This reserves two `bal_indexes` per crossed segment boundary
-            // (one for post-N's `finish()`, one for pre-N+1's
-            // `apply_pre_execution_changes`) so worker reads via
-            // `BalWrites::get` see those writes via the strict less-than
-            // semantic.
-            if let Some(setter) = self.bal_index_setter {
-                let renumbered = bal_index + 2 * segment_idx as u64;
-                setter(self.inner_mut().evm_mut().db_mut(), renumbered);
-            }
+            let renumbered = index + 1 + 2 * segment_idx;
+            self.evm_mut().set_index(BlockAccessIndex::new(renumbered as u64));
 
             segment_idx
         } else {
@@ -335,19 +263,11 @@ where
         let spec = inner.spec.clone();
         let receipt_builder = inner.receipt_builder;
 
-        if let Some(bumper) = self.bal_index_bumper {
-            bumper(inner.evm_mut().db_mut());
-        }
+        inner.evm_mut().bump_bal_index();
 
         let (mut evm, result) = inner.finish()?;
 
-        // Renumbering: bump bal_index so the new segment's
-        // `apply_pre_execution_changes` writes land at K+1 instead of colliding
-        // with post-N at K. Without this, BAL workers querying at K can't see
-        // either boundary write via `BalWrites::get`'s strict less-than.
-        if let Some(bumper) = self.bal_index_bumper {
-            bumper(evm.db_mut());
-        }
+        evm.bump_bal_index();
 
         // Receipts already have globally-correct cumulative_gas_used (fixed
         // up in commit_transaction). Update the offset with this segment's
@@ -414,15 +334,6 @@ where
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    EthEvm<DB, I, P>: Evm<
-        DB = DB,
-        Tx = TxEnv,
-        HaltReason = HaltReason,
-        Error = EVMError<DB::Error>,
-        Spec = SpecId,
-        BlockEnv = BlockEnv,
-    >,
-    TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
@@ -435,7 +346,7 @@ where
         // correct block number and parent hash. Without this the outer big
         // block header's (synthetic) block_number would be used, writing to
         // wrong EIP-2935 slots and corrupting state.
-        self.initialize()?;
+        self.initialize(None)?;
         self.inner_mut().apply_pre_execution_changes()
     }
 
@@ -443,7 +354,16 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
-        self.initialize()?;
+        self.initialize(None)?;
+        self.inner_mut().execute_transaction_without_commit(tx)
+    }
+
+    fn execute_transaction_with_index(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        index: usize,
+    ) -> Result<Self::Result, BlockExecutionError> {
+        self.initialize(Some(index))?;
         self.inner_mut().execute_transaction_without_commit(tx)
     }
 
@@ -478,16 +398,7 @@ where
         // EthBlockExecutor::finish() applies the correct withdrawal balance
         // increments and post-execution system calls.
         let last_seg = self.plan.segments.last().unwrap();
-        let last_ctx = EthBlockExecutionCtx {
-            parent_hash: last_seg.ctx.parent_hash,
-            parent_beacon_block_root: last_seg.ctx.parent_beacon_block_root,
-            ommers: last_seg.ctx.ommers,
-            withdrawals: last_seg.ctx.withdrawals.clone(),
-            extra_data: last_seg.ctx.extra_data.clone(),
-            tx_count_hint: last_seg.ctx.tx_count_hint,
-            slot_number: last_seg.ctx.slot_number,
-        };
-        self.inner_mut().ctx = last_ctx;
+        self.inner_mut().ctx = last_seg.ctx.clone();
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
@@ -582,25 +493,13 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         evm: EthEvm<DB, I, PrecompilesMap>,
         plan: BbEvmPlan<'a>,
         block_hash_seeder: Option<BlockHashSeeder<DB>>,
-        bal_index_reader: Option<BalIndexReader<DB>>,
-        bal_index_bumper: Option<BalIndexBumper<DB>>,
-        bal_index_setter: Option<BalIndexSetter<DB>>,
     ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>
     where
         Spec: alloy_evm::eth::spec::EthExecutorSpec,
         DB: StateDB,
         I: Inspector<EthEvmContext<DB>>,
     {
-        BbBlockExecutor::new(
-            evm,
-            plan,
-            &self.spec,
-            self.receipt_builder,
-            block_hash_seeder,
-            bal_index_reader,
-            bal_index_bumper,
-            bal_index_setter,
-        )
+        BbBlockExecutor::new(evm, plan, &self.spec, self.receipt_builder, block_hash_seeder)
     }
 }
 
@@ -633,6 +532,6 @@ where
         DB: StateDB,
         I: Inspector<EthEvmContext<DB>>,
     {
-        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, None, None, None, None)
+        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, None)
     }
 }

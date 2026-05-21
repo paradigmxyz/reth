@@ -1,16 +1,10 @@
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
-use alloy_eip7928::BlockAccessIndex;
-use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
-    Evm,
-};
+use alloy_evm::block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory};
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use revm::database::State;
-use revm_state::bal::Bal as RevmBal;
-use std::sync::Arc;
 
 pub(super) struct BalWorkerOutput<R> {
     pub(super) index: usize,
@@ -33,7 +27,6 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     result_tx: WorkerResultSender<Evm>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
-    received_bal_revm: Arc<RevmBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
 ) where
@@ -45,11 +38,8 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalExecutionError> {
-            let mut worker_state = State::builder()
-                .with_database(make_db()?)
-                .with_bal(received_bal_revm)
-                .with_bundle_update()
-                .build();
+            let mut worker_state =
+                State::builder().with_database(make_db()?).with_bundle_update().build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
             let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
@@ -65,9 +55,8 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let signer = *tx.signer();
                 let tx_gas_limit = tx.tx().gas_limit();
 
-                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
-                    .execute_transaction_without_commit(tx)
+                    .execute_transaction_with_index(tx, index)
                     .map_err(BalExecutionError::Evm)?;
 
                 if result_tx

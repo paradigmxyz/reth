@@ -181,11 +181,8 @@ where
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let chain_spec = client.chain_spec();
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
-    let mut db = State::builder()
-        .with_database(cached_reads.as_db_mut(state))
-        .with_bundle_update()
-        .with_bal_builder_if(is_amsterdam)
-        .build();
+    let mut db =
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
 
     let mut builder = evm_config
         .builder_for_next_block(
@@ -446,9 +443,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
-        mut handle,
-    ) = trie_handle
+    let BlockBuilderOutcome { execution_result, block, .. } = if let Some(mut handle) = trie_handle
     {
         // Drop the state hook, which drops the StateHookSender and triggers
         // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
@@ -488,8 +483,9 @@ where
         }));
     }
 
-    let block_access_list: Option<Bytes> =
-        block_access_list.map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
+    let block_access_list: Option<Bytes> = execution_result
+        .block_access_list
+        .map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
     let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);

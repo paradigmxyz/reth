@@ -267,12 +267,10 @@ where
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     // Configure state
-    let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
-        .with_bal_builder_if(has_bal)
         .build();
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
@@ -306,10 +304,11 @@ where
         cumulative_gas_used += gas_used;
     }
 
-    let BlockBuilderOutcome { block, block_access_list, .. } =
+    let BlockBuilderOutcome { block, execution_result, .. } =
         builder.finish(&state_provider, None)?;
 
-    let encoded_bal: Option<Bytes> = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
+    let encoded_bal: Option<Bytes> =
+        execution_result.block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
 
     Ok((block.into_sealed_block(), encoded_bal))
 }

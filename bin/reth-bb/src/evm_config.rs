@@ -10,7 +10,7 @@ use reth_engine_primitives::ExecutionPayload as _;
 use reth_storage_errors::any::AnyError;
 use revm_primitives::Bytes;
 
-use crate::evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan};
+use crate::evm::{BbBlockExecutorFactory, BbEvmPlan};
 use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
 use alloy_evm::{
@@ -19,7 +19,6 @@ use alloy_evm::{
 };
 use alloy_primitives::B256;
 use alloy_rpc_types::engine::ExecutionData;
-use core::convert::Infallible;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -29,7 +28,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
-use revm::{primitives::hardfork::SpecId, state::bal::BlockAccessIndex};
+use revm::primitives::hardfork::SpecId;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -103,36 +102,6 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
     }
 }
 
-/// Reads the BAL index from a `&mut State<DB>`.
-///
-/// Used as a [`BalIndexReader`] callback so the
-/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
-/// starting segment without a trait bound on `DB`.
-const fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
-    state.bal_state.bal_index().get()
-}
-
-/// Bumps the BAL index on a `&mut State<DB>`.
-///
-/// Used as a [`BalIndexBumper`](crate::evm::BalIndexBumper) callback so the
-/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can advance
-/// `bal_index` between sub-events of a segment boundary (post-N's `finish()`
-/// and pre-N+1's `apply_pre_execution_changes()`) without a trait bound on
-/// `DB`.
-const fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
-    state.bump_bal_index();
-}
-
-/// Sets the BAL index on a `&mut State<DB>`.
-///
-/// Used as a [`BalIndexSetter`](crate::evm::BalIndexSetter) callback so
-/// [`BbBlockExecutor::initialize`](crate::evm::BbBlockExecutor) can renumber
-/// a worker's incoming `bal_index = i + 1` into the boundary-padded space
-/// `i + 1 + 2*k` (where `k` is the worker's segment index).
-const fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
-    state.set_bal_index(BlockAccessIndex::new(index));
-}
-
 // ---------------------------------------------------------------------------
 // ConfigureEvm
 // ---------------------------------------------------------------------------
@@ -142,7 +111,7 @@ where
     C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
 {
     type Primitives = EthPrimitives;
-    type Error = Infallible;
+    type Error = AnyError;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory = BbBlockExecutorFactory<Arc<C>>;
     type BlockAssembler = BbBlockAssembler;
@@ -196,9 +165,6 @@ where
         DB: Database,
         I: reth_evm::InspectorFor<Self, &'a mut revm::database::State<DB>> + 'a,
     {
-        let bal_index_reader: Option<BalIndexReader<&'a mut revm::database::State<DB>>> =
-            Some(read_bal_index::<DB>);
-
         // Inject concrete function pointers that know the `State<DB>` type so
         // the generic executor can manipulate `bal_index` and reseed block
         // hashes without a trait bound on `DB`.
@@ -206,9 +172,6 @@ where
             evm,
             ctx,
             Some(seed_state_block_hashes::<DB>),
-            bal_index_reader,
-            Some(bump_bal_index::<DB>),
-            Some(set_bal_index::<DB>),
         )
     }
 
@@ -226,16 +189,10 @@ where
         DB: Database,
         I: reth_evm::InspectorFor<Self, &'db mut revm::database::State<DB>>,
     {
-        let bal_index_reader: Option<BalIndexReader<&'db mut revm::database::State<DB>>> =
-            Some(read_bal_index::<DB>);
-
         self.executor_factory.create_executor_with_seeder(
             evm,
             ctx,
             Some(seed_state_block_hashes::<DB>),
-            bal_index_reader,
-            Some(bump_bal_index::<DB>),
-            Some(set_bal_index::<DB>),
         )
     }
 }

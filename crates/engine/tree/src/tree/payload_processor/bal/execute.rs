@@ -14,15 +14,9 @@
 //! validator still handles consensus checks, receipt-root validation, state-root work, and block
 //! insertion.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, RejectReason};
-use alloy_eip7928::{
-    bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash,
-};
-use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
-    Evm,
-};
+use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_evm::block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult};
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
@@ -34,7 +28,6 @@ use revm::{
     database::{states::bundle_state::BundleRetention, State},
     primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
-use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -100,19 +93,12 @@ where
     MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
-    let bal = input_bal.as_bal();
-    let input_bal_revm: Arc<RevmBal> = Arc::new(
-        RevmBal::try_from(Vec::<_>::from(bal.clone()))
-            .map_err(|e| BalExecutionError::BalConversion(format!("{e:?}")))?,
-    );
-
     // NOTE: technically Amsterdam implies BAL (the current path) we are on.
     // TODO: should we do this
     let is_amsterdam = evm_env.cfg_env.spec.into().is_enabled_in(SpecId::AMSTERDAM);
     let block_gas_limit = evm_env.block_env.gas_limit();
     let mut canonical_state =
-        State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
-    load_bal_accounts(&mut canonical_state, bal)?;
+        State::builder().with_database(make_db()?).with_bundle_update().build();
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -126,7 +112,6 @@ where
                 result_tx.clone(),
                 evm_config,
                 make_db,
-                Arc::clone(&input_bal_revm),
                 evm_env.clone(),
                 ctx.clone(),
             );
@@ -149,7 +134,6 @@ where
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
-            canonical_executor.evm_mut().db_mut().bump_bal_index();
 
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
@@ -165,80 +149,15 @@ where
         }
         drop(abort_guard);
 
-        canonical_executor.evm_mut().db_mut().bump_bal_index();
         let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
-
-    validate_bal(&mut canonical_state, input_bal.as_ref())?;
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
     ))
-}
-
-fn load_bal_accounts<DB>(
-    canonical_state: &mut State<DB>,
-    bal: &AlloyBal,
-) -> Result<(), BalExecutionError>
-where
-    DB: Database,
-{
-    // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
-    // (called by `commit_transaction`) panics at revm-database's
-    // `cache.rs:195` ("All accounts should be present inside cache") when it tries to
-    // apply a diff for an address not previously loaded. In the normal serial flow the
-    // EVM loads the account itself during execution, but here workers execute the tx EVM
-    // and the canonical loop only commits their outputs, so canonical may never have read
-    // those accounts itself.
-    for account_changes in bal {
-        canonical_state
-            .load_cache_account(account_changes.address)
-            .map_err(|e| BalExecutionError::Evm(BlockExecutionError::other(e)))?;
-    }
-
-    Ok(())
-}
-
-/// Validates that execution rebuilt the same BAL that was provided with the payload.
-///
-/// This consumes the BAL built by `canonical_state` and compares it against the decoded input
-/// BAL before post-execution validation relies on `DecodedBal::hash()` as the header commitment.
-pub(crate) fn validate_bal<DB>(
-    canonical_state: &mut State<DB>,
-    input_bal: &DecodedBal,
-) -> Result<(), BalExecutionError>
-where
-    DB: Database,
-{
-    let composed_alloy = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    let input_bal_entries = input_bal.as_bal();
-    if composed_alloy == input_bal_entries.as_slice() {
-        return Ok(());
-    }
-    let rebuilt = compute_block_access_list_hash(&composed_alloy);
-    let expected_bal_hash = input_bal.hash();
-
-    if tracing::enabled!(
-        target: "engine::tree::payload_processor::bal",
-        tracing::Level::DEBUG
-    ) {
-        let div = input_bal_entries.diff(&composed_alloy);
-        tracing::debug!(
-            target: "engine::tree::payload_processor::bal",
-            %rebuilt,
-            expected = %expected_bal_hash,
-            %div,
-            "first BAL divergence",
-        );
-    }
-
-    Err(BalExecutionError::Reject(RejectReason::FinalHashMismatch {
-        rebuilt,
-        expected: expected_bal_hash,
-    }))
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -404,19 +323,18 @@ mod tests {
         use revm::database::State as RevmState;
 
         let db = system_contracts_db();
-        let mut state =
-            RevmState::builder().with_database(db).with_bundle_update().with_bal_builder().build();
+        let mut state = RevmState::builder().with_database(db).with_bundle_update().build();
 
         // Any header_bal_hash on the reference block is fine — we don't check it here.
         let block = empty_amsterdam_block(B256::ZERO);
-        {
-            let mut executor =
-                evm_config.executor_for_block(&mut state, &block).expect("build executor");
-            executor.apply_pre_execution_changes().expect("pre-exec");
-            executor.evm_mut().db_mut().bump_bal_index();
-            executor.apply_post_execution_changes().expect("post-exec");
-        }
-        state.take_built_alloy_bal().expect("with_bal_builder was set")
+
+        evm_config
+            .executor_for_block(&mut state, &block)
+            .expect("build executor")
+            .execute_block(vec![])
+            .expect("execute block")
+            .block_access_list
+            .expect("bal built")
     }
 
     #[test]
@@ -518,26 +436,15 @@ mod tests {
     {
         use revm::database::State as RevmState;
 
-        let mut state = RevmState::builder()
-            .with_database(&mut db)
-            .with_bundle_update()
-            .with_bal_builder()
-            .build();
+        let mut state = RevmState::builder().with_database(&mut db).with_bundle_update().build();
 
-        {
-            let mut executor =
-                evm_config.executor_for_block(&mut state, block).expect("build executor");
-            executor.apply_pre_execution_changes().expect("pre-exec");
-            for (i, tx) in txs.into_iter().enumerate() {
-                executor.evm_mut().db_mut().bump_bal_index();
-                executor
-                    .execute_transaction(tx)
-                    .unwrap_or_else(|e| panic!("tx {i} failed during reference build: {e:?}"));
-            }
-            executor.evm_mut().db_mut().bump_bal_index();
-            executor.apply_post_execution_changes().expect("post-exec");
-        }
-        state.take_built_alloy_bal().expect("with_bal_builder was set")
+        evm_config
+            .executor_for_block(&mut state, block)
+            .expect("build executor")
+            .execute_block(txs)
+            .expect("execute block")
+            .block_access_list
+            .expect("bal built")
     }
 
     #[test]
@@ -683,27 +590,17 @@ mod tests {
     ) -> (ShadowOutput, BlockAccessList) {
         use revm::database::State as RevmState;
 
-        let mut state = RevmState::builder()
-            .with_database(canonical_db)
-            .with_bundle_update()
-            .with_bal_builder()
-            .build();
+        let mut state =
+            RevmState::builder().with_database(canonical_db).with_bundle_update().build();
 
         let block_result = {
-            let mut executor =
-                evm_config.executor_for_block(&mut state, block).expect("build serial executor");
-            executor.apply_pre_execution_changes().expect("serial pre-exec");
-            for (i, tx) in txs.iter().cloned().enumerate() {
-                executor.evm_mut().db_mut().bump_bal_index();
-                executor
-                    .execute_transaction(tx)
-                    .unwrap_or_else(|e| panic!("serial tx {i} failed: {e:?}"));
-            }
-            executor.evm_mut().db_mut().bump_bal_index();
-            executor.apply_post_execution_changes().expect("serial post-exec")
+            evm_config
+                .executor_for_block(&mut state, block)
+                .expect("build serial executor")
+                .execute_block(txs)
+                .expect("execute block")
         };
 
-        let bal = state.take_built_alloy_bal().expect("with_bal_builder was set");
         state.merge_transitions(BundleRetention::Reverts);
         let bundle_state = state.take_bundle();
 
@@ -714,7 +611,7 @@ mod tests {
                 gas_used: block_result.gas_used,
                 requests: block_result.requests,
             },
-            bal,
+            block_result.block_access_list.expect("bal built"),
         )
     }
 
