@@ -94,7 +94,9 @@ Networking:
           Disable Nat discovery
 
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for devp2p peer discovery version 4
+          The UDP address to use for devp2p peer discovery version 4.
+
+          If unset and `--net-if.experimental` is used, discv4 binds to the resolved interface address.
 
           [default: 0.0.0.0]
 
@@ -264,7 +266,7 @@ Networking:
       --net-if.experimental <IF_NAME>
           Name of network interface used to communicate with peers.
 
-          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried. If `--discovery.addr` is left at its default, discv4 will also bind to the resolved interface address.
 
       --tx-propagation-policy <TX_PROPAGATION_POLICY>
           Transaction Propagation Policy
@@ -513,6 +515,11 @@ RPC State Cache:
 
       --rpc-cache.max-headers <MAX_HEADERS>
           Max number of headers in cache
+
+          [default: 1000]
+
+      --rpc-cache.max-bals <MAX_BALS>
+          Max number of revm block access lists in cache
 
           [default: 1000]
 
@@ -841,6 +848,9 @@ Database:
 
           Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
 
+      --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
+          Number of recent blocks to keep in the in-memory BAL store cache
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -961,9 +971,9 @@ Engine:
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
-          This value must be greater than `--engine.persistence-threshold`.
+          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
-          [default: 16]
+          This value must be greater than `--engine.persistence-threshold`.
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
@@ -1089,10 +1099,10 @@ Engine:
           When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
       --engine.disable-bal-parallel-execution
-          Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled, falling back to transaction-based prewarming even when a BAL is available
+          Disable BAL (Block Access List, EIP-7928) based parallel execution
 
       --engine.disable-bal-parallel-state-root
-          Disable BAL-driven parallel state root computation. When set, the BAL hashed post state is not sent to the multiproof task for early parallel state root computation
+          Disable BAL-driven parallel state root computation. This is only valid together with `--engine.disable-bal-parallel-execution`
 
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache

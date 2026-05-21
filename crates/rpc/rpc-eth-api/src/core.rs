@@ -5,7 +5,6 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
@@ -19,7 +18,7 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthApiError, FillTransaction};
+use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -88,6 +87,13 @@ pub trait EthApi<
     /// Returns the chain ID of the current network.
     #[method(name = "chainId")]
     async fn chain_id(&self) -> RpcResult<Option<U64>>;
+
+    /// Returns effective routing capabilities for this node.
+    ///
+    /// See the `eth_capabilities` execution API proposal:
+    /// <https://github.com/ethereum/execution-apis/pull/755>.
+    #[method(name = "capabilities")]
+    fn capabilities(&self) -> RpcResult<EthCapabilities>;
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
@@ -186,6 +192,10 @@ pub trait EthApi<
         address: Address,
         nonce: U64,
     ) -> RpcResult<Option<T>>;
+
+    /// Returns all transactions in the local pending pool.
+    #[method(name = "pendingTransactions")]
+    fn pending_transactions(&self) -> RpcResult<Vec<T>>;
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
@@ -314,6 +324,10 @@ pub trait EthApi<
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
+    /// Returns the base fee for the next block, or `null` before London activation.
+    #[method(name = "baseFee")]
+    async fn base_fee(&self) -> RpcResult<Option<U256>>;
+
     /// Introduced in EIP-4844, returns the current blob base fee in wei.
     #[method(name = "blobBaseFee")]
     async fn blob_base_fee(&self) -> RpcResult<U256>;
@@ -418,6 +432,10 @@ pub trait EthApi<
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<Value>>;
 
+    /// Returns the EIP-7928 block access list for a given block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
@@ -472,6 +490,12 @@ where
     async fn chain_id(&self) -> RpcResult<Option<U64>> {
         trace!(target: "rpc::eth", "Serving eth_chainId");
         Ok(Some(EthApiSpec::chain_id(self)))
+    }
+
+    /// Handler for: `eth_capabilities`
+    fn capabilities(&self) -> RpcResult<EthCapabilities> {
+        trace!(target: "rpc::eth", "Serving eth_capabilities");
+        EthApiSpec::capabilities(self).to_rpc_result()
     }
 
     /// Handler for: `eth_getBlockByHash`
@@ -639,6 +663,12 @@ where
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
         Ok(EthTransactions::get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true)
             .await?)
+    }
+
+    /// Handler for: `eth_pendingTransactions`
+    fn pending_transactions(&self) -> RpcResult<Vec<RpcTransaction<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", "Serving eth_pendingTransactions");
+        Ok(EthTransactions::pending_transactions(self)?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
@@ -814,6 +844,12 @@ where
         Ok(EthFees::blob_base_fee(self).await?)
     }
 
+    /// Handler for: `eth_baseFee`
+    async fn base_fee(&self) -> RpcResult<Option<U256>> {
+        trace!(target: "rpc::eth", "Serving eth_baseFee");
+        Ok(EthFees::base_fee(self).await?)
+    }
+
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
     // caching of it in the LRU cache.
     // When new RPC call is executed, the cache gets locked, we check it for the historical fees
@@ -930,6 +966,7 @@ where
 
         Ok(Some(json))
     }
+
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
     async fn block_access_list_by_block_number(
         &self,
@@ -943,11 +980,22 @@ where
 
         Ok(Some(json))
     }
+
+    /// Handler for: `eth_getBlockAccessList`
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
+
+        let bal = self.get_block_access_list(block_id).await?;
+        let json = serde_json::to_value(&bal)
+            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
+
+        Ok(Some(json))
+    }
+
     /// Handler for: `eth_getBlockAccessListRaw`
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
 
-        let bal = self.get_block_access_list(block).await?;
-        Ok(bal.map(|b: BlockAccessList| alloy_rlp::encode(b).into()))
+        Ok(self.get_raw_block_access_list(block).await?)
     }
 }

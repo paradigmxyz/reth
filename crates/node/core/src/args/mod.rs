@@ -26,7 +26,7 @@ pub use log::{ColorMode, DefaultLogArgs, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
-pub use trace::{OtlpInitStatus, OtlpLogsStatus, TraceArgs};
+pub use trace::{DefaultTraceValues, OtlpInitStatus, OtlpLogsStatus, TraceArgs};
 
 /// `MetricArgs` to configure metrics.
 mod metric;
@@ -59,10 +59,6 @@ pub use pruning::{DefaultPruningValues, PruneConfigKind, PruningArgs};
 /// DatadirArgs for configuring data storage paths
 mod datadir_args;
 pub use datadir_args::DatadirArgs;
-
-/// BenchmarkArgs struct for configuring the benchmark to run
-mod benchmark_args;
-pub use benchmark_args::{BenchmarkArgs, RpcBlockFetchRetries, WaitForPersistence};
 
 /// EngineArgs for configuring the engine
 mod engine;

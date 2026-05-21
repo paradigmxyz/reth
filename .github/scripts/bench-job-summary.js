@@ -1,4 +1,4 @@
-// Generates a rich GitHub Actions job summary for reth-bench results.
+// Generates a rich GitHub Actions job summary for benchmark results.
 //
 // Reads from environment:
 //   BENCH_WORK_DIR       – Directory containing summary.json
@@ -7,7 +7,7 @@
 //   BENCH_CORES          – CPU core limit (0 = all)
 //   BENCH_WARMUP_BLOCKS  – Number of warmup blocks
 //   BENCH_SAMPLY         – 'true' if samply profiling was enabled
-//   BENCH_ABBA           – 'true' if ABBA interleaved order was used
+//   BENCH_RUN_PAIRS      – Number of configured benchmark run pairs
 //
 // Usage from actions/github-script:
 //   const jobSummary = require('./.github/scripts/bench-job-summary.js');

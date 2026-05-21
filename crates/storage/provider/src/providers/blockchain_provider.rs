@@ -6,8 +6,8 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, InMemoryBalStore,
-    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
+    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
@@ -104,6 +104,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let bal_store = storage.bal_store().clone();
+
         Ok(Self {
             database: storage,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(
@@ -111,7 +113,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
-            bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
+            bal_store,
         })
     }
 

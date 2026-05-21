@@ -1,7 +1,7 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{map::B256Map, B128, B256};
 use parking_lot::RwLock;
@@ -225,6 +225,25 @@ impl BlobStore for InMemoryBlobStore {
         self.get_by_versioned_hashes_cells_eip7594(versioned_hashes, indices_bitarray)
     }
 
+    fn get_cells(
+        &self,
+        tx: B256,
+        indices_bitarray: B128,
+    ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
+        let Some(sidecar) = self.get(tx)? else {
+            return Ok(None);
+        };
+
+        let Some(sidecar) = sidecar.as_eip7594() else {
+            return Ok(None);
+        };
+
+        sidecar
+            .compute_matching_cells(BlobCellMask::new(indices_bitarray))
+            .map(Some)
+            .map_err(|err| BlobStoreError::Other(Box::new(err)))
+    }
+
     fn data_size_hint(&self) -> Option<usize> {
         Some(self.inner.size_tracker.data_size())
     }
@@ -314,5 +333,28 @@ mod tests {
         assert_eq!(cells_and_proofs.proofs.len(), 2);
         assert!(cells_and_proofs.blob_cells.iter().all(Option::is_some));
         assert_eq!(cells_and_proofs.proofs, vec![Some(Bytes48::default()); 2]);
+    }
+
+    #[test]
+    fn mem_get_cells_returns_requested_cells() {
+        let store = InMemoryBlobStore::default();
+
+        let tx_hash = B256::random();
+        let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
+        store.insert(tx_hash, sidecar).unwrap();
+
+        let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
+        let expected = store
+            .get_by_versioned_hashes_v4(&[versioned_hash], indices_bitarray)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .unwrap()
+            .blob_cells
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(store.get_cells(tx_hash, indices_bitarray).unwrap(), Some(expected));
     }
 }

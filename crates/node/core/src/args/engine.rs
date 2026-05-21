@@ -289,10 +289,16 @@ impl Default for DefaultEngineValues {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
-            bal_parallel_execution_disabled: true,
+            bal_parallel_execution_disabled: false,
             bal_parallel_state_root_disabled: false,
         }
     }
+}
+
+fn default_persistence_backpressure_threshold(persistence_threshold: u64) -> u64 {
+    DefaultEngineValues::get_global()
+        .persistence_backpressure_threshold
+        .max(persistence_threshold.saturating_mul(2))
 }
 
 /// Parameters for configuring the engine driver.
@@ -310,9 +316,12 @@ pub struct EngineArgs {
 
     /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
     ///
+    /// If omitted, this defaults to the larger of the default backpressure threshold and twice
+    /// `--engine.persistence-threshold`.
+    ///
     /// This value must be greater than `--engine.persistence-threshold`.
-    #[arg(long = "engine.persistence-backpressure-threshold", default_value_t = DefaultEngineValues::get_global().persistence_backpressure_threshold)]
-    pub persistence_backpressure_threshold: u64,
+    #[arg(long = "engine.persistence-backpressure-threshold")]
+    pub persistence_backpressure_threshold: Option<u64>,
 
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
@@ -511,13 +520,12 @@ pub struct EngineArgs {
     )]
     pub suppress_persistence_during_build: bool,
 
-    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. Defaults to disabled,
-    /// falling back to transaction-based prewarming even when a BAL is available.
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution.
     #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
     pub bal_parallel_execution_disabled: bool,
 
-    /// Disable BAL-driven parallel state root computation. When set, the BAL hashed post state
-    /// is not sent to the multiproof task for early parallel state root computation.
+    /// Disable BAL-driven parallel state root computation. This is only valid together with
+    /// `--engine.disable-bal-parallel-execution`.
     #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
     pub bal_parallel_state_root_disabled: bool,
 
@@ -545,7 +553,7 @@ impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
             persistence_threshold,
-            persistence_backpressure_threshold,
+            persistence_backpressure_threshold: _,
             memory_block_buffer_target,
             invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
@@ -578,7 +586,7 @@ impl Default for EngineArgs {
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
-            persistence_backpressure_threshold,
+            persistence_backpressure_threshold: None,
             memory_block_buffer_target,
             invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
@@ -622,13 +630,25 @@ impl Default for EngineArgs {
 }
 
 impl EngineArgs {
+    /// Returns the effective persistence backpressure threshold.
+    pub fn persistence_backpressure_threshold(&self) -> u64 {
+        self.persistence_backpressure_threshold.unwrap_or_else(|| {
+            default_persistence_backpressure_threshold(self.persistence_threshold)
+        })
+    }
+
     /// Validates cross-field engine arguments.
     pub fn validate(&self) -> eyre::Result<()> {
+        let persistence_backpressure_threshold = self.persistence_backpressure_threshold();
         ensure!(
-            self.persistence_backpressure_threshold > self.persistence_threshold,
+            persistence_backpressure_threshold > self.persistence_threshold,
             "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
-            self.persistence_backpressure_threshold,
+            persistence_backpressure_threshold,
             self.persistence_threshold
+        );
+        ensure!(
+            self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
+            "--engine.disable-bal-parallel-state-root requires --engine.disable-bal-parallel-execution because BAL parallel execution depends on BAL prewarm state-root updates"
         );
         Ok(())
     }
@@ -636,8 +656,8 @@ impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
         let config = TreeConfig::default()
+            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
-            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -693,6 +713,60 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+        assert_eq!(
+            args.persistence_backpressure_threshold(),
+            DefaultEngineValues::get_global().persistence_backpressure_threshold
+        );
+    }
+
+    #[test]
+    fn default_backpressure_threshold_uses_parsed_persistence_args() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "100",
+            "--engine.memory-block-buffer-target",
+            "50",
+        ])
+        .args;
+
+        assert_eq!(args.persistence_backpressure_threshold(), 200);
+
+        let tree_config = args.tree_config();
+        assert_eq!(tree_config.persistence_threshold(), 100);
+        assert_eq!(tree_config.memory_block_buffer_target(), 50);
+        assert_eq!(tree_config.persistence_backpressure_threshold(), 200);
+    }
+
+    #[test]
+    fn default_backpressure_threshold_uses_global_default_when_larger() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "4",
+        ])
+        .args;
+
+        assert_eq!(
+            args.persistence_backpressure_threshold(),
+            DefaultEngineValues::get_global().persistence_backpressure_threshold
+        );
+    }
+
+    #[test]
+    fn explicit_backpressure_threshold_overrides_calculated_default() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "100",
+            "--engine.memory-block-buffer-target",
+            "50",
+            "--engine.persistence-backpressure-threshold",
+            "101",
+        ])
+        .args;
+
+        assert_eq!(args.persistence_backpressure_threshold(), 101);
     }
 
     #[test]
@@ -700,7 +774,7 @@ mod tests {
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
-            persistence_backpressure_threshold: 101,
+            persistence_backpressure_threshold: Some(101),
             memory_block_buffer_target: 50,
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -792,13 +866,26 @@ mod tests {
     fn validate_rejects_invalid_backpressure_threshold() {
         let args = EngineArgs {
             persistence_threshold: 4,
-            persistence_backpressure_threshold: 4,
+            persistence_backpressure_threshold: Some(4),
             ..EngineArgs::default()
         };
 
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.persistence-backpressure-threshold"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_rejects_bal_parallel_execution_without_bal_parallel_state_root() {
+        let args = EngineArgs {
+            bal_parallel_execution_disabled: false,
+            bal_parallel_state_root_disabled: true,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.disable-bal-parallel-state-root"));
+        assert!(err.contains("engine.disable-bal-parallel-execution"));
     }
 
     #[test]

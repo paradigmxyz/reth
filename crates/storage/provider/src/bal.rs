@@ -51,9 +51,17 @@ pub struct BalConfig {
 }
 
 impl BalConfig {
+    /// Default block distance for BALs kept in memory.
+    pub const DEFAULT_IN_MEMORY_RETENTION_DISTANCE: u64 = BAL_RETENTION_PERIOD_SLOTS;
+
     /// Returns a config with no in-memory BAL retention limit.
     pub const fn unbounded() -> Self {
         Self { in_memory_retention: None }
+    }
+
+    /// Returns a config that keeps BALs within the given block distance in memory.
+    pub const fn with_in_memory_retention_distance(blocks: u64) -> Self {
+        Self::with_in_memory_retention(PruneMode::Distance(blocks))
     }
 
     /// Returns a config with the given in-memory BAL retention policy.
@@ -64,7 +72,7 @@ impl BalConfig {
 
 impl Default for BalConfig {
     fn default() -> Self {
-        Self::with_in_memory_retention(PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS))
+        Self::with_in_memory_retention_distance(Self::DEFAULT_IN_MEMORY_RETENTION_DISTANCE)
     }
 }
 
@@ -132,6 +140,31 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
+    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+        if entries.is_empty() {
+            return Ok(())
+        }
+
+        let mut inner = self.inner.write();
+        inner.entries.reserve(entries.len());
+        for (num_hash, bal) in &entries {
+            inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
+        }
+        if let Some(highest_block_number) = inner.highest_block_number {
+            inner.prune(self.config.in_memory_retention, highest_block_number);
+        }
+        drop(inner);
+
+        for (num_hash, bal) in entries {
+            self.notifications.notify(BalNotification::new(num_hash, bal));
+        }
+        Ok(())
+    }
+
+    fn flush(&self) -> ProviderResult<()> {
+        Ok(())
+    }
+
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
     }
@@ -151,18 +184,14 @@ impl BalStore for InMemoryBalStore {
         &self,
         block_hashes: &[BlockHash],
         limit: GetBlockAccessListLimit,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         let inner = self.inner.read();
         let mut size = 0;
 
         for hash in block_hashes {
-            let bal = inner
-                .entries
-                .get(hash)
-                .map(|entry| entry.bal.clone())
-                .unwrap_or_else(|| Bytes::from_static(&[0xc0]));
-            size += bal.len();
+            let bal = inner.entries.get(hash).map(|entry| entry.bal.clone());
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
             out.push(bal);
 
             if limit.exceeds(size) {
@@ -171,10 +200,6 @@ impl BalStore for InMemoryBalStore {
         }
 
         Ok(())
-    }
-
-    fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
     }
 
     fn bal_stream(&self) -> BalNotificationStream {
@@ -205,10 +230,31 @@ mod tests {
     }
 
     #[test]
-    fn range_lookup_is_empty() {
+    fn insert_many_and_lookup_by_hash() {
+        let store = InMemoryBalStore::default();
+        let hash0 = B256::random();
+        let hash1 = B256::random();
+        let bal0 = sealed_bal(Bytes::from_static(b"bal0"));
+        let bal1 = sealed_bal(Bytes::from_static(b"bal1"));
+
+        store
+            .insert_many(vec![
+                (NumHash::new(1, hash0), bal0.clone()),
+                (NumHash::new(2, hash1), bal1),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[hash0, hash1]).unwrap(),
+            vec![Some(bal0.clone_inner()), Some(Bytes::from_static(b"bal1"))]
+        );
+    }
+
+    #[test]
+    fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
-        assert!(store.get_by_range(1, 10).unwrap().is_empty());
+        store.flush().unwrap();
     }
 
     #[test]
@@ -232,7 +278,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(limited, vec![bal0, bal1]);
+        assert_eq!(limited, vec![Some(bal0), Some(bal1)]);
     }
 
     #[test]
@@ -328,6 +374,26 @@ mod tests {
     }
 
     #[test]
+    fn in_memory_retention_distance_prunes_old_bals() {
+        let store = InMemoryBalStore::new(BalConfig::with_in_memory_retention_distance(2));
+        let old_hash = B256::random();
+        let retained_hash = B256::random();
+        let tip_hash = B256::random();
+        let old_bal = Bytes::from_static(b"old");
+        let retained_bal = Bytes::from_static(b"retained");
+        let tip_bal = Bytes::from_static(b"tip");
+
+        store.insert(NumHash::new(1, old_hash), sealed_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(2, retained_hash), sealed_bal(retained_bal.clone())).unwrap();
+        store.insert(NumHash::new(4, tip_hash), sealed_bal(tip_bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[old_hash, retained_hash, tip_hash]).unwrap(),
+            vec![None, Some(retained_bal), Some(tip_bal)]
+        );
+    }
+
+    #[test]
     fn reinserting_hash_updates_number_index() {
         let store =
             InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Before(2)));
@@ -355,6 +421,32 @@ mod tests {
         assert_eq!(
             stream.next().await.unwrap(),
             BalNotification::new(NumHash::new(block_number, hash), sealed_bal)
+        );
+    }
+
+    #[tokio::test]
+    async fn insert_many_notifies_subscribers() {
+        let store = InMemoryBalStore::default();
+        let mut stream = store.bal_stream();
+        let hash0 = B256::random();
+        let hash1 = B256::random();
+        let bal0 = sealed_bal(Bytes::from_static(b"bal0"));
+        let bal1 = sealed_bal(Bytes::from_static(b"bal1"));
+
+        store
+            .insert_many(vec![
+                (NumHash::new(1, hash0), bal0.clone()),
+                (NumHash::new(2, hash1), bal1.clone()),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            stream.next().await.unwrap(),
+            BalNotification::new(NumHash::new(1, hash0), bal0)
+        );
+        assert_eq!(
+            stream.next().await.unwrap(),
+            BalNotification::new(NumHash::new(2, hash1), bal1)
         );
     }
 
