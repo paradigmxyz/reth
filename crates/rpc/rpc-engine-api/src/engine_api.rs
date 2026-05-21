@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
@@ -98,6 +98,7 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
+        let cell_custody = network.cell_custody().clone();
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -111,6 +112,7 @@ where
             tx_pool,
             validator,
             accept_execution_requests_hash,
+            cell_custody,
             is_syncing,
         });
         Self { inner }
@@ -385,8 +387,11 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
-        _custody_columns: Option<B128>,
+        custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(custody_columns) = custody_columns {
+            self.inner.cell_custody.set(custody_columns);
+        }
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
     }
@@ -1279,11 +1284,11 @@ where
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
-        _custody_columns: Option<B128>,
+        custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
         Ok(self
-            .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, _custody_columns)
+            .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, custody_columns)
             .await?)
     }
 
@@ -1559,6 +1564,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// Engine validator.
     validator: Validator,
     accept_execution_requests_hash: bool,
+    /// Shared blob cell custody bitmap.
+    cell_custody: CellCustody,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
 }
@@ -1856,6 +1863,11 @@ mod tests {
             1
         }
 
+        fn cell_custody(&self) -> &CellCustody {
+            static CELL_CUSTODY: std::sync::OnceLock<CellCustody> = std::sync::OnceLock::new();
+            CELL_CUSTODY.get_or_init(CellCustody::default)
+        }
+
         fn is_syncing(&self) -> bool {
             self.syncing
         }
@@ -1925,6 +1937,151 @@ mod tests {
 
         let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128));
         assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn fcu_v4_updates_shared_cell_custody_before_forkchoice_result() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+        let network = NoopNetwork::default();
+        let cell_custody = network.cell_custody().clone();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            network,
+        );
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x33; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let custody_columns = B128::from(0b1010u128);
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v4(state, None, Some(custody_columns)).await
+        });
+
+        let request = tokio::time::timeout(std::time::Duration::from_secs(1), engine_rx.recv())
+            .await
+            .expect("timed out waiting for forkchoiceUpdated request")
+            .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(payload_attrs.is_none());
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+        assert_eq!(cell_custody.get(), custody_columns);
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        api_task
+            .await
+            .expect("api task should not panic")
+            .expect("forkchoiceUpdatedV4 should succeed");
+        assert_eq!(cell_custody.get(), custody_columns);
+    }
+
+    #[tokio::test]
+    async fn fcu_v4_updates_shared_cell_custody_when_payload_attrs_invalid() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+        let network = NoopNetwork::default();
+        let cell_custody = network.cell_custody().clone();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            network,
+        );
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x44; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: None,
+            slot_number: None,
+        };
+        let custody_columns = B128::from(0b1010u128);
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v4(state, Some(payload_attributes), Some(custody_columns)).await
+        });
+
+        let request = tokio::time::timeout(std::time::Duration::from_secs(1), engine_rx.recv())
+            .await
+            .expect("timed out waiting for forkchoiceUpdated request")
+            .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "when attrs are invalid, API should first evaluate forkchoice without attrs"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+        assert_eq!(cell_custody.get(), custody_columns);
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        let response = api_task.await.expect("api task should not panic");
+        assert_matches!(
+            response,
+            Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::PayloadAttributes(_)
+            ))
+        );
     }
 
     #[tokio::test]
