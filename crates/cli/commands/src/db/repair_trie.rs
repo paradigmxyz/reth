@@ -41,6 +41,38 @@ use tracing::{info, warn};
 
 const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
 
+#[derive(Debug)]
+struct ProgressEstimate {
+    last_progress_percent: Option<f64>,
+    last_sample_time: Instant,
+}
+
+impl ProgressEstimate {
+    fn new(now: Instant) -> Self {
+        Self { last_progress_percent: None, last_sample_time: now }
+    }
+
+    fn estimate_eta(&mut self, progress_percent: f64) -> Option<Duration> {
+        let now = Instant::now();
+        let eta = self.last_progress_percent.and_then(|last_progress_percent| {
+            let delta_progress = progress_percent - last_progress_percent;
+            let delta_seconds = now.duration_since(self.last_sample_time).as_secs_f64();
+            if delta_progress > 0.0 && delta_seconds > 0.0 && progress_percent < 100.0 {
+                Duration::try_from_secs_f64(
+                    (100.0 - progress_percent) / delta_progress * delta_seconds,
+                )
+                .ok()
+            } else {
+                None
+            }
+        });
+
+        self.last_progress_percent = Some(progress_percent);
+        self.last_sample_time = now;
+        eta
+    }
+}
+
 /// The arguments for the `reth db repair-trie` command
 #[derive(Parser, Debug)]
 pub struct Command {
@@ -133,8 +165,8 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
     let metrics = RepairTrieMetrics::new();
 
     let mut inconsistent_nodes = 0;
-    let start_time = Instant::now();
     let mut last_progress_time = Instant::now();
+    let mut progress_estimate = ProgressEstimate::new(last_progress_time);
 
     // Iterate over the verifier and repair inconsistencies
     for output_result in verifier {
@@ -142,7 +174,7 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
 
         if let Output::Progress(path) = output {
             if last_progress_time.elapsed() > PROGRESS_PERIOD {
-                output_progress(path, start_time, inconsistent_nodes);
+                output_progress(path, inconsistent_nodes, &mut progress_estimate);
                 last_progress_time = Instant::now();
             }
         } else {
@@ -257,8 +289,8 @@ where
     let metrics = RepairTrieMetrics::new();
 
     let mut inconsistent_nodes = 0;
-    let start_time = Instant::now();
     let mut last_progress_time = Instant::now();
+    let mut progress_estimate = ProgressEstimate::new(last_progress_time);
 
     // Iterate over the verifier and repair inconsistencies
     for output_result in verifier {
@@ -327,7 +359,7 @@ where
             }
             Output::Progress(path) => {
                 if last_progress_time.elapsed() > PROGRESS_PERIOD {
-                    output_progress(path, start_time, inconsistent_nodes);
+                    output_progress(path, inconsistent_nodes, &mut progress_estimate);
                     last_progress_time = Instant::now();
                 }
             }
@@ -377,7 +409,11 @@ where
 }
 
 /// Output progress information based on the last seen account path.
-fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_nodes: u64) {
+fn output_progress(
+    last_account: Nibbles,
+    inconsistent_nodes: u64,
+    progress_estimate: &mut ProgressEstimate,
+) {
     // Calculate percentage based on position in the trie path space
     // For progress estimation, we'll use the first few nibbles as an approximation
 
@@ -396,18 +432,14 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
     let progress_percent = current_value as f64 / u64::MAX as f64 * 100.0;
     let progress_percent_str = format!("{progress_percent:.2}");
 
-    // Calculate ETA based on current speed
-    let elapsed = start_time.elapsed();
-    let elapsed_secs = elapsed.as_secs_f64();
-
-    let estimated_total_time =
-        if progress_percent > 0.0 { elapsed_secs / (progress_percent / 100.0) } else { 0.0 };
-    let remaining_time = estimated_total_time - elapsed_secs;
-    let eta_duration = Duration::from_secs(remaining_time as u64);
+    let eta = progress_estimate
+        .estimate_eta(progress_percent)
+        .map(|duration| humantime::format_duration(duration).to_string())
+        .unwrap_or_else(|| "??".to_string());
 
     info!(
         progress_percent = progress_percent_str,
-        eta = %humantime::format_duration(eta_duration),
+        eta = %eta,
         inconsistent_nodes,
         "Repairing trie tables",
     );
