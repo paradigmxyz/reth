@@ -615,7 +615,7 @@ where
     T: ProviderNodeTypes,
 {
     /// Returns access to the underlying database.
-    pub const fn database(&self) -> &T::DB {
+    pub fn database(&self) -> &T::DB {
         self.right().db_ref()
     }
 
@@ -789,7 +789,7 @@ where
     T: FullNodeTypes<Types: NodeTypesForProvider>,
 {
     /// Returns access to the underlying database.
-    pub const fn database(&self) -> &T::DB {
+    pub fn database(&self) -> &T::DB {
         self.provider_factory().db_ref()
     }
 
