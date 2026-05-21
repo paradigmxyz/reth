@@ -36,24 +36,6 @@ PERSIST_WAIT_MIN_TOTAL_PCT = 0.1
 TARGET_METRIC_BLOCK_HEIGHT_QUERY = "reth_blockchain_tree_canonical_chain_height"
 TARGET_METRIC_COUNTER_STATS = ("mean",)
 TARGET_METRIC_MIN_PAIRED_OBSERVATIONS = 30
-TARGET_METRIC_IGNORED_CARDINALITY_LABELS = frozenset(
-    (
-        "bal-enabled",
-        "bal-mode",
-        "bench_sha",
-        "benchmark_id",
-        "benchmark_run",
-        "git-ref",
-        "git-sha",
-        "job",
-        "platform",
-        "quantile",
-        "reference_epoch",
-        "run_start_epoch",
-        "run_type",
-        "scenario",
-    )
-)
 SELECTOR_RE = re.compile(
     r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(?P<labels>[^}]*)\})?$"
 )
@@ -655,12 +637,52 @@ def target_metric_identity_key(labels: dict[str, str]) -> tuple[tuple[str, str],
     return tuple(sorted(labels.items()))
 
 
-def target_metric_identity_labels(query: str, sample_labels: dict[str, str]) -> dict[str, str]:
-    _, _, label_filters = parse_target_metric_query(query)
+def target_metric_candidate_identity_labels(
+    query: str,
+    sample_labels: dict[str, str],
+) -> dict[str, str]:
+    _aggregate, _metric_name, label_filters = parse_target_metric_query(query)
     return {
         key: value
         for key, value in sorted(sample_labels.items())
-        if key not in label_filters and key not in TARGET_METRIC_IGNORED_CARDINALITY_LABELS
+        if key not in label_filters
+    }
+
+
+def target_metric_variable_identity_label_keys(
+    scrapes: list[dict],
+    query: str,
+) -> set[str]:
+    aggregate, _metric_name, _label_filters = parse_target_metric_query(query)
+    if aggregate == "sum":
+        return set()
+
+    matched_labels = []
+    candidate_keys = set()
+    for scrape in scrapes:
+        _aggregate, matched_samples = query_samples(scrape["samples"], query)
+        for sample in matched_samples:
+            labels = target_metric_candidate_identity_labels(query, sample["labels"])
+            matched_labels.append(labels)
+            candidate_keys.update(labels)
+
+    return {
+        key
+        for key in candidate_keys
+        if len({labels.get(key) for labels in matched_labels}) > 1
+    }
+
+
+def target_metric_identity_labels(
+    query: str,
+    sample_labels: dict[str, str],
+    identity_label_keys: set[str],
+) -> dict[str, str]:
+    candidate_labels = target_metric_candidate_identity_labels(query, sample_labels)
+    return {
+        key: value
+        for key, value in candidate_labels.items()
+        if key in identity_label_keys
     }
 
 
@@ -672,7 +694,11 @@ def target_metric_display_query(query: str, identity_labels: dict[str, str] | No
     return re.sub(r"\s+", "", format_target_metric_query(metric_name, display_labels))
 
 
-def group_query_samples_by_identity(samples: list[dict], query: str) -> tuple[str, dict]:
+def group_query_samples_by_identity(
+    samples: list[dict],
+    query: str,
+    identity_label_keys: set[str],
+) -> tuple[str, dict]:
     aggregate, matched_samples = query_samples(samples, query)
     groups = {}
     if aggregate == "sum":
@@ -681,7 +707,11 @@ def group_query_samples_by_identity(samples: list[dict], query: str) -> tuple[st
         return aggregate, groups
 
     for sample in matched_samples:
-        identity_labels = target_metric_identity_labels(query, sample["labels"])
+        identity_labels = target_metric_identity_labels(
+            query,
+            sample["labels"],
+            identity_label_keys,
+        )
         key = target_metric_identity_key(identity_labels)
         group = groups.setdefault(key, {"identity_labels": identity_labels, "samples": []})
         group["samples"].append(sample)
@@ -988,10 +1018,14 @@ def query_counter_target_metric_run(
     counter: dict,
     run_label: str,
     metadata: dict,
+    identity_label_keys: set[str],
 ) -> dict[tuple[tuple[str, str], ...], dict]:
     query = counter["query"]
     aggregate, _metric_name, _label_filters = parse_target_metric_query(query)
-    grouped_scrapes = [group_query_samples_by_identity(scrape["samples"], query)[1] for scrape in relevant_scrapes]
+    grouped_scrapes = [
+        group_query_samples_by_identity(scrape["samples"], query, identity_label_keys)[1]
+        for scrape in relevant_scrapes
+    ]
     identities = collect_metric_identities(grouped_scrapes)
     if not identities:
         raise ValueError(f"Target metric '{query}' in run '{run_label}' had no sampled values")
@@ -1072,9 +1106,13 @@ def query_histogram_target_metric_run(
     histogram: dict,
     run_label: str,
     metadata: dict,
+    identity_label_keys: set[str],
 ) -> dict[tuple[tuple[str, str], ...], dict]:
     sum_query = histogram_counter_query(histogram["query"], "sum")
-    sum_grouped_scrapes = [group_query_samples_by_identity(scrape["samples"], sum_query)[1] for scrape in relevant_scrapes]
+    sum_grouped_scrapes = [
+        group_query_samples_by_identity(scrape["samples"], sum_query, identity_label_keys)[1]
+        for scrape in relevant_scrapes
+    ]
     mean_identities = collect_metric_identities(sum_grouped_scrapes)
 
     metrics_by_identity = {}
@@ -1139,7 +1177,7 @@ def query_histogram_target_metric_run(
     return metrics_by_identity
 
 
-def query_target_metric_run(path: str, config: dict) -> tuple[str, dict[str, dict[str, dict]]]:
+def load_target_metric_run_context(path: str) -> dict:
     run_label = run_label_from_path(path)
     metadata = load_target_metric_range(path)
     scrapes = load_target_metric_scrapes(path)
@@ -1156,17 +1194,75 @@ def query_target_metric_run(path: str, config: dict) -> tuple[str, dict[str, dic
         )
     for scrape in relevant_scrapes:
         scrape["block_height"] = evaluate_query(scrape["samples"], TARGET_METRIC_BLOCK_HEIGHT_QUERY)
+    return {
+        "run_label": run_label,
+        "metadata": metadata,
+        "relevant_scrapes": relevant_scrapes,
+    }
+
+
+def collect_target_metric_identity_label_keys(
+    run_contexts: list[dict],
+    config: dict,
+) -> dict[str, set[str]]:
+    identity_label_keys_by_query = {}
+
+    for counter in config.get("counters", []):
+        query = counter["query"]
+        identity_label_keys_by_query[query] = set().union(
+            *(
+                target_metric_variable_identity_label_keys(
+                    context["relevant_scrapes"],
+                    query,
+                )
+                for context in run_contexts
+            )
+        )
+
+    for histogram in config.get("histograms", []):
+        query = histogram_counter_query(histogram["query"], "sum")
+        identity_label_keys_by_query[query] = set().union(
+            *(
+                target_metric_variable_identity_label_keys(
+                    context["relevant_scrapes"],
+                    query,
+                )
+                for context in run_contexts
+            )
+        )
+
+    return identity_label_keys_by_query
+
+
+def query_target_metric_run(
+    run_context: dict,
+    config: dict,
+    identity_label_keys_by_query: dict[str, set[str]],
+) -> tuple[str, dict[str, dict[str, dict]]]:
+    run_label = run_context["run_label"]
+    metadata = run_context["metadata"]
+    relevant_scrapes = run_context["relevant_scrapes"]
 
     counters = {}
     for counter in config.get("counters", []):
+        query = counter["query"]
         counters[counter["query"]] = query_counter_target_metric_run(
-            relevant_scrapes, counter, run_label, metadata
+            relevant_scrapes,
+            counter,
+            run_label,
+            metadata,
+            identity_label_keys_by_query[query],
         )
 
     histograms = {}
     for histogram in config.get("histograms", []):
+        query = histogram_counter_query(histogram["query"], "sum")
         histograms[histogram["query"]] = query_histogram_target_metric_run(
-            relevant_scrapes, histogram, run_label, metadata
+            relevant_scrapes,
+            histogram,
+            run_label,
+            metadata,
+            identity_label_keys_by_query[query],
         )
 
     return run_label, {"counters": counters, "histograms": histograms}
@@ -1304,8 +1400,24 @@ def compute_target_metric_summary(
     with open(config_path) as f:
         config = json.load(f)
 
-    baseline_runs = [query_target_metric_run(path, config) for path in baseline_csv_paths]
-    feature_runs = [query_target_metric_run(path, config) for path in feature_csv_paths]
+    baseline_run_contexts = [
+        load_target_metric_run_context(path) for path in baseline_csv_paths
+    ]
+    feature_run_contexts = [
+        load_target_metric_run_context(path) for path in feature_csv_paths
+    ]
+    identity_label_keys_by_query = collect_target_metric_identity_label_keys(
+        baseline_run_contexts + feature_run_contexts,
+        config,
+    )
+    baseline_runs = [
+        query_target_metric_run(context, config, identity_label_keys_by_query)
+        for context in baseline_run_contexts
+    ]
+    feature_runs = [
+        query_target_metric_run(context, config, identity_label_keys_by_query)
+        for context in feature_run_contexts
+    ]
     block_latency_ms = max(
         float(baseline_stats["mean_total_lat_ms"]),
         float(feature_stats["mean_total_lat_ms"]),
