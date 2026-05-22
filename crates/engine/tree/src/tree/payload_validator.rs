@@ -565,6 +565,7 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
+        let mut hashed_state_rx = handle.take_hashed_state_rx();
         let hashed_state: LazyHashedPostState =
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
@@ -572,7 +573,12 @@ where
                     "hashed_post_state",
                 )
                 .entered();
-                Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                let state = if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
+                    state
+                } else {
+                    hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+                };
+                Arc::new(state)
             });
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
