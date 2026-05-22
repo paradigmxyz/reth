@@ -238,16 +238,18 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
-                            .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
-                        targets
-                            .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                if !check_min_len || lower.min_len == 0 || path.len() >= lower.min_len as usize {
+                    return true
+                }
+
+                return targets
+                    .skip_iter()
+                    .take_while(|target| target.key_nibbles.starts_with(path))
+                    .any(|target| path.len() >= target.min_len as usize) ||
+                    targets
+                        .rev_iter()
+                        .take_while(|target| target.key_nibbles.starts_with(path))
+                        .any(|target| path.len() >= target.min_len as usize)
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
