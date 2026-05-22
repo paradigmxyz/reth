@@ -43,6 +43,8 @@ pub struct BbEvmPlan<'a> {
     pub(crate) segments: Vec<BigBlockSegment<'a>>,
     /// Index of the next segment to switch to (starts at 1).
     pub(crate) next_segment: usize,
+    /// Transaction index at which the next segment boundary should be applied.
+    pub(crate) next_segment_start: Option<usize>,
     /// Number of user transactions executed so far.
     pub(crate) tx_counter: usize,
     /// Block hashes to seed for inter-segment BLOCKHASH resolution.
@@ -61,7 +63,9 @@ impl<'a> BbEvmPlan<'a> {
             block_hashes_to_seed.push((finished_block_number, finished_block_hash));
         }
 
-        Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
+        let next_segment_start = segments.get(1).map(|segment| segment.start_tx);
+
+        Self { segments, next_segment: 1, next_segment_start, tx_counter: 0, block_hashes_to_seed }
     }
 
     /// Returns the 256 block hashes relevant to a segment with the given block
@@ -325,6 +329,8 @@ where
         new_cfg_env.disable_base_fee = true;
 
         plan.next_segment += 1;
+        plan.next_segment_start =
+            plan.segments.get(plan.next_segment).map(|segment| segment.start_tx);
 
         // Finish the inner executor for the completed segment. This applies
         // post-execution system calls (EIP-7002/7251) and withdrawal balance
@@ -454,17 +460,15 @@ where
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
+        if offset > 0
+            && let Some(receipt) = self.inner_mut().receipts.last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }
 
         self.plan.tx_counter += 1;
 
-        while self.plan.next_segment < self.plan.segments.len() &&
-            self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
-        {
+        while self.plan.next_segment_start == Some(self.plan.tx_counter) {
             self.apply_segment_boundary().expect("must succeed");
         }
 
