@@ -177,8 +177,10 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
+            if account.info != account.original_info() {
+                let info = if destroyed { None } else { Some(account.info.into()) };
+                hashed_state.accounts.insert(hashed_address, info);
+            }
 
             let mut changed_storage_iter = account
                 .storage
