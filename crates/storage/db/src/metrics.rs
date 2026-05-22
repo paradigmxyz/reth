@@ -100,6 +100,7 @@ impl DatabaseEnvMetrics {
 
     /// Record a metric for database operation executed in `f`.
     /// Panics if a metric recorder is not found for the given table and operation.
+    #[inline]
     pub(crate) fn record_operation<R>(
         &self,
         table: &'static str,
@@ -389,6 +390,7 @@ impl OperationMetrics {
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [`LARGE_VALUE_THRESHOLD_BYTES`].
+    #[inline(always)]
     pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
         self.calls_total.increment(1);
 

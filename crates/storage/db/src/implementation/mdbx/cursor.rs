@@ -47,6 +47,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
     /// size.
     ///
     /// Otherwise, just execute the closure.
+    #[inline]
     fn execute_with_operation_metric<R>(
         &mut self,
         operation: Operation,
