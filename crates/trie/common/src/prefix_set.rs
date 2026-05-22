@@ -206,6 +206,9 @@ impl PrefixSet {
         if self.all {
             return true
         }
+        if self.keys.is_empty() {
+            return false
+        }
 
         while self.index > 0 && &self.keys[self.index] > prefix {
             self.index -= 1;
@@ -235,6 +238,9 @@ impl PrefixSet {
     pub fn contains_range(&mut self, range: Range<&Nibbles>) -> bool {
         if self.all {
             return true
+        }
+        if self.keys.is_empty() {
+            return false
         }
 
         while self.index > 0 && &self.keys[self.index] >= range.end {
