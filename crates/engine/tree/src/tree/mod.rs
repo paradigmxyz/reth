@@ -1680,25 +1680,11 @@ where
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
-                                        let (persistence_tx, persistence_rx) =
-                                            std::sync::mpsc::channel();
-                                        self.runtime.spawn_blocking_named(
-                                            "wait-persist",
-                                            move || {
-                                                let start = Instant::now();
-                                                let result = rx
-                                                    .recv()
-                                                    .expect("persistence state channel closed");
-                                                let _ = persistence_tx.send((
-                                                    result,
-                                                    start_time,
-                                                    start.elapsed(),
-                                                ));
-                                            },
-                                        );
-                                        let (result, start_time, wait_duration) = persistence_rx
+                                        let start = Instant::now();
+                                        let result = rx
                                             .recv()
-                                            .expect("persistence result channel closed");
+                                            .expect("persistence state channel closed");
+                                        let wait_duration = start.elapsed();
                                         let _ = self.on_persistence_complete(result, start_time);
                                         wait_duration
                                     } else {
