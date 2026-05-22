@@ -27,6 +27,7 @@ reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
@@ -59,6 +60,7 @@ std = [
     "reth-trie-common/std",
     "serde_json?/std",
     "dep:reth-tokio-util",
+    "alloy-eip7928/std",
 ]
 
 db-api = [
@@ -79,6 +81,7 @@ serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-rpc-types-engine/serde",
+    "alloy-eip7928/serde",
 ]
 
 serde-bincode-compat = [

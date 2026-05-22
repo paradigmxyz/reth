@@ -1,5 +1,6 @@
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
+use alloy_eip7928::BlockAccessIndex;
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
     Evm,
@@ -64,7 +65,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let signer = *tx.signer();
                 let tx_gas_limit = tx.tx().gas_limit();
 
-                executor.evm_mut().db_mut().set_bal_index(index as u64 + 1);
+                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(BalExecutionError::Evm)?;

@@ -1032,7 +1032,7 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -1260,25 +1260,23 @@ mod tests {
                             EvmStorageSlot::new_changed(
                                 U256::ZERO,
                                 U256::from(rng.random::<u64>()),
-                                0,
+                                TransactionId::ZERO,
                             ),
                         );
                     }
                 }
 
-                let account = revm_state::Account {
-                    info: AccountInfo {
-                        balance: U256::from(rng.random::<u64>()),
-                        nonce: rng.random::<u64>(),
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                        account_id: None,
-                    },
-                    original_info: Box::new(AccountInfo::default()),
-                    storage,
-                    status: AccountStatus::Touched,
-                    transaction_id: 0,
+                let mut account = revm_state::Account::default();
+                account.info = AccountInfo {
+                    balance: U256::from(rng.random::<u64>()),
+                    nonce: rng.random::<u64>(),
+                    code_hash: KECCAK_EMPTY,
+                    code: Some(Default::default()),
+                    account_id: None,
                 };
+                account.storage = storage;
+                account.status = AccountStatus::Touched;
+                account.transaction_id = TransactionId::ZERO;
 
                 state_update.insert(address, account);
             }
