@@ -21,7 +21,7 @@ pub trait AccountReader {
 /// Account reader
 #[auto_impl(&, Arc, Box)]
 pub trait AccountExtReader {
-    /// Iterate over account changesets and return all account address that were changed.
+    /// Iterate over account changesets and return all account addresses that were changed.
     fn changed_accounts_with_range(
         &self,
         _range: RangeInclusive<BlockNumber>,

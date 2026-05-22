@@ -408,7 +408,7 @@ tables! {
     /// * `Address | 100`
     /// * `Address | u64::MAX`
     ///
-    /// What we need to find is number that is one greater than N. Db `seek` function allows us to fetch
+    /// What we need to find is the number that is one greater than N. Db `seek` function allows us to fetch
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
@@ -430,7 +430,7 @@ tables! {
     /// * `Address | StorageKey | 100`
     /// * `Address | StorageKey | u64::MAX`
     ///
-    /// What we need to find is number that is one greater than N. Db `seek` function allows us to fetch
+    /// What we need to find is the number that is one greater than N. Db `seek` function allows us to fetch
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.

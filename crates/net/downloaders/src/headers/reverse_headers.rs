@@ -610,7 +610,7 @@ where
         }
     }
 
-    /// Validate whether the header is valid in relation to it's parent
+    /// Validate whether the header is valid in relation to its parent
     fn validate(
         &self,
         header: &SealedHeader<H::Header>,

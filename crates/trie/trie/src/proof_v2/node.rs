@@ -97,7 +97,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         Ok(ProofTrieNodeV2 { node, path, masks })
     }
 
-    /// Returns the short key of the child, if it is a leaf or branch, or empty if its a
+    /// Returns the short key of the child, if it is a leaf or branch, or empty if it's a
     /// [`Self::RlpNode`].
     pub(crate) fn short_key(&self) -> &Nibbles {
         match self {

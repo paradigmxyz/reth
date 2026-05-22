@@ -116,7 +116,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// transactions.
     ///
     /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
-    /// will affect all transaction in that bundle.
+    /// will affect all transactions in that bundle.
     /// `BlockNumber` and `transaction_index` are optional. `Transaction_index`
     /// specifies the number of tx in the block to replay and -1 means all transactions should be
     /// replayed.

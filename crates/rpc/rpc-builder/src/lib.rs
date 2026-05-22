@@ -2260,7 +2260,7 @@ impl RpcServerHandle {
         Some(provider)
     }
 
-    /// Returns an ws provider from the rpc server handle for the
+    /// Returns a ws provider from the rpc server handle for the
     /// specified [`alloy_network::Network`].
     ///
     /// This installs the recommended fillers: [`RecommendedFillers`]
