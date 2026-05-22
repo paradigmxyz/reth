@@ -1335,7 +1335,7 @@ mod tests {
         }
 
         for update in &state_updates {
-            hashed_state.extend(evm_state_to_hashed_post_state(update.clone(), false));
+            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
 
             for (address, account) in update {
                 let storage: HashMap<B256, U256> = account

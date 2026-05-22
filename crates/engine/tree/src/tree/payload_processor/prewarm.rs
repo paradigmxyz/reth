@@ -827,12 +827,6 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             continue
         }
 
-        if *account.original_info == account.info &&
-            account.storage.iter().all(|(_, value)| !value.is_changed())
-        {
-            continue;
-        }
-
         let hashed_address = keccak256(addr);
 
         if account.info != account.original_info() {

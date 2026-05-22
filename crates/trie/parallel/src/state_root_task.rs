@@ -192,18 +192,11 @@ impl Drop for StateHookSender {
 /// (e.g. post-block balance increments built by `alloy_evm::block::state_changes::
 /// balance_increment_state`) set `original_info` equal to the post-increment `info`, so applying
 /// the skip there would silently discard real state changes.
-pub fn evm_state_to_hashed_post_state(update: EvmState, skip_unchanged: bool) -> HashedPostState {
+pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
         if account.is_touched() {
-            if skip_unchanged &&
-                *account.original_info == account.info &&
-                account.storage.iter().all(|(_, value)| !value.is_changed())
-            {
-                continue;
-            }
-
             let hashed_address = keccak256(address);
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
