@@ -270,7 +270,6 @@ mod tests {
                 reservoir: 0,
                 gas_refunded: 0,
                 bytes: Bytes::default(),
-                refill_amount: 0,
             })
         })
         .into();
@@ -285,7 +284,6 @@ mod tests {
             reservoir: 0,
             gas_refunded: 0,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
-            refill_amount: 0,
         };
 
         let input = b"test_input";
@@ -320,7 +318,6 @@ mod tests {
                     reservoir: 0,
                     gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
-                    refill_amount: 0,
                 })
             }
         })
@@ -338,7 +335,6 @@ mod tests {
                     reservoir: 0,
                     gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
-                    refill_amount: 0,
                 })
             }
         })
