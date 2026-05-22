@@ -198,6 +198,36 @@ impl OrderedTrieRootEncodedBuilder {
         self.flush();
     }
 
+    /// Pushes an item from a caller that streams execution indices in ascending order.
+    ///
+    /// Ordered roots visit RLP-encoded indices in a mostly sequential order, so a receipt stream
+    /// can usually be inserted directly into the hash builder without first copying the encoded
+    /// receipt into `pending`.
+    #[inline]
+    pub fn push_streamed_unchecked(&mut self, index: usize, bytes: &[u8]) {
+        debug_assert!(index < self.len, "index {index} out of bounds for length {}", self.len);
+        debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
+
+        if self.next_insert_i < self.len {
+            let exec_index_needed = adjust_index_for_rlp(self.next_insert_i, self.len);
+            if index == exec_index_needed {
+                self.add_leaf(index, bytes);
+                self.received += 1;
+                self.next_insert_i += 1;
+                self.flush();
+                return;
+            }
+        }
+
+        self.push_unchecked(index, bytes);
+    }
+
+    #[inline]
+    fn add_leaf(&mut self, index: usize, value: &[u8]) {
+        let index_buffer = alloy_rlp::encode_fixed_size(&index);
+        self.hb.add_leaf(Nibbles::unpack(&index_buffer), value);
+    }
+
     /// Attempts to flush pending items to the hash builder.
     fn flush(&mut self) {
         while self.next_insert_i < self.len {
@@ -207,8 +237,7 @@ impl OrderedTrieRootEncodedBuilder {
                 break;
             };
 
-            let index_buffer = alloy_rlp::encode_fixed_size(&exec_index_needed);
-            self.hb.add_leaf(Nibbles::unpack(&index_buffer), &value);
+            self.add_leaf(exec_index_needed, &value);
 
             self.next_insert_i += 1;
         }

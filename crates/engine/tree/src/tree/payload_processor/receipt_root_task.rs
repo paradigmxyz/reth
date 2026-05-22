@@ -90,7 +90,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             // Receipt indices are produced by the block executor in transaction order and are
             // bounded by `receipts_len`, so avoid re-validating every streamed receipt on the hot
             // path. `finalize` below still catches aborted execution that sends too few receipts.
-            builder.push_unchecked(indexed_receipt.index, &encode_buf);
+            builder.push_streamed_unchecked(indexed_receipt.index, &encode_buf);
             received_count += 1;
         }
 
