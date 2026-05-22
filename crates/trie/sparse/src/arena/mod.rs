@@ -16,7 +16,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_trie::{BranchNodeCompact, TrieMask};
-use core::{cmp::Reverse, mem};
+use core::mem;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -2514,7 +2514,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
         // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
         // cannot contain dirty subtries since dirty state propagates upward.
-        taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
+        if taken.len() > 1 {
+            taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
+        }
 
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
