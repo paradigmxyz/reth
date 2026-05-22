@@ -28,7 +28,10 @@ use reth_evm::{
 };
 use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
-use revm::primitives::hardfork::SpecId;
+use revm::{
+    primitives::hardfork::SpecId,
+    state::bal::{alloy::AlloyBal as BlockAccessList, Bal as RevmBal},
+};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -227,6 +230,16 @@ where
         &self,
         payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        let block_access_list = payload
+            .merged_block_access_list
+            .as_ref()
+            .map(|bal| {
+                let bal: BlockAccessList =
+                    alloy_rlp::decode_exact(bal.as_ref()).map_err(AnyError::new)?;
+                Ok::<_, AnyError>(Arc::new(RevmBal::try_from(bal).map_err(AnyError::new)?))
+            })
+            .transpose()?;
+
         let mut current_tx = 0;
         let segments: Vec<_> = payload
             .env_switches
@@ -235,7 +248,10 @@ where
                 let start_tx = current_tx;
                 let mut evm_env = self.inner.evm_env_for_payload(exec_data)?;
                 evm_env.cfg_env.disable_base_fee = true;
-                let ctx = self.inner.context_for_payload(exec_data)?;
+                let mut ctx = self.inner.context_for_payload(exec_data)?;
+                if let Some(block_access_list) = &block_access_list {
+                    ctx.block_access_list = Some(block_access_list.clone());
+                }
                 current_tx += exec_data.payload.transactions().len();
                 Ok(BigBlockSegment { start_tx, evm_env, ctx })
             })

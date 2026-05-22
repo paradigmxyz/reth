@@ -24,7 +24,7 @@ use reth_evm::evm::BalEvm;
 use reth_evm_ethereum::RethReceiptBuilder;
 use revm::{
     context::TxEnv, context_interface::result::HaltReason, handler::PrecompileProvider,
-    interpreter::InterpreterResult, state::bal::BlockAccessIndex, Inspector,
+    interpreter::InterpreterResult, Inspector,
 };
 use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
@@ -172,12 +172,7 @@ where
         }
 
         let segment_idx = if let Some(index) = index {
-            let segment_idx = self.plan.segment_index_for_tx(index);
-
-            let renumbered = index + 1 + 2 * segment_idx;
-            self.evm_mut().set_index(BlockAccessIndex::new(renumbered as u64));
-
-            segment_idx
+            self.plan.segment_index_for_tx(index)
         } else {
             if self.initialized {
                 return Ok(());
@@ -196,7 +191,11 @@ where
         let evm_ctx = inner.evm.ctx_mut();
         evm_ctx.block = block_env;
         evm_ctx.cfg = cfg_env;
-        inner.ctx = segment.ctx.clone();
+        let mut ctx = segment.ctx.clone();
+        if index.is_none() {
+            ctx.block_access_list = None;
+        }
+        inner.ctx = ctx;
 
         self.reseed_block_hashes_for(block_number);
 
@@ -260,10 +259,10 @@ where
         // (= K, the boundary's "post-N slot").
         let mut inner = self.inner.take().expect("inner executor must exist");
         inner.ctx = prev_segment.ctx.clone();
+        // Unset so that BAL validation is skipped.
+        inner.ctx.block_access_list = None;
         let spec = inner.spec.clone();
         let receipt_builder = inner.receipt_builder;
-
-        inner.evm_mut().bump_bal_index();
 
         let (mut evm, result) = inner.finish()?;
 
@@ -320,6 +319,7 @@ where
 
         // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788)
         // at bal_index K+1.
+        self.inner_mut().ctx.block_access_list = None;
         self.inner_mut().apply_pre_execution_changes()?;
 
         trace!(target: "engine::bb::evm", "Started segment {seg_idx}");
@@ -364,7 +364,9 @@ where
         index: usize,
     ) -> Result<Self::Result, BlockExecutionError> {
         self.initialize(Some(index))?;
-        self.inner_mut().execute_transaction_without_commit(tx)
+        let segment_idx = self.plan.segment_index_for_tx(index);
+        let renumbered = index + 2 * segment_idx;
+        self.inner_mut().execute_transaction_with_index(tx, renumbered)
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
@@ -399,6 +401,8 @@ where
         // increments and post-execution system calls.
         let last_seg = self.plan.segments.last().unwrap();
         self.inner_mut().ctx = last_seg.ctx.clone();
+        // Unset so that BAL validation is skipped.
+        self.inner_mut().ctx.block_access_list = None;
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
