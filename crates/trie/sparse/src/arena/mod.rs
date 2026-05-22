@@ -1260,14 +1260,16 @@ impl ArenaParallelSparseTrie {
                 ExtensionNodeRef::new(&short_key, &rlp_node).rlp(rlp_buf)
             };
 
-            trace!(
-                target: TRACE_TARGET,
-                path = ?head_path,
-                short_key = ?arena[head_idx].short_key(),
-                children = ?state_mask.iter().zip(rlp_node_buf.iter()).collect::<Vec<_>>(),
-                rlp_node = ?rlp_node,
-                "Calculated branch RlpNode",
-            );
+            if tracing::enabled!(target: TRACE_TARGET, tracing::Level::TRACE) {
+                trace!(
+                    target: TRACE_TARGET,
+                    path = ?head_path,
+                    short_key = ?arena[head_idx].short_key(),
+                    children = ?state_mask.iter().zip(rlp_node_buf.iter()).collect::<Vec<_>>(),
+                    rlp_node = ?rlp_node,
+                    "Calculated branch RlpNode",
+                );
+            }
 
             let branch = arena[head_idx].branch_mut();
             branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
