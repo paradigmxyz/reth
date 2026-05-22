@@ -108,7 +108,7 @@ impl DatabaseEnvMetrics {
         f: impl FnOnce() -> R,
     ) -> R {
         if let Some(metrics) = self.operations.get(table) {
-            metrics[operation.index()].record(value_size, f)
+            metrics[operation.index()].record_with_size(value_size, f)
         } else {
             f()
         }
@@ -385,21 +385,38 @@ pub(crate) struct OperationMetrics {
 }
 
 impl OperationMetrics {
-    /// Record operation metric.
+    /// Record only the operation count.
+    #[inline]
+    pub(crate) fn record_count(&self) {
+        self.calls_total.increment(1);
+    }
+
+    /// Record operation count and duration for a large-value operation.
+    #[inline]
+    pub(crate) fn record_large<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.record_count();
+        let start = Instant::now();
+        let result = f();
+        self.large_value_duration_seconds.record(start.elapsed());
+        result
+    }
+
+    /// Record operation metric, timing only large values.
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [`LARGE_VALUE_THRESHOLD_BYTES`].
-    pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
-        self.calls_total.increment(1);
-
+    #[inline]
+    pub(crate) fn record_with_size<R>(
+        &self,
+        value_size: Option<usize>,
+        f: impl FnOnce() -> R,
+    ) -> R {
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
         if value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES) {
-            let start = Instant::now();
-            let result = f();
-            self.large_value_duration_seconds.record(start.elapsed());
-            result
+            self.record_large(f)
         } else {
+            self.record_count();
             f()
         }
     }
