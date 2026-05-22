@@ -992,6 +992,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewBlockHashes(h) => h.len(),
                 EthMessage::NewPooledTransactionHashes66(h) => h.len(),
                 EthMessage::NewPooledTransactionHashes68(h) => h.hashes.len(),
+                EthMessage::NewPooledTransactionHashes72(h) => h.hashes.len(),
                 _ => 0,
             },
             Self::Broadcast(msg) => match msg {
@@ -1097,7 +1098,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
-    /// it is the same variant (eth66 or eth68).
+    /// it is the same variant (eth66, eth68, or eth72).
     pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
@@ -1138,7 +1139,9 @@ mod tests {
         GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream, UnifiedStatus,
     };
-    use reth_eth_wire_types::{message::MAX_MESSAGE_SIZE, EthMessageID, RawCapabilityMessage};
+    use reth_eth_wire_types::{
+        message::MAX_MESSAGE_SIZE, EthMessageID, NewPooledTransactionHashes72, RawCapabilityMessage,
+    };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -1476,6 +1479,22 @@ mod tests {
             ActiveSessionMessage::ProtocolBreach { .. } => {}
             ev => unreachable!("{ev:?}"),
         }
+    }
+
+    #[test]
+    fn eth72_pooled_hashes_count_broadcast_items() {
+        let hashes =
+            vec![alloy_primitives::B256::repeat_byte(1), alloy_primitives::B256::repeat_byte(2)];
+        let msg: OutgoingMessage<EthNetworkPrimitives> =
+            EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72 {
+                types: vec![0; hashes.len()],
+                sizes: vec![1; hashes.len()],
+                hashes,
+                cell_mask: None,
+            })
+            .into();
+
+        assert_eq!(2, msg.broadcast_item_count());
     }
 
     #[test]

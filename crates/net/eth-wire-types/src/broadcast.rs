@@ -211,11 +211,16 @@ pub struct SharedTransactions<T = TransactionSigned>(
 pub enum NewPooledTransactionHashes {
     /// A list of transaction hashes valid for [66-68)
     Eth66(NewPooledTransactionHashes66),
-    /// A list of transaction hashes valid from [68..]
+    /// A list of transaction hashes valid for [68-72)
     ///
     /// Note: it is assumed that the payload is valid (all vectors have the same length)
     Eth68(NewPooledTransactionHashes68),
     /// A list of transaction hashes valid from [72..]
+    ///
+    /// This extends the eth/68 announcement payload with the `cell_mask` field introduced by
+    /// [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070).
+    ///
+    /// Note: it is assumed that the payload is valid (all vectors have the same length)
     Eth72(NewPooledTransactionHashes72),
 }
 
