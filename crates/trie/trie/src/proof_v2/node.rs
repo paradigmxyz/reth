@@ -159,6 +159,10 @@ pub(crate) struct ProofTrieBranch {
 /// Panics if the given `len` is greater than the length of the `Nibbles`.
 pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
     debug_assert!(n.len() >= len);
+    if len == 0 {
+        return *n;
+    }
+
     n.slice_unchecked(len, n.len())
 }
 
