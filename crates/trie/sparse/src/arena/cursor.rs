@@ -308,13 +308,14 @@ impl ArenaCursor {
         loop {
             let head = self.stack.last().expect("cursor has root");
             let head_idx = head.index;
+            let head_path = head.path;
 
-            let head_branch = match &arena[head_idx] {
+            let (state_mask, short_key) = match &arena[head_idx] {
                 ArenaSparseNode::EmptyRoot => {
                     return SeekResult::EmptyRoot;
                 }
                 ArenaSparseNode::Leaf { key, .. } => {
-                    let mut leaf_full_path = head.path;
+                    let mut leaf_full_path = head_path;
                     leaf_full_path.extend(key);
                     return if &leaf_full_path == full_path {
                         SeekResult::RevealedLeaf
@@ -322,36 +323,42 @@ impl ArenaCursor {
                         SeekResult::Diverged
                     };
                 }
-                ArenaSparseNode::Branch(b) => b,
+                ArenaSparseNode::Branch(b) => (b.state_mask, b.short_key),
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
+            let head_path_len = head_path.len();
+            let logical_path_len = head_path_len + short_key.len();
 
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
+            if full_path.len() <= logical_path_len || !full_path.starts_with(&head_path) {
+                return SeekResult::Diverged;
+            }
+
+            if !short_key.is_empty() &&
+                full_path.slice_unchecked(head_path_len, logical_path_len) != short_key
             {
                 return SeekResult::Diverged;
             }
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
-            let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
-            else {
+            let child_nibble = full_path.get_unchecked(logical_path_len);
+            let Some(branch_child_idx) = BranchChildIdx::new(state_mask, child_nibble) else {
                 return SeekResult::NoChild { child_nibble };
             };
 
-            match &head_branch.children[branch_child_idx] {
+            match &arena[head_idx].branch_ref().children[branch_child_idx] {
                 ArenaSparseNodeBranchChild::Blinded(_) => {
                     return SeekResult::Blinded;
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    let mut path = head_path;
+                    path.extend(&short_key);
+                    path.push_unchecked(child_nibble);
                     self.push(arena, child_idx, path);
                 }
             }
