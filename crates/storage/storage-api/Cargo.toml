@@ -60,6 +60,7 @@ std = [
     "reth-trie-common/std",
     "serde_json?/std",
     "dep:reth-tokio-util",
+    "alloy-eip7928/std",
 ]
 
 db-api = [
@@ -80,6 +81,7 @@ serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-rpc-types-engine/serde",
+    "alloy-eip7928/serde",
 ]
 
 serde-bincode-compat = [

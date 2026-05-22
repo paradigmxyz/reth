@@ -56,6 +56,7 @@ std = [
     "reth-storage-api/std",
     "reth-trie-common/std",
     "reth-ethereum-primitives/std",
+    "alloy-eip7928/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
