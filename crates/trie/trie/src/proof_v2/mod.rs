@@ -1205,8 +1205,9 @@ where
                 if !self.should_retain(targets, &child_path, false) {
                     // Pull this child's hash out of the cached branch node. The hash index
                     // is the number of hash_mask bits set below this child's nibble.
-                    let lower_bits = TrieMask::new((1u16 << child_nibble) - 1);
-                    let hash_idx = (cached_branch.hash_mask & lower_bits).count_ones() as usize;
+                    let lower_bits = (1u16 << child_nibble) - 1;
+                    let hash_idx =
+                        (cached_branch.hash_mask.get() & lower_bits).count_ones() as usize;
                     let hash = cached_branch.hashes[hash_idx];
 
                     trace!(
