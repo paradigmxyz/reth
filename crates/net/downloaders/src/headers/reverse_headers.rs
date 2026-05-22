@@ -329,6 +329,7 @@ where
         self.next_chain_tip_block_number =
             validated.last().expect("exists").number().saturating_sub(1);
         self.queued_validated_headers.extend(validated);
+        self.set_queued_headers_metric();
 
         Ok(())
     }
@@ -363,6 +364,7 @@ where
                     .count();
                 // removes all headers that are higher than current target
                 self.queued_validated_headers.drain(..skip);
+                self.set_queued_headers_metric();
             }
         } else {
             // this occurs on the initial sync target request
@@ -435,6 +437,7 @@ where
                 self.on_block_number_update(target.number(), parent_block_number);
 
                 self.queued_validated_headers.push(target);
+                self.set_queued_headers_metric();
 
                 // try to validate all buffered responses blocked by this successful response
                 self.try_validate_buffered()
@@ -628,6 +631,7 @@ where
 
         self.metrics.in_flight_requests.set(0.);
         self.metrics.buffered_responses.set(0.);
+        self.metrics.queued_blocks.set(0.);
     }
 
     /// Splits off the next batch of headers
@@ -651,7 +655,13 @@ where
         // new buffer. The total memory allocated should then be not much more than the original
         // size of `queued_validated_headers`.
         rem.shrink_to_fit();
+        self.set_queued_headers_metric();
         rem
+    }
+
+    /// Sets the gauge tracking the number of validated headers currently queued for the consumer.
+    fn set_queued_headers_metric(&self) {
+        self.metrics.queued_blocks.set(self.queued_validated_headers.len() as f64);
     }
 }
 
@@ -685,6 +695,7 @@ where
             // headers are sorted high to low
             self.queued_validated_headers.pop();
         }
+        self.set_queued_headers_metric();
         trace!(
             target: "downloaders::headers",
             head=?head.num_hash(),
