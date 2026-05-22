@@ -290,28 +290,28 @@ impl Default for DefaultTxPoolValues {
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "TxPool")]
 pub struct TxPoolArgs {
-    /// Max number of transaction in the pending sub-pool.
+    /// Max number of transactions in the pending sub-pool.
     #[arg(long = "txpool.pending-max-count", alias = "txpool.pending_max_count", default_value_t = DefaultTxPoolValues::get_global().pending_max_count)]
     pub pending_max_count: usize,
     /// Max size of the pending sub-pool in megabytes.
     #[arg(long = "txpool.pending-max-size", alias = "txpool.pending_max_size", default_value_t = DefaultTxPoolValues::get_global().pending_max_size)]
     pub pending_max_size: usize,
 
-    /// Max number of transaction in the basefee sub-pool
+    /// Max number of transactions in the basefee sub-pool
     #[arg(long = "txpool.basefee-max-count", alias = "txpool.basefee_max_count", default_value_t = DefaultTxPoolValues::get_global().basefee_max_count)]
     pub basefee_max_count: usize,
     /// Max size of the basefee sub-pool in megabytes.
     #[arg(long = "txpool.basefee-max-size", alias = "txpool.basefee_max_size", default_value_t = DefaultTxPoolValues::get_global().basefee_max_size)]
     pub basefee_max_size: usize,
 
-    /// Max number of transaction in the queued sub-pool
+    /// Max number of transactions in the queued sub-pool
     #[arg(long = "txpool.queued-max-count", alias = "txpool.queued_max_count", default_value_t = DefaultTxPoolValues::get_global().queued_max_count)]
     pub queued_max_count: usize,
     /// Max size of the queued sub-pool in megabytes.
     #[arg(long = "txpool.queued-max-size", alias = "txpool.queued_max_size", default_value_t = DefaultTxPoolValues::get_global().queued_max_size)]
     pub queued_max_size: usize,
 
-    /// Max number of transaction in the blobpool
+    /// Max number of transactions in the blobpool
     #[arg(long = "txpool.blobpool-max-count", alias = "txpool.blobpool_max_count", default_value_t = DefaultTxPoolValues::get_global().blobpool_max_count)]
     pub blobpool_max_count: usize,
     /// Max size of the blobpool in megabytes.
