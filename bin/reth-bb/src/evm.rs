@@ -43,6 +43,8 @@ pub struct BbEvmPlan<'a> {
     pub(crate) segments: Vec<BigBlockSegment<'a>>,
     /// Index of the next segment to switch to (starts at 1).
     pub(crate) next_segment: usize,
+    /// Transaction index where the next segment starts, or `usize::MAX` when exhausted.
+    pub(crate) next_segment_start_tx: usize,
     /// Number of user transactions executed so far.
     pub(crate) tx_counter: usize,
     /// Block hashes to seed for inter-segment BLOCKHASH resolution.
@@ -60,8 +62,15 @@ impl<'a> BbEvmPlan<'a> {
             let finished_block_hash = seg.ctx.parent_hash;
             block_hashes_to_seed.push((finished_block_number, finished_block_hash));
         }
+        let next_segment_start_tx = segments.get(1).map_or(usize::MAX, |segment| segment.start_tx);
 
-        Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
+        Self {
+            segments,
+            next_segment: 1,
+            next_segment_start_tx,
+            tx_counter: 0,
+            block_hashes_to_seed,
+        }
     }
 
     /// Returns the 256 block hashes relevant to a segment with the given block
@@ -325,6 +334,8 @@ where
         new_cfg_env.disable_base_fee = true;
 
         plan.next_segment += 1;
+        plan.next_segment_start_tx =
+            plan.segments.get(plan.next_segment).map_or(usize::MAX, |segment| segment.start_tx);
 
         // Finish the inner executor for the completed segment. This applies
         // post-execution system calls (EIP-7002/7251) and withdrawal balance
@@ -448,23 +459,26 @@ where
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
-        let gas_used = self.inner_mut().commit_transaction(output);
-
-        // Fix up cumulative_gas_used on the just-committed receipt so that
-        // the receipt root task (which reads receipts incrementally) sees
-        // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
-        {
-            receipt.cumulative_gas_used += offset;
-        }
+        let gas_used = {
+            let inner = self.inner_mut();
+            let gas_used = inner.commit_transaction(output);
+
+            // Fix up cumulative_gas_used on the just-committed receipt so that
+            // the receipt root task (which reads receipts incrementally) sees
+            // globally-correct values across all segments.
+            if offset > 0 &&
+                let Some(receipt) = inner.receipts.last_mut()
+            {
+                receipt.cumulative_gas_used += offset;
+            }
+
+            gas_used
+        };
 
         self.plan.tx_counter += 1;
 
-        while self.plan.next_segment < self.plan.segments.len() &&
-            self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
-        {
+        while self.plan.tx_counter == self.plan.next_segment_start_tx {
             self.apply_segment_boundary().expect("must succeed");
         }
 
