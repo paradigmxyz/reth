@@ -78,7 +78,7 @@ use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageId,
+    StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -477,6 +477,7 @@ where
         &self,
         changeset_cache: ChangesetCache,
         rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
     ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
@@ -557,17 +558,21 @@ where
 
             // Builds an unwind-only pipeline
             let pipeline = PipelineBuilder::default()
-                .add_stages(DefaultStages::new(
-                    factory.clone(),
-                    tip_rx,
-                    Arc::new(NoopConsensus::default()),
-                    NoopHeaderDownloader::default(),
-                    NoopBodiesDownloader::default(),
-                    NoopEvmConfig::<Evm>::default(),
-                    self.toml_config().stages.clone(),
-                    self.prune_modes(),
-                    None,
-                ))
+                .add_stages(
+                    DefaultStages::new(
+                        factory.clone(),
+                        tip_rx,
+                        Arc::new(NoopConsensus::default()),
+                        NoopHeaderDownloader::default(),
+                        NoopBodiesDownloader::default(),
+                        NoopEvmConfig::<Evm>::default(),
+                        self.toml_config().stages.clone(),
+                        self.prune_modes(),
+                        None,
+                    )
+                    .builder()
+                    .disable_all(disabled_stages),
+                )
                 .build(
                     factory.clone(),
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
@@ -594,13 +599,15 @@ where
         self,
         changeset_cache: ChangesetCache,
         rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory =
-            self.create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider).await?;
+        let factory = self
+            .create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider, disabled_stages)
+            .await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -937,11 +944,14 @@ where
     /// This returns the configured `debug.tip` if set, otherwise it will check if backfill was
     /// previously interrupted and returns the block hash of the last checkpoint, see also
     /// [`Self::check_pipeline_consistency`]
-    pub fn initial_backfill_target(&self) -> ProviderResult<Option<B256>> {
+    pub fn initial_backfill_target(
+        &self,
+        disabled_stages: &[StageId],
+    ) -> ProviderResult<Option<B256>> {
         let mut initial_target = self.node_config().debug.tip;
 
         if initial_target.is_none() {
-            initial_target = self.check_pipeline_consistency()?;
+            initial_target = self.check_pipeline_consistency(disabled_stages)?;
         }
 
         Ok(initial_target)
@@ -989,11 +999,15 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+    pub fn check_pipeline_consistency(
+        &self,
+        disabled_stages: &[StageId],
+    ) -> ProviderResult<Option<B256>> {
         // We skip the era stage if it's not enabled
         let era_enabled = self.era_import_source().is_some();
-        let mut all_stages =
-            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+        let mut all_stages = StageId::ALL
+            .into_iter()
+            .filter(|id| (era_enabled || id != &StageId::Era) && !disabled_stages.contains(id));
 
         // Get the expected first stage based on config.
         let first_stage = all_stages.next().expect("there must be at least one stage");
