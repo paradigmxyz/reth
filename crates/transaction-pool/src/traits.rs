@@ -1452,7 +1452,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Create new instance of [Self].
     ///
-    /// Caution: In case of blob transactions, this does marks the blob sidecar as
+    /// Caution: In case of blob transactions, this marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
     pub fn new(transaction: Recovered<T>, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
