@@ -29,7 +29,7 @@ use revm::{
     primitives::hardfork::SpecId,
     Inspector,
 };
-use std::sync::{Arc, Mutex};
+use std::{cell::UnsafeCell, sync::Arc};
 use tracing::{debug, trace};
 
 // ---------------------------------------------------------------------------
@@ -124,6 +124,53 @@ pub(crate) type BalIndexBumper<DB> = fn(&mut DB);
 /// strict less-than reads can see those boundary writes.
 pub(crate) type BalIndexSetter<DB> = fn(&mut DB, u64);
 
+/// Shared state hook storage used to keep one hook alive across inner executor
+/// rebuilds at segment boundaries.
+#[allow(missing_debug_implementations)]
+#[derive(Clone, Default)]
+struct SharedStateHook(Arc<SharedStateHookInner>);
+
+#[allow(missing_debug_implementations)]
+#[derive(Default)]
+struct SharedStateHookInner {
+    hook: UnsafeCell<Option<Box<dyn OnStateHook>>>,
+}
+
+// `BbBlockExecutor` only calls the forwarding hook and replaces it on the
+// execution thread. The shared cell exists so a newly constructed inner
+// executor can keep forwarding to the same hook after a segment boundary.
+unsafe impl Send for SharedStateHookInner {}
+unsafe impl Sync for SharedStateHookInner {}
+
+impl SharedStateHook {
+    fn set(&self, hook: Option<Box<dyn OnStateHook>>) {
+        // SAFETY: the hook is replaced only while mutably borrowing the outer
+        // executor, and state-hook calls are made by that same executor thread.
+        unsafe { *self.0.hook.get() = hook };
+    }
+
+    fn has_hook(&self) -> bool {
+        // SAFETY: see `set`; this is only used while rebuilding the executor
+        // on the execution thread.
+        unsafe { (*self.0.hook.get()).is_some() }
+    }
+
+    /// Creates a forwarding `OnStateHook` that delegates to the shared hook.
+    fn forwarding_hook(&self) -> Option<Box<dyn OnStateHook>> {
+        self.has_hook().then(|| {
+            let shared = self.clone();
+            Box::new(move |source: StateChangeSource, state: &revm::state::EvmState| {
+                // SAFETY: state updates are delivered serially by the block
+                // executor; the shared hook is not mutated while a forwarding
+                // hook is running.
+                if let Some(hook) = unsafe { (*shared.0.hook.get()).as_mut() } {
+                    hook.on_state(source, state);
+                }
+            }) as Box<dyn OnStateHook>
+        })
+    }
+}
+
 /// Block executor that wraps [`EthBlockExecutor`] and handles segment-boundary
 /// changes for big-block execution.
 ///
@@ -155,7 +202,7 @@ where
     /// Shared state hook that survives inner executor finish/reconstruct
     /// cycles at segment boundaries. Each inner executor receives a
     /// forwarding hook that delegates to this shared instance.
-    shared_hook: Arc<Mutex<Option<Box<dyn OnStateHook>>>>,
+    shared_hook: SharedStateHook,
     /// Callback to reseed block hashes into the DB's cache at segment
     /// boundaries. See [`BlockHashSeeder`].
     block_hash_seeder: Option<BlockHashSeeder<DB>>,
@@ -207,7 +254,7 @@ where
             accumulated_requests: Requests::default(),
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
-            shared_hook: Arc::new(Mutex::new(None)),
+            shared_hook: SharedStateHook::default(),
             block_hash_seeder,
             bal_index_reader,
             bal_index_bumper,
@@ -273,16 +320,6 @@ where
         self.reseed_block_hashes_for(block_number);
 
         Ok(())
-    }
-
-    /// Creates a forwarding `OnStateHook` that delegates to the shared hook.
-    fn forwarding_hook(&self) -> Option<Box<dyn OnStateHook>> {
-        let shared = self.shared_hook.clone();
-        Some(Box::new(move |source: StateChangeSource, state: &revm::state::EvmState| {
-            if let Some(hook) = shared.lock().unwrap().as_mut() {
-                hook.on_state(source, state);
-            }
-        }))
     }
 
     const fn inner(&self) -> &EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
@@ -386,8 +423,8 @@ where
 
         // Re-install the forwarding state hook so the parallel state root
         // task continues to receive state changes.
-        if self.shared_hook.lock().unwrap().is_some() {
-            new_inner.set_state_hook(self.forwarding_hook());
+        if self.shared_hook.has_hook() {
+            new_inner.set_state_hook(self.shared_hook.forwarding_hook());
         }
 
         self.inner = Some(new_inner);
@@ -525,8 +562,8 @@ where
         // Store the real hook in the shared slot and give the inner
         // executor a lightweight forwarder. This way the hook survives
         // inner executor finish/reconstruct cycles at segment boundaries.
-        *self.shared_hook.lock().unwrap() = hook;
-        let fwd = self.forwarding_hook();
+        self.shared_hook.set(hook);
+        let fwd = self.shared_hook.forwarding_hook();
         self.inner_mut().set_state_hook(fwd);
     }
 
