@@ -566,9 +566,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Returns the transaction for the given hash.
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns all transactions objects for the given hashes.
+    /// Returns all transaction objects for the given hashes.
     ///
-    /// Caution: This in case of blob transactions, this does not include the sidecar.
+    /// Caution: In case of blob transactions, this does not include the sidecar.
     fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Notify the pool about transactions that are propagated to peers.
@@ -1452,7 +1452,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Create new instance of [Self].
     ///
-    /// Caution: In case of blob transactions, this does marks the blob sidecar as
+    /// Caution: In case of blob transactions, this marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
     pub fn new(transaction: Recovered<T>, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
