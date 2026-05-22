@@ -149,7 +149,9 @@ where
 
         if use_rocksdb {
             provider.commit_pending_rocksdb_batches()?;
-            provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
+            if first_sync {
+                provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
+            }
         }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
