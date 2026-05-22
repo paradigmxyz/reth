@@ -329,17 +329,19 @@ impl ArenaCursor {
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
+            let head_branch_logical_path_len = head.path.len() + head_branch.short_key.len();
 
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
+            if full_path.len() <= head_branch_logical_path_len ||
+                (!head_branch.short_key.is_empty() &&
+                    full_path.slice(head.path.len()..head_branch_logical_path_len) !=
+                        head_branch.short_key)
             {
                 return SeekResult::Diverged;
             }
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+            let child_nibble = full_path.get_unchecked(head_branch_logical_path_len);
             let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
             else {
                 return SeekResult::NoChild { child_nibble };
@@ -351,7 +353,9 @@ impl ArenaCursor {
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    let mut path = head.path;
+                    path.extend(&head_branch.short_key);
+                    path.push_unchecked(child_nibble);
                     self.push(arena, child_idx, path);
                 }
             }
