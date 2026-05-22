@@ -1,5 +1,45 @@
 # Database
 
+## Database Size Configuration
+
+### Default Size Limits
+
+Reth's database has a configurable maximum size limit:
+
+- **Current default:** 8 TB (increased from 4 TB in v1.8.2)
+- **Configurable via CLI:** `--db.max-size`
+- **Page size dependency:** Maximum size depends on page size
+  - 4KB pages: 8TB maximum
+  - 8KB pages: 16TB maximum
+
+### Common Issues
+
+**Error:** `environment map size limit reached`
+
+This error occurs when the database reaches its maximum configured size. Solutions:
+
+1. **Increase the limit** (if your system can support it):
+``````bash
+   reth node --db.max-size=12TB
+`````
+
+2. **Check system capacity**: The error can also occur if your system cannot reserve the requested virtual memory, even if the database hasn't reached the limit.
+
+3. **Upgrade Reth**: Newer versions have higher defaults (v1.8.2+ has 8TB default vs. 4TB in earlier versions)
+
+### Configuration
+
+````bash
+# Set custom database size limit
+reth node --db.max-size=12TB
+
+# For sizes >8TB, you need to increase page size
+reth node --db.max-size=16TB --db.page-size=8KB
+```
+
+**Note:** Changing the page size requires re-syncing the node from scratch.
+
+
 ## Abstractions
 
 - We created a [Database trait abstraction](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/database.rs) using Rust Stable GATs which frees us from being bound to a single database implementation. We currently use MDBX, but are exploring [redb](https://github.com/cberner/redb) as an alternative.
