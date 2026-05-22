@@ -311,8 +311,9 @@ jobs:
       BENCH_NODE_BIN: reth
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      BENCH_OTLP_TRACES_ENDPOINT: ${{ secrets.BENCH_OTLP_TRACES_ENDPOINT }}
-      BENCH_OTLP_LOGS_ENDPOINT: ${{ secrets.BENCH_OTLP_LOGS_ENDPOINT }}
+      BENCH_OTLP_DISABLED: ${{ needs.resolve-refs.outputs.mode == 'release' && 'true' || 'false' }}
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
       CLICKHOUSE_URL: ${{ secrets.CLICKHOUSE_URL }}
