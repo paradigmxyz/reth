@@ -24,6 +24,39 @@ mod mem;
 mod noop;
 mod tracker;
 
+/// Cell columns available for a stored blob transaction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct BlobCellAvailability {
+    mask: B128,
+}
+
+impl BlobCellAvailability {
+    /// Creates a new availability mask.
+    pub const fn new(mask: B128) -> Self {
+        Self { mask }
+    }
+
+    /// Returns full cell availability.
+    pub const fn full() -> Self {
+        Self { mask: B128::new([u8::MAX; 16]) }
+    }
+
+    /// Returns the cell mask used in eth/72 announcements and GetCells requests.
+    pub const fn mask(&self) -> B128 {
+        self.mask
+    }
+
+    /// Returns whether no cells are available.
+    pub fn is_empty(&self) -> bool {
+        self.mask == B128::ZERO
+    }
+
+    /// Returns the availability of a fully stored sidecar.
+    pub const fn from_sidecar(_sidecar: &BlobTransactionSidecarVariant) -> Self {
+        Self::full()
+    }
+}
+
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
 /// This type is responsible for keeping track of blob data until it is no longer needed (after
@@ -32,13 +65,17 @@ mod tracker;
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError>;
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<BlobCellAvailability, BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError>;
+    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;

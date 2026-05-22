@@ -51,7 +51,7 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::{BlobStore, BlobStoreError},
+    blobstore::{BlobCellAvailability, BlobStore, BlobStoreError},
     error::{InvalidPoolTransactionError, PoolError, PoolResult},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -1383,6 +1383,14 @@ pub trait PoolTransaction:
     fn requires_nonce_check(&self) -> bool {
         true
     }
+
+    /// Returns the cached blob cell availability mask for this transaction, if any.
+    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        None
+    }
+
+    /// Sets the cached blob cell availability mask for this transaction.
+    fn set_blob_cell_availability(&mut self, _availability: BlobCellAvailability) {}
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions intended for the
@@ -1393,6 +1401,16 @@ pub trait PoolTransaction:
 pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
+
+    /// Returns the cached blob cell availability mask for this transaction, if any.
+    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        PoolTransaction::blob_cell_availability(self)
+    }
+
+    /// Sets the cached blob cell availability mask for this transaction.
+    fn set_blob_cell_availability(&mut self, availability: BlobCellAvailability) {
+        PoolTransaction::set_blob_cell_availability(self, availability);
+    }
 
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
@@ -1447,6 +1465,9 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 
     /// The blob side car for this transaction
     pub blob_sidecar: EthBlobTransactionSidecar,
+
+    /// Cell columns available locally for this blob transaction.
+    pub blob_cell_availability: Option<BlobCellAvailability>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1475,7 +1496,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_sidecar = EthBlobTransactionSidecar::Missing;
         }
 
-        Self { transaction, cost, encoded_length, blob_sidecar }
+        Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability: None }
     }
 
     /// Return the reference to the underlying transaction.
@@ -1515,7 +1536,9 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
+                let availability = BlobCellAvailability::from_sidecar(&blob);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
+                pooled.blob_cell_availability = Some(availability);
                 pooled
             }
             tx => {
@@ -1554,6 +1577,16 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
         self.encoded_length
+    }
+
+    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        self.blob_cell_availability
+    }
+
+    fn set_blob_cell_availability(&mut self, availability: BlobCellAvailability) {
+        if self.is_eip4844() {
+            self.blob_cell_availability = Some(availability);
+        }
     }
 }
 

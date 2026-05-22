@@ -1,6 +1,8 @@
 //! A simple diskstore for blobs
 
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use crate::blobstore::{
+    BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
@@ -204,16 +206,20 @@ impl DiskFileBlobStore {
 }
 
 impl BlobStore for DiskFileBlobStore {
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError> {
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<BlobCellAvailability, BlobStoreError> {
         self.inner.insert_one(tx, data)
     }
 
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(Vec::new())
         }
         self.inner.insert_many(txs)
     }
@@ -459,7 +465,8 @@ impl DiskFileBlobStoreInner {
         &self,
         tx: B256,
         data: BlobTransactionSidecarVariant,
-    ) -> Result<(), BlobStoreError> {
+    ) -> Result<BlobCellAvailability, BlobStoreError> {
+        let availability = BlobCellAvailability::from_sidecar(&data);
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
 
@@ -477,14 +484,16 @@ impl DiskFileBlobStoreInner {
 
         self.size_tracker.add_size(size);
         self.size_tracker.inc_len(1);
-        Ok(())
+        Ok(availability)
     }
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
+        let availability =
+            txs.iter().map(|(tx, data)| (*tx, BlobCellAvailability::from_sidecar(data))).collect();
         let raw = txs
             .iter()
             .map(|(tx, data)| {
@@ -530,7 +539,7 @@ impl DiskFileBlobStoreInner {
         self.size_tracker.add_size(add);
         self.size_tracker.inc_len(num);
 
-        Ok(())
+        Ok(availability)
     }
 
     /// Returns true if the blob for the given transaction hash is in the blob cache or on disk.

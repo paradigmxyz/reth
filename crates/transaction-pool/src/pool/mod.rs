@@ -589,7 +589,7 @@ where
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
-                let (transaction, blob_sidecar) = match transaction {
+                let (mut transaction, blob_sidecar) = match transaction {
                     ValidTransaction::Valid(tx) => (tx, None),
                     ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
                         debug_assert!(
@@ -599,6 +599,11 @@ where
                         (transaction, Some(sidecar))
                     }
                 };
+                if let Some(sidecar) = &blob_sidecar {
+                    transaction.set_blob_cell_availability(
+                        crate::blobstore::BlobCellAvailability::from_sidecar(sidecar),
+                    );
+                }
 
                 let tx = ValidPoolTransaction {
                     transaction,

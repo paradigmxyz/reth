@@ -1,4 +1,6 @@
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use crate::blobstore::{
+    BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
@@ -95,20 +97,27 @@ impl PartialEq for InMemoryBlobStoreInner {
 }
 
 impl BlobStore for InMemoryBlobStore {
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError> {
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<BlobCellAvailability, BlobStoreError> {
+        let availability = BlobCellAvailability::from_sidecar(&data);
         let mut store = self.inner.store.write();
         self.inner.size_tracker.add_size(insert_size(&mut store, tx, data));
         self.inner.size_tracker.update_len(store.len());
-        Ok(())
+        Ok(availability)
     }
 
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(Vec::new())
         }
+        let availability =
+            txs.iter().map(|(tx, data)| (*tx, BlobCellAvailability::from_sidecar(data))).collect();
         let mut store = self.inner.store.write();
         let mut total_add = 0;
         for (tx, data) in txs {
@@ -117,7 +126,7 @@ impl BlobStore for InMemoryBlobStore {
         }
         self.inner.size_tracker.add_size(total_add);
         self.inner.size_tracker.update_len(store.len());
-        Ok(())
+        Ok(availability)
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {

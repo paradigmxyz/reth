@@ -61,6 +61,7 @@ use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
+    blobstore::BlobCellAvailability,
     error::{PoolError, PoolResult},
     AddedTransactionOutcome, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
@@ -923,7 +924,7 @@ where
         let PropagateTransactions { pooled, full } = full_transactions.build();
 
         // send hashes if any
-        if let Some(new_pooled_hashes) = pooled {
+        for new_pooled_hashes in pooled {
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.record(hash, PropagateKind::Hash(peer_id));
                 // mark transaction as seen by peer
@@ -992,22 +993,26 @@ where
 
             let new_pooled_hashes = hashes.build();
 
-            if new_pooled_hashes.is_empty() {
+            if new_pooled_hashes.iter().all(NewPooledTransactionHashes::is_empty) {
                 // nothing to propagate
                 return
             }
 
             if let Some(peer) = self.peers.get_mut(&peer_id) {
-                for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated.record(hash, PropagateKind::Hash(peer_id));
-                    peer.seen_transactions.insert(hash);
+                for msg in &new_pooled_hashes {
+                    for hash in msg.iter_hashes().copied() {
+                        propagated.record(hash, PropagateKind::Hash(peer_id));
+                        peer.seen_transactions.insert(hash);
+                    }
                 }
             }
 
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
 
             // send hashes of transactions
-            self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
+            for msg in new_pooled_hashes {
+                self.network.send_transactions_hashes(peer_id, msg);
+            }
 
             // Update propagated transactions metrics
             self.metrics.propagated_transactions.increment(propagated.len() as u64);
@@ -1074,7 +1079,7 @@ where
             let PropagateTransactions { pooled, full } = builder.build();
 
             // send hashes if any
-            if let Some(mut new_pooled_hashes) = pooled {
+            for mut new_pooled_hashes in pooled {
                 // enforce tx soft limit per message for the (unlikely) event the number of
                 // hashes exceeds it
                 new_pooled_hashes
@@ -1258,8 +1263,9 @@ where
         }
 
         debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.len(), "Broadcasting transaction hashes");
-        let msg = msg_builder.build();
-        self.network.send_transactions_hashes(peer_id, msg);
+        for msg in msg_builder.build() {
+            self.network.send_transactions_hashes(peer_id, msg);
+        }
     }
 
     /// Handles a received event related to common network events.
@@ -1740,13 +1746,14 @@ impl PropagationMode {
 struct PropagateTransaction<T = TransactionSigned> {
     size: usize,
     transaction: Arc<T>,
+    blob_cell_availability: Option<BlobCellAvailability>,
 }
 
 impl<T: SignedTransaction> PropagateTransaction<T> {
     /// Create a new instance from a transaction.
     pub fn new(transaction: T) -> Self {
         let size = transaction.length();
-        Self { size, transaction: Arc::new(transaction) }
+        Self { size, transaction: Arc::new(transaction), blob_cell_availability: None }
     }
 
     /// Create a new instance from a pooled transaction
@@ -1755,9 +1762,10 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
         P: PoolTransaction<Consensus = T>,
     {
         let size = tx.encoded_length();
+        let blob_cell_availability = tx.transaction.blob_cell_availability();
         let transaction = tx.transaction.clone_into_consensus();
         let transaction = Arc::new(transaction.into_inner());
-        Self { size, transaction }
+        Self { size, transaction, blob_cell_availability }
     }
 
     fn tx_hash(&self) -> &TxHash {
@@ -1795,9 +1803,7 @@ impl<T> PropagateTransactionsBuilder<T> {
     /// Consumes the type and returns the built messages that should be sent to the peer.
     fn build(self) -> PropagateTransactions<T> {
         match self {
-            Self::Pooled(pooled) => {
-                PropagateTransactions { pooled: Some(pooled.build()), full: None }
-            }
+            Self::Pooled(pooled) => PropagateTransactions { pooled: pooled.build(), full: None },
             Self::Full(full) => full.build(),
         }
     }
@@ -1823,7 +1829,7 @@ impl<T: SignedTransaction> PropagateTransactionsBuilder<T> {
 /// Represents how the transactions should be sent to a peer if any.
 struct PropagateTransactions<T> {
     /// The pooled transaction hashes to send.
-    pooled: Option<NewPooledTransactionHashes>,
+    pooled: Vec<NewPooledTransactionHashes>,
     /// The transactions to send in full.
     full: Option<Vec<Arc<T>>>,
 }
@@ -1859,7 +1865,7 @@ impl<T> FullTransactionsBuilder<T> {
 
     /// Returns the messages that should be propagated to the peer.
     fn build(self) -> PropagateTransactions<T> {
-        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
+        let pooled = self.pooled.build();
         let full = Some(self.transactions).filter(|full| !full.is_empty());
         PropagateTransactions { pooled, full }
     }
@@ -1916,7 +1922,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
 enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
-    Eth72(NewPooledTransactionHashes72),
+    Eth72(Eth72PooledTransactionsHashesBuilder),
 }
 
 // === impl PooledTransactionsHashesBuilder ===
@@ -1931,11 +1937,12 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.ty());
             }
-            Self::Eth72(msg) => {
-                msg.hashes.push(*pooled_tx.hash());
-                msg.sizes.push(pooled_tx.encoded_length());
-                msg.types.push(pooled_tx.transaction.ty());
-            }
+            Self::Eth72(msg) => msg.push(
+                *pooled_tx.hash(),
+                pooled_tx.encoded_length(),
+                pooled_tx.transaction.ty(),
+                pooled_tx.transaction.blob_cell_availability(),
+            ),
         }
     }
 
@@ -1976,9 +1983,7 @@ impl PooledTransactionsHashesBuilder {
                 msg.types.push(tx.transaction.ty());
             }
             Self::Eth72(msg) => {
-                msg.hashes.push(*tx.tx_hash());
-                msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.ty());
+                msg.push(*tx.tx_hash(), tx.size, tx.transaction.ty(), tx.blob_cell_availability);
             }
         }
     }
@@ -1994,22 +1999,88 @@ impl PooledTransactionsHashesBuilder {
         }
     }
 
-    fn build(self) -> NewPooledTransactionHashes {
+    fn build(self) -> Vec<NewPooledTransactionHashes> {
         match self {
             Self::Eth66(mut msg) => {
                 msg.shrink_to_fit();
-                msg.into()
+                vec![msg.into()]
             }
             Self::Eth68(mut msg) => {
                 msg.shrink_to_fit();
-                msg.into()
+                vec![msg.into()]
             }
-            Self::Eth72(mut msg) => {
-                msg.shrink_to_fit();
-                msg.into()
-            }
+            Self::Eth72(msg) => msg.build(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct Eth72PooledTransactionsHashesBuilder {
+    non_blob: NewPooledTransactionHashes72,
+    blob_groups: Vec<(BlobCellAvailability, NewPooledTransactionHashes72)>,
+}
+
+impl Eth72PooledTransactionsHashesBuilder {
+    fn is_empty(&self) -> bool {
+        self.non_blob.hashes.is_empty() &&
+            self.blob_groups.iter().all(|(_, msg)| msg.hashes.is_empty())
+    }
+
+    fn len(&self) -> usize {
+        self.non_blob.hashes.len() +
+            self.blob_groups.iter().map(|(_, msg)| msg.hashes.len()).sum::<usize>()
+    }
+
+    fn push(
+        &mut self,
+        hash: TxHash,
+        size: usize,
+        ty: u8,
+        blob_cell_availability: Option<BlobCellAvailability>,
+    ) {
+        if ty != TxType::Eip4844 as u8 {
+            push_eth72_hash(&mut self.non_blob, hash, size, ty);
+            return
+        }
+
+        let availability = blob_cell_availability.unwrap_or_default();
+        if let Some((_, msg)) = self.blob_groups.iter_mut().find(|(mask, _)| *mask == availability)
+        {
+            push_eth72_hash(msg, hash, size, ty);
+        } else {
+            let mut msg = NewPooledTransactionHashes72 {
+                cell_mask: Some(availability.mask()),
+                ..Default::default()
+            };
+            push_eth72_hash(&mut msg, hash, size, ty);
+            self.blob_groups.push((availability, msg));
+        }
+    }
+
+    fn build(self) -> Vec<NewPooledTransactionHashes> {
+        let mut messages = Vec::with_capacity(
+            usize::from(!self.non_blob.hashes.is_empty()) + self.blob_groups.len(),
+        );
+        if !self.non_blob.hashes.is_empty() {
+            let mut msg = self.non_blob;
+            msg.cell_mask = None;
+            msg.shrink_to_fit();
+            messages.push(msg.into());
+        }
+
+        for (_, mut msg) in self.blob_groups {
+            msg.shrink_to_fit();
+            messages.push(msg.into());
+        }
+
+        messages
+    }
+}
+
+fn push_eth72_hash(msg: &mut NewPooledTransactionHashes72, hash: TxHash, size: usize, ty: u8) {
+    msg.hashes.push(hash);
+    msg.sizes.push(size);
+    msg.types.push(ty);
 }
 
 /// How we received the transactions.
@@ -2979,7 +3050,7 @@ mod tests {
 
         let txs = builder.build();
         assert!(txs.full.is_none());
-        let txs = txs.pooled.unwrap();
+        let txs = txs.pooled.first().unwrap();
         assert_eq!(txs.len(), 1);
     }
 
@@ -2999,14 +3070,14 @@ mod tests {
         assert!(!builder.is_empty());
 
         let txs = builder.clone().build();
-        assert!(txs.pooled.is_none());
+        assert!(txs.pooled.is_empty());
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
 
         builder.push(&tx);
 
         let txs = builder.clone().build();
-        let pooled = txs.pooled.unwrap();
+        let pooled = txs.pooled.first().unwrap();
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
@@ -3025,14 +3096,14 @@ mod tests {
 
         let txs = builder.clone().build();
         assert!(txs.full.is_none());
-        let txs = txs.pooled.unwrap();
+        let txs = txs.pooled.first().unwrap();
         assert_eq!(txs.len(), 1);
 
         let tx = PropagateTransaction::pool_tx(Arc::new(factory.create_eip1559()));
         builder.push(&tx);
 
         let txs = builder.clone().build();
-        let pooled = txs.pooled.unwrap();
+        let pooled = txs.pooled.first().unwrap();
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
