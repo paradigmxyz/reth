@@ -225,6 +225,7 @@ where
     /// segment containing the `(bal_index - 1)`-th transaction and drops the
     /// plan so segment boundaries don't fire — a BAL worker only runs one
     /// transaction in its segment.
+    #[inline]
     fn initialize(&mut self) -> Result<(), BlockExecutionError> {
         if self.initialized {
             return Ok(());
@@ -251,10 +252,6 @@ where
 
             segment_idx
         } else {
-            if self.initialized {
-                return Ok(());
-            }
-
             self.initialized = true;
             0
         };
@@ -285,10 +282,12 @@ where
         }))
     }
 
+    #[inline]
     const fn inner(&self) -> &EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
 
+    #[inline]
     const fn inner_mut(
         &mut self,
     ) -> &mut EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
@@ -443,7 +442,9 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
-        self.initialize()?;
+        if !self.initialized {
+            self.initialize()?;
+        }
         self.inner_mut().execute_transaction_without_commit(tx)
     }
 
