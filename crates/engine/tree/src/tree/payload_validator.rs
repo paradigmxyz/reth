@@ -116,6 +116,9 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data and changeset provider preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
+/// Above this many transactions, record transaction timing as one aggregate sample per block.
+const PER_TRANSACTION_TIMING_SAMPLE_LIMIT: usize = 1024;
+
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
@@ -1205,12 +1208,21 @@ where
         // In that case, invoking the callback on every transaction would resend the previous
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
+        let record_per_transaction_timing =
+            transaction_count <= PER_TRANSACTION_TIMING_SAMPLE_LIMIT;
+        let mut total_transaction_wait = Duration::ZERO;
+        let mut total_transaction_execution = Duration::ZERO;
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
-            self.metrics.record_transaction_wait(wait_start.elapsed());
+            let wait_elapsed = wait_start.elapsed();
+            if record_per_transaction_timing {
+                self.metrics.record_transaction_wait(wait_elapsed);
+            } else {
+                total_transaction_wait += wait_elapsed;
+            }
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
@@ -1231,7 +1243,12 @@ where
 
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
+            let tx_elapsed = tx_start.elapsed();
+            if record_per_transaction_timing {
+                self.metrics.record_transaction_execution(tx_elapsed);
+            } else {
+                total_transaction_execution += tx_elapsed;
+            }
 
             // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
@@ -1249,6 +1266,11 @@ where
             if has_bal {
                 executor.evm_mut().db_mut().bump_bal_index();
             }
+        }
+
+        if !record_per_transaction_timing {
+            self.metrics.record_transaction_wait(total_transaction_wait);
+            self.metrics.record_transaction_execution(total_transaction_execution);
         }
 
         drop(exec_span);
