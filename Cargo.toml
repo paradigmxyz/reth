@@ -701,4 +701,4 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "cc45f5b" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "3b712cc" }
