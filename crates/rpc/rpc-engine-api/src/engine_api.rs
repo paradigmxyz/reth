@@ -45,8 +45,7 @@ use tracing::{debug, trace, warn};
 /// this cache first and, on a hit, removes and returns the cached value without re-executing.
 ///
 /// Entries older than the configured depth are evicted on each insert in the engine tree.
-pub type WitnessCache =
-    Arc<Mutex<HashMap<B256, (u64, alloy_rpc_types_debug::ExecutionWitness)>>>;
+pub type WitnessCache = Arc<Mutex<HashMap<B256, (u64, alloy_rpc_types_debug::ExecutionWitness)>>>;
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -649,9 +648,10 @@ where
             // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
             // truncate the end if it's greater than the last block
             if let Ok(best_block) = inner.provider.best_block_number()
-                && end > best_block {
-                    end = best_block;
-                }
+                && end > best_block
+            {
+                end = best_block;
+            }
 
             // Check if the requested range starts before the earliest available block due to pruning/expiry
             let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
@@ -924,9 +924,9 @@ where
             if let Err(err) = attr_validation_res {
                 let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
                 if fcu_res.is_invalid() || fcu_res.payload_status.is_syncing() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
@@ -952,7 +952,7 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         self.inner
@@ -996,7 +996,7 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         self.inner
@@ -1019,12 +1019,12 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         // Spec requires returning `null` if syncing.
         if (*self.inner.is_syncing)() {
-            return Ok(None)
+            return Ok(None);
         }
 
         self.inner
@@ -1048,12 +1048,12 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         // Spec requires returning `null` if syncing.
         if (*self.inner.is_syncing)() {
-            return Ok(None)
+            return Ok(None);
         }
 
         self.inner
@@ -1598,10 +1598,6 @@ pub struct EngineApiWithWitness<Provider, PayloadT: PayloadTypes, Pool, Validato
     /// Task spawner for offloading blocking witness generation.
     task_spawner: Runtime,
     /// Optional pre-computed witness cache populated by the engine tree during primary execution.
-    ///
-    /// When `Some`, `generate_witness` checks this cache before falling back to re-execution.
-    /// This avoids the overhead of a second EVM run for the common case where the REST handler
-    /// is called shortly after `engine_newPayload` for the same block.
     witness_cache: Option<WitnessCache>,
 }
 
@@ -1621,18 +1617,13 @@ where
     }
 
     /// Attaches a witness cache to this handler.
-    ///
-    /// When set, `generate_witness` will check the cache before falling back to re-execution.
-    /// The same `Arc` must be cloned and passed to the engine tree via
-    /// `BasicEngineValidator::with_witness_cache`.
     pub fn with_witness_cache(mut self, cache: WitnessCache) -> Self {
         self.witness_cache = Some(cache);
         self
     }
 }
 
-impl<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
-    crate::rest::NewPayloadWithWitnessHandler
+impl<Provider, PayloadT, Pool, Validator, ChainSpec, Evm> crate::rest::NewPayloadWithWitnessHandler
     for EngineApiWithWitness<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
 where
     Provider: BlockReader + HeaderProvider + StateProviderFactory + BalProvider + Clone + 'static,
@@ -1641,19 +1632,15 @@ where
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<PayloadT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
-    Evm: reth_evm::ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<Block = Provider::Block>>
-        + 'static,
+    Evm: reth_evm::ConfigureEvm<
+            Primitives: reth_primitives_traits::NodePrimitives<Block = Provider::Block>,
+        > + 'static,
 {
     fn new_payload_v5(
         &self,
         payload: ExecutionData,
     ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<PayloadStatus, EngineApiError>,
-                > + Send
-                + '_,
-        >,
+        Box<dyn std::future::Future<Output = Result<PayloadStatus, EngineApiError>> + Send + '_>,
     > {
         Box::pin(self.engine_api.new_payload_v5(payload))
     }
@@ -1669,12 +1656,9 @@ where
                 + '_,
         >,
     > {
-        // Fast path: check the pre-computed witness cache populated during primary execution.
+        // First try to obtain this from cache (if it fails it would fal back to re-execution)
         if let Some(cache) = &self.witness_cache {
-            let cached = cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&block_hash);
+            let cached = cache.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_hash);
             if let Some((_block_number, witness)) = cached {
                 debug!(
                     target: "rpc::engine",
@@ -1685,8 +1669,7 @@ where
             }
         }
 
-        // Slow path: the witness was not cached (block not recently executed, or cache disabled).
-        // Re-execute the block from scratch.
+        // re-execution to obtain witness
         use reth_evm::execute::Executor;
         use reth_revm::witness::ExecutionWitnessRecord;
         use reth_storage_api::TransactionVariant;
@@ -1722,22 +1705,17 @@ where
 
                 // 3. Create executor and re-execute the block with state closure.
                 let spd = reth_revm::database::StateProviderDatabase::new(state_provider);
-                let mut db = reth_revm::State::builder()
-                    .with_database(spd)
-                    .with_bundle_update()
-                    .build();
+                let mut db =
+                    reth_revm::State::builder().with_database(spd).with_bundle_update().build();
 
                 let block_executor = evm_config.executor(&mut db);
                 let mode = ExecutionWitnessMode::Legacy;
 
                 let mut witness_record = ExecutionWitnessRecord::default();
                 let _ = block_executor
-                    .execute_with_state_closure(
-                        &block,
-                        |statedb: &reth_revm::State<_>| {
-                            witness_record.record_executed_state(statedb, mode);
-                        },
-                    )
+                    .execute_with_state_closure(&block, |statedb: &reth_revm::State<_>| {
+                        witness_record.record_executed_state(statedb, mode);
+                    })
                     .map_err(|e| EngineApiError::Internal(Box::new(e)))?;
 
                 // 4. Convert the record into a full ExecutionWitness.
@@ -2466,8 +2444,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().into_block())),
             );
@@ -2496,8 +2474,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {

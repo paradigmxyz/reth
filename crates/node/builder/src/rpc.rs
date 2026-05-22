@@ -42,8 +42,8 @@ use reth_rpc_builder::{
     config::RethRpcServerConfig,
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
-use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 pub use reth_rpc_engine_api::WitnessCache;
+use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
@@ -1598,7 +1598,6 @@ where
         );
 
         // Create the witness handler by wrapping a clone of the engine API.
-        // Attach the cache if provided so the handler checks it before re-executing.
         let mut with_witness = reth_rpc_engine_api::EngineApiWithWitness::new(
             engine_api.clone(),
             ctx.node.provider().clone(),

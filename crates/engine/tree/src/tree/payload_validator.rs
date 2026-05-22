@@ -221,11 +221,6 @@ where
     /// Custom state root computation function.
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
     /// Optional witness cache shared with the REST handler.
-    ///
-    /// When `Some`, every successfully executed block's [`ExecutionWitness`] is captured
-    /// during primary execution and stored here, keyed by block hash. The REST handler
-    /// (`EngineApiWithWitness`) reads and removes entries from this cache instead of
-    /// re-executing the block.
     witness_cache: Option<WitnessCache>,
 }
 
@@ -294,10 +289,6 @@ where
     }
 
     /// Sets the witness cache shared with the REST handler.
-    ///
-    /// When set, the engine tree will capture the [`ExecutionWitness`] during primary block
-    /// execution (instead of discarding it) and store it in this cache. The REST handler can
-    /// then retrieve it without re-executing the block.
     pub fn with_witness_cache(mut self, cache: WitnessCache) -> Self {
         self.witness_cache = Some(cache);
         self
@@ -429,7 +420,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -457,7 +448,7 @@ where
                 return Err(validated_block
                     .try_into_inner()
                     .expect("sole handle")
-                    .expect_err("Err result checked"))
+                    .expect_err("Err result checked"));
             }
         }
 
@@ -472,7 +463,7 @@ where
                 validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
@@ -854,7 +845,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         let timing_stats = state_provider_stats.map(|stats| {
@@ -1097,13 +1088,10 @@ where
 
         // Capture the execution witness BEFORE merge_transitions() consumes the cache.
         //
-        // `State<DB>.cache.accounts` and `.cache.contracts` are fully populated at this point —
+        // `State<DB>.cache.accounts` and `.cache.contracts` are fully populated at this point
         // they hold all accounts and contracts that were accessed or modified during execution.
         // `merge_transitions()` moves data from the cache into the bundle state; after that call
         // the cache is partially cleared, making witness generation incorrect.
-        //
-        // This mirrors the pattern used in `debug_executionWitness` (debug.rs), but avoids the
-        // second EVM execution by hooking into the primary execution path.
         if let Some(witness_cache) = &self.witness_cache {
             use reth_revm::witness::ExecutionWitnessRecord;
             use reth_trie_common::ExecutionWitnessMode;
@@ -1135,7 +1123,6 @@ where
                     );
                 }
                 Err(e) => {
-                    // Non-fatal: log and continue. The REST handler will fall back to re-execution.
                     warn!(
                         target: "engine::tree::payload_validator",
                         %e,
@@ -1149,7 +1136,6 @@ where
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
-
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
@@ -1171,9 +1157,9 @@ where
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
-        let parallel_execution = has_bal &&
-            !self.config.disable_state_cache() &&
-            !self.config.disable_bal_parallel_execution();
+        let parallel_execution = has_bal
+            && !self.config.disable_state_cache()
+            && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"
@@ -1682,9 +1668,11 @@ where
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
+
+
 
         // record post-execution validation duration
         self.metrics
@@ -1752,9 +1740,9 @@ where
 
                 Ok(handle)
             }
-            StateRootStrategy::Parallel |
-            StateRootStrategy::Synchronous |
-            StateRootStrategy::Custom(_) => {
+            StateRootStrategy::Parallel
+            | StateRootStrategy::Synchronous
+            | StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -1786,7 +1774,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1794,7 +1782,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1828,7 +1816,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -2014,9 +2002,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
