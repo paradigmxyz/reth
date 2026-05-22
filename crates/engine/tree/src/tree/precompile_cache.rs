@@ -14,6 +14,8 @@ use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 1024 * 1024;
+/// Initial entry capacity for each per-address precompile cache.
+const INITIAL_CACHE_ENTRIES: usize = 1024;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -52,7 +54,7 @@ where
     fn default() -> Self {
         Self(
             moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .initial_capacity(MAX_CACHE_SIZE as usize)
+                .initial_capacity(INITIAL_CACHE_ENTRIES)
                 .eviction_policy(EvictionPolicy::lru())
                 .weigher(|key: &Bytes, value: &CacheEntry<S>| {
                     (key.len() + value.output.bytes.len()) as u32
