@@ -1342,6 +1342,7 @@ where
         // (`next_uncached_key_range`). If/when this becomes None then there are no further nodes
         // which could exist.
         let mut uncalculated_lower_bound = Some(sub_trie_targets.prefix);
+        let sub_trie_prefix_is_empty = sub_trie_targets.prefix.is_empty();
 
         trace!(target: TRACE_TARGET, "Starting loop");
         loop {
@@ -1395,10 +1396,9 @@ where
             // If the `hashed_cursor_current` is None (exhausted), or not within the range of the
             // sub-trie, then there are no more keys at all, meaning the trie couldn't possibly have
             // more data and we should complete computation.
-            if hashed_cursor_current
-                .as_ref()
-                .is_none_or(|(key, _)| !key.starts_with(&sub_trie_targets.prefix))
-            {
+            if hashed_cursor_current.as_ref().is_none_or(|(key, _)| {
+                !sub_trie_prefix_is_empty && !key.starts_with(&sub_trie_targets.prefix)
+            }) {
                 break;
             }
 
