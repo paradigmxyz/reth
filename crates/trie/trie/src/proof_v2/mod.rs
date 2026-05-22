@@ -1521,6 +1521,11 @@ where
         value_encoder: &mut VE,
         targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+        if targets.is_empty() {
+            trace!(target: TRACE_TARGET, "Empty targets, returning");
+            return Ok(Vec::new())
+        }
+
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
         self.proof_inner(value_encoder, targets)
