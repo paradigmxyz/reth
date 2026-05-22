@@ -288,15 +288,11 @@ where
             // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
             // the `rlp_nodes_bufs` free-list.
             self.rlp_encode_buf.clear();
-            let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
-
-            // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
-            // nodes before returning.
-            self.rlp_encode_buf.clear();
-            proof_node.node.encode(&mut self.rlp_encode_buf);
+            let (proof_node, rlp_node) =
+                child.into_proof_trie_node_and_rlp(child_path, &mut self.rlp_encode_buf)?;
 
             self.retained_proofs.push(proof_node);
-            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+            return Ok(rlp_node)
         }
 
         // If the child path is not being retained then we convert directly to an `RlpNode`

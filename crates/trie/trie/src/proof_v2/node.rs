@@ -67,6 +67,51 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         }
     }
 
+    /// Converts this child into both its retained proof node and its RLP node representation.
+    ///
+    /// This is used when the caller needs to retain the node and pass its RLP upward. It avoids
+    /// encoding the retained [`ProofTrieNodeV2`] a second time after materializing it.
+    ///
+    /// # Panics
+    ///
+    /// If called on a [`Self::RlpNode`].
+    pub(crate) fn into_proof_trie_node_and_rlp(
+        self,
+        path: Nibbles,
+        buf: &mut Vec<u8>,
+    ) -> Result<(ProofTrieNodeV2, RlpNode), StateProofError> {
+        let (node, masks, rlp_node) = match self {
+            Self::Leaf { short_key, value } => {
+                // RLP encode the value itself.
+                value.encode(buf)?;
+                let value_enc_len = buf.len();
+
+                // Keep the encoded value for the retained proof node, but reuse the same buffer to
+                // encode the enclosing leaf node that will be returned as the RLP child.
+                let rlp_val = buf.clone();
+                let leaf_enc_len = LeafNodeRef::new(&short_key, buf).length();
+                buf.resize(value_enc_len + leaf_enc_len, 0);
+
+                // SAFETY: the buffer has just been resized beyond `value_enc_len`.
+                let (value_buf, mut leaf_buf) =
+                    unsafe { buf.split_at_mut_unchecked(value_enc_len) };
+
+                LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
+                let rlp_node = RlpNode::from_rlp(&buf[value_enc_len..]);
+
+                (TrieNodeV2::Leaf(LeafNode::new(short_key, rlp_val)), None, rlp_node)
+            }
+            Self::Branch { node, masks } => {
+                node.encode(buf);
+                let rlp_node = RlpNode::from_rlp(buf);
+                (TrieNodeV2::Branch(node), masks, rlp_node)
+            }
+            Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node_and_rlp` on RlpNode"),
+        };
+
+        Ok((ProofTrieNodeV2 { node, path, masks }, rlp_node))
+    }
+
     /// Converts this child into a [`ProofTrieNodeV2`] having the given path.
     ///
     /// # Panics
