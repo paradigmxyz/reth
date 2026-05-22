@@ -25,7 +25,7 @@ mod error;
 /// Engine API metrics.
 mod metrics;
 
-pub use engine_api::{EngineApi, EngineApiSender, EngineApiWithWitness};
+pub use engine_api::{EngineApi, EngineApiSender, EngineApiWithWitness, WitnessCache};
 pub use error::*;
 pub use reth_engine_api::RethEngineApi;
 

@@ -97,11 +97,25 @@ use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
+
+/// A cache keyed by block hash, storing `(block_number, ExecutionWitness)` tuples.
+///
+/// Written by the engine tree during primary execution (when the REST witness endpoint is
+/// configured) and consumed by the REST handler, avoiding a second EVM execution.
+///
+/// Entries are evicted when a newer block whose number exceeds the stored block's number by
+/// more than [`WITNESS_CACHE_MAX_DEPTH`] is inserted.
+pub type WitnessCache =
+    Arc<Mutex<HashMap<alloy_primitives::B256, (u64, alloy_rpc_types_debug::ExecutionWitness)>>>;
+
+/// Maximum number of blocks worth of witnesses to retain in the cache.
+/// Witnesses for blocks older than `current - WITNESS_CACHE_MAX_DEPTH` are evicted.
+const WITNESS_CACHE_MAX_DEPTH: u64 = 64;
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -206,6 +220,13 @@ where
     runtime: reth_tasks::Runtime,
     /// Custom state root computation function.
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
+    /// Optional witness cache shared with the REST handler.
+    ///
+    /// When `Some`, every successfully executed block's [`ExecutionWitness`] is captured
+    /// during primary execution and stored here, keyed by block hash. The REST handler
+    /// (`EngineApiWithWitness`) reads and removes entries from this cache instead of
+    /// re-executing the block.
+    witness_cache: Option<WitnessCache>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -262,12 +283,23 @@ where
             changeset_cache,
             runtime,
             custom_state_root: None,
+            witness_cache: None,
         }
     }
 
     /// Sets a custom state root computation handler.
     pub fn with_custom_state_root(mut self, custom_state_root: CustomStateRoot<N>) -> Self {
         self.custom_state_root = Some(custom_state_root);
+        self
+    }
+
+    /// Sets the witness cache shared with the REST handler.
+    ///
+    /// When set, the engine tree will capture the [`ExecutionWitness`] during primary block
+    /// execution (instead of discarding it) and store it in this cache. The REST handler can
+    /// then retrieve it without re-executing the block.
+    pub fn with_witness_cache(mut self, cache: WitnessCache) -> Self {
+        self.witness_cache = Some(cache);
         self
     }
 
@@ -1063,9 +1095,61 @@ where
             crate::tree::payload_processor::bal::validate_bal(&mut db, decoded_bal)?;
         }
 
+        // Capture the execution witness BEFORE merge_transitions() consumes the cache.
+        //
+        // `State<DB>.cache.accounts` and `.cache.contracts` are fully populated at this point —
+        // they hold all accounts and contracts that were accessed or modified during execution.
+        // `merge_transitions()` moves data from the cache into the bundle state; after that call
+        // the cache is partially cleared, making witness generation incorrect.
+        //
+        // This mirrors the pattern used in `debug_executionWitness` (debug.rs), but avoids the
+        // second EVM execution by hooking into the primary execution path.
+        if let Some(witness_cache) = &self.witness_cache {
+            use reth_revm::witness::ExecutionWitnessRecord;
+            use reth_trie_common::ExecutionWitnessMode;
+
+            let block_hash = env.hash;
+            let block_number = input.num_hash().number;
+            let mode = ExecutionWitnessMode::Legacy;
+
+            let witness_record = ExecutionWitnessRecord::from_executed_state(&db, mode);
+            match witness_record.into_execution_witness(
+                &*db.database,
+                &self.provider,
+                block_number,
+                mode,
+            ) {
+                Ok(witness) => {
+                    let mut cache = witness_cache.lock().unwrap_or_else(|e| e.into_inner());
+                    cache.insert(block_hash, (block_number, witness));
+                    // Evict entries older than WITNESS_CACHE_MAX_DEPTH blocks.
+                    cache.retain(|_, (num, _)| {
+                        block_number.saturating_sub(*num) <= WITNESS_CACHE_MAX_DEPTH
+                    });
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        block_hash = ?block_hash,
+                        block_number,
+                        cache_size = cache.len(),
+                        "Cached execution witness for block"
+                    );
+                }
+                Err(e) => {
+                    // Non-fatal: log and continue. The REST handler will fall back to re-execution.
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %e,
+                        block_hash = ?block_hash,
+                        "Failed to generate witness during primary execution; REST handler will re-execute"
+                    );
+                }
+            }
+        }
+
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
+
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 

@@ -29,7 +29,7 @@ use reth_node_builder::{
         BasicEngineApiBuilder, BasicEngineValidatorBuilder, Either, EngineApiBuilder,
         EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity,
         PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
-        RpcAddOns, RpcHandle, Stack,
+        RpcAddOns, RpcHandle, Stack, WitnessCache,
     },
     BuilderContext, DebugNode, Node, NodeAdapter,
 };
@@ -56,7 +56,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm::context::TxEnv;
-use std::{marker::PhantomData, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, marker::PhantomData, sync::{Arc, Mutex}, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -198,11 +198,15 @@ where
     EthereumEthApiBuilder: EthApiBuilder<N>,
 {
     fn default() -> Self {
+        // Pre-create a witness cache shared by both the engine tree validator (writer)
+        // and the REST witness handler (reader). Using the same Arc ensures they operate
+        // on the same underlying Mutex<HashMap> without additional coordination.
+        let witness_cache: WitnessCache = Arc::new(Mutex::new(HashMap::new()));
         Self::new(RpcAddOns::new(
             EthereumEthApiBuilder::default(),
             EthereumEngineValidatorBuilder::default(),
-            BasicEngineApiBuilder::default(),
-            BasicEngineValidatorBuilder::default(),
+            BasicEngineApiBuilder::default().with_witness_cache(witness_cache.clone()),
+            BasicEngineValidatorBuilder::default().with_witness_cache(witness_cache),
             Default::default(),
             Identity::new(),
         ))

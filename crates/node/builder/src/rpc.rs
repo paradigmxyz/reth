@@ -43,6 +43,7 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+pub use reth_rpc_engine_api::WitnessCache;
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
@@ -1440,12 +1441,28 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 pub struct BasicEngineValidatorBuilder<EV> {
     /// The payload validator builder used to create the engine validator.
     payload_validator_builder: EV,
+    /// Optional witness cache shared with the REST handler.
+    ///
+    /// When `Some`, the built [`BasicEngineValidator`] will capture the
+    /// [`ExecutionWitness`] during primary block execution and store it in this
+    /// cache for later retrieval by the REST handler.
+    witness_cache: Option<WitnessCache>,
 }
 
 impl<EV> BasicEngineValidatorBuilder<EV> {
     /// Creates a new instance with the given payload validator builder.
-    pub const fn new(payload_validator_builder: EV) -> Self {
-        Self { payload_validator_builder }
+    pub fn new(payload_validator_builder: EV) -> Self {
+        Self { payload_validator_builder, witness_cache: None }
+    }
+
+    /// Attaches a witness cache to the validator builder.
+    ///
+    /// The same [`WitnessCache`] `Arc` should also be passed to
+    /// [`BasicEngineApiBuilder::with_witness_cache`] so the REST handler can read
+    /// witnesses cached during primary execution.
+    pub fn with_witness_cache(mut self, cache: WitnessCache) -> Self {
+        self.witness_cache = Some(cache);
+        self
     }
 }
 
@@ -1479,11 +1496,12 @@ where
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> eyre::Result<Self::EngineValidator> {
-        let validator = self.payload_validator_builder.build(ctx).await?;
+        let Self { payload_validator_builder, witness_cache } = self;
+        let validator = payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
-        Ok(BasicEngineValidator::new(
+        let mut engine_validator = BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
@@ -1492,7 +1510,13 @@ where
             invalid_block_hook,
             changeset_cache,
             ctx.node.task_executor().clone(),
-        ))
+        );
+
+        if let Some(cache) = witness_cache {
+            engine_validator = engine_validator.with_witness_cache(cache);
+        }
+
+        Ok(engine_validator)
     }
 }
 
@@ -1504,6 +1528,23 @@ where
 #[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<PVB> {
     payload_validator_builder: PVB,
+    /// Optional witness cache shared with the engine tree validator.
+    ///
+    /// When `Some`, the built REST handler will check this cache before falling back to
+    /// re-execution. The same [`WitnessCache`] `Arc` should also be passed to
+    /// [`BasicEngineValidatorBuilder::with_witness_cache`] so the engine tree populates it.
+    witness_cache: Option<WitnessCache>,
+}
+
+impl<PVB> BasicEngineApiBuilder<PVB> {
+    /// Attaches a witness cache to the engine API builder.
+    ///
+    /// The same [`WitnessCache`] `Arc` should also be passed to
+    /// [`BasicEngineValidatorBuilder::with_witness_cache`].
+    pub fn with_witness_cache(mut self, cache: WitnessCache) -> Self {
+        self.witness_cache = Some(cache);
+        self
+    }
 }
 
 impl<N, PVB> EngineApiBuilder<N> for BasicEngineApiBuilder<PVB>
@@ -1532,7 +1573,7 @@ where
         Self::EngineApi,
         Option<Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler>>,
     )> {
-        let Self { payload_validator_builder } = self;
+        let Self { payload_validator_builder, witness_cache } = self;
 
         let engine_validator = payload_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
@@ -1557,13 +1598,18 @@ where
         );
 
         // Create the witness handler by wrapping a clone of the engine API.
+        // Attach the cache if provided so the handler checks it before re-executing.
+        let mut with_witness = reth_rpc_engine_api::EngineApiWithWitness::new(
+            engine_api.clone(),
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            ctx.node.task_executor().clone(),
+        );
+        if let Some(cache) = witness_cache {
+            with_witness = with_witness.with_witness_cache(cache);
+        }
         let witness_handler: Arc<dyn reth_rpc_engine_api::rest::NewPayloadWithWitnessHandler> =
-            Arc::new(reth_rpc_engine_api::EngineApiWithWitness::new(
-                engine_api.clone(),
-                ctx.node.provider().clone(),
-                ctx.node.evm_config().clone(),
-                ctx.node.task_executor().clone(),
-            ));
+            Arc::new(with_witness);
 
         Ok((engine_api, Some(witness_handler)))
     }

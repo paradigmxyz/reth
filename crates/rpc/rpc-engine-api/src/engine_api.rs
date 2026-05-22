@@ -31,11 +31,22 @@ use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFa
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
-    sync::Arc,
+    collections::HashMap,
+    sync::{Arc, Mutex},
     time::{Instant, SystemTime},
 };
 use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
+
+/// Cache shared between the engine tree (writer) and the REST witness handler (reader).
+///
+/// The engine tree captures the [`ExecutionWitness`] during primary block execution and stores it
+/// here, keyed by block hash. The REST handler (`EngineApiWithWitness::generate_witness`) checks
+/// this cache first and, on a hit, removes and returns the cached value without re-executing.
+///
+/// Entries older than the configured depth are evicted on each insert in the engine tree.
+pub type WitnessCache =
+    Arc<Mutex<HashMap<B256, (u64, alloy_rpc_types_debug::ExecutionWitness)>>>;
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -1586,6 +1597,12 @@ pub struct EngineApiWithWitness<Provider, PayloadT: PayloadTypes, Pool, Validato
     evm_config: Evm,
     /// Task spawner for offloading blocking witness generation.
     task_spawner: Runtime,
+    /// Optional pre-computed witness cache populated by the engine tree during primary execution.
+    ///
+    /// When `Some`, `generate_witness` checks this cache before falling back to re-execution.
+    /// This avoids the overhead of a second EVM run for the common case where the REST handler
+    /// is called shortly after `engine_newPayload` for the same block.
+    witness_cache: Option<WitnessCache>,
 }
 
 impl<Provider, PayloadT, Pool, Validator, ChainSpec, Evm>
@@ -1600,7 +1617,17 @@ where
         evm_config: Evm,
         task_spawner: Runtime,
     ) -> Self {
-        Self { engine_api, provider, evm_config, task_spawner }
+        Self { engine_api, provider, evm_config, task_spawner, witness_cache: None }
+    }
+
+    /// Attaches a witness cache to this handler.
+    ///
+    /// When set, `generate_witness` will check the cache before falling back to re-execution.
+    /// The same `Arc` must be cloned and passed to the engine tree via
+    /// `BasicEngineValidator::with_witness_cache`.
+    pub fn with_witness_cache(mut self, cache: WitnessCache) -> Self {
+        self.witness_cache = Some(cache);
+        self
     }
 }
 
@@ -1642,6 +1669,24 @@ where
                 + '_,
         >,
     > {
+        // Fast path: check the pre-computed witness cache populated during primary execution.
+        if let Some(cache) = &self.witness_cache {
+            let cached = cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&block_hash);
+            if let Some((_block_number, witness)) = cached {
+                debug!(
+                    target: "rpc::engine",
+                    ?block_hash,
+                    "Returning cached execution witness (no re-execution needed)"
+                );
+                return Box::pin(std::future::ready(Ok(witness)));
+            }
+        }
+
+        // Slow path: the witness was not cached (block not recently executed, or cache disabled).
+        // Re-execute the block from scratch.
         use reth_evm::execute::Executor;
         use reth_revm::witness::ExecutionWitnessRecord;
         use reth_storage_api::TransactionVariant;
