@@ -154,10 +154,11 @@ where
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
 
-            let current_len = canonical_executor.receipts().len();
+            let receipts = canonical_executor.receipts();
+            let current_len = receipts.len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
-                if let Some(receipt) = canonical_executor.receipts().last() {
+                if let Some(receipt) = receipts.last() {
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
@@ -289,9 +290,13 @@ impl BlockGasTracker {
 
     const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
-        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
-        self.block_regular_gas_used =
-            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        if self.is_amsterdam {
+            self.block_regular_gas_used =
+                self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        } else {
+            self.cumulative_tx_gas_used =
+                self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
+        }
     }
 }
 
