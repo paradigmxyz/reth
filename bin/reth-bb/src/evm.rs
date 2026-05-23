@@ -171,6 +171,8 @@ where
     bal_index_setter: Option<BalIndexSetter<DB>>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
+    /// Segment currently installed in the inner executor.
+    active_segment_idx: Option<usize>,
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -213,6 +215,7 @@ where
             bal_index_bumper,
             bal_index_setter,
             initialized: false,
+            active_segment_idx: None,
         }
     }
 
@@ -249,6 +252,10 @@ where
                 setter(self.inner_mut().evm_mut().db_mut(), renumbered);
             }
 
+            if self.active_segment_idx == Some(segment_idx) {
+                return Ok(());
+            }
+
             segment_idx
         } else {
             if self.initialized {
@@ -271,6 +278,7 @@ where
         inner.ctx = segment.ctx.clone();
 
         self.reseed_block_hashes_for(block_number);
+        self.active_segment_idx = Some(segment_idx);
 
         Ok(())
     }
@@ -391,6 +399,7 @@ where
         }
 
         self.inner = Some(new_inner);
+        self.active_segment_idx = Some(seg_idx);
 
         // Reseed the block hash cache for the new segment's 256-block window
         // before applying pre-execution changes (which may use BLOCKHASH).
