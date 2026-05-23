@@ -7,7 +7,10 @@ use reth_db::models::AccountBeforeTx;
 use reth_db_api::models::BlockNumberAddress;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::ops::{Bound, RangeBounds};
+use std::{
+    ops::{Bound, RangeBounds},
+    vec::IntoIter,
+};
 
 /// Iterator that walks account changesets from static files in a block range.
 ///
@@ -21,9 +24,9 @@ pub struct StaticFileAccountChangesetWalker<P> {
     /// Current block being processed
     current_block: BlockNumber,
     /// Changesets for current block
-    current_changesets: Vec<AccountBeforeTx>,
-    /// Index within current block's changesets
-    changeset_index: usize,
+    current_changesets: IntoIter<AccountBeforeTx>,
+    /// Whether `current_block` is backed by the active changeset iterator.
+    current_block_loaded: bool,
 }
 
 impl<P> StaticFileAccountChangesetWalker<P> {
@@ -52,8 +55,8 @@ impl<P> StaticFileAccountChangesetWalker<P> {
             provider,
             end_block,
             current_block: start,
-            current_changesets: Vec::new(),
-            changeset_index: 0,
+            current_changesets: Vec::new().into_iter(),
+            current_block_loaded: false,
         }
     }
 }
@@ -66,27 +69,25 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         // Yield remaining changesets from current block
-        if let Some(changeset) = self.current_changesets.get(self.changeset_index).cloned() {
-            self.changeset_index += 1;
+        if let Some(changeset) = self.current_changesets.next() {
             return Some(Ok((self.current_block, changeset)));
         }
 
         // Advance to next block if we exhausted the previous one
-        //
-        // If we do not return from the previous condition, but the current changesets are
-        // non-empty, then we have run past the current changeset and must fetch the next
-        // changeset.
-        if !self.current_changesets.is_empty() {
+        if self.current_block_loaded {
             self.current_block += 1;
+            self.current_block_loaded = false;
         }
 
         // Load next block with changesets
         while self.end_block.is_none_or(|end| self.current_block < end) {
             match self.provider.account_block_changeset(self.current_block) {
                 Ok(changesets) if !changesets.is_empty() => {
+                    let mut changesets = changesets.into_iter();
+                    let first = changesets.next().expect("changesets is not empty");
                     self.current_changesets = changesets;
-                    self.changeset_index = 1;
-                    return Some(Ok((self.current_block, self.current_changesets[0].clone())));
+                    self.current_block_loaded = true;
+                    return Some(Ok((self.current_block, first)));
                 }
                 Ok(_) => self.current_block += 1,
                 Err(e) => {
@@ -110,9 +111,9 @@ pub struct StaticFileStorageChangesetWalker<P> {
     /// Current block being processed
     current_block: BlockNumber,
     /// Changesets for current block
-    current_changesets: Vec<(BlockNumberAddress, StorageEntry)>,
-    /// Index within current block's changesets
-    changeset_index: usize,
+    current_changesets: IntoIter<(BlockNumberAddress, StorageEntry)>,
+    /// Whether `current_block` is backed by the active changeset iterator.
+    current_block_loaded: bool,
 }
 
 impl<P> StaticFileStorageChangesetWalker<P> {
@@ -134,8 +135,8 @@ impl<P> StaticFileStorageChangesetWalker<P> {
             provider,
             end_block,
             current_block: start,
-            current_changesets: Vec::new(),
-            changeset_index: 0,
+            current_changesets: Vec::new().into_iter(),
+            current_block_loaded: false,
         }
     }
 }
@@ -147,21 +148,23 @@ where
     type Item = ProviderResult<(BlockNumberAddress, StorageEntry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(changeset) = self.current_changesets.get(self.changeset_index).copied() {
-            self.changeset_index += 1;
+        if let Some(changeset) = self.current_changesets.next() {
             return Some(Ok(changeset));
         }
 
-        if !self.current_changesets.is_empty() {
+        if self.current_block_loaded {
             self.current_block += 1;
+            self.current_block_loaded = false;
         }
 
         while self.end_block.is_none_or(|end| self.current_block < end) {
             match self.provider.storage_changeset(self.current_block) {
                 Ok(changesets) if !changesets.is_empty() => {
+                    let mut changesets = changesets.into_iter();
+                    let first = changesets.next().expect("changesets is not empty");
                     self.current_changesets = changesets;
-                    self.changeset_index = 1;
-                    return Some(Ok(self.current_changesets[0]));
+                    self.current_block_loaded = true;
+                    return Some(Ok(first));
                 }
                 Ok(_) => self.current_block += 1,
                 Err(e) => {
