@@ -258,6 +258,10 @@ where
     /// This may consume and move forward the current entries when the overlay indicates a removed
     /// node.
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
+        if self.post_state_cursor.is_empty() {
+            return Ok(self.db_cursor_state.entry().copied())
+        }
+
         loop {
             let post_state_current =
                 self.post_state_cursor.current().copied().map(|(k, v)| (k, v.into_option()));
@@ -311,8 +315,11 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let post_state_entry =
-            self.post_state_cursor.seek(&key).copied().map(|(k, v)| (k, v.into_option()));
+        let post_state_entry = if self.post_state_cursor.is_empty() {
+            None
+        } else {
+            self.post_state_cursor.seek(&key).copied().map(|(k, v)| (k, v.into_option()))
+        };
 
         if let Some((mem_key, Some(value))) = post_state_entry &&
             mem_key == key
@@ -365,7 +372,8 @@ where
 
         // If either cursor is currently pointing to the last entry which was returned then consume
         // that entry so that `choose_next_entry` is looking at the subsequent one.
-        if let Some((key, _)) = self.post_state_cursor.current() &&
+        if !self.post_state_cursor.is_empty() &&
+            let Some((key, _)) = self.post_state_cursor.current() &&
             key == &last_key
         {
             self.post_state_cursor.first_after(&last_key);
@@ -413,7 +421,9 @@ where
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| !value.is_zero()) {
+        if !self.post_state_cursor.is_empty() &&
+            self.post_state_cursor.has_any(|(_, value)| !value.is_zero())
+        {
             return Ok(false);
         }
 
