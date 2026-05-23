@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobCellAvailability, BlobStore, BlobStoreError},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -563,6 +563,40 @@ where
         self.notify_on_transaction_updates(promoted, discarded);
     }
 
+    /// Stores blob sidecars and attaches the resulting availability mask before insertion.
+    fn prepare_transaction(
+        &self,
+        tx: TransactionValidationOutcome<T::Transaction>,
+    ) -> TransactionValidationOutcome<T::Transaction> {
+        let TransactionValidationOutcome::Valid {
+            balance,
+            state_nonce,
+            transaction: ValidTransaction::ValidWithSidecar { mut transaction, sidecar },
+            propagate,
+            bytecode_hash,
+            authorities,
+        } = tx
+        else {
+            return tx
+        };
+
+        let hash = *transaction.hash();
+        match self.insert_blob(hash, sidecar.clone()) {
+            Ok(availability) => {
+                transaction.set_blob_cell_availability(availability);
+                TransactionValidationOutcome::Valid {
+                    balance,
+                    state_nonce,
+                    transaction: ValidTransaction::ValidWithSidecar { transaction, sidecar },
+                    propagate,
+                    bytecode_hash,
+                    authorities,
+                }
+            }
+            Err(err) => TransactionValidationOutcome::Error(hash, Box::new(err)),
+        }
+    }
+
     /// Add a single validated transaction into the pool.
     ///
     /// Returns the outcome and optionally metadata to be processed after the pool lock is
@@ -589,7 +623,7 @@ where
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
-                let (mut transaction, blob_sidecar) = match transaction {
+                let (transaction, blob_sidecar) = match transaction {
                     ValidTransaction::Valid(tx) => (tx, None),
                     ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
                         debug_assert!(
@@ -599,11 +633,8 @@ where
                         (transaction, Some(sidecar))
                     }
                 };
-                if let Some(sidecar) = &blob_sidecar {
-                    transaction.set_blob_cell_availability(
-                        crate::blobstore::BlobCellAvailability::from_sidecar(sidecar),
-                    );
-                }
+
+                let hash = *transaction.hash();
 
                 let tx = ValidPoolTransaction {
                     transaction,
@@ -616,9 +647,13 @@ where
 
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
                     Ok(added) => added,
-                    Err(err) => return (Err(err), None),
+                    Err(err) => {
+                        if blob_sidecar.is_some() {
+                            self.delete_blob(hash);
+                        }
+                        return (Err(err), None)
+                    }
                 };
-                let hash = *added.hash();
                 let state = added.transaction_state();
 
                 let meta = AddedTransactionMeta { added, blob_sidecar };
@@ -673,6 +708,11 @@ where
             Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
         >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        let transactions = transactions
+            .into_iter()
+            .map(|(origin, tx)| (origin, self.prepare_transaction(tx)))
+            .collect::<Vec<_>>();
+
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
@@ -739,7 +779,6 @@ where
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
             self.on_new_blob_sidecar(&hash, &sidecar);
-            self.insert_blob(hash, sidecar);
         }
 
         // Delete replaced blob sidecar if any
@@ -1280,13 +1319,18 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecarVariant) {
+    fn insert_blob(
+        &self,
+        hash: TxHash,
+        blob: BlobTransactionSidecarVariant,
+    ) -> Result<BlobCellAvailability, BlobStoreError> {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
-        if let Err(err) = self.blob_store.insert(hash, blob) {
+        let availability = self.blob_store.insert(hash, blob).inspect_err(|err| {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
-        }
+        })?;
         self.update_blob_store_metrics();
+        Ok(availability)
     }
 
     /// Delete a blob from the blob store

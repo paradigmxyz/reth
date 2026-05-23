@@ -2293,7 +2293,7 @@ mod tests {
     };
     use alloy_consensus::{TxEip1559, TxLegacy};
     use alloy_eips::eip4844::BlobTransactionValidationError;
-    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
+    use alloy_primitives::{hex, Signature, TxKind, B128, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2306,6 +2306,7 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
     use reth_transaction_pool::{
+        blobstore::BlobCellAvailability,
         error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError},
         test_utils::{testing_pool, MockTransaction, MockTransactionFactory, TestPool},
     };
@@ -3107,6 +3108,33 @@ mod tests {
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
+    }
+
+    #[test]
+    fn test_eth72_pooled_hashes_group_blob_transactions_by_cell_availability() {
+        let full = BlobCellAvailability::full();
+        let sparse = BlobCellAvailability::new(B128::from(0b1010u128));
+
+        let mut builder = Eth72PooledTransactionsHashesBuilder::default();
+        builder.push(B256::with_last_byte(1), 100, TxType::Eip1559 as u8, None);
+        builder.push(B256::with_last_byte(2), 100, TxType::Eip4844 as u8, Some(full));
+        builder.push(B256::with_last_byte(3), 100, TxType::Eip4844 as u8, Some(sparse));
+        builder.push(B256::with_last_byte(4), 100, TxType::Eip4844 as u8, Some(full));
+
+        let messages = builder.build();
+        assert_eq!(messages.len(), 3);
+
+        let non_blob = messages[0].as_eth72().unwrap();
+        assert_eq!(non_blob.cell_mask, None);
+        assert_eq!(non_blob.hashes, vec![B256::with_last_byte(1)]);
+
+        let full_blobs = messages[1].as_eth72().unwrap();
+        assert_eq!(full_blobs.cell_mask, Some(full.mask()));
+        assert_eq!(full_blobs.hashes, vec![B256::with_last_byte(2), B256::with_last_byte(4)]);
+
+        let sparse_blobs = messages[2].as_eth72().unwrap();
+        assert_eq!(sparse_blobs.cell_mask, Some(sparse.mask()));
+        assert_eq!(sparse_blobs.hashes, vec![B256::with_last_byte(3)]);
     }
 
     #[tokio::test]
