@@ -833,13 +833,17 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             targets.account_targets.push(hashed_address.into());
         }
 
-        let mut storage_slots = Vec::with_capacity(account.storage.len());
+        let storage_len = account.storage.len();
+        let mut storage_slots = Vec::new();
         for (key, slot) in account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
                 continue
             }
 
+            if storage_slots.is_empty() {
+                storage_slots.reserve(storage_len);
+            }
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
             storage_slots.push(ProofV2Target::from(hashed_slot));
         }
