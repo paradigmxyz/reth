@@ -126,7 +126,7 @@ impl ArenaSparseNodeBranch {
 
     /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
     pub(super) fn branch_node_compact(&self, arena: &NodeArena) -> BranchNodeCompact {
-        let mut hashes = Vec::new();
+        let mut hashes = Vec::with_capacity(self.branch_masks.hash_mask.count_bits() as usize);
         for (nibble, child) in self.child_iter() {
             if self.branch_masks.hash_mask.is_bit_set(nibble) {
                 let hash = match child {
