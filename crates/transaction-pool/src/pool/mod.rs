@@ -1113,7 +1113,7 @@ where
         self.pool.write().prune_transactions(hashes)
     }
 
-    /// Removes and returns all transactions that are present in the pool.
+    /// Retains only transactions that are not present in the pool.
     pub fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,
@@ -1123,6 +1123,18 @@ where
         }
         let pool = self.get_pool_data();
         announcement.retain_by_hash(|tx| !pool.contains(tx))
+    }
+
+    /// Retains only transactions that are present in the pool.
+    pub fn retain_contains<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+        if announcement.is_empty() {
+            return
+        }
+        let pool = self.get_pool_data();
+        announcement.retain_by_hash(|tx| pool.contains(tx))
     }
 
     /// Returns the transaction by hash.
@@ -1648,8 +1660,26 @@ mod tests {
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
-    use alloy_primitives::Address;
+    use alloy_primitives::{Address, TxHash};
+    use reth_eth_wire_types::HandleMempoolData;
     use std::{fs, path::PathBuf};
+
+    #[derive(Debug)]
+    struct TestAnnouncement(Vec<TxHash>);
+
+    impl HandleMempoolData for TestAnnouncement {
+        fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
+
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+            self.0.retain(|hash| f(hash));
+        }
+    }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
@@ -1774,5 +1804,37 @@ mod tests {
         assert!(test_pool.get_highest_consecutive_transaction_by_sender(sender, 0).is_none());
         assert!(test_pool.remove_transactions_by_sender(sender).is_empty());
         assert_eq!(test_pool.sender_id(&sender), None);
+    }
+
+    #[test]
+    fn retain_filters_announcements_by_pool_membership() {
+        let test_pool = &TestPoolBuilder::default().with_config(Default::default()).pool;
+
+        let tx = MockTransaction::legacy().with_gas_price(100).with_gas_limit(21_000);
+        let known_hash = *tx.get_hash();
+        let unknown_hash = TxHash::random();
+        let other_unknown_hash = TxHash::random();
+
+        test_pool.add_transactions(
+            TransactionOrigin::External,
+            [TransactionValidationOutcome::Valid {
+                balance: U256::from(10_000_000),
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::Valid(tx),
+                propagate: true,
+                authorities: None,
+            }],
+        );
+
+        let mut known_announcement =
+            TestAnnouncement(vec![known_hash, unknown_hash, other_unknown_hash]);
+        test_pool.retain_contains(&mut known_announcement);
+        assert_eq!(known_announcement.0, vec![known_hash]);
+
+        let mut unknown_announcement =
+            TestAnnouncement(vec![known_hash, unknown_hash, other_unknown_hash]);
+        test_pool.retain_unknown(&mut unknown_announcement);
+        assert_eq!(unknown_announcement.0, vec![unknown_hash, other_unknown_hash]);
     }
 }
