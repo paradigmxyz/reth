@@ -436,6 +436,14 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
     }
 }
 
+impl<Executor: BlockExecutor> ExecutorTx<Executor>
+    for (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>)
+{
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        self
+    }
+}
+
 impl<Executor> ExecutorTx<Executor>
     for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
 where
