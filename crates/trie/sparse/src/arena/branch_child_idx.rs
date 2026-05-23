@@ -52,12 +52,14 @@ impl BranchChildIdx {
 impl<T> Index<BranchChildIdx> for SmallVec<[T; 4]> {
     type Output = T;
 
+    #[inline(always)]
     fn index(&self, idx: BranchChildIdx) -> &Self::Output {
         &self.as_slice()[idx.get()]
     }
 }
 
 impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
+    #[inline(always)]
     fn index_mut(&mut self, idx: BranchChildIdx) -> &mut Self::Output {
         &mut self.as_mut_slice()[idx.get()]
     }
@@ -73,6 +75,7 @@ pub(super) struct BranchChildIter {
 
 impl BranchChildIter {
     /// Creates a new iterator over the occupied children of the given `state_mask`.
+    #[inline]
     pub(super) fn new(state_mask: TrieMask) -> Self {
         Self { inner: state_mask.iter().enumerate() }
     }
@@ -81,10 +84,12 @@ impl BranchChildIter {
 impl Iterator for BranchChildIter {
     type Item = (BranchChildIdx, u8);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(dense, nibble)| (BranchChildIdx(dense as u8), nibble))
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }
