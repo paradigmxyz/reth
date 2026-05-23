@@ -314,9 +314,7 @@ impl ArenaCursor {
                     return SeekResult::EmptyRoot;
                 }
                 ArenaSparseNode::Leaf { key, .. } => {
-                    let mut leaf_full_path = head.path;
-                    leaf_full_path.extend(key);
-                    return if &leaf_full_path == full_path {
+                    return if leaf_path_matches(head.path, key, full_path) {
                         SeekResult::RevealedLeaf
                     } else {
                         SeekResult::Diverged
@@ -371,4 +369,12 @@ fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibb
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
 fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+}
+
+/// Returns true if `full_path` is exactly `path + leaf_key` without constructing that combined
+/// path.
+fn leaf_path_matches(path: Nibbles, leaf_key: &Nibbles, full_path: &Nibbles) -> bool {
+    full_path.len() == path.len() + leaf_key.len() &&
+        full_path.starts_with(&path) &&
+        full_path.ends_with(leaf_key)
 }
