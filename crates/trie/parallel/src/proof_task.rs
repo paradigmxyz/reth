@@ -33,10 +33,7 @@ use crate::{
     root::ParallelStateRootError,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256, U256,
-};
+use alloy_primitives::{map::B256Map, B256, U256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
@@ -979,6 +976,8 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
+        account_targets.sort_unstable_by_key(|target| target.key_nibbles);
+
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
@@ -1062,33 +1061,42 @@ where
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
-    mut storage_targets: B256Map<Vec<ProofV2Target>>,
+    storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
-
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
-
-    // For storage targets with associated account proofs, ensure the first target has
-    // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
-            *first = first.with_min_len(0);
-        }
-    }
 
     // Sort storage targets by address for optimal dispatch order.
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
     // reduces head-of-line blocking when consuming results.
     let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
     sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
+    debug_assert!(account_targets.windows(2).all(|window| window[0].key() <= window[1].key()));
+
+    // For storage targets with associated account proofs, ensure the first target has
+    // min_len(0) so the root node is returned for storage root computation. Both inputs are sorted,
+    // so walk the account targets once instead of allocating and probing a temporary hash set.
+    let mut account_target_index = 0;
+    for (hashed_address, targets) in &mut sorted_storage_targets {
+        while account_target_index < account_targets.len()
+            && account_targets[account_target_index].key() < *hashed_address
+        {
+            account_target_index += 1;
+        }
+
+        if account_targets
+            .get(account_target_index)
+            .is_some_and(|target| target.key() == *hashed_address)
+            && let Some(first) = targets.first_mut()
+        {
+            *first = first.with_min_len(0);
+        }
+    }
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
