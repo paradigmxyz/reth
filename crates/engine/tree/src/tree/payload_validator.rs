@@ -1225,9 +1225,7 @@ where
                 )
                 .entered()
             });
-            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
-                trace!(target: "engine::tree", "Executing transaction");
-            }
+            trace!(target: "engine::tree", "Executing transaction");
 
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
