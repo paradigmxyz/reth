@@ -1199,6 +1199,8 @@ where
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let trace_execution = tracing::enabled!(target: "engine::tree", Level::TRACE);
+        let debug_execute_tx = tracing::enabled!(target: "engine::tree", Level::DEBUG);
         let mut transactions = transactions.into_iter();
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
@@ -1217,7 +1219,7 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
+            let _enter = debug_execute_tx.then(|| {
                 debug_span!(
                     target: "engine::tree",
                     "execute tx",
@@ -1225,7 +1227,7 @@ where
                 )
                 .entered()
             });
-            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
+            if trace_execution {
                 trace!(target: "engine::tree", "Executing transaction");
             }
 
