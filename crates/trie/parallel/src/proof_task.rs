@@ -1092,8 +1092,10 @@ fn dispatch_v2_storage_proofs(
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
-        // Create channel for receiving StorageProofResultMessage
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        // Each storage proof produces exactly one response. A one-slot channel avoids the
+        // linked-list allocation path used by unbounded channels while still letting the worker
+        // finish if the account proof has not reached this receiver yet.
+        let (result_tx, result_rx) = crossbeam_channel::bounded(1);
         let input = StorageProofInput::new(hashed_address, targets);
 
         storage_work_tx
