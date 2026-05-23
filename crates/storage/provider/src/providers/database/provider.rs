@@ -1361,14 +1361,26 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         hashed_accounts_cursor: &mut impl DbCursorRO<tables::HashedAccounts>,
         hashed_storage_cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+        let mut last_storage_address_hash = None;
+
         self.populate_bundle_state(
             account_changeset,
             storage_changeset,
             |address| Ok(hashed_accounts_cursor.seek_exact(keccak256(address))?.map(|kv| kv.1)),
             |address, storage_key| {
+                let hashed_address = match last_storage_address_hash {
+                    Some((cached_address, hashed_address)) if cached_address == address => {
+                        hashed_address
+                    }
+                    _ => {
+                        let hashed_address = keccak256(address);
+                        last_storage_address_hash = Some((address, hashed_address));
+                        hashed_address
+                    }
+                };
                 let hashed_storage_key = keccak256(storage_key);
                 Ok(hashed_storage_cursor
-                    .seek_by_key_subkey(keccak256(address), hashed_storage_key)?
+                    .seek_by_key_subkey(hashed_address, hashed_storage_key)?
                     .filter(|s| s.key == hashed_storage_key)
                     .map(|s| s.value))
             },
