@@ -2437,6 +2437,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // which will add its own updates directly into self.updates.
         Self::merge_subtrie_updates(&mut self.updates, &mut self.buffers.updates);
 
+        if self.upper_arena[self.root].is_cached() {
+            return self.upper_arena[self.root].cached_hash()
+        }
+
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
@@ -2514,7 +2518,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
         // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
         // cannot contain dirty subtries since dirty state propagates upward.
-        taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
+        if taken.len() > 1 {
+            taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
+        }
 
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
