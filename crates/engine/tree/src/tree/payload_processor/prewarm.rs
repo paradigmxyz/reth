@@ -32,7 +32,10 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_tasks::{
+    pool::{Worker, WorkerPool},
+    Runtime,
+};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -41,6 +44,9 @@ use std::sync::{
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
+
+/// Number of streamed transactions to dispatch in one prewarm rayon job.
+const PREWARM_TX_CHUNK_SIZE: usize = 8;
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
@@ -149,6 +155,7 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
+                let mut tx_chunk = Vec::with_capacity(PREWARM_TX_CHUNK_SIZE);
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
@@ -164,17 +171,19 @@ where
                     }
 
                     tx_count += 1;
-                    let parent_span = Span::current();
-                    s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
-                    });
+                    tx_chunk.push((index, tx));
+                    if tx_chunk.len() == PREWARM_TX_CHUNK_SIZE {
+                        Self::spawn_tx_chunk(
+                            s,
+                            ctx,
+                            core::mem::take(&mut tx_chunk),
+                            to_sparse_trie_task,
+                        );
+                    }
+                }
+
+                if !tx_chunk.is_empty() {
+                    Self::spawn_tx_chunk(s, ctx, tx_chunk, to_sparse_trie_task);
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
@@ -195,11 +204,43 @@ where
         });
     }
 
-    /// Executes a single prewarm transaction on the current pool thread's EVM.
+    /// Spawns a small batch of transaction prewarm work on the current rayon scope.
+    fn spawn_tx_chunk<'scope, Tx>(
+        scope: &rayon::Scope<'scope>,
+        ctx: &'scope PrewarmContext<N, P, Evm>,
+        txs: Vec<(usize, Tx)>,
+        to_sparse_trie_task: Option<&'scope CrossbeamSender<StateRootMessage>>,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Send + 'scope,
+    {
+        debug_assert!(!txs.is_empty());
+        let first_index = txs[0].0;
+        let txs_len = txs.len();
+        let parent_span = Span::current();
+        scope.spawn(move |_| {
+            let _enter = trace_span!(
+                target: "engine::tree::payload_processor::prewarm",
+                parent: parent_span,
+                "prewarm_tx_chunk",
+                first_i = first_index,
+                txs = txs_len,
+            )
+            .entered();
+
+            WorkerPool::with_worker_mut(|worker| {
+                for (index, tx) in txs {
+                    Self::transact_worker_with(worker, ctx, index, tx, to_sparse_trie_task);
+                }
+            });
+        });
+    }
+
+    /// Executes a single prewarm transaction using the current pool thread's worker-local EVM.
     ///
     /// Lazily initialises per-thread [`PrewarmEvmState`] via
     /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init) on first access.
-    fn transact_worker<Tx>(
+    fn transact_worker_with<Tx>(
+        worker: &mut Worker,
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
@@ -207,55 +248,52 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
-        WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) =
-                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
-            else {
-                return;
-            };
+        let Some(evm) = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
+        else {
+            return;
+        };
 
-            if ctx.should_stop() {
-                return;
-            }
+        if ctx.should_stop() {
+            return;
+        }
 
-            // skip if main execution has already processed this transaction
-            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                return;
-            }
+        // skip if main execution has already processed this transaction
+        if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+            return;
+        }
 
-            let start = Instant::now();
+        let start = Instant::now();
 
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    return;
-                }
-            };
-            ctx.metrics.execution_duration.record(start.elapsed());
-
-            if ctx.should_stop() {
+        let (tx_env, tx) = tx.into_parts();
+        let res = match evm.transact(tx_env) {
+            Ok(res) => res,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    tx_hash=%tx.tx().tx_hash(),
+                    sender=%tx.signer(),
+                    "Error when executing prewarm transaction",
+                );
+                ctx.metrics.transaction_errors.increment(1);
                 return;
             }
+        };
+        ctx.metrics.execution_duration.record(start.elapsed());
 
-            if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
-                ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-                    let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
-                }
+        if ctx.should_stop() {
+            return;
+        }
+
+        if index > 0 {
+            let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+            ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+            if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
             }
+        }
 
-            ctx.metrics.total_runtime.record(start.elapsed());
-        });
+        ctx.metrics.total_runtime.record(start.elapsed());
     }
 
     /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
