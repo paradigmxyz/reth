@@ -2,8 +2,11 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
-use alloy_consensus::{transaction::Recovered, BlockHeader, TxReceipt};
-use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
+use alloy_consensus::{
+    transaction::{Recovered, TxHashRef},
+    BlockHeader, TxReceipt,
+};
+use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Log, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
@@ -291,10 +294,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all receipts with attachment.
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
-    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>> {
         let mut receipt_attach = Vec::with_capacity(self.blocks().len());
 
         self.blocks_and_receipts().for_each(|(block, receipts)| {
@@ -305,7 +305,7 @@ impl<N: NodePrimitives> Chain<N> {
                 .transactions()
                 .iter()
                 .zip(receipts)
-                .map(|(tx, receipt)| (tx.trie_hash(), receipt.clone()))
+                .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
                 .collect();
 
             receipt_attach.push(BlockReceipts {
@@ -445,7 +445,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.blocks
             .values()
-            .flat_map(|block| block.body().transactions_iter().map(|tx| tx.trie_hash()))
+            .flat_map(|block| block.body().transactions_iter().map(|tx| *tx.tx_hash()))
     }
 }
 
