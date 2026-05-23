@@ -827,13 +827,10 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             continue
         }
 
-        let hashed_address = keccak256(addr);
+        let account_changed = account.info != account.original_info();
+        let storage_len = account.storage.len();
 
-        if account.info != account.original_info() {
-            targets.account_targets.push(hashed_address.into());
-        }
-
-        let mut storage_slots = Vec::with_capacity(account.storage.len());
+        let mut storage_slots = None;
         for (key, slot) in account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
@@ -841,13 +838,25 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(ProofV2Target::from(hashed_slot));
+            storage_slots
+                .get_or_insert_with(|| Vec::with_capacity(storage_len))
+                .push(ProofV2Target::from(hashed_slot));
+        }
+
+        let Some(storage_slots) = storage_slots else {
+            if account_changed {
+                targets.account_targets.push(keccak256(addr).into());
+            }
+            continue
+        };
+
+        let hashed_address = keccak256(addr);
+        if account_changed {
+            targets.account_targets.push(hashed_address.into());
         }
 
         storage_target_count += storage_slots.len();
-        if !storage_slots.is_empty() {
-            targets.storage_targets.insert(hashed_address, storage_slots);
-        }
+        targets.storage_targets.insert(hashed_address, storage_slots);
     }
 
     (targets, storage_target_count)
