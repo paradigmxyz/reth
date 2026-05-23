@@ -11,8 +11,8 @@ use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::B256;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV4,
-    PraguePayloadFields,
+    CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV3,
+    ExecutionPayloadV4, PraguePayloadFields,
 };
 use http::{header, Method, Response, StatusCode};
 use reth_payload_primitives::EngineObjectValidationError;
@@ -26,6 +26,7 @@ use tracing::{debug, trace, warn};
 
 /// The REST route path.
 const NEW_PAYLOAD_WITH_WITNESS_PATH: &str = "/new-payload-with-witness";
+const NEW_PAYLOAD_WITH_WITNESS_V4_PATH: &str = "/new-payload-with-witness-v4";
 
 /// JSON error response body used for REST error responses.
 #[derive(serde::Serialize)]
@@ -44,9 +45,9 @@ fn json_error_response(
     Response::builder()
         .status(http_status)
         .header(header::CONTENT_TYPE, "application/json")
-        .body(jsonrpsee_core::http_helpers::Body::new(
-            http_body_util::Full::new(bytes::Bytes::from(body)),
-        ))
+        .body(jsonrpsee_core::http_helpers::Body::new(http_body_util::Full::new(
+            bytes::Bytes::from(body),
+        )))
         .expect("valid response")
 }
 
@@ -55,6 +56,18 @@ fn json_error_response(
 /// This abstracts over the `EngineApi` to allow the REST handler to call
 /// `new_payload_v5` without being generic over all the engine API type params.
 pub trait NewPayloadWithWitnessHandler: Send + Sync + 'static {
+    /// Executes `engine_newPayloadV4` logic and returns the payload status.
+    fn new_payload_v4(
+        &self,
+        payload: ExecutionData,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<alloy_rpc_types_engine::PayloadStatus, EngineApiError>>
+                + Send
+                + '_,
+        >,
+    >;
+
     /// Executes `engine_newPayloadV5` logic and returns the payload status.
     fn new_payload_v5(
         &self,
@@ -69,19 +82,13 @@ pub trait NewPayloadWithWitnessHandler: Send + Sync + 'static {
 
     /// Generates an execution witness by re-executing the block identified by `block_hash`.
     ///
-    /// This is called after `new_payload_v5` returns `VALID`. The implementation should
-    /// retrieve the block from the provider, re-execute it with state closure capture,
+    /// This is called after `new_payload_v4`/`new_payload_v5` returns `VALID`. The implementation
+    /// should retrieve the block from the provider, re-execute it with state closure capture,
     /// and produce the [`ExecutionWitness`].
     fn generate_witness(
         &self,
         block_hash: B256,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<ExecutionWitness, EngineApiError>>
-                + Send
-                + '_,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitness, EngineApiError>> + Send + '_>>;
 
     /// Returns whether the engine accepts execution requests hash.
     fn accept_execution_requests_hash(&self) -> bool;
@@ -168,7 +175,8 @@ impl<S: Clone, H: ?Sized> Clone for NewPayloadWithWitnessService<S, H> {
     }
 }
 
-impl<S, H: ?Sized, ReqBody> tower::Service<http::Request<ReqBody>> for NewPayloadWithWitnessService<S, H>
+impl<S, H: ?Sized, ReqBody> tower::Service<http::Request<ReqBody>>
+    for NewPayloadWithWitnessService<S, H>
 where
     S: tower::Service<
             http::Request<ReqBody>,
@@ -192,7 +200,9 @@ where
 
     fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
         // Check if this is a request to our REST endpoint.
-        if req.uri().path() == NEW_PAYLOAD_WITH_WITNESS_PATH {
+        if req.uri().path() == NEW_PAYLOAD_WITH_WITNESS_PATH
+            || req.uri().path() == NEW_PAYLOAD_WITH_WITNESS_V4_PATH
+        {
             // Only POST is allowed.
             if req.method() != Method::POST {
                 return Box::pin(async move {
@@ -218,6 +228,7 @@ where
             }
 
             let handler = Arc::clone(&self.handler);
+            let target_path = req.uri().path().to_owned();
             return Box::pin(async move {
                 // Read the full body
                 let body_bytes = match read_body(req.into_body()).await {
@@ -232,11 +243,14 @@ where
                     }
                 };
 
-                handle_new_payload_with_witness(handler, body_bytes).await
+                if target_path == NEW_PAYLOAD_WITH_WITNESS_V4_PATH {
+                    handle_new_payload_with_witness_v4(handler, body_bytes).await
+                } else {
+                    handle_new_payload_with_witness(handler, body_bytes).await
+                }
             });
         }
 
-        // Not our route — pass through to the inner JSON-RPC service.
         let mut inner = self.inner.clone();
         Box::pin(async move { inner.call(req).await })
     }
@@ -397,9 +411,155 @@ async fn handle_new_payload_with_witness<H: NewPayloadWithWitnessHandler + ?Size
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
-        .body(jsonrpsee_core::http_helpers::Body::new(
-            http_body_util::Full::new(bytes::Bytes::from(ssz_bytes)),
-        ))
+        .body(jsonrpsee_core::http_helpers::Body::new(http_body_util::Full::new(
+            bytes::Bytes::from(ssz_bytes),
+        )))
+        .expect("valid response"))
+}
+
+/// Parses the JSON body, calls `new_payload_v4`, and returns an SSZ response.
+async fn handle_new_payload_with_witness_v4<H: NewPayloadWithWitnessHandler + ?Sized>(
+    handler: Arc<H>,
+    body: bytes::Bytes,
+) -> Result<http::Response<jsonrpsee_core::http_helpers::Body>, tower::BoxError> {
+    trace!(target: "rpc::engine::rest", "Serving POST /new-payload-with-witness-v4");
+
+    let params: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(json_error_response(
+                StatusCode::BAD_REQUEST,
+                -32700,
+                format!("Parse error: {e}"),
+            ));
+        }
+    };
+
+    let arr = match params.as_array() {
+        Some(a) => a,
+        None => {
+            return Ok(json_error_response(
+                StatusCode::BAD_REQUEST,
+                -32700,
+                "Request body must be a JSON array",
+            ));
+        }
+    };
+
+    if arr.len() != 4 {
+        return Ok(json_error_response(
+            StatusCode::BAD_REQUEST,
+            -32602,
+            format!("Expected exactly 4 parameters, got {}", arr.len()),
+        ));
+    }
+
+    // Parse individual parameters.
+    // arr[0] is ExecutionPayloadV3 for v4 (Prague), NOT ExecutionPayloadV4 (Amsterdam).
+    let execution_payload: ExecutionPayloadV3 = match serde_json::from_value(arr[0].clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(json_error_response(
+                StatusCode::BAD_REQUEST,
+                -32602,
+                format!("Invalid executionPayload: {e}"),
+            ));
+        }
+    };
+
+    let versioned_hashes: Vec<B256> = match serde_json::from_value(arr[1].clone()) {
+        Ok(h) => h,
+        Err(e) => {
+            return Ok(json_error_response(
+                StatusCode::BAD_REQUEST,
+                -32602,
+                format!("Invalid expectedBlobVersionedHashes: {e}"),
+            ));
+        }
+    };
+
+    let parent_beacon_block_root: B256 = match serde_json::from_value(arr[2].clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(json_error_response(
+                StatusCode::BAD_REQUEST,
+                -32602,
+                format!("Invalid parentBeaconBlockRoot: {e}"),
+            ));
+        }
+    };
+
+    let execution_requests: RequestsOrHash = match serde_json::from_value(arr[3].clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(json_error_response(
+                StatusCode::BAD_REQUEST,
+                -32602,
+                format!("Invalid executionRequests: {e}"),
+            ));
+        }
+    };
+
+    // Check if execution requests hash is acceptable.
+    if execution_requests.is_hash() && !handler.accept_execution_requests_hash() {
+        return Ok(json_error_response(
+            StatusCode::BAD_REQUEST,
+            -38003,
+            "requests hash cannot be accepted without --engine.accept-execution-requests-hash flag",
+        ));
+    }
+
+    // Assemble ExecutionData. The sidecar format is identical to v5.
+    let payload = ExecutionData {
+        payload: execution_payload.into(),
+        sidecar: ExecutionPayloadSidecar::v4(
+            CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+            PraguePayloadFields { requests: execution_requests },
+        ),
+    };
+
+    // Call newPayloadV4 logic (V4 version-field validation, not V5).
+    let status = match handler.new_payload_v4(payload).await {
+        Ok(s) => s,
+        Err(e) => return Ok(map_engine_error_to_rest(e)),
+    };
+
+    debug!(
+        target: "rpc::engine::rest",
+        status = ?status.status,
+        "POST /new-payload-with-witness-v4 result"
+    );
+
+    // When the status is VALID, generate the execution witness.
+    let witness = if status.status.is_valid() {
+        if let Some(latest_valid_hash) = status.latest_valid_hash {
+            match handler.generate_witness(latest_valid_hash).await {
+                Ok(w) => Some(w),
+                Err(e) => {
+                    warn!(
+                        target: "rpc::engine::rest",
+                        %e,
+                        "Failed to generate execution witness, returning None"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // SSZ-encode the response.
+    let ssz_bytes = encode_new_payload_with_witness_response(&status, witness.as_ref());
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(jsonrpsee_core::http_helpers::Body::new(http_body_util::Full::new(
+            bytes::Bytes::from(ssz_bytes),
+        )))
         .expect("valid response"))
 }
 

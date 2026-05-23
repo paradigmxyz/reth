@@ -1636,6 +1636,15 @@ where
             Primitives: reth_primitives_traits::NodePrimitives<Block = Provider::Block>,
         > + 'static,
 {
+    fn new_payload_v4(
+        &self,
+        payload: ExecutionData,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<PayloadStatus, EngineApiError>> + Send + '_>,
+    > {
+        Box::pin(self.engine_api.new_payload_v4(payload))
+    }
+
     fn new_payload_v5(
         &self,
         payload: ExecutionData,
