@@ -686,12 +686,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let mut block_bodies = Vec::with_capacity(blocks.len());
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
+
+                block_bodies.push((recovered_block.number(), Some(recovered_block.body())));
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
@@ -715,6 +719,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     timings.write_state += start.elapsed();
                 }
             }
+
+            self.storage.writer().write_block_bodies(self, block_bodies)?;
 
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
@@ -803,17 +809,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
 
-        self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
+        self.write_block_body_indices(block_number, first_tx_num, tx_count)?;
 
         Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
     }
 
-    /// Writes MDBX block body indices (`BlockBodyIndices`, `TransactionBlocks`,
-    /// `Ommers`/`Withdrawals`).
+    /// Writes MDBX block body indices (`BlockBodyIndices`, `TransactionBlocks`).
     fn write_block_body_indices(
         &self,
         block_number: BlockNumber,
-        body: &BodyTy<N>,
         first_tx_num: TxNumber,
         tx_count: u64,
     ) -> ProviderResult<()> {
@@ -832,9 +836,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .append(first_tx_num + tx_count - 1, &block_number)?;
             self.metrics.record_duration(metrics::Action::InsertTransactionBlocks, start.elapsed());
         }
-
-        // MDBX: Ommers/Withdrawals
-        self.storage.writer().write_block_bodies(self, vec![(block_number, Some(body))])?;
 
         Ok(())
     }
