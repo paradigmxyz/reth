@@ -117,6 +117,14 @@ where
     if n == 0 {
         return;
     }
+    if n == 1 {
+        let mut item = Vec::with_capacity(1);
+        iter.collect_into_vec(&mut item);
+        if let Some(item) = item.pop() {
+            f(item);
+        }
+        return;
+    }
 
     let shared = Shared::<I::Item>::new(n);
 
