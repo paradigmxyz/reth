@@ -185,12 +185,32 @@ where
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
+        let mut pending_message = None;
 
-        while let Ok(message) = updates.recv() {
+        loop {
+            let message = match pending_message.take() {
+                Some(message) => message,
+                None => match updates.recv() {
+                    Ok(message) => message,
+                    Err(_) => break,
+                },
+            };
             total_idle_time += idle_start.elapsed();
 
             let msg = match message {
-                StateRootMessage::PrefetchProofs(targets) => {
+                StateRootMessage::PrefetchProofs(mut targets) => {
+                    while let Ok(next) = updates.try_recv() {
+                        match next {
+                            StateRootMessage::PrefetchProofs(next_targets) => {
+                                extend_prefetch_targets(&mut targets, next_targets);
+                            }
+                            StateRootMessage::BlockAccessList(_) => {}
+                            other => {
+                                pending_message = Some(other);
+                                break;
+                            }
+                        }
+                    }
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
                 StateRootMessage::StateUpdate(_, state) => {
@@ -860,6 +880,14 @@ fn encode_account_leaf_value(
     account_rlp_buf.clear();
     account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
     account_rlp_buf.clone()
+}
+
+/// Extends prefetch proof targets with another message's targets.
+fn extend_prefetch_targets(targets: &mut MultiProofTargetsV2, mut additional: MultiProofTargetsV2) {
+    targets.account_targets.append(&mut additional.account_targets);
+    for (address, storage_targets) in additional.storage_targets {
+        targets.storage_targets.entry(address).or_default().extend(storage_targets);
+    }
 }
 
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
