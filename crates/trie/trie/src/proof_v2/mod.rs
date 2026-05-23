@@ -982,7 +982,7 @@ where
         targets: &mut Option<TargetsCursor<'a>>,
         next_path: &Nibbles,
     ) -> Result<(), StateProofError> {
-        while !next_path.starts_with(&self.branch_path) {
+        while !self.branch_path.is_empty() && !next_path.starts_with(&self.branch_path) {
             self.pop_branch(targets)?;
         }
         Ok(())
