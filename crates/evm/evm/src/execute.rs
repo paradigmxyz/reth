@@ -416,22 +416,71 @@ where
     pub assembler: Builder,
 }
 
-/// Conversions for executable transactions.
+/// A recovered transaction handle that can be borrowed before being converted into an owned value.
+///
+/// This is used by [`ExecutorTx`] to let block building execute against a recovered transaction
+/// without forcing ownership upfront. If execution is skipped or the commit condition rejects the
+/// result, callers can drop the handle without materializing the owned [`Recovered`] transaction.
+/// If the transaction is committed, the handle can then be consumed into the owned value that is
+/// stored in the built block.
+pub trait IntoOwnedRecovered<T> {
+    /// Returns the recovered transaction.
+    fn as_ref(&self) -> &T;
+
+    /// Converts this handle into an owned recovered transaction.
+    fn into_owned(self) -> T;
+}
+
+impl<T> IntoOwnedRecovered<Self> for Recovered<T> {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+
+    fn into_owned(self) -> Self {
+        self
+    }
+}
+
+impl<T: Clone> IntoOwnedRecovered<Recovered<T>> for Arc<Recovered<T>> {
+    fn as_ref(&self) -> &Recovered<T> {
+        self
+    }
+
+    fn into_owned(self) -> Recovered<T> {
+        Self::unwrap_or_clone(self)
+    }
+}
+
+/// Converts transaction inputs into the parts required by block building.
+///
+/// The builder needs an EVM transaction environment for execution and access to the recovered
+/// transaction for receipt generation and, if committed, block assembly. The recovered transaction
+/// is returned as an [`IntoOwnedRecovered`] handle so callers can borrow it while executing and
+/// only take ownership after the executor commits the transaction. This avoids cloning or otherwise
+/// materializing transaction ownership for invalid or rejected transactions.
 pub trait ExecutorTx<Executor: BlockExecutor> {
-    /// Converts the transaction into a tuple of [`TxEnvFor`] and [`Recovered`].
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>);
+    /// Converts the transaction into a tuple of [`TxEnvFor`] and a recovered transaction handle.
+    ///
+    /// Callers should borrow the returned handle for execution and only consume it into an owned
+    /// [`Recovered`] transaction once the transaction is committed.
+    fn into_parts(
+        self,
+    ) -> (<Executor::Evm as Evm>::Tx, impl IntoOwnedRecovered<Recovered<Executor::Transaction>>);
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor>
     for WithEncoded<Recovered<Executor::Transaction>>
 {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+    fn into_parts(
+        self,
+    ) -> (<Executor::Evm as Evm>::Tx, impl IntoOwnedRecovered<Recovered<Executor::Transaction>>)
+    {
         (self.to_tx_env(), self.1)
     }
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Self) {
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, impl IntoOwnedRecovered<Self>) {
         (self.to_tx_env(), self)
     }
 }
@@ -439,7 +488,10 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
 impl<Executor: BlockExecutor> ExecutorTx<Executor>
     for (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>)
 {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+    fn into_parts(
+        self,
+    ) -> (<Executor::Evm as Evm>::Tx, impl IntoOwnedRecovered<Recovered<Executor::Transaction>>)
+    {
         self
     }
 }
@@ -449,8 +501,11 @@ impl<Executor> ExecutorTx<Executor>
 where
     Executor: BlockExecutor<Transaction: Clone>,
 {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
-        (self.tx_env, Arc::unwrap_or_clone(self.tx))
+    fn into_parts(
+        self,
+    ) -> (<Executor::Evm as Evm>::Tx, impl IntoOwnedRecovered<Recovered<Executor::Transaction>>)
+    {
+        (self.tx_env, self.tx)
     }
 }
 
@@ -489,9 +544,9 @@ where
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
+            self.executor.execute_transaction_with_commit_condition((tx_env, tx.as_ref()), f)?
         {
-            self.transactions.push(tx);
+            self.transactions.push(tx.into_owned());
             self.executor.evm_mut().db_mut().bump_bal_index();
             Ok(Some(gas_used))
         } else {
