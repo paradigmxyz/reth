@@ -1581,22 +1581,23 @@ where
 
         // proof_subtrie will retain the root node if retain_proof is true, regardless of if there
         // are any targets.
-        let mut proofs = core::mem::take(&mut self.retained_proofs);
         trace!(
             target: TRACE_TARGET,
-            proofs_len = ?proofs.len(),
+            proofs_len = ?self.retained_proofs.len(),
             "root_node: extracting root",
         );
 
         // The root node is at the empty path - it must exist since retain_root is true. Otherwise
         // targets was empty, so there should be no other retained proofs.
         debug_assert_eq!(
-            proofs.len(), 1,
+            self.retained_proofs.len(), 1,
             "prefix is empty, retain_root is true, and targets is empty, so there must be only the root node"
         );
 
         // Find and remove the root node (node at empty path)
-        let root_node = proofs.pop().expect("prefix is empty, retain_root is true, and targets is empty, so there must be only the root node");
+        let root_node = self.retained_proofs.pop().expect(
+            "prefix is empty, retain_root is true, and targets is empty, so there must be only the root node",
+        );
 
         Ok(root_node)
     }
