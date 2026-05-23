@@ -246,6 +246,12 @@ where
                 return;
             }
 
+            // If the main executor caught up while this worker was executing, avoid building and
+            // dispatching proof prefetch targets that can no longer help the main execution path.
+            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                return;
+            }
+
             if index > 0 {
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
