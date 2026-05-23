@@ -261,6 +261,7 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get storage by plain (unhashed) storage key slot.
+    #[inline]
     fn storage(
         &self,
         account: Address,

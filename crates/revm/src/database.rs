@@ -35,14 +35,17 @@ pub trait EvmStateProvider {
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
 impl<T: StateProvider> EvmStateProvider for T {
+    #[inline]
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         <T as AccountReader>::basic_account(self, address)
     }
 
+    #[inline]
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         <T as BlockHashReader>::block_hash(self, number)
     }
 
+    #[inline]
     fn bytecode_by_hash(
         &self,
         code_hash: &B256,
@@ -50,6 +53,7 @@ impl<T: StateProvider> EvmStateProvider for T {
         <T as BytecodeReader>::bytecode_by_hash(self, code_hash)
     }
 
+    #[inline]
     fn storage(
         &self,
         account: Address,
@@ -109,6 +113,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
+    #[inline]
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         self.basic_ref(address)
     }
@@ -116,6 +121,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
+    #[inline]
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.code_by_hash_ref(code_hash)
     }
@@ -123,6 +129,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
+    #[inline]
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         self.storage_ref(address, index)
     }
@@ -131,6 +138,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
+    #[inline]
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.block_hash_ref(number)
     }
@@ -143,6 +151,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
+    #[inline]
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.basic_account(&address)?.map(Into::into))
     }
@@ -150,6 +159,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
+    #[inline]
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
@@ -157,6 +167,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
+    #[inline]
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
     }
@@ -164,6 +175,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
+    #[inline]
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
         Ok(self.0.block_hash(number)?.unwrap_or_default())
