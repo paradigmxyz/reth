@@ -287,8 +287,11 @@ where
         }
 
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
-        {
+        for (nibbles, maybe_updated) in &updates.storage_nodes {
+            if nibbles.is_empty() {
+                continue;
+            }
+
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
             // Delete the old entry if it exists.
