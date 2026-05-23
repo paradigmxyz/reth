@@ -365,6 +365,10 @@ where
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
     ) -> Result<(), StateProofError> {
+        if targets.is_none() {
+            return Ok(())
+        }
+
         if matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))) {
             trace!(target: TRACE_TARGET, "Last child already committed, leaving stack unchanged");
             return Ok(())
