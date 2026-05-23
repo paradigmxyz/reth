@@ -181,15 +181,6 @@ where
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
-        let last = indices.last().expect("qed");
-        collector.insert(
-            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
-            BlockNumberList::new_pre_sorted(indices),
-        )?;
-        Ok::<(), StageError>(())
-    };
-
     let range = to_range(range);
     let start_block = range.start;
     let static_file_provider = provider.static_file_provider();
@@ -215,12 +206,24 @@ where
                 current_block = current_block_number,
                 "Collecting indices"
             );
-            collect_indices(cache.drain(), &mut insert_fn)?;
+            for (key, indices) in cache.drain() {
+                let last = indices.last().expect("qed");
+                collector.insert(
+                    StorageShardedKey::new(key.0 .0, key.0 .1, *last),
+                    BlockNumberList::new_pre_sorted(indices),
+                )?;
+            }
             flush_counter = 0;
         }
     }
 
-    collect_indices(cache.into_iter(), insert_fn)?;
+    for (key, indices) in cache {
+        let last = indices.last().expect("qed");
+        collector.insert(
+            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
+            BlockNumberList::new_pre_sorted(indices),
+        )?;
+    }
 
     Ok(collector)
 }
