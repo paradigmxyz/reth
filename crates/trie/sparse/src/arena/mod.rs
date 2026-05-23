@@ -1246,9 +1246,9 @@ impl ArenaParallelSparseTrie {
             let b = arena[head_idx].branch_ref();
             let short_key = b.short_key;
             let state_mask = b.state_mask;
-            let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
+            let prev_branch_masks = b.branch_masks;
 
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
@@ -1275,7 +1275,8 @@ impl ArenaParallelSparseTrie {
 
             // Record trie updates for dirty branches only.
             // Skip the root node (empty logical path) as PST does.
-            if let Some(trie_updates) = updates.as_mut().filter(|_| was_dirty) {
+            if was_dirty {
+                let Some(trie_updates) = updates.as_mut() else { continue };
                 let mut logical_path = head_path;
                 logical_path.extend(&short_key);
 
