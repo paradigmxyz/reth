@@ -1200,6 +1200,7 @@ impl ArenaParallelSparseTrie {
 
             rlp_node_buf.clear();
             let state_mask = arena[head_idx].branch_ref().state_mask;
+            rlp_node_buf.reserve(state_mask.count_ones() as usize);
             for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
                 match &arena[head_idx].branch_ref().children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
