@@ -1,4 +1,5 @@
 use crate::metrics::PersistenceMetrics;
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -153,6 +154,8 @@ where
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
+        let has_bal_blocks =
+            blocks.iter().any(|b| b.recovered_block.header().block_access_list_hash().is_some());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -179,9 +182,11 @@ where
             }
 
             provider_rw.commit()?;
-            let _ = self.provider.bal_store().flush().inspect_err(|err| {
-                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-            });
+            if has_bal_blocks {
+                let _ = self.provider.bal_store().flush().inspect_err(|err| {
+                    warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+                });
+            }
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
         }
 
