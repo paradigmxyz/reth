@@ -37,7 +37,10 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{
+    map::{B256Map, FbBuildHasher},
+    TxHash, B256,
+};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -293,7 +296,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
+    transactions_by_peers: B256Map<HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -309,7 +312,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
-    bad_imports: LruCache<TxHash>,
+    bad_imports: LruCache<TxHash, FbBuildHasher<32>>,
     /// All the connected peers.
     peers: HashMap<PeerId, PeerMetadata<N>>,
     /// Send half for the command channel.
@@ -2019,7 +2022,7 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: LruCache<TxHash>,
+    seen_transactions: LruCache<TxHash, FbBuildHasher<32>>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender<PeerRequest<N>>,
     /// negotiated version of the session.
@@ -2054,7 +2057,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     }
 
     /// Returns a mutable reference to the seen transactions LRU cache.
-    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
+    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash, FbBuildHasher<32>> {
         &mut self.seen_transactions
     }
 

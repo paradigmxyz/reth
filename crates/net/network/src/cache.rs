@@ -11,19 +11,24 @@ use std::{fmt, hash::Hash};
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
-pub struct LruCache<T: Hash + Eq + fmt::Debug> {
+pub struct LruCache<T: Hash + Eq + fmt::Debug, S = DefaultHashBuilder>
+where
+    S: BuildHasher,
+{
     limit: u32,
-    inner: LruMap<T, ()>,
+    inner: LruMap<T, (), ByLength, S>,
 }
 
-impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
+impl<T: Hash + Eq + fmt::Debug, S: BuildHasher + Default> LruCache<T, S> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: u32) -> Self {
         // limit of lru map is one element more, so can give eviction feedback, which isn't
         // supported by LruMap
         Self { inner: LruMap::new(limit + 1), limit }
     }
+}
 
+impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     /// Insert an element into the set.
     ///
     /// This operation uses `get_or_insert` from the underlying `schnellru::LruMap` which:
@@ -105,9 +110,10 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     }
 }
 
-impl<T> Extend<T> for LruCache<T>
+impl<T, S> Extend<T> for LruCache<T, S>
 where
     T: Eq + Hash + fmt::Debug,
+    S: BuildHasher,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
@@ -116,9 +122,10 @@ where
     }
 }
 
-impl<T> fmt::Debug for LruCache<T>
+impl<T, S> fmt::Debug for LruCache<T, S>
 where
     T: fmt::Debug + Hash + Eq,
+    S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruCache");
@@ -167,13 +174,14 @@ where
     }
 }
 
-impl<K, V> LruMap<K, V>
+impl<K, V, S> LruMap<K, V, ByLength, S>
 where
     K: Hash + PartialEq,
+    S: BuildHasher + Default,
 {
-    /// Returns a new cache with default limiter and hash builder.
+    /// Returns a new cache with default limiter and the given hash builder.
     pub fn new(max_length: u32) -> Self {
-        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), Default::default()))
+        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), S::default()))
     }
 }
 
@@ -217,7 +225,7 @@ mod test {
 
     #[test]
     fn test_cache_should_insert_into_empty_set() {
-        let mut cache = LruCache::new(5);
+        let mut cache = LruCache::<&str>::new(5);
         let entry = "entry";
         assert!(cache.insert(entry));
         assert!(cache.contains(&entry));
@@ -225,7 +233,7 @@ mod test {
 
     #[test]
     fn test_cache_should_not_insert_same_value_twice() {
-        let mut cache = LruCache::new(5);
+        let mut cache = LruCache::<&str>::new(5);
         let entry = "entry";
         assert!(cache.insert(entry));
         assert!(!cache.insert(entry));
@@ -233,7 +241,7 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let mut cache = LruCache::new(1); // LruCache limit will be 2, check LruCache::new
+        let mut cache = LruCache::<&str>::new(1); // LruCache limit will be 2, check LruCache::new
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
@@ -245,7 +253,7 @@ mod test {
 
     #[test]
     fn test_cache_should_extend_an_array() {
-        let mut cache = LruCache::new(5);
+        let mut cache = LruCache::<&str>::new(5);
         let entries = ["some_entry", "another_entry"];
         cache.extend(entries);
         for e in entries {
@@ -259,7 +267,7 @@ mod test {
         #[derive(Debug)]
         struct Value(i8);
 
-        let mut cache = LruMap::new(2);
+        let mut cache = LruMap::<Key, Value>::new(2);
         let key_1 = Key(1);
         let value_1 = Value(11);
         cache.insert(key_1, value_1);
@@ -275,7 +283,7 @@ mod test {
 
     #[test]
     fn test_debug_impl_lru_cache() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::<Key>::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);
@@ -289,7 +297,7 @@ mod test {
 
     #[test]
     fn get() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::<Key>::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);
@@ -306,7 +314,7 @@ mod test {
 
     #[test]
     fn get_ty_custom_eq_impl() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::<CompoundKey>::new(2);
         let key_1 = CompoundKey::new(1, 11);
         cache.insert(key_1);
         let key_2 = CompoundKey::new(2, 22);
@@ -319,7 +327,7 @@ mod test {
 
     #[test]
     fn peek() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::<Key>::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);
@@ -336,7 +344,7 @@ mod test {
 
     #[test]
     fn peek_ty_custom_eq_impl() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::<CompoundKey>::new(2);
         let key_1 = CompoundKey::new(1, 11);
         cache.insert(key_1);
         let key_2 = CompoundKey::new(2, 22);
@@ -349,7 +357,7 @@ mod test {
 
     #[test]
     fn test_insert_methods() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::<&str>::new(2);
 
         // Test basic insert
         assert!(cache.insert("first")); // new entry
