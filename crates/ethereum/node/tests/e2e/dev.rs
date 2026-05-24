@@ -6,6 +6,7 @@ use reth_node_api::{BlockBody, FullNodeComponents};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_primitives_traits::transaction::TxHashRef;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_rpc_eth_api::{helpers::EthTransactions, EthApiServer};
 use reth_tasks::Runtime;
