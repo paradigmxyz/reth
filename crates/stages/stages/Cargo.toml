@@ -85,6 +85,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
 
 alloy-genesis.workspace = true
+alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 reth-db-common.workspace = true
 reth-tracing.workspace = true
