@@ -9611,7 +9611,6 @@ name = "reth-prune"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-primitives",
  "assert_matches",
  "itertools 0.14.0",
@@ -10090,7 +10089,6 @@ name = "reth-stages"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",

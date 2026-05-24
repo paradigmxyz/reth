@@ -1,4 +1,3 @@
-use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex, Address};
 use futures::StreamExt;
@@ -99,7 +98,7 @@ where
     let head = notifications.next().await.unwrap();
 
     let tx = &head.tip().body().transactions()[0];
-    assert_eq!(tx.trie_hash(), hash);
+    assert_eq!(*tx.tx_hash(), hash);
     println!("mined transaction: {hash}");
 }
 
