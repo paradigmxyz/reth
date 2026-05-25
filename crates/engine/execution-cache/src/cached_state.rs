@@ -430,6 +430,7 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 }
 
 impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
+    #[inline]
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if PREWARM {
             match self.caches.get_or_try_insert_account_with(*address, || {
@@ -475,6 +476,7 @@ fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
 }
 
 impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
+    #[inline]
     fn storage(
         &self,
         account: Address,
@@ -515,6 +517,7 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
 }
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
+    #[inline]
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if PREWARM {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
