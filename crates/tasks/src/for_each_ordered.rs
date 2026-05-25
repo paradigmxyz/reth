@@ -1,7 +1,7 @@
 use crossbeam_utils::CachePadded;
 use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -52,59 +52,62 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
     }
 }
 
-/// A slot holding an optional value and a condvar for notification.
-struct Slot<T> {
-    value: Mutex<Option<T>>,
-    notify: Condvar,
-}
-
-impl<T> Slot<T> {
-    const fn new() -> Self {
-        Self { value: Mutex::new(None), notify: Condvar::new() }
-    }
-}
-
 struct Shared<T> {
-    slots: Box<[CachePadded<Slot<T>>]>,
+    slots: Box<[CachePadded<Mutex<Option<T>>>]>,
+    notify: Condvar,
+    notify_lock: Mutex<()>,
     panicked: AtomicBool,
+    next: AtomicUsize,
 }
 
 impl<T> Shared<T> {
     fn new(n: usize) -> Self {
-        let slots =
-            (0..n).map(|_| CachePadded::new(Slot::new())).collect::<Vec<_>>().into_boxed_slice();
-        Self { slots, panicked: AtomicBool::new(false) }
+        let slots = (0..n)
+            .map(|_| CachePadded::new(Mutex::new(None)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self {
+            slots,
+            notify: Condvar::new(),
+            notify_lock: Mutex::new(()),
+            panicked: AtomicBool::new(false),
+            next: AtomicUsize::new(0),
+        }
     }
 
     /// Writes a value into slot `i`. Must only be called once per index.
     #[inline]
     fn write(&self, i: usize, val: T) {
-        let slot = &self.slots[i];
-        *slot.value.lock() = Some(val);
-        slot.notify.notify_one();
+        *self.slots[i].lock() = Some(val);
+        if self.next.load(Ordering::Acquire) == i {
+            let _guard = self.notify_lock.lock();
+            self.notify.notify_one();
+        }
     }
 
     /// Blocks until slot `i` is ready and takes the value.
     /// Returns `None` if the producer panicked.
     fn take(&self, i: usize) -> Option<T> {
-        let slot = &self.slots[i];
-        let mut guard = slot.value.lock();
         loop {
-            if let Some(val) = guard.take() {
+            if let Some(val) = self.slots[i].lock().take() {
+                self.next.store(i + 1, Ordering::Release);
                 return Some(val);
             }
             if self.panicked.load(Ordering::Acquire) {
                 return None;
             }
-            slot.notify.wait(&mut guard);
+            let mut guard = self.notify_lock.lock();
+            if self.slots[i].lock().is_none() && !self.panicked.load(Ordering::Acquire) {
+                self.notify.wait(&mut guard);
+            }
         }
     }
 }
 
 /// Executes a parallel iterator and delivers results to a sequential callback in index order.
 ///
-/// Each slot has its own [`Condvar`], so the consumer blocks precisely on the slot it needs
-/// with zero spurious wakeups.
+/// Each slot has its own value mutex, while a shared [`Condvar`] wakes the consumer when the next
+/// ordered value is ready.
 fn ordered_impl<I, F>(iter: I, pool: Option<&rayon::ThreadPool>, mut f: F)
 where
     I: IndexedParallelIterator,
@@ -130,12 +133,8 @@ where
             }));
             if let Err(payload) = res {
                 shared.panicked.store(true, Ordering::Release);
-                // Wake all slots so the consumer doesn't hang. Lock each slot's mutex
-                // first to serialize with the consumer's panicked check → wait sequence.
-                for slot in &*shared.slots {
-                    let _guard = slot.value.lock();
-                    slot.notify.notify_one();
-                }
+                let _guard = shared.notify_lock.lock();
+                shared.notify.notify_one();
                 std::panic::resume_unwind(payload);
             }
         });
