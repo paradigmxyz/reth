@@ -10480,6 +10480,7 @@ name = "reth-trie-common"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
