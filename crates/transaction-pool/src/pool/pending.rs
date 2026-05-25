@@ -311,22 +311,46 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// Note: If the transaction has a descendant transaction
     /// it will advance it to the best queue.
+    ///
+    /// Sender-level caches (`independent_transactions` and `highest_nonces`) are
+    /// recomputed from `by_id` after a successful removal, so that these caches
+    /// stay consistent with `by_id` even if the caller passes an id that is the
+    /// not the sender's cached lowest/highest. This is important because callers
+    /// (e.g. `TxPool::remove_from_subpool`) may invoke this method with an id that
+    /// is anywhere in the sender's nonce range, and we must never let the cached
+    /// `independent_transactions` entry drift away from `by_id`'s actual lowest.
     pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        // Remove from `by_id` first. If the tx is not actually tracked by this
+        // subpool (e.g. caller passed a stale id), don't mutate sender-level
+        // indexes. Mutating them before confirming removal would leave the
+        // sender's cached lowest/highest pointing at something inconsistent with
+        // `by_id`, which corrupts `best()` iterators (see
+        // `independent_transactions` use in `PendingPool::best`).
+        let tx = self.by_id.remove(id)?;
+        self.size_of -= tx.transaction.size();
+
+        // If we removed the cached lowest, advance to the new lowest by scanning
+        // `by_id` forward from this sender. Using `by_id` directly (rather than
+        // `get(&id.descendant())`) preserves correctness even when there is a
+        // gap in the sender's pending nonces.
         if let Some(lowest) = self.independent_transactions.get(&id.sender) &&
             lowest.transaction.nonce() == id.nonce
         {
             self.independent_transactions.remove(&id.sender);
-            // mark the next as independent if it exists
-            if let Some(unlocked) = self.get(&id.descendant()) {
-                self.independent_transactions.insert(id.sender, unlocked.clone());
+            if let Some((_, new_lowest)) = self
+                .by_id
+                .range((
+                    id.sender.start_bound(),
+                    std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
+                ))
+                .next()
+            {
+                self.independent_transactions.insert(id.sender, new_lowest.clone());
             }
         }
-
-        let tx = self.by_id.remove(id)?;
-        self.size_of -= tx.transaction.size();
 
         match self.highest_nonces.entry(id.sender) {
             Entry::Occupied(mut entry) => {
@@ -601,6 +625,43 @@ impl<T: TransactionOrdering> PendingPool<T> {
             self.independent_transactions.len(),
             "highest_nonces.len() != independent_transactions.len()"
         );
+
+        // Per-sender bounds must match `by_id`: the cached independent entry
+        // must be the sender's lowest nonce in `by_id`, and the cached highest
+        // entry must be the sender's highest nonce in `by_id`. Drift here is
+        // what causes `best()` to start iteration from the wrong nonce.
+        for (sender, lowest) in &self.independent_transactions {
+            let actual_lowest = self
+                .by_id
+                .range((
+                    sender.start_bound(),
+                    std::ops::Bound::Included(TransactionId::new(*sender, u64::MAX)),
+                ))
+                .next()
+                .map(|(id, _)| id.nonce);
+            assert_eq!(
+                Some(lowest.transaction.nonce()),
+                actual_lowest,
+                "independent_transactions[{:?}] is out of sync with by_id",
+                sender,
+            );
+        }
+        for (sender, highest) in &self.highest_nonces {
+            let actual_highest = self
+                .by_id
+                .range((
+                    sender.start_bound(),
+                    std::ops::Bound::Included(TransactionId::new(*sender, u64::MAX)),
+                ))
+                .next_back()
+                .map(|(id, _)| id.nonce);
+            assert_eq!(
+                Some(highest.transaction.nonce()),
+                actual_highest,
+                "highest_nonces[{:?}] is out of sync with by_id",
+                sender,
+            );
+        }
     }
 }
 
@@ -1129,6 +1190,103 @@ mod tests {
         let id0 = TransactionId::new(sender_id, 0);
         let _ = pool.remove_transaction(&id0);
         assert!(!pool.highest_nonces.contains_key(&sender_id));
+        pool.assert_invariants();
+    }
+
+    /// Removing a tx whose id is not present in `by_id` must not mutate the
+    /// sender-level caches. Without the fix in `remove_transaction`,
+    /// `independent_transactions` was advanced (or cleared) even when the
+    /// underlying `by_id.remove` returned `None`, leaving the cache pointing
+    /// at a transaction that no longer existed in the pool.
+    #[test]
+    fn test_remove_transaction_for_missing_id_is_noop() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let sender = address!("0x00000000000000000000000000000000000000dd");
+        let txs = MockTransactionSet::dependent(sender, 0, 3, TxType::Eip1559).into_vec();
+        for tx in txs {
+            pool.add_transaction(f.validated_arc(tx), 0);
+        }
+        pool.assert_invariants();
+
+        let sender_id = f.ids.sender_id(&sender).unwrap();
+        let id0 = TransactionId::new(sender_id, 0);
+        let cached_lowest_before = pool
+            .independent_transactions
+            .get(&sender_id)
+            .map(|tx| tx.transaction.nonce());
+        let cached_highest_before = pool
+            .highest_nonces
+            .get(&sender_id)
+            .map(|tx| tx.transaction.nonce());
+
+        // Simulate a stale subpool/all_transactions divergence: pretend the tx
+        // was removed from `by_id` by some other path. The caller can still
+        // invoke `remove_transaction` with the stale id (e.g. through
+        // `TxPool::remove_from_subpool` after an inconsistency).
+        pool.by_id.remove(&id0).expect("nonce 0 must be in by_id");
+
+        // remove_transaction must report "not found" and must not mutate
+        // sender-level caches.
+        assert!(pool.remove_transaction(&id0).is_none());
+        let cached_lowest_after = pool
+            .independent_transactions
+            .get(&sender_id)
+            .map(|tx| tx.transaction.nonce());
+        let cached_highest_after = pool
+            .highest_nonces
+            .get(&sender_id)
+            .map(|tx| tx.transaction.nonce());
+
+        assert_eq!(cached_lowest_before, cached_lowest_after);
+        assert_eq!(cached_highest_before, cached_highest_after);
+    }
+
+    /// `remove_transaction` must keep `independent_transactions` consistent
+    /// with `by_id` even when there is a non-contiguous nonce range, by
+    /// scanning `by_id` for the actual next lowest rather than relying on
+    /// `get(id.descendant())`.
+    #[test]
+    fn test_remove_lowest_advances_independent_across_gap() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let sender = address!("0x00000000000000000000000000000000000000ee");
+
+        // Build a sender chain [0, 1, 3] (i.e. nonce 2 is missing from `by_id`).
+        let mut txs = MockTransactionSet::dependent(sender, 0, 4, TxType::Eip1559).into_vec();
+        // Remove nonce 2 from the slice before insertion.
+        let removed = txs.remove(2);
+        assert_eq!(removed.nonce(), 2);
+        for tx in &txs {
+            pool.add_transaction(f.validated_arc(tx.clone()), 0);
+        }
+        pool.assert_invariants();
+
+        let sender_id = f.ids.sender_id(&sender).unwrap();
+        let id0 = TransactionId::new(sender_id, 0);
+
+        // After removing nonce 0, the cached lowest must advance to nonce 1
+        // (which is still present), not to nonce 2 (the descendant, which is
+        // absent from `by_id`).
+        let removed_tx = pool.remove_transaction(&id0).expect("nonce 0 was in pool");
+        assert_eq!(removed_tx.nonce(), 0);
+        let new_lowest = pool
+            .independent_transactions
+            .get(&sender_id)
+            .expect("sender still has pending txs");
+        assert_eq!(new_lowest.transaction.nonce(), 1);
+        pool.assert_invariants();
+
+        // After removing nonce 1, the cached lowest must skip the gap at 2
+        // and advance to nonce 3.
+        let id1 = TransactionId::new(sender_id, 1);
+        let removed_tx = pool.remove_transaction(&id1).expect("nonce 1 was in pool");
+        assert_eq!(removed_tx.nonce(), 1);
+        let new_lowest = pool
+            .independent_transactions
+            .get(&sender_id)
+            .expect("sender still has pending txs");
+        assert_eq!(new_lowest.transaction.nonce(), 3);
         pool.assert_invariants();
     }
 }
