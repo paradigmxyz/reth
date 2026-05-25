@@ -1252,13 +1252,14 @@ where
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
 
+            let tx_index = senders.len();
             senders.push(tx_signer);
 
             let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
                 debug_span!(
                     target: "engine::tree",
                     "execute tx",
-                    tx_index = senders.len() - 1,
+                    tx_index,
                 )
                 .entered()
             });
@@ -1271,15 +1272,16 @@ where
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            executed_tx_index.store(tx_index + 1, Ordering::Relaxed);
 
-            let current_len = executor.receipts().len();
+            let receipts = executor.receipts();
+            let current_len = receipts.len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
                 // Send the latest receipt to the background task for incremental root computation.
-                if let Some(receipt) = executor.receipts().last() {
-                    let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                if let Some(receipt) = receipts.last() {
+                    let receipt_index = current_len - 1;
+                    let _ = receipt_tx.send(IndexedReceipt::new(receipt_index, receipt.clone()));
                 }
             }
             // Bump BAL index after each transaction (EIP-7928)
