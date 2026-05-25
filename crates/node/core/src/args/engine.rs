@@ -1,6 +1,9 @@
 //! clap [Args](clap::Args) for engine purposes
 
-use clap::{builder::Resettable, Args};
+use clap::{
+    builder::{RangedU64ValueParser, Resettable},
+    Args,
+};
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
@@ -383,7 +386,7 @@ pub struct EngineArgs {
     pub accept_execution_requests_hash: bool,
 
     /// Multiproof task chunk size for proof targets.
-    #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
+    #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub multiproof_chunk_size: usize,
 
     /// Configure the number of reserved CPU cores for non-reth processes
@@ -873,6 +876,17 @@ mod tests {
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.persistence-backpressure-threshold"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn parse_rejects_zero_multiproof_chunk_size() {
+        let result = CommandParser::<EngineArgs>::try_parse_from([
+            "reth",
+            "--engine.multiproof-chunk-size",
+            "0",
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
