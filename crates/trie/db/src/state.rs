@@ -312,7 +312,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                 accounts.push((keccak256(address), info));
             }
         }
-        accounts.sort_unstable_by_key(|(hash, _)| *hash);
+        accounts.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
         // Read storages into B256Map<Vec<_>> with HashSet to track seen keys.
         // Only keep the first (oldest) occurrence of each (address, slot) pair.
@@ -338,7 +338,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         let hashed_storages = storages
             .into_iter()
             .map(|(address, mut slots)| {
-                slots.sort_unstable_by_key(|(slot, _)| *slot);
+                slots.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
                 (address, HashedStorageSorted { storage_slots: slots, wiped: false })
             })
             .collect();
