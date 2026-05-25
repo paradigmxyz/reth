@@ -615,18 +615,17 @@ where
             block
         );
 
-        // Wait for the background keccak256 hashing task to complete. This blocks until
-        // all changed addresses and storage slots have been hashed.
-        let hashed_state_ref =
-            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                .in_scope(|| hashed_state.get());
-
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        let mut hashed_state_validate_result = self
-            .validator
-            .validate_block_post_execution_with_hashed_state(hashed_state_ref, &block);
+        let mut hashed_state_validate_result = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").in_scope(|| {
+            // Wait for the background keccak256 hashing task to complete. This blocks until
+            // all changed addresses and storage slots have been hashed.
+            let hashed_state_ref =
+                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                    .in_scope(|| hashed_state.get());
+
+            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, &block)
+        });
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
