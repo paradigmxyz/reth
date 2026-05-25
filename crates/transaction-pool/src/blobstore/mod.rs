@@ -41,6 +41,11 @@ impl BlobCellAvailability {
         Self { mask: B128::new([u8::MAX; 16]) }
     }
 
+    /// Returns no cell availability.
+    pub const fn empty() -> Self {
+        Self { mask: B128::ZERO }
+    }
+
     /// Returns the cell mask used in eth/72 announcements and GetCells requests.
     pub const fn mask(&self) -> B128 {
         self.mask
@@ -51,9 +56,13 @@ impl BlobCellAvailability {
         self.mask == B128::ZERO
     }
 
-    /// Returns the availability of a fully stored sidecar.
-    pub const fn from_sidecar(_sidecar: &BlobTransactionSidecarVariant) -> Self {
-        Self::full()
+    /// Returns the cell availability supported by a fully stored sidecar.
+    pub const fn from_sidecar(sidecar: &BlobTransactionSidecarVariant) -> Self {
+        if sidecar.is_eip7594() {
+            Self::full()
+        } else {
+            Self::empty()
+        }
     }
 }
 
@@ -271,9 +280,32 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
+    };
 
     #[expect(dead_code)]
     struct DynStore {
         store: Box<dyn BlobStore>,
+    }
+
+    #[test]
+    fn eip4844_sidecar_has_no_cell_availability() {
+        let sidecar = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default());
+
+        assert_eq!(BlobCellAvailability::from_sidecar(&sidecar), BlobCellAvailability::empty());
+    }
+
+    #[test]
+    fn eip7594_sidecar_has_full_cell_availability() {
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::default()],
+            vec![Bytes48::default()],
+            vec![Bytes48::default(); CELLS_PER_EXT_BLOB],
+        );
+        let sidecar = BlobTransactionSidecarVariant::Eip7594(sidecar);
+
+        assert_eq!(BlobCellAvailability::from_sidecar(&sidecar), BlobCellAvailability::full());
     }
 }

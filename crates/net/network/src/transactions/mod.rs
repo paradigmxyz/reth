@@ -2002,10 +2002,16 @@ impl PooledTransactionsHashesBuilder {
     fn build(self) -> Vec<NewPooledTransactionHashes> {
         match self {
             Self::Eth66(mut msg) => {
+                if msg.is_empty() {
+                    return Vec::new()
+                }
                 msg.shrink_to_fit();
                 vec![msg.into()]
             }
             Self::Eth68(mut msg) => {
+                if msg.is_empty() {
+                    return Vec::new()
+                }
                 msg.shrink_to_fit();
                 vec![msg.into()]
             }
