@@ -168,8 +168,6 @@ impl PrefixSetMut {
         } else {
             self.keys.sort_unstable();
             self.keys.dedup();
-            // Shrink after deduplication to release unused capacity.
-            self.keys.shrink_to_fit();
             PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         }
     }
@@ -305,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn test_freeze_shrinks_capacity() {
+    fn test_freeze_retains_capacity() {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 4]));
@@ -320,11 +318,11 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.keys.capacity(), 4); // Capacity is retained after deduplication
     }
 
     #[test]
-    fn test_freeze_shrinks_existing_capacity() {
+    fn test_freeze_retains_existing_capacity() {
         // do the above test but with preallocated capacity
         let mut prefix_set_mut = PrefixSetMut::with_capacity(101);
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
@@ -340,7 +338,7 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.keys.capacity(), 101); // Capacity is retained after deduplication
     }
 
     #[test]
