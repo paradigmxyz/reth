@@ -7,11 +7,10 @@
 //! computed root.
 
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Bloom, B256};
+use alloy_primitives::{map::HashMap, Bloom, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
-use std::collections::HashMap;
 use tokio::sync::oneshot;
 use tracing::debug_span;
 
