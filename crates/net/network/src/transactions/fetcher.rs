@@ -36,7 +36,7 @@ use crate::{
     metrics::TransactionFetcherMetrics,
 };
 use alloy_consensus::transaction::PooledTransaction;
-use alloy_primitives::TxHash;
+use alloy_primitives::{map::FbBuildHasher, TxHash};
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -67,7 +67,7 @@ use tracing::trace;
 #[pin_project]
 pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
-    pub active_peers: LruMap<PeerId, u8, ByLength>,
+    pub active_peers: LruMap<PeerId, u8, ByLength, FbBuildHasher<64>>,
     /// All currently active [`GetPooledTransactions`] requests.
     ///
     /// The set of hashes encompassed by these requests are a subset of all hashes in the fetcher.
@@ -79,9 +79,10 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     ///
     /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
     /// which a [`GetPooledTransactions`] request is inflight.
-    pub hashes_pending_fetch: LruCache<TxHash>,
+    pub hashes_pending_fetch: LruCache<TxHash, FbBuildHasher<32>>,
     /// Tracks all hashes in the transaction fetcher.
-    pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
+    pub hashes_fetch_inflight_and_pending_fetch:
+        LruMap<TxHash, TxFetchMetadata, ByLength, FbBuildHasher<32>>,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
     #[doc(hidden)]
@@ -133,10 +134,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         metrics.capacity_inflight_requests.increment(max_inflight_requests as u64);
 
         Self {
-            active_peers: LruMap::new(max_inflight_requests),
-            hashes_pending_fetch: LruCache::new(max_capacity_cache_txns_pending_fetch),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+            active_peers: LruMap::with_hasher(max_inflight_requests, Default::default()),
+            hashes_pending_fetch: LruCache::with_hasher(
+                max_capacity_cache_txns_pending_fetch,
+                Default::default(),
+            ),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::with_hasher(
                 max_inflight_requests + max_capacity_cache_txns_pending_fetch,
+                Default::default(),
             ),
             info,
             metrics,
@@ -551,9 +556,18 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             previously_unseen_hashes_count += 1;
 
-            if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
-                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
-            ).is_none() {
+            if self
+                .hashes_fetch_inflight_and_pending_fetch
+                .get_or_insert(*hash, || TxFetchMetadata {
+                    retries: 0,
+                    fallback_peers: LruCache::with_hasher(
+                        DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32,
+                        Default::default(),
+                    ),
+                    tx_encoded_length: None,
+                })
+                .is_none()
+            {
 
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
@@ -686,7 +700,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn fill_request_from_hashes_pending_fetch(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        seen_hashes: &LruCache<TxHash>,
+        seen_hashes: &LruCache<TxHash, FbBuildHasher<32>>,
         mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.iter().next() else { return };
@@ -992,11 +1006,18 @@ impl<N: NetworkPrimitives> Stream for TransactionFetcher<N> {
 impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
     fn default() -> Self {
         Self {
-            active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
+            active_peers: LruMap::with_hasher(
+                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+                Default::default(),
+            ),
             inflight_requests: Default::default(),
-            hashes_pending_fetch: LruCache::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+            hashes_pending_fetch: LruCache::with_hasher(
+                DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+                Default::default(),
+            ),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::with_hasher(
                 DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
+                Default::default(),
             ),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),
@@ -1010,7 +1031,7 @@ pub struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
-    fallback_peers: LruCache<PeerId>,
+    fallback_peers: LruCache<PeerId, FbBuildHasher<64>>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
@@ -1020,7 +1041,7 @@ pub struct TxFetchMetadata {
 
 impl TxFetchMetadata {
     /// Returns a mutable reference to the fallback peers cache for this transaction hash.
-    pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+    pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId, FbBuildHasher<64>> {
         &mut self.fallback_peers
     }
 
