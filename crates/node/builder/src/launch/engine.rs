@@ -5,12 +5,14 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+    RethFullAdapter,
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
@@ -64,16 +66,17 @@ impl EngineNodeLauncher {
         Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
     }
 
-    async fn launch_node<T, CB, AO>(
+    async fn launch_node<N, DB, T, CB, AO>(
         self,
         target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<NodeHandle<NodeAdapter<T, CB::Components>, AO>>
     where
+        N: Node<RethFullAdapter<DB, N>> + NodeTypesForProvider,
+        DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
         T: FullNodeTypes<
-            Types: NodeTypesForProvider,
-            Provider = BlockchainProvider<
-                NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
-            >,
+            Types = N,
+            Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, DB>>,
+            DB = DB,
         >,
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
@@ -91,6 +94,7 @@ impl EngineNodeLauncher {
 
         // Create changeset cache that will be shared across the engine
         let changeset_cache = ChangesetCache::new();
+        let disabled_stages = N::disabled_stages();
 
         // setup the launch context
         let ctx = ctx
@@ -104,7 +108,12 @@ impl EngineNodeLauncher {
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory with changeset cache
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone(), rocksdb_provider).await?
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(
+                changeset_cache.clone(),
+                rocksdb_provider,
+                disabled_stages,
+            )
+            .await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -162,6 +171,7 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             ctx.era_import_source(),
+            disabled_stages,
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -282,7 +292,7 @@ impl EngineNodeLauncher {
         let (engine_shutdown, shutdown_rx) = EngineShutdown::new();
 
         // Run consensus engine to completion
-        let initial_target = ctx.initial_backfill_target()?;
+        let initial_target = ctx.initial_backfill_target(disabled_stages)?;
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
@@ -430,14 +440,15 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<N, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     T: FullNodeTypes<
-        Types: NodeTypesForProvider,
-        Provider = BlockchainProvider<
-            NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
-        >,
+        Types = N,
+        DB = DB,
+        Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, DB>>,
     >,
+    N: Node<RethFullAdapter<DB, N>> + NodeTypesForProvider,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     CB: NodeComponentsBuilder<T> + 'static,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
