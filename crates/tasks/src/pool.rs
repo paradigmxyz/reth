@@ -291,11 +291,13 @@ impl WorkerPool {
     ///
     /// This is useful for accessing the worker from inside `par_iter` where the initial `&Worker`
     /// reference from `install` belongs to a different thread.
+    #[inline]
     pub fn with_worker<R>(f: impl FnOnce(&Worker) -> R) -> R {
         WORKER.with_borrow(|worker| f(worker))
     }
 
     /// Mutably access the current thread's [`Worker`] from within a pool closure.
+    #[inline]
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
     }
@@ -351,6 +353,7 @@ impl Worker {
     /// # Panics
     ///
     /// Panics if the worker has not been initialized or if the type does not match.
+    #[inline]
     pub fn get<T: 'static>(&self) -> &T {
         self.state
             .as_ref()
@@ -364,6 +367,7 @@ impl Worker {
     /// # Panics
     ///
     /// Panics if the worker has not been initialized or if the type does not match.
+    #[inline]
     pub fn get_mut<T: 'static>(&mut self) -> &mut T {
         self.state
             .as_mut()
@@ -377,6 +381,7 @@ impl Worker {
     /// # Panics
     ///
     /// Panics if the state was previously initialized with a different type.
+    #[inline]
     pub fn get_or_init<T: 'static>(&mut self, f: impl FnOnce() -> T) -> &mut T {
         self.state
             .get_or_insert_with(|| Box::new(f()))
