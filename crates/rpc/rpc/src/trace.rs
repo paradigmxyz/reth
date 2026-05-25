@@ -40,6 +40,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
+/// Limits DB readers from parallel block replays.
+const TRACE_FILTER_CONCURRENT_BLOCKS: usize = 4;
+
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
@@ -65,6 +68,24 @@ impl<Eth> TraceApi<Eth> {
         &self,
     ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
         self.inner.blocking_task_guard.clone().acquire_owned().await
+    }
+
+    /// Acquires a weighted permit to execute one `trace_filter` block replay.
+    async fn acquire_trace_filter_block_permit(
+        &self,
+    ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
+        self.inner
+            .blocking_task_guard
+            .clone()
+            .acquire_many_owned(self.trace_filter_block_permits())
+            .await
+    }
+
+    /// Returns the number of trace permits a single `trace_filter` block replay should hold.
+    fn trace_filter_block_permits(&self) -> u32 {
+        let max_tracing_requests = self.inner.eth_config.max_tracing_requests.max(1);
+        let permits = (max_tracing_requests / TRACE_FILTER_CONCURRENT_BLOCKS).max(1);
+        permits.min(u32::MAX as usize) as u32
     }
 
     /// Access the underlying `Eth` API.
@@ -408,21 +429,29 @@ where
 
             // trace all blocks
             for block in &blocks {
+                let this = self.clone();
                 let matcher = matcher.clone();
-                let traces = self.eth_api().trace_block_until(
-                    block.hash().into(),
-                    Some(block.clone()),
-                    None,
-                    TracingInspectorConfig::default_parity(),
-                    move |tx_info, mut ctx| {
-                        let mut traces = ctx
-                            .take_inspector()
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-                        traces.retain(|trace| matcher.matches(&trace.trace));
-                        Ok(Some(traces))
-                    },
-                );
+                let block_id = block.hash().into();
+                let block = block.clone();
+                let traces = async move {
+                    let _permit = this.acquire_trace_filter_block_permit().await;
+                    this.eth_api()
+                        .trace_block_until(
+                            block_id,
+                            Some(block),
+                            None,
+                            TracingInspectorConfig::default_parity(),
+                            move |tx_info, mut ctx| {
+                                let mut traces = ctx
+                                    .take_inspector()
+                                    .into_parity_builder()
+                                    .into_localized_transaction_traces(tx_info);
+                                traces.retain(|trace| matcher.matches(&trace.trace));
+                                Ok(Some(traces))
+                            },
+                        )
+                        .await
+                };
                 block_traces.push(traces);
             }
 
@@ -720,7 +749,8 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        let _permit = self.inner.blocking_task_guard.clone().acquire_many_owned(2).await;
+        // `trace_filter` acquires permits per replayed block. Holding a request-level permit here
+        // can deadlock when concurrent calls consume all permits before their block replays start.
         Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
     }
 
