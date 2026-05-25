@@ -36,6 +36,11 @@ function verdict(changes) {
   return { emoji: '⚪', label: 'No Difference' };
 }
 
+function isWin(changes) {
+  const vals = Object.values(changes || {}).filter(v => !v.informational);
+  return vals.some(v => v.sig === 'good') && !vals.some(v => v.sig === 'bad');
+}
+
 function loadSamplyUrls(workDir) {
   const urls = {};
   let runs = [];
@@ -125,6 +130,7 @@ module.exports = {
   fmtS,
   fmtChange,
   verdict,
+  isWin,
   loadSamplyUrls,
   blocksLabel,
   metricRows,

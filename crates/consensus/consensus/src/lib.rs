@@ -330,6 +330,14 @@ pub enum ConsensusError {
     #[error("missing requests hash")]
     RequestsHashMissing,
 
+    /// Error when the block access list hash is missing.
+    #[error("missing block access list hash")]
+    BlockAccessListHashMissing,
+
+    /// Error when the slot number is missing.
+    #[error("missing slot number")]
+    SlotNumberMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
@@ -337,6 +345,14 @@ pub enum ConsensusError {
     /// Error when an unexpected requests hash is encountered.
     #[error("unexpected requests hash")]
     RequestsHashUnexpected,
+
+    /// Error when an unexpected block access list hash is encountered.
+    #[error("unexpected block access list hash")]
+    BlockAccessListHashUnexpected,
+
+    /// Error when an unexpected slot number is encountered.
+    #[error("unexpected slot number")]
+    SlotNumberUnexpected,
 
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]

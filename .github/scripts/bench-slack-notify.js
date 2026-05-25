@@ -18,7 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
+const { fmtChange, fmtMs, verdict, isWin, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -263,24 +263,22 @@ async function success({ core, context }) {
 
   const slackMode = process.env.BENCH_SLACK || 'always';
 
-  // Post to public channel if any metric shows significant improvement or regression
+  // Post to public channel only when the overall verdict is a win.
   const channel = process.env.SLACK_BENCH_CHANNEL;
   let postedToChannel = false;
   if (channel) {
-    const changes = summary.changes || {};
-    const hasImprovement = Object.values(changes).some(c => !c.informational && c.sig === 'good');
-    if (hasImprovement) {
+    if (isWin(summary.changes)) {
       await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
     } else {
-      core.info('No significant improvement, skipping public channel notification');
+      core.info('No unambiguous improvement, skipping public channel notification');
     }
   }
 
-  // In on-win mode, only notify on improvement — skip DM fallback entirely
+  // In on-win mode, only notify on unambiguous improvement. Mixed results are not wins.
   if (slackMode === 'on-win') {
     if (!postedToChannel) {
-      core.info('on-win mode: no improvement detected, skipping all notifications');
+      core.info('on-win mode: no unambiguous improvement detected, skipping all notifications');
     }
     return;
   }
