@@ -106,6 +106,12 @@ pub struct CachedStateProvider<S, const PREWARM: bool = false> {
     /// Optional cache statistics for detailed block logging. Only tracked when slow block
     /// threshold is configured.
     cache_stats: Option<Arc<CacheStats>>,
+
+    /// Per-provider cache hit/miss counts for Prometheus metrics.
+    ///
+    /// These are flushed when the provider is dropped so the state-access hot path avoids the
+    /// heavier global metric recorder on every account/storage/code lookup.
+    metric_counts: CacheStats,
 }
 
 impl<S> CachedStateProvider<S> {
@@ -116,7 +122,13 @@ impl<S> CachedStateProvider<S> {
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics, cache_stats: None }
+        Self {
+            state_provider,
+            caches,
+            metrics,
+            cache_stats: None,
+            metric_counts: CacheStats::new(),
+        }
     }
 }
 
@@ -127,7 +139,13 @@ impl<S> CachedStateProvider<S, true> {
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics, cache_stats: None }
+        Self {
+            state_provider,
+            caches,
+            metrics,
+            cache_stats: None,
+            metric_counts: CacheStats::new(),
+        }
     }
 }
 
@@ -136,6 +154,39 @@ impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
     pub fn with_cache_stats(mut self, stats: Option<Arc<CacheStats>>) -> Self {
         self.cache_stats = stats;
         self
+    }
+}
+
+impl<S, const PREWARM: bool> Drop for CachedStateProvider<S, PREWARM> {
+    fn drop(&mut self) {
+        if PREWARM {
+            return;
+        }
+
+        let account_hits = self.metric_counts.account_hits();
+        if account_hits != 0 {
+            self.metrics.account_cache_hits.increment(account_hits as f64);
+        }
+        let account_misses = self.metric_counts.account_misses();
+        if account_misses != 0 {
+            self.metrics.account_cache_misses.increment(account_misses as f64);
+        }
+        let storage_hits = self.metric_counts.storage_hits();
+        if storage_hits != 0 {
+            self.metrics.storage_cache_hits.increment(storage_hits as f64);
+        }
+        let storage_misses = self.metric_counts.storage_misses();
+        if storage_misses != 0 {
+            self.metrics.storage_cache_misses.increment(storage_misses as f64);
+        }
+        let code_hits = self.metric_counts.code_hits();
+        if code_hits != 0 {
+            self.metrics.code_cache_hits.increment(code_hits as f64);
+        }
+        let code_misses = self.metric_counts.code_misses();
+        if code_misses != 0 {
+            self.metrics.code_cache_misses.increment(code_misses as f64);
+        }
     }
 }
 
@@ -279,6 +330,18 @@ pub struct CacheStats {
 }
 
 impl CacheStats {
+    /// Creates a new zeroed cache stats container.
+    pub const fn new() -> Self {
+        Self {
+            account_hits: AtomicUsize::new(0),
+            account_misses: AtomicUsize::new(0),
+            storage_hits: AtomicUsize::new(0),
+            storage_misses: AtomicUsize::new(0),
+            code_hits: AtomicUsize::new(0),
+            code_misses: AtomicUsize::new(0),
+        }
+    }
+
     /// Records an account cache hit.
     pub fn record_account_hit(&self) {
         self.account_hits.fetch_add(1, Ordering::Relaxed);
@@ -450,13 +513,13 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
                 }
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
-            self.metrics.account_cache_hits.increment(1);
+            self.metric_counts.record_account_hit();
             if let Some(stats) = &self.cache_stats {
                 stats.record_account_hit();
             }
             Ok(account)
         } else {
-            self.metrics.account_cache_misses.increment(1);
+            self.metric_counts.record_account_miss();
             if let Some(stats) = &self.cache_stats {
                 stats.record_account_miss();
             }
@@ -499,13 +562,13 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
-            self.metrics.storage_cache_hits.increment(1);
+            self.metric_counts.record_storage_hit();
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_hit();
             }
             Ok(nonzero_storage_value(value))
         } else {
-            self.metrics.storage_cache_misses.increment(1);
+            self.metric_counts.record_storage_miss();
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_miss();
             }
@@ -535,13 +598,13 @@ impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvi
                 }
             }
         } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-            self.metrics.code_cache_hits.increment(1);
+            self.metric_counts.record_code_hit();
             if let Some(stats) = &self.cache_stats {
                 stats.record_code_hit();
             }
             Ok(code)
         } else {
-            self.metrics.code_cache_misses.increment(1);
+            self.metric_counts.record_code_miss();
             if let Some(stats) = &self.cache_stats {
                 stats.record_code_miss();
             }
