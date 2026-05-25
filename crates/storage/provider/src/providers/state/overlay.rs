@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockHash, BlockNumber, B256};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{EthPrimitives, StateTrieOverlay, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -7,7 +7,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{
     dashmap::{self, DashMap},
-    NodePrimitives,
+    Account, NodePrimitives,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
@@ -17,7 +17,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursor},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
     HashedPostStateSorted,
@@ -567,10 +567,7 @@ where
                 tx.cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account(
-            cursor,
-            self.overlay.trie_updates.iter().map(Arc::as_ref),
-        ))
+        Ok(InMemoryTrieCursor::new_account_from_overlay(cursor, &self.overlay.trie_updates))
     }
 
     fn storage_trie_cursor(
@@ -589,9 +586,9 @@ where
                 hashed_address,
             ))
         };
-        Ok(InMemoryTrieCursor::new_storage(
+        Ok(InMemoryTrieCursor::new_storage_from_overlay(
             cursor,
-            self.overlay.trie_updates.iter().map(Arc::as_ref),
+            &self.overlay.trie_updates,
             hashed_address,
         ))
     }
@@ -602,30 +599,27 @@ where
     Provider: DBProvider,
 {
     type AccountCursor<'a>
-        = <HashedPostStateCursorFactory<
+        = HashedPostStateCursor<
         'a,
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
-        Vec<&'a HashedPostStateSorted>,
-    > as HashedCursorFactory>::AccountCursor<'a>
+        <DatabaseHashedCursorFactory<&'a Provider::Tx> as HashedCursorFactory>::AccountCursor<'a>,
+        Option<Account>,
+    >
     where
         Self: 'a;
 
     type StorageCursor<'a>
-        = <HashedPostStateCursorFactory<
+        = HashedPostStateCursor<
         'a,
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
-        Vec<&'a HashedPostStateSorted>,
-    > as HashedCursorFactory>::StorageCursor<'a>
+        <DatabaseHashedCursorFactory<&'a Provider::Tx> as HashedCursorFactory>::StorageCursor<'a>,
+        U256,
+    >
     where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_post_state =
-            self.overlay.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
-        hashed_cursor_factory.hashed_account_cursor()
+        let cursor = db_hashed_cursor_factory.hashed_account_cursor()?;
+        Ok(HashedPostStateCursor::new_account_from_overlay(cursor, &self.overlay.hashed_post_state))
     }
 
     fn hashed_storage_cursor(
@@ -633,11 +627,12 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_post_state =
-            self.overlay.hashed_post_state.iter().map(Arc::as_ref).collect::<Vec<_>>();
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
-        hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+        let cursor = db_hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+        Ok(HashedPostStateCursor::new_storage_from_overlay(
+            cursor,
+            &self.overlay.hashed_post_state,
+            hashed_address,
+        ))
     }
 }
 

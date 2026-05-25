@@ -16,7 +16,10 @@ use reth_primitives_traits::{
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie::{
+    hashed_cursor::HashedPostStateOverlay, trie_cursor::TrieUpdatesOverlay,
+    updates::TrieUpdatesSorted, HashedPostStateSorted,
+};
 #[cfg(any(test, feature = "rayon"))]
 use std::time::Instant;
 use std::{fmt, sync::Arc};
@@ -136,7 +139,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
         let _guard = span.enter();
         for anchor_hash in cached_parent_overlays {
-            self.spawn_overlay_cache_fill(OverlayCacheKey { anchor_hash, tip_hash: hash });
+            self.spawn_overlay_cache_fill(OverlayCacheKey { anchor_hash, tip_hash: hash }, None);
         }
     }
 
@@ -244,9 +247,10 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let cached_prefix = self.largest_cached_prefix(anchor_hash, &blocks);
         span.record("parent_overlay_reused", cached_prefix.is_some());
 
-        self.spawn_overlay_cache_fill(key);
+        let overlay = Self::overlay_stack_from_path(&blocks, cached_prefix.as_ref());
+        self.spawn_overlay_cache_fill(key, Some(ResolvedOverlayPath { blocks, cached_prefix }));
 
-        Ok(Self::overlay_stack_from_path(&blocks, cached_prefix))
+        Ok(overlay)
     }
 
     fn resolve_block_path(
@@ -288,10 +292,10 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
     fn overlay_stack_from_path(
         blocks_newest_to_oldest: &[ExecutedBlock<N>],
-        cached_prefix: Option<(usize, StateTrieOverlay)>,
+        cached_prefix: Option<&(usize, StateTrieOverlay)>,
     ) -> StateTrieOverlay {
         let individual_block_count =
-            cached_prefix.as_ref().map_or(blocks_newest_to_oldest.len(), |(idx, _)| *idx);
+            cached_prefix.map_or(blocks_newest_to_oldest.len(), |(idx, _)| *idx);
         let mut trie_updates =
             Vec::with_capacity(individual_block_count + cached_prefix.is_some() as usize);
         let mut hashed_post_state =
@@ -304,17 +308,18 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
 
         if let Some((_, cached_overlay)) = cached_prefix {
-            trie_updates.extend(cached_overlay.trie_updates);
-            hashed_post_state.extend(cached_overlay.hashed_post_state);
+            trie_updates.extend(cached_overlay.trie_updates.iter().cloned());
+            hashed_post_state.extend(cached_overlay.hashed_post_state.iter().cloned());
         }
 
         StateTrieOverlay::new(trie_updates, hashed_post_state)
     }
 
-    fn spawn_overlay_cache_fill(&self, key: OverlayCacheKey) {
+    fn spawn_overlay_cache_fill(&self, key: OverlayCacheKey, path: Option<ResolvedOverlayPath<N>>) {
         #[cfg(not(feature = "rayon"))]
         {
             let _ = key;
+            let _ = path;
         }
 
         #[cfg(feature = "rayon")]
@@ -340,14 +345,18 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                     anchor_hash = %key.anchor_hash,
                 )
                 .entered();
-                manager.compute_and_cache_overlay(key);
+                manager.compute_and_cache_overlay(key, path);
             });
         }
     }
 
     #[cfg(any(test, feature = "rayon"))]
-    fn compute_and_cache_overlay(&self, key: OverlayCacheKey) {
-        let result = self.compute_overlay_for_key(key);
+    fn compute_and_cache_overlay(
+        &self,
+        key: OverlayCacheKey,
+        path: Option<ResolvedOverlayPath<N>>,
+    ) {
+        let result = self.compute_overlay_for_key(key, path);
 
         if let Err(error) = result {
             self.remove_pending_overlay(key);
@@ -365,12 +374,23 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
     fn compute_overlay_for_key(
         &self,
         key: OverlayCacheKey,
+        path: Option<ResolvedOverlayPath<N>>,
     ) -> Result<StateTrieOverlay, StateTrieOverlayError> {
-        let blocks = self.resolve_block_path(key.tip_hash, key.anchor_hash)?;
-        let cached_prefix = self.largest_cached_prefix(key.anchor_hash, &blocks);
-        let (blocks, parent_overlay) = match cached_prefix {
-            Some((idx, parent_overlay)) => (blocks[..idx].to_vec(), parent_overlay),
-            None => (blocks, StateTrieOverlay::default()),
+        let path = match path {
+            Some(path) => path,
+            None => {
+                let blocks = self.resolve_block_path(key.tip_hash, key.anchor_hash)?;
+                let cached_prefix = self.largest_cached_prefix(key.anchor_hash, &blocks);
+                ResolvedOverlayPath { blocks, cached_prefix }
+            }
+        };
+        let (blocks, parent_overlay) = match path.cached_prefix {
+            Some((idx, parent_overlay)) => {
+                let mut blocks = path.blocks;
+                blocks.truncate(idx);
+                (blocks, parent_overlay)
+            }
+            None => (path.blocks, StateTrieOverlay::default()),
         };
         let overlay = compute_overlay(blocks, parent_overlay, key.anchor_hash, &self.metrics);
 
@@ -451,18 +471,21 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 #[derive(Clone, Debug, Default)]
 pub struct StateTrieOverlay {
     /// Trie updates overlays.
-    pub trie_updates: Vec<Arc<TrieUpdatesSorted>>,
+    pub trie_updates: TrieUpdatesOverlay,
     /// Hashed post state overlays.
-    pub hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
+    pub hashed_post_state: HashedPostStateOverlay,
 }
 
 impl StateTrieOverlay {
     /// Create a new state trie overlay.
-    pub const fn new(
+    pub fn new(
         trie_updates: Vec<Arc<TrieUpdatesSorted>>,
         hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
     ) -> Self {
-        Self { trie_updates, hashed_post_state }
+        Self {
+            trie_updates: TrieUpdatesOverlay::new(trie_updates),
+            hashed_post_state: HashedPostStateOverlay::new(hashed_post_state),
+        }
     }
 }
 
@@ -491,6 +514,12 @@ impl std::error::Error for StateTrieOverlayError {}
 struct OverlayCacheKey {
     anchor_hash: B256,
     tip_hash: B256,
+}
+
+#[cfg_attr(not(any(test, feature = "rayon")), allow(dead_code))]
+struct ResolvedOverlayPath<N: NodePrimitives> {
+    blocks: Vec<ExecutedBlock<N>>,
+    cached_prefix: Option<(usize, StateTrieOverlay)>,
 }
 
 #[cfg_attr(not(any(test, feature = "rayon")), allow(dead_code))]
@@ -682,10 +711,13 @@ mod tests {
             .hashed_post_state;
         assert_eq!(short.len(), 1);
         assert_eq!(state_account_count(&short), 1);
-        manager.compute_and_cache_overlay(OverlayCacheKey {
-            anchor_hash: short_anchor,
-            tip_hash: blocks[2].recovered_block().hash(),
-        });
+        manager.compute_and_cache_overlay(
+            OverlayCacheKey {
+                anchor_hash: short_anchor,
+                tip_hash: blocks[2].recovered_block().hash(),
+            },
+            None,
+        );
         let cached_short = manager
             .overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap()
@@ -704,7 +736,8 @@ mod tests {
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let prefix_tip = blocks[1].recovered_block().hash();
-        manager.compute_and_cache_overlay(OverlayCacheKey { anchor_hash, tip_hash: prefix_tip });
+        manager
+            .compute_and_cache_overlay(OverlayCacheKey { anchor_hash, tip_hash: prefix_tip }, None);
 
         let state = manager
             .overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
@@ -789,7 +822,10 @@ mod tests {
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[0].recovered_block().hash();
-        manager.compute_and_cache_overlay(OverlayCacheKey { anchor_hash, tip_hash: parent_hash });
+        manager.compute_and_cache_overlay(
+            OverlayCacheKey { anchor_hash, tip_hash: parent_hash },
+            None,
+        );
 
         let child_hash = blocks[1].recovered_block().hash();
         manager.insert_block(blocks[1].clone());
@@ -819,7 +855,10 @@ mod tests {
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[0].recovered_block().hash();
-        manager.compute_and_cache_overlay(OverlayCacheKey { anchor_hash, tip_hash: parent_hash });
+        manager.compute_and_cache_overlay(
+            OverlayCacheKey { anchor_hash, tip_hash: parent_hash },
+            None,
+        );
 
         let child_hash = blocks[1].recovered_block().hash();
         let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
@@ -845,10 +884,13 @@ mod tests {
         }
 
         let original_anchor = blocks[0].recovered_block().parent_hash();
-        manager.compute_and_cache_overlay(OverlayCacheKey {
-            anchor_hash: original_anchor,
-            tip_hash: blocks[2].recovered_block().hash(),
-        });
+        manager.compute_and_cache_overlay(
+            OverlayCacheKey {
+                anchor_hash: original_anchor,
+                tip_hash: blocks[2].recovered_block().hash(),
+            },
+            None,
+        );
 
         manager.remove_blocks([
             blocks[0].recovered_block().hash(),
