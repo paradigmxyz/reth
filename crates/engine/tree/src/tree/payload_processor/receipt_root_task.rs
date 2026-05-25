@@ -81,12 +81,15 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut received_count = 0usize;
 
         for indexed_receipt in self.receipt_rx {
+            let has_logs = !indexed_receipt.receipt.logs().is_empty();
             let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
 
             encode_buf.clear();
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            if has_logs {
+                aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            }
             // Receipt indices are produced by the block executor in transaction order and are
             // bounded by `receipts_len`, so avoid re-validating every streamed receipt on the hot
             // path. `finalize` below still catches aborted execution that sends too few receipts.
