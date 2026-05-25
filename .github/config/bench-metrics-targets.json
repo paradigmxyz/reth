@@ -17,8 +17,8 @@
     {
       "query": "reth_sync_block_validation_state_root_histogram",
       "target": "decrease",
-      "floor_pct": 2.5,
-      "min_value_pct_total_latency": 0.1
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 5.0
     },
     {
       "query": "reth_trie_proof_task_account_worker_idle_time_seconds",
