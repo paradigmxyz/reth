@@ -316,6 +316,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
 
+            let _permit = self.acquire_owned_blocking_io().await;
+
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();
             let transaction_index = transaction_index.unwrap_or_default();
