@@ -110,11 +110,11 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 **Features**
 
-The following performance features are enabled by default: `jemalloc` (except on Windows), `asm-keccak`, and `min-debug-logs`.
+The following performance features are enabled by default: `jemalloc` (except on Windows), `asm-keccak`, and `min-trace-logs`.
 
 Some additional optional features are available:
 
--   `min-LEVEL-logs`, where `LEVEL` is one of `error`, `warn`, `info`, `debug`, `trace`: disables compilation of logs of lower level than the given one; `min-debug-logs` is enabled by default
+-   `min-LEVEL-logs`, where `LEVEL` is one of `error`, `warn`, `info`, `debug`, `trace`: disables compilation of logs of lower level than the given one; `min-trace-logs` is enabled by default
 
 You can build with maximum performance optimizations using:
 

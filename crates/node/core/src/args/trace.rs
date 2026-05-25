@@ -4,7 +4,51 @@ use clap::Parser;
 use eyre::WrapErr;
 use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
 use reth_tracing_otlp::OtlpProtocol;
+use std::sync::OnceLock;
 use url::Url;
+
+static TRACE_DEFAULTS: OnceLock<DefaultTraceValues> = OnceLock::new();
+
+/// Overridable defaults for OTLP trace configuration.
+///
+/// Downstream binaries that embed reth can call
+/// `DefaultTraceValues::default().with_service_name("myapp").try_init()` before CLI parsing to
+/// change the defaults that clap will use.
+#[derive(Debug, Clone)]
+pub struct DefaultTraceValues {
+    service_name: String,
+    service_version: Option<String>,
+}
+
+impl Default for DefaultTraceValues {
+    fn default() -> Self {
+        Self { service_name: "reth".to_string(), service_version: None }
+    }
+}
+
+impl DefaultTraceValues {
+    /// Initialize the global trace defaults with this configuration.
+    pub fn try_init(self) -> Result<(), Self> {
+        TRACE_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global trace defaults.
+    pub fn get_global() -> &'static Self {
+        TRACE_DEFAULTS.get_or_init(Self::default)
+    }
+
+    /// Set the default service name.
+    pub fn with_service_name(mut self, name: impl Into<String>) -> Self {
+        self.service_name = name.into();
+        self
+    }
+
+    /// Set the default service version.
+    pub fn with_service_version(mut self, version: impl Into<String>) -> Self {
+        self.service_version = Some(version.into());
+        self
+    }
+}
 
 /// CLI arguments for configuring `Opentelemetry` trace and logs export.
 #[derive(Debug, Clone, Parser)]
@@ -109,11 +153,25 @@ pub struct TraceArgs {
         env = "OTEL_SERVICE_NAME",
         global = true,
         value_name = "NAME",
-        default_value = "reth",
+        default_value = DefaultTraceValues::get_global().service_name.as_str(),
         hide = true,
         help_heading = "Tracing"
     )]
     pub service_name: String,
+
+    /// Service version to use for OTLP tracing export.
+    ///
+    /// Overrides the default version reported in the `service.version` OTLP resource attribute.
+    /// Falls back to the crate's `CARGO_PKG_VERSION` if not specified.
+    #[arg(
+        long = "tracing-otlp.service-version",
+        env = "OTEL_SERVICE_VERSION",
+        global = true,
+        value_name = "VERSION",
+        hide = true,
+        help_heading = "Tracing"
+    )]
+    pub service_version: Option<String>,
 
     /// Trace sampling ratio to control the percentage of traces to export.
     ///
@@ -135,6 +193,7 @@ pub struct TraceArgs {
 
 impl Default for TraceArgs {
     fn default() -> Self {
+        let defaults = DefaultTraceValues::get_global();
         Self {
             otlp: None,
             logs_otlp: None,
@@ -142,7 +201,8 @@ impl Default for TraceArgs {
             otlp_filter: EnvFilter::from_default_env(),
             logs_otlp_filter: EnvFilter::try_new("info").expect("valid filter"),
             sample_ratio: None,
-            service_name: "reth".to_string(),
+            service_name: defaults.service_name.clone(),
+            service_version: defaults.service_version.clone(),
         }
     }
 }
@@ -168,12 +228,15 @@ impl TraceArgs {
             #[cfg(feature = "otlp")]
             {
                 {
-                    let config = reth_tracing_otlp::OtlpConfig::new(
+                    let mut config = reth_tracing_otlp::OtlpConfig::new(
                         self.service_name.clone(),
                         endpoint.clone(),
                         self.protocol,
                         self.sample_ratio,
                     )?;
+                    if let Some(version) = &self.service_version {
+                        config = config.with_service_version(version.clone());
+                    }
 
                     _layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
 
@@ -201,11 +264,14 @@ impl TraceArgs {
 
             #[cfg(feature = "otlp-logs")]
             {
-                let config = reth_tracing_otlp::OtlpLogsConfig::new(
+                let mut config = reth_tracing_otlp::OtlpLogsConfig::new(
                     self.service_name.clone(),
                     endpoint.clone(),
                     self.protocol,
                 )?;
+                if let Some(version) = &self.service_version {
+                    config = config.with_service_version(version.clone());
+                }
 
                 _layers.with_log_layer(config.clone(), self.logs_otlp_filter.clone())?;
 

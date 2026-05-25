@@ -1,6 +1,6 @@
 # Runs benchmarks.
 #
-# The reth-bench job replays real blocks via the Engine API against a reth node
+# The bench job replays real blocks via the Engine API against a reth node
 # backed by a local snapshot managed with schelk.
 #
 # It runs the baseline binary and the feature (candidate) binary on the
@@ -12,15 +12,15 @@ on:
   workflow_dispatch:
     inputs:
       blocks:
-        description: "Number of blocks to benchmark"
+        description: "Number of blocks to benchmark (default: 500, big blocks: 30)"
         required: false
-        default: "500"
+        default: ""
         type: string
       big_blocks:
-        description: "Use big blocks mode (pre-generated merged payloads with reth-bb)"
+        description: "Use big blocks mode: false, true, or target gas like 100M/2G"
         required: false
         default: "false"
-        type: boolean
+        type: string
       bal:
         description: "Replay block access lists during big-block benchmarks"
         required: false
@@ -32,9 +32,9 @@ on:
           - "feature"
           - "baseline"
       warmup:
-        description: "Number of warmup blocks"
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
         required: false
-        default: "200"
+        default: ""
         type: string
       baseline:
         description: "Baseline git ref (default: merge-base)"
@@ -81,11 +81,11 @@ on:
           - on-win
           - on-error
           - never
-      abba:
-        description: "Run ABBA (FBBF) interleaved order; false = single FB pass"
+      run_pairs:
+        description: "Number of benchmark run pairs (default: 6, big blocks: 10)"
         required: false
-        default: "true"
-        type: boolean
+        default: ""
+        type: string
       otlp:
         description: "Export OTLP traces and logs"
         required: false
@@ -95,18 +95,18 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
-  BENCH_RUNNERS: 2
+  BENCH_RUNNERS: 4
 
 name: bench
 
 permissions: {}
 
 jobs:
-  reth-bench-ack:
+  bench-ack:
     if: |
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
       github.event_name == 'workflow_dispatch'
-    name: reth-bench-ack
+    name: bench-ack
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -124,31 +124,50 @@ jobs:
       slack: ${{ steps.args.outputs.slack }}
       cores: ${{ steps.args.outputs.cores }}
       big-blocks: ${{ steps.args.outputs.big-blocks }}
+      big-blocks-target-gas: ${{ steps.args.outputs.big-blocks-target-gas }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
-      abba: ${{ steps.args.outputs.abba }}
+      run-pairs: ${{ steps.args.outputs.run-pairs }}
+      run-order: ${{ steps.args.outputs.run-order }}
       otlp: ${{ steps.args.outputs.otlp }}
+      node-bin: ${{ steps.args.outputs.node-bin }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
+      pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
+      pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
+      pr-head-repo: ${{ steps.args.outputs.pr-head-repo }}
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.DEREK_BENCH_ACK_TOKEN }}
           script: |
-            const user = context.payload.comment.user.login;
-            try {
-              const { status } = await github.rest.orgs.checkMembershipForUser({
-                org: 'paradigmxyz',
-                username: user,
-              });
-              if (status !== 204 && status !== 302) {
-                core.setFailed(`@${user} is not a member of paradigmxyz`);
+            const org = 'paradigmxyz';
+            const checkMembership = async (username) => {
+              try {
+                const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
+                return status === 204 || status === 302;
+              } catch {
+                return false;
               }
-            } catch (e) {
-              core.setFailed(`@${user} is not a member of paradigmxyz`);
+            };
+
+            const commenter = context.payload.comment.user.login;
+            if (!await checkMembership(commenter)) {
+              core.setFailed(`@${commenter} is not a member of ${org}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const prAuthor = pr.user.login;
+            if (!await checkMembership(prAuthor)) {
+              core.setFailed(`PR author @${prAuthor} is not a member of ${org}`);
             }
 
       - name: Parse arguments
@@ -159,24 +178,53 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
+            let bigBlocksTargetGas = '';
+            let explicitBlocks = false;
             let explicitWarmup = false;
+            let explicitRunPairs = false;
+
+            const parseBigBlocks = (value) => {
+              value = String(value || 'false');
+              if (value === 'true') return { enabled: 'true', targetGas: '' };
+              if (value === 'false') return { enabled: 'false', targetGas: '' };
+              if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
+              return null;
+            };
+            const defaultBlocks = (isBigBlocks) => isBigBlocks ? '30' : '500';
+            const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
+            const defaultRunPairs = (isBigBlocks) => isBigBlocks ? '10' : '6';
+            const benchRunOrder = (runPairs) => {
+              const n = Number(runPairs);
+              if (!Number.isInteger(n) || n < 1) {
+                throw new Error('run pairs must be a positive integer');
+              }
+              return n % 2 === 0 ? 'ABBA'.repeat(n / 2) : 'AB'.repeat(n);
+            };
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
-              blocks = '${{ github.event.inputs.blocks }}' || '500';
-              warmup = '${{ github.event.inputs.warmup }}' || '200';
-              if (warmup !== '200') explicitWarmup = true;
+              blocks = '${{ github.event.inputs.blocks }}' || '';
+              explicitBlocks = blocks !== '';
+              warmup = '${{ github.event.inputs.warmup }}' || '';
+              explicitWarmup = warmup !== '';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
               var slack = '${{ github.event.inputs.slack }}' || 'never';
               cores = '${{ github.event.inputs.cores }}' || '0';
-              bigBlocks = '${{ github.event.inputs.big_blocks }}' === 'true' ? 'true' : 'false';
+              const parsedBigBlocks = parseBigBlocks('${{ github.event.inputs.big_blocks }}');
+              if (!parsedBigBlocks) {
+                core.setFailed(`Invalid big_blocks value: ${{ github.event.inputs.big_blocks }} (must be false, true, or a gas value like 100M or 2G)`);
+                return;
+              }
+              bigBlocks = parsedBigBlocks.enabled;
+              bigBlocksTargetGas = parsedBigBlocks.targetGas;
               bal = '${{ github.event.inputs.bal }}' || 'false';
-              var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
-              var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
+              var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
+              explicitRunPairs = runPairs !== '';
+              var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -199,14 +247,13 @@ jobs:
               actor = context.payload.comment.user.login;
 
               const body = context.payload.comment.body.trim();
-              const intArgs = new Set(['warmup', 'cores', 'blocks']);
+              const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs']);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply', 'big-blocks']);
-              const boolDefaultTrue = new Set(['abba', 'otlp']);
+              const boolArgs = new Set(['samply', 'otlp']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '200', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -218,9 +265,9 @@ jobs:
               for (const part of parts) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
-                  if (boolArgs.has(part)) {
+                  if (part === 'big-blocks') {
                     defaults[part] = 'true';
-                  } else if (boolDefaultTrue.has(part)) {
+                  } else if (boolArgs.has(part)) {
                     defaults[part] = 'true';
                   } else {
                     unknown.push(part);
@@ -233,7 +280,14 @@ jobs:
                 if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
                   value = value.slice(1, -1);
                 }
-                if (boolArgs.has(key) || boolDefaultTrue.has(key)) {
+                if (key === 'big-blocks') {
+                  const parsed = parseBigBlocks(value);
+                  if (parsed) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be false, true, or a gas value like 100M or 2G)`);
+                  }
+                } else if (boolArgs.has(key)) {
                   if (value === 'true' || value === 'false') {
                     defaults[key] = value;
                   } else {
@@ -256,7 +310,9 @@ jobs:
                     invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
                   } else {
                     defaults[key] = value;
+                    if (key === 'blocks') explicitBlocks = true;
                     if (key === 'warmup') explicitWarmup = true;
+                    if (key === 'run-pairs') explicitRunPairs = true;
                   }
                 } else if (refArgs.has(key)) {
                   if (!value) {
@@ -291,53 +347,69 @@ jobs:
               samply = defaults.samply;
               var slack = defaults.slack;
               cores = defaults.cores;
-              bigBlocks = defaults['big-blocks'];
+              const parsedBigBlocks = parseBigBlocks(defaults['big-blocks']);
+              bigBlocks = parsedBigBlocks.enabled;
+              bigBlocksTargetGas = parsedBigBlocks.targetGas;
               bal = defaults.bal;
-              var abba = defaults.abba;
+              var runPairs = defaults['run-pairs'];
               var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
             }
 
-            // Default warmup to 20 for big-blocks mode unless explicitly set
-            if (bigBlocks === 'true' && !explicitWarmup) {
-              warmup = '20';
+            const isBigBlocks = bigBlocks === 'true';
+            if (!explicitBlocks) {
+              blocks = defaultBlocks(isBigBlocks);
             }
+            if (!explicitRunPairs) {
+              runPairs = defaultRunPairs(isBigBlocks);
+            }
+            if (!/^\d+$/.test(blocks)) {
+              core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
+              return;
+            }
+            if (explicitWarmup && !/^\d+$/.test(warmup)) {
+              core.setFailed(`Invalid warmup value: ${warmup} (must be a positive integer)`);
+              return;
+            }
+            if (!explicitWarmup) {
+              warmup = defaultWarmup(blocks);
+            }
+            if (!/^[1-9]\d*$/.test(runPairs)) {
+              core.setFailed(`Invalid run-pairs value: ${runPairs} (must be a positive integer greater than zero)`);
+              return;
+            }
+            const runOrder = benchRunOrder(runPairs);
 
             if (!validBalModes.has(bal)) {
               core.setFailed(`Invalid bal mode: ${bal}`);
               return;
             }
-            if (bal !== 'false' && bigBlocks !== 'true') {
-              const msg = `❌ **Invalid bench command**\n\n\`bal\` requires \`big-blocks=true\`.\n\n**Usage:** ${usage}`;
-              if (context.eventName === 'issue_comment') {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: msg,
-                });
-              }
-              core.setFailed(msg);
-              return;
+
+            const releaseRef = (ref) => /^v\d+\.\d+\.\d+/.test(ref || '');
+            if (releaseRef(baseline) || releaseRef(feature) || '${{ github.ref_type }}' === 'tag') {
+              otlp = 'false';
             }
 
             // Resolve display names for baseline/feature
             let baselineName = baseline || 'main';
             let featureName = feature;
-            if (!featureName) {
-              if (pr) {
-                const { data: prData } = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: parseInt(pr),
-                });
-                featureName = prData.head.ref;
-              } else {
-                featureName = '${{ github.ref_name }}';
-              }
+            if (pr) {
+              const { data: prData } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parseInt(pr),
+              });
+              core.setOutput('pr-head-sha', prData.head.sha);
+              core.setOutput('pr-head-ref', prData.head.ref);
+              core.setOutput('pr-head-repo', prData.head.repo.full_name);
+              if (!featureName) featureName = prData.head.ref;
+            } else {
+              if (!featureName) featureName = '${{ github.ref_name }}';
             }
+
+            const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
 
             core.setOutput('pr', pr || '');
             core.setOutput('actor', actor);
@@ -351,12 +423,15 @@ jobs:
             core.setOutput('slack', slack);
             core.setOutput('cores', cores);
             core.setOutput('big-blocks', bigBlocks);
+            core.setOutput('big-blocks-target-gas', bigBlocksTargetGas);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
-            core.setOutput('abba', abba);
+            core.setOutput('run-pairs', runPairs);
+            core.setOutput('run-order', runOrder);
             core.setOutput('otlp', otlp);
+            core.setOutput('node-bin', nodeBin);
 
       - name: Acknowledge request
         id: ack
@@ -419,11 +494,12 @@ jobs:
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
-            const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
-            const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
+            const runOrder = '${{ steps.args.outputs.run-order }}';
+            const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
@@ -432,8 +508,8 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -463,11 +539,12 @@ jobs:
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
-            const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
-            const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
+            const runOrder = '${{ steps.args.outputs.run-order }}';
+            const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
@@ -476,8 +553,8 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -526,9 +603,9 @@ jobs:
               }
             }
 
-  reth-bench:
-    needs: reth-bench-ack
-    name: reth-bench
+  bench-txgen:
+    needs: bench-ack
+    name: bench-txgen
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
       contents: read
@@ -539,25 +616,32 @@ jobs:
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
-      BENCH_PR: ${{ needs.reth-bench-ack.outputs.pr }}
-      BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
-      BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
-      BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
-      BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
-      BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
-      BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
-      BENCH_BAL: ${{ needs.reth-bench-ack.outputs.bal }}
-      BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
-      BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
-      BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
-      BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
-      BENCH_OTLP: ${{ needs.reth-bench-ack.outputs.otlp }}
-      BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
-      BENCH_SLACK: ${{ needs.reth-bench-ack.outputs.slack }}
-      BENCH_NODE_BIN: ${{ needs.reth-bench-ack.outputs.big-blocks == 'true' && 'reth-bb' || 'reth' }}
-      BENCH_METRICS_ADDR: "127.0.0.1:9100"
-      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
-      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
+      BENCH_PR: ${{ needs.bench-ack.outputs.pr }}
+      BENCH_PR_HEAD_SHA: ${{ needs.bench-ack.outputs.pr-head-sha }}
+      BENCH_PR_HEAD_REF: ${{ needs.bench-ack.outputs.pr-head-ref }}
+      BENCH_PR_HEAD_REPO: ${{ needs.bench-ack.outputs.pr-head-repo }}
+      BENCH_ACTOR: ${{ needs.bench-ack.outputs.actor }}
+      BENCH_BLOCKS: ${{ needs.bench-ack.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.bench-ack.outputs.warmup }}
+      BENCH_SAMPLY: ${{ needs.bench-ack.outputs.samply }}
+      BENCH_CORES: ${{ needs.bench-ack.outputs.cores }}
+      BENCH_BIG_BLOCKS: ${{ needs.bench-ack.outputs.big-blocks }}
+      BENCH_BIG_BLOCKS_TARGET_GAS: ${{ needs.bench-ack.outputs.big-blocks-target-gas }}
+      BENCH_BAL: ${{ needs.bench-ack.outputs.bal }}
+      BENCH_WAIT_TIME: ${{ needs.bench-ack.outputs.wait-time }}
+      BENCH_BASELINE_ARGS: ${{ needs.bench-ack.outputs.baseline-args }}
+      BENCH_FEATURE_ARGS: ${{ needs.bench-ack.outputs.feature-args }}
+      BENCH_RUN_PAIRS: ${{ needs.bench-ack.outputs.run-pairs }}
+      BENCH_RUN_ORDER: ${{ needs.bench-ack.outputs.run-order }}
+      BENCH_OTLP: ${{ needs.bench-ack.outputs.otlp }}
+      BENCH_COMMENT_ID: ${{ needs.bench-ack.outputs.comment-id }}
+      BENCH_SLACK: ${{ needs.bench-ack.outputs.slack }}
+      BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
+      BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
+      BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
+      BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -568,22 +652,23 @@ jobs:
         with:
           script: |
             if (!process.env.BENCH_PR) {
+              core.setOutput('repository', '${{ github.repository }}');
               core.setOutput('ref', '${{ github.ref }}');
               return;
             }
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: parseInt(process.env.BENCH_PR),
-            });
-            // Always use head SHA — the merge ref (refs/pull/N/merge) may not
-            // exist if the PR has conflicts, was force-pushed, or was
-            // merged/closed between this step and checkout.
-            core.info(`PR #${process.env.BENCH_PR} (${pr.state}), using head SHA ${pr.head.sha}`);
-            core.setOutput('ref', pr.head.sha);
+            const sha = process.env.BENCH_PR_HEAD_SHA;
+            if (!sha) {
+              core.setFailed('BENCH_PR_HEAD_SHA is not set — ack job must pin the PR head SHA');
+              return;
+            }
+            const repository = process.env.BENCH_PR_HEAD_REPO || '${{ github.repository }}';
+            core.info(`PR #${process.env.BENCH_PR}, using ${repository}@${sha}`);
+            core.setOutput('repository', repository);
+            core.setOutput('ref', sha);
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ steps.checkout-ref.outputs.repository }}
           persist-credentials: false
           submodules: true
           fetch-depth: 0
@@ -600,26 +685,28 @@ jobs:
               repo: context.repo.repo,
               run_id: context.runId,
             });
-            const job = jobs.jobs.find(j => j.name === 'reth-bench');
+            const expectedJobName = 'bench-txgen';
+            const job = jobs.jobs.find(j => j.name === expectedJobName);
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
-            const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
-            const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
+            const baseline = '${{ needs.bench-ack.outputs.baseline-name }}';
+            const feature = '${{ needs.bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
             const slack = process.env.BENCH_SLACK || 'always';
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const bal = process.env.BENCH_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
-            const balNote = bigBlocks && bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const abbaEnabled = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
-            const otlpEnabled = (process.env.BENCH_OTLP || 'true') !== 'false';
+            const runPairs = process.env.BENCH_RUN_PAIRS || '6';
+            const runOrder = process.env.BENCH_RUN_ORDER || '';
+            const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
+            const otlpEnabled = (process.env.BENCH_OTLP || 'false') !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
@@ -627,8 +714,8 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -643,6 +730,27 @@ jobs:
         continue-on-error: true
       - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
 
+      - name: Mask OTLP endpoints
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const envName of ['BENCH_OTLP_TRACES_ENDPOINT', 'BENCH_OTLP_LOGS_ENDPOINT']) {
+              const endpoint = process.env[envName] || '';
+              if (!endpoint) {
+                continue;
+              }
+
+              core.setSecret(endpoint);
+              try {
+                const url = new URL(endpoint);
+                url.username = '';
+                url.password = '';
+                core.setSecret(url.toString());
+              } catch {
+                // The CLI parser will report malformed endpoints later; this step only masks.
+              }
+            }
+
       - name: Install dependencies
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
@@ -655,6 +763,12 @@ jobs:
             python3 make jq zstd curl dmsetup \
             linux-tools-"$(uname -r)" || \
             sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          # mc (MinIO client)
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
@@ -690,7 +804,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in schelk cpupower taskset stdbuf python3 curl make uv jq; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -706,13 +820,10 @@ jobs:
         with:
           script: |
             if (process.env.BENCH_PR) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: parseInt(process.env.BENCH_PR),
-              });
-              core.setOutput('head-ref', pr.head.ref);
-              core.setOutput('head-sha', pr.head.sha);
+              const ref = process.env.BENCH_PR_HEAD_REF || '${{ github.ref_name }}';
+              const sha = process.env.BENCH_PR_HEAD_SHA || '${{ github.sha }}';
+              core.setOutput('head-ref', ref);
+              core.setOutput('head-sha', sha);
             } else {
               core.setOutput('head-ref', '${{ github.ref_name }}');
               core.setOutput('head-sha', '${{ github.sha }}');
@@ -726,8 +837,8 @@ jobs:
             const { execSync } = require('child_process');
             const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 
-            const baselineArg = '${{ needs.reth-bench-ack.outputs.baseline }}';
-            const featureArg = '${{ needs.reth-bench-ack.outputs.feature }}';
+            const baselineArg = '${{ needs.bench-ack.outputs.baseline }}';
+            const featureArg = '${{ needs.bench-ack.outputs.feature }}';
 
             let baselineRef, baselineName, featureRef, featureName;
 
@@ -766,46 +877,6 @@ jobs:
             core.setOutput('feature-ref', featureRef);
             core.setOutput('feature-name', featureName);
 
-      - name: Validate local big blocks
-        if: env.BENCH_BIG_BLOCKS == 'true'
-        id: big-blocks-check
-        run: |
-          set -euo pipefail
-          BIG_BLOCKS_DIR="$HOME/.reth-bench-big-blocks"
-          PAYLOAD_DIR="$BIG_BLOCKS_DIR/payloads"
-          MANIFEST="$BIG_BLOCKS_DIR/manifest.json"
-          echo "BENCH_BIG_BLOCKS_DIR=${BIG_BLOCKS_DIR}" >> "$GITHUB_ENV"
-
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error::Missing local big-blocks manifest at $MANIFEST"
-            exit 1
-          fi
-
-          BASE_SNAPSHOT=$(jq -r '.base_snapshot // empty' "$MANIFEST")
-          if [ -z "$BASE_SNAPSHOT" ]; then
-            echo "::error::Big-blocks manifest missing base_snapshot field"
-            exit 1
-          fi
-
-          if [ ! -d "$PAYLOAD_DIR" ]; then
-            echo "::error::Missing local big-block payload directory at $PAYLOAD_DIR"
-            exit 1
-          fi
-
-          PAYLOAD_COUNT=$(find "$PAYLOAD_DIR" -name '*.json' | wc -l)
-          if [ "$PAYLOAD_COUNT" -eq 0 ]; then
-            echo "::error::No payload files found in $PAYLOAD_DIR"
-            exit 1
-          fi
-
-          echo "Big-blocks base snapshot: $BASE_SNAPSHOT"
-          echo "Payload files: $PAYLOAD_COUNT"
-          echo "BENCH_SNAPSHOT_NAME=${BASE_SNAPSHOT}" >> "$GITHUB_ENV"
-
-      - name: Validate local snapshot
-        id: snapshot-check
-        run: .github/scripts/bench-reth-snapshot.sh
-
       - name: Prepare source dirs
         run: |
           prepare_source_dir() {
@@ -833,14 +904,21 @@ jobs:
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
+          TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
+          DEREK_PAT: ${{ secrets.DEREK_PAT }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
 
-          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
+          .github/scripts/bench-txgen-install.sh
+
+          .github/scripts/bench-txgen-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
           PID_BASELINE=$!
-          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
+          .github/scripts/bench-txgen-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
           PID_FEATURE=$!
 
           FAIL=0
@@ -850,6 +928,12 @@ jobs:
             echo "::error::One or more build tasks failed"
             exit 1
           fi
+
+      - name: Sync snapshot
+        id: snapshot-check
+        run: |
+          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -900,7 +984,14 @@ jobs:
             echo 0 | sudo tee "$irq" 2>/dev/null || true
           done
           # Stop noisy background services
-          sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+          sudo systemctl stop \
+            irqbalance cron atd unattended-upgrades snapd \
+            prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+            prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+            prometheus-node-exporter-ipmitool-sensor.timer prometheus-node-exporter-ipmitool-sensor.service \
+            sysstat-collect.timer sysstat-collect.service \
+            sysstat-summary.timer sysstat-summary.service \
+            2>/dev/null || true
           # Log environment for reproducibility
           echo "=== Benchmark environment ==="
           uname -r
@@ -921,101 +1012,106 @@ jobs:
           rm -rf "$BENCH_WORK_DIR"
           mkdir -p "$BENCH_WORK_DIR"
 
-      - name: Start metrics proxy
+      - name: Initialize benchmark metrics labels
         run: |
+          if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+            echo "::add-mask::$BENCH_VICTORIAMETRICS_URL"
+          fi
+
           BENCH_ID="ci-${{ github.run_id }}"
           BENCH_REFERENCE_EPOCH=$(date +%s)
           echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
           echo "BENCH_REFERENCE_EPOCH=${BENCH_REFERENCE_EPOCH}" >> "$GITHUB_ENV"
 
-          LABELS_FILE="/tmp/bench-metrics-labels.json"
+          LABELS_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/bench-metrics-labels.XXXXXX")"
           echo '{}' > "$LABELS_FILE"
           echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
 
-          python3 .github/scripts/bench-metrics-proxy.py \
-            --labels "$LABELS_FILE" \
-            --upstream "http://${BENCH_METRICS_ADDR}/" \
-            --subnet 10.10.0.0/24 \
-            --port 9090 &
-          PROXY_PID=$!
-          echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
-          echo "Metrics proxy started (PID $PROXY_PID)"
-
-      - name: Update status (running benchmarks)
-        if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ secrets.DEREK_PAT }}
-          script: |
-            const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Running benchmarks...'});
-
-      # Interleaved run order (F-B-B-F) to reduce systematic bias from
-      # thermal drift and cache warming.
-      - name: "Run benchmark: feature (1/2)"
-        id: run-feature-1
-        env:
-          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
-          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-1,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+      # Extract txgen payloads once so they are reused across all benchmark
+      # runs instead of re-fetching from the remote RPC for every run.
+      - name: Extract txgen payloads
         run: |
-          LAST_RUN_START=$(date +%s)
-          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
-          cat > "$BENCH_LABELS_FILE" <<LABELS
-          {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
-          LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
+          PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
+          .github/scripts/bench-txgen-extract.sh \
+            "../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            "$PAYLOADS_DIR"
+          echo "TXGEN_PAYLOADS_DIR=${PAYLOADS_DIR}" >> "$GITHUB_ENV"
 
-      - name: "Run benchmark: baseline (1/2)"
-        id: run-baseline-1
+      # Interleaved run order (A=feature, B=baseline) to reduce systematic bias
+      # from thermal drift and cache warming.
+      - name: Run benchmarks
+        id: run-benchmarks
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
-          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-1,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
-        run: |
-          LAST_RUN_START=$(date +%s)
-          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
-          cat > "$BENCH_LABELS_FILE" <<LABELS
-          {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
-          LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
-
-      - name: "Run benchmark: baseline (2/2)"
-        if: env.BENCH_ABBA != 'false'
-        id: run-baseline-2
-        env:
-          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
-          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=baseline-2,run_type=baseline,git_ref=${{ steps.refs.outputs.baseline-ref }}"
-        run: |
-          LAST_RUN_START=$(date +%s)
-          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
-          cat > "$BENCH_LABELS_FILE" <<LABELS
-          {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
-          LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
-
-      - name: "Run benchmark: feature (2/2)"
-        if: env.BENCH_ABBA != 'false'
-        id: run-feature-2
-        env:
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
-          OTEL_RESOURCE_ATTRIBUTES: "benchmark_id=${{ env.BENCH_ID }},benchmark_run=feature-2,run_type=feature,git_ref=${{ steps.refs.outputs.feature-ref }}"
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: |
-          LAST_RUN_START=$(date +%s)
-          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
-          cat > "$BENCH_LABELS_FILE" <<LABELS
-          {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
-          LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
+          set -euo pipefail
 
-      - name: Stop metrics proxy & generate Grafana URL
+          build_run_order() {
+            local run_pairs="$1"
+            if ! [[ "$run_pairs" =~ ^[1-9][0-9]*$ ]]; then
+              echo "run pairs must be a positive integer" >&2
+              return 1
+            fi
+            if [ $((run_pairs % 2)) -eq 0 ]; then
+              printf 'ABBA%.0s' $(seq 1 $((run_pairs / 2)))
+            else
+              printf 'AB%.0s' $(seq 1 "$run_pairs")
+            fi
+            echo
+          }
+
+          RUN_ORDER="$(build_run_order "${BENCH_RUN_PAIRS:-6}")"
+          echo "BENCH_RUN_ORDER=${RUN_ORDER}" >> "$GITHUB_ENV"
+          echo "${RUN_ORDER}" > "$BENCH_WORK_DIR/run_order.txt"
+          echo "Run order: ${RUN_ORDER} (A=feature, B=baseline)"
+
+          run_total="${#RUN_ORDER}"
+          run_progress=0
+          feature_index=0
+          baseline_index=0
+
+          for ((i = 0; i < ${#RUN_ORDER}; i++)); do
+            side="${RUN_ORDER:i:1}"
+            if [ "$side" = "A" ]; then
+              run_type="feature"
+              feature_index=$((feature_index + 1))
+              run_index="$feature_index"
+              ref="$FEATURE_REF"
+              binary="../reth-feature/target/profiling/${BENCH_NODE_BIN}"
+            elif [ "$side" = "B" ]; then
+              run_type="baseline"
+              baseline_index=$((baseline_index + 1))
+              run_index="$baseline_index"
+              ref="$BASELINE_REF"
+              binary="../reth-baseline/target/profiling/${BENCH_NODE_BIN}"
+            else
+              echo "::error::Invalid run-order entry '${side}'"
+              exit 1
+            fi
+
+            run_progress=$((run_progress + 1))
+            run_label="${run_type}-${run_index}"
+            .github/scripts/bench-update-status.sh "Running benchmark: ${run_label} (${run_progress}/${run_total})..."
+            LAST_RUN_START=$(date +%s)
+            echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
+            export OTEL_RESOURCE_ATTRIBUTES="benchmark_id=${BENCH_ID},benchmark_run=${run_label},run_type=${run_type},git_ref=${ref}"
+            cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"${run_label}","run_type":"${run_type}","git_ref":"${ref}","bench_sha":"${ref}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+            taskset -c 0 .github/scripts/bench-txgen-run.sh "$run_type" "$binary" "$BENCH_WORK_DIR/${run_label}"
+          done
+
+          .github/scripts/bench-update-status.sh "Finalizing results..."
+
+      - name: Generate Grafana URL
         id: metrics
         if: "!cancelled()"
         run: |
-          kill "$BENCH_METRICS_PROXY_PID" 2>/dev/null || true
-
-          LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
-          TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          TO_MS=$(( $(date +%s) * 1000 ))
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 
@@ -1024,7 +1120,8 @@ jobs:
         run: |
           ERRORS_FILE="$BENCH_WORK_DIR/errors.md"
           found=false
-          for run_dir in baseline-1 feature-1 feature-2 baseline-2; do
+          mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+          for run_dir in "${RUN_DIRS[@]}"; do
             LOG="$BENCH_WORK_DIR/$run_dir/node.log"
             if [ ! -f "$LOG" ]; then continue; fi
 
@@ -1057,7 +1154,8 @@ jobs:
           PROFILER_API="https://api.profiler.firefox.com"
           PROFILER_ACCEPT="Accept: application/vnd.firefox-profiler+json;version=1.0"
 
-          for run_dir in baseline-1 baseline-2 feature-1 feature-2; do
+          mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+          for run_dir in "${RUN_DIRS[@]}"; do
             PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
             if [ ! -f "$PROFILE" ]; then continue; fi
 
@@ -1096,6 +1194,13 @@ jobs:
           done
 
       # Results & charts
+      - name: Upload raw results
+        if: success()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: bench-raw-results
+          path: ${{ env.BENCH_WORK_DIR }}
+
       - name: Parse results
         id: results
         if: success()
@@ -1119,15 +1224,15 @@ jobs:
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
-          BASELINE_CSVS="$BENCH_WORK_DIR/baseline-1/combined_latency.csv"
-          FEATURE_CSVS="$BENCH_WORK_DIR/feature-1/combined_latency.csv"
-          if [ "${BENCH_ABBA:-true}" = "true" ]; then
-            BASELINE_CSVS="$BASELINE_CSVS $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
-            FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          mapfile -t BASELINE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/baseline-*/combined_latency.csv" -type f | sort -V)
+          mapfile -t FEATURE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/feature-*/combined_latency.csv" -type f | sort -V)
+          if [ "${#BASELINE_CSVS[@]}" -eq 0 ] || [ "${#FEATURE_CSVS[@]}" -eq 0 ]; then
+            echo "::error::Missing baseline or feature benchmark CSVs"
+            exit 1
           fi
-          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BASELINE_CSVS"
-          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
-          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv ${BASELINE_CSVS[*]}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv ${FEATURE_CSVS[*]}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs ${BENCH_RUN_PAIRS:-6}"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
@@ -1157,14 +1262,14 @@ jobs:
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
         run: |
           CHART_ARGS="--output-dir $BENCH_WORK_DIR/charts"
-          FEATURE_CSVS="$BENCH_WORK_DIR/feature-1/combined_latency.csv"
-          BASELINE_CSVS="$BENCH_WORK_DIR/baseline-1/combined_latency.csv"
-          if [ "${BENCH_ABBA:-true}" = "true" ]; then
-            FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
-            BASELINE_CSVS="$BASELINE_CSVS $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          mapfile -t FEATURE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/feature-*/combined_latency.csv" -type f | sort -V)
+          mapfile -t BASELINE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/baseline-*/combined_latency.csv" -type f | sort -V)
+          if [ "${#BASELINE_CSVS[@]}" -eq 0 ] || [ "${#FEATURE_CSVS[@]}" -eq 0 ]; then
+            echo "::error::Missing baseline or feature benchmark CSVs"
+            exit 1
           fi
-          CHART_ARGS="$CHART_ARGS --feature $FEATURE_CSVS"
-          CHART_ARGS="$CHART_ARGS --baseline $BASELINE_CSVS"
+          CHART_ARGS="$CHART_ARGS --feature ${FEATURE_CSVS[*]}"
+          CHART_ARGS="$CHART_ARGS --baseline ${BASELINE_CSVS[*]}"
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
@@ -1174,7 +1279,7 @@ jobs:
         if: "!cancelled()"
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: bench-reth-results
+          name: bench-results
           path: ${{ env.BENCH_WORK_DIR }}
 
       - name: Push charts
@@ -1195,6 +1300,7 @@ jobs:
             git init "${TMP_DIR}"
             git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
+          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
 
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
@@ -1205,8 +1311,7 @@ jobs:
             rm -rf "${TMP_DIR}"
             exit 0
           fi
-          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
+          git -C "${TMP_DIR}" commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
 
           for attempt in 1 2 3 4 5; do
             if git -C "${TMP_DIR}" push origin HEAD:main; then
@@ -1262,16 +1367,11 @@ jobs:
 
             // Samply profile links (URLs point directly to Firefox Profiler)
             if (process.env.BENCH_SAMPLY === 'true') {
-              const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-              const runs = abba ? ['feature-1', 'baseline-1', 'baseline-2', 'feature-2'] : ['feature-1', 'baseline-1'];
+              const { loadSamplyUrls } = require('./.github/scripts/bench-utils');
+              const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
               const links = [];
-              for (const run of runs) {
-                try {
-                  const url = fs.readFileSync(`${process.env.BENCH_WORK_DIR}/${run}/samply-profile-url.txt`, 'utf8').trim();
-                  if (url) {
-                    links.push(`- **${run}**: [Firefox Profiler](${url})`);
-                  }
-                } catch (e) {}
+              for (const [run, url] of Object.entries(samplyUrls)) {
+                links.push(`- **${run}**: [Firefox Profiler](${url})`);
               }
               if (links.length > 0) {
                 comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
@@ -1336,16 +1436,11 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
-              ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
-              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
+              ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],
+              ['parsing results', '${{ steps.results.outcome }}'],
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
@@ -1374,16 +1469,11 @@ jobs:
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
           script: |
-            const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
-            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const steps_status = [
-              ...(bigBlocks ? [['validating local big-block data', '${{ steps.big-blocks-check.outcome }}']] : []),
-              ['validating local snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
-              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
-              ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
-              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
+              ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],
+              ['parsing results', '${{ steps.results.outcome }}'],
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';

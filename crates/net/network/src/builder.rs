@@ -16,7 +16,7 @@ use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_storage_api::BalProvider;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{BlobStore, TransactionPool};
 use tokio::sync::mpsc;
 
 /// We set the max channel capacity of the `EthRequestHandler` to 256
@@ -75,6 +75,21 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
         let request_handler = EthRequestHandler::new(client, peers, rx);
+        NetworkBuilder { network, request_handler, transactions }
+    }
+
+    /// Creates a new [`EthRequestHandler`] with access to a blob store and wires it to the network.
+    pub fn request_handler_with_blob_store<Client>(
+        self,
+        client: Client,
+        blob_store: Box<dyn BlobStore>,
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N>
+    where
+        Client: BalProvider,
+    {
+        let NetworkBuilder { network, transactions, request_handler } =
+            self.request_handler(client);
+        let request_handler = request_handler.with_blob_store(blob_store);
         NetworkBuilder { network, request_handler, transactions }
     }
 

@@ -1,6 +1,9 @@
 /**
 
-_libmdbx_ (aka MDBX) is an extremely fast, compact, powerful, embeddable,
+\file mdbx.h
+\brief The libmdbx C API header file.
+
+\details _libmdbx_ (aka MDBX) is an extremely fast, compact, powerful, embeddable,
 transactional [key-value
 store](https://en.wikipedia.org/wiki/Key-value_database), with [Apache 2.0
 license](./LICENSE). _MDBX_ has a specific set of properties and capabilities,
@@ -9,7 +12,7 @@ focused on creating unique lightweight solutions with extraordinary performance.
 _libmdbx_ is superior to [LMDB](https://bit.ly/26ts7tL) in terms of features
 and reliability, not inferior in performance. In comparison to LMDB, _libmdbx_
 makes many things just work perfectly, not silently and catastrophically
-break down. _libmdbx_ supports Linux, Windows, MacOS, OSX, iOS, Android,
+break down. _libmdbx_ supports Linux, Windows, MacOS, OSX, Harmony, iOS, Android,
 FreeBSD, DragonFly, Solaris, OpenSolaris, OpenIndiana, NetBSD, OpenBSD and other
 systems compliant with POSIX.1-2008.
 
@@ -18,24 +21,36 @@ C++ API description and links to the origin git repo with the source code.
 Questions, feedback and suggestions are welcome to the Telegram' group
 https://t.me/libmdbx.
 
-Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`.
+Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`,
+BTC `bc1qzvl9uegf2ea6cwlytnanrscyv8snwsvrc0xfsu`, SOL `FTCTgbHajoLVZGr8aEFWMzx3NDMyS5wXJgfeMTmJznRi`.
 Всё будет хорошо!
 
-\note The origin has been migrated to
-[GitFlic](https://gitflic.ru/project/erthink/libmdbx) since on 2022-04-15 the
-Github administration, without any warning nor explanation, deleted libmdbx
-along with a lot of other projects, simultaneously blocking access for many
-developers. For the same reason ~~Github~~ is blacklisted forever.
+The _libmdbx_ project has been completely relocated to the jurisdiction of the Russian Federation.
+\note _libmdbx_ is still open and provided with first-class free support.
 
 \section copyright LICENSE & COPYRIGHT
 \copyright SPDX-License-Identifier: Apache-2.0
-\note Please refer to the COPYRIGHT file for explanations license change,
-credits and acknowledgments.
-\author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
+Please refer to the COPYRIGHT file for explanations license change, credits and acknowledgments.
+\author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 
 *******************************************************************************/
 
 #pragma once
+/*
+ * Tested with, since 2026:
+ *  - Elbrus LCC >= 1.28 (http://www.mcst.ru/lcc);
+ *  - GNU C >= 11.3;
+ *  - CLANG >= 14.0;
+ *  - MSVC >= 19.44 (Visual Studio 2022 toolchain v143),
+ * before 2026:
+ *  - Elbrus LCC >= 1.23 (http://www.mcst.ru/lcc);
+ *  - GNU C >= 4.8;
+ *  - CLANG >= 3.9;
+ *  - MSVC >= 14.0 (Visual Studio 2015),
+ *    but 19.2x could hang due optimizer bug;
+ *  - AppleClang.
+ */
+
 #ifndef LIBMDBX_H
 #define LIBMDBX_H
 
@@ -2525,8 +2540,7 @@ typedef enum MDBX_env_delete_mode {
   /** \brief Make sure that the environment is not being used by other
    * processes, or return an error otherwise. */
   MDBX_ENV_ENSURE_UNUSED = 1,
-  /** \brief Wait until other processes closes the environment before deletion.
-   */
+  /** \brief Wait until other processes closes the environment before deletion. */
   MDBX_ENV_WAIT_FOR_UNUSED = 2,
 } MDBX_env_delete_mode_t;
 
@@ -4992,7 +5006,7 @@ LIBMDBX_API int mdbx_get_equal_or_great(const MDBX_txn *txn, MDBX_dbi dbi, MDBX_
  * \retval MDBX_EINVAL    An invalid parameter was specified. */
 LIBMDBX_API int mdbx_put(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *data, MDBX_put_flags_t flags);
 
-/** \brief Replace items in a table.
+/** \brief Replaces item in a table.
  * \ingroup c_crud
  *
  * This function allows to update or delete an existing value at the same time
@@ -5032,13 +5046,70 @@ LIBMDBX_API int mdbx_put(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_
  *                           combination for selection particular item from
  *                           multi-value/duplicates.
  *
+ * \see mdbx_replace_ex()
  * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
  *
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_replace(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *new_data, MDBX_val *old_data,
                              MDBX_put_flags_t flags);
 
+/** \brief A data preservation callback for using within \ref mdbx_replace_ex().
+ * \ingroup c_crud */
 typedef int (*MDBX_preserve_func)(void *context, MDBX_val *target, const void *src, size_t bytes);
+
+/** \brief Replaces item in a table using preservation callback for an original data.
+ * \ingroup c_crud
+ *
+ * This function allows to update or delete an existing value at the same time
+ * as the previous value is retrieved. If the argument new_data equal is NULL
+ * zero, the removal is performed, otherwise the update/insert.
+ *
+ * The current value may be in an already changed (aka dirty) page. In this
+ * case, the page will be overwritten during the update, and the old value will
+ * be lost. In such cases, the given preservation callback will be used to save
+ * the source data, that, at your discretion, can perform copying, other necessary
+ * actions, or return a special error code.
+ *
+ * If an original data needs to be saved then the passed preservation callback will be called
+ * with `old_data` as a `target` parameter, and `src` with `bytes` for original data.
+ * Such callback should check necessary conditions, perform appropriate action and return
+ * corresponding error code, which will be returned from function as is.
+ * For example, for behavior similar to \ref mdbx_replace(), the callback should check if there
+ * provided buffer size is enough, then either copy the data or return \ref MDBX_RESULT_TRUE.
+ *
+ * For tables with non-unique keys (i.e. with \ref MDBX_DUPSORT flag),
+ * another use case is also possible, when by old_data argument selects a
+ * specific item from multi-value/duplicates with the same key for deletion or
+ * update. To select this scenario in flags should simultaneously specify
+ * \ref MDBX_CURRENT and \ref MDBX_NOOVERWRITE. This combination is chosen
+ * because it makes no sense, and thus allows you to identify the request of
+ * such a scenario.
+ *
+ * \param [in] txn           A transaction handle returned
+ *                           by \ref mdbx_txn_begin().
+ * \param [in] dbi           A table handle returned by \ref mdbx_dbi_open().
+ * \param [in] key           The key to store in the table.
+ * \param [in] new_data      The data to store, if NULL then deletion will
+ *                           be performed.
+ * \param [in,out] old_data  The buffer for retrieve previous value as describe
+ *                           above.
+ * \param [in] flags         Special options for this operation.
+ *                           This parameter must be set to 0 or by bitwise
+ *                           OR'ing together one or more of the values
+ *                           described in \ref mdbx_put() description above,
+ *                           and additionally
+ *                           (\ref MDBX_CURRENT | \ref MDBX_NOOVERWRITE)
+ *                           combination for selection particular item from
+ *                           multi-value/duplicates.
+ * \param [in] preserver     The callback to preserve an original data in case
+ *                           it is on a dirty page and could be overwritten.
+ * \param [in] preserver_context The optional context pointer for use within the preserving callback.
+ *
+ * \see mdbx_replace_ex()
+ * \see MDBX_preserve_func
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_replace_ex(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *new_data,
                                 MDBX_val *old_data, MDBX_put_flags_t flags, MDBX_preserve_func preserver,
                                 void *preserver_context);

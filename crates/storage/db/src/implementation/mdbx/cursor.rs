@@ -2,7 +2,7 @@
 
 use super::utils::*;
 use crate::{
-    metrics::{DatabaseEnvMetrics, Operation},
+    metrics::{Operation, TableOperationMetrics},
     DatabaseError,
 };
 use reth_db_api::{
@@ -15,7 +15,7 @@ use reth_db_api::{
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
-use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
+use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
@@ -29,8 +29,8 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     pub(crate) inner: reth_libmdbx::Cursor<K>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
-    /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
-    metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Per-table operation metrics. If `None`, metrics are not recorded.
+    metrics: Option<TableOperationMetrics>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
@@ -38,7 +38,7 @@ pub struct Cursor<K: TransactionKind, T: Table> {
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
     pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
-        metrics: Option<Arc<DatabaseEnvMetrics>>,
+        metrics: Option<TableOperationMetrics>,
     ) -> Self {
         Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
     }
@@ -54,7 +54,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if let Some(metrics) = self.metrics.clone() {
-            metrics.record_operation(T::NAME, operation, value_size, || f(self))
+            metrics[operation.index()].record(value_size, || f(self))
         } else {
             f(self)
         }

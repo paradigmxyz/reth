@@ -26,7 +26,9 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -44,6 +46,7 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
+pub mod bal;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -80,11 +83,31 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
+type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
-    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
+    IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <N as NodePrimitives>::Receipt,
 >;
+
+type IteratorPrewarmTxReceiver<Evm, I> =
+    PrewarmTxReceiver<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+
+type IteratorExecuteTxReceiver<Evm, I> = ExecuteTxReceiver<
+    TxEnvFor<Evm>,
+    <I as ExecutableTxIterator<Evm>>::Recovered,
+    <I as ExecutableTxTuple>::Error,
+>;
+
+type RecoveredTx<TxEnv, Recovered> = WithTxEnv<TxEnv, Recovered>;
+type IndexedTxResult<Tx, Err> = (usize, Result<Tx, Err>);
+type IndexedTxReceiver<Tx, Err> = CrossbeamReceiver<IndexedTxResult<Tx, Err>>;
+type IndexedTxSender<Tx, Err> = CrossbeamSender<IndexedTxResult<Tx, Err>>;
+type PrewarmTxReceiver<TxEnv, Recovered> = mpsc::Receiver<(usize, RecoveredTx<TxEnv, Recovered>)>;
+type ExecuteTxReceiver<TxEnv, Recovered, Err> =
+    IndexedTxReceiver<RecoveredTx<TxEnv, Recovered>, Err>;
+type ExecuteTxSender<TxEnv, Recovered, Err> = IndexedTxSender<RecoveredTx<TxEnv, Recovered>, Err>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -122,11 +145,10 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-    /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
-    disable_bal_parallel_execution: bool,
     /// Whether to disable BAL-driven parallel state root computation.
+    /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
-    /// Whether BAL batched IO is disabled.
+    /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
 }
 
@@ -163,7 +185,6 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
-            disable_bal_parallel_execution: config.disable_bal_parallel_execution(),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
         }
@@ -272,12 +293,24 @@ where
             halve_workers,
             config,
         );
-        let install_state_hook = env.decoded_bal.is_none();
+        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
+        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
+        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
+        // the block follows today's sequential execution and transaction-prewarm path.
+        //
+        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
+        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
+        // prewarm, not this dispatch decision.
+        let parallel_bal_execution = !config.disable_state_cache() &&
+            !config.disable_bal_parallel_execution() &&
+            env.decoded_bal.is_some();
+        let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
+            parallel_bal_execution,
         );
 
         PayloadHandle {
@@ -304,7 +337,8 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -349,16 +383,18 @@ where
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
             proof_handle,
             state_root_tx,
+            hashed_state_tx,
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -388,18 +424,14 @@ where
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
     /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
-    #[expect(clippy::type_complexity)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
         transaction_count: usize,
-    ) -> (
-        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
-    ) {
+    ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
-        let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
+        let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -443,12 +475,11 @@ where
                     })
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            let tx = WithTxEnv::new(tx);
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
-                        let _ = execute_tx.send(tx);
+                        let _ = execute_tx.send((idx, tx));
                         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                         });
                         });
@@ -458,29 +489,36 @@ where
     }
 
     /// Spawn prewarming optionally wired to the sparse trie task for target updates.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor",
-        skip_all,
-        fields(bal=%env.decoded_bal.is_some())
-    )]
+    ///
+    /// `parallel_bal_execution` is true when the BAL execute path will execute this block. In
+    /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
+    /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        parallel_bal_execution: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm =
-            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
-
+        let mode = if parallel_bal_execution {
+            PrewarmMode::BlockAccessList(
+                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+            )
+        } else if self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        {
+            PrewarmMode::Skipped
+        } else {
+            PrewarmMode::Transactions(transactions)
+        };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
-        let maybe_decoded_bal = env.decoded_bal.clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -505,17 +543,7 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
-                let mode = if skip_prewarm {
-                    PrewarmMode::Skipped
-                } else if let Some(decoded_bal) =
-                    maybe_decoded_bal.filter(|_| !disable_bal_parallel_execution)
-                {
-                    PrewarmMode::BlockAccessList(decoded_bal)
-                } else {
-                    PrewarmMode::Transactions(transactions)
-                };
                 prewarm_task.run(mode, to_prewarm_task);
             });
         }
@@ -555,6 +583,7 @@ where
         &self,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -603,6 +632,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
                 sparse_state_trie,
@@ -703,6 +733,16 @@ where
                 return
             }
 
+            if let Some(cache) = cached.as_ref().filter(|cache| !cache.is_available()) {
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    usage_count = cache.usage_count(),
+                    "Execution cache is in use, skip updating cache with new state for inserted executed block",
+                );
+                return
+            }
+
             // Take existing cache (if any) or create fresh caches
             let caches = match cached.take() {
                 Some(existing) => existing.cache().clone(),
@@ -730,7 +770,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
-    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
@@ -738,14 +778,11 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| {
-            let (tx_env, tx) = tx.into_parts();
-            WithTxEnv { tx_env, tx: Arc::new(tx) }
-        });
+        let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
-        let _ = execute_tx.send(tx);
+        let _ = execute_tx.send((idx, tx));
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
@@ -762,8 +799,8 @@ pub struct PayloadHandle<Tx, Err, R> {
     install_state_hook: bool,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
-    /// Stream of block transactions
-    transactions: mpsc::Receiver<Result<Tx, Err>>,
+    /// Stream of block transactions and their indices in the block.
+    transactions: IndexedTxReceiver<Tx, Err>,
     /// Span for tracing
     _span: Span,
 }
@@ -798,11 +835,18 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a state hook to stream execution state updates to the sparse trie cache task.
     ///
-    /// Returns `None` when execution should not send state updates, such as BAL-driven execution.
+    /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
         self.install_state_hook
             .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
             .flatten()
+    }
+
+    /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL
+    /// execute path uses this to spawn its own sparse-trie streaming task fed from the
+    /// snapshot.
+    pub fn sparse_trie_updates_tx(&self) -> Option<CrossbeamSender<StateRootMessage>> {
+        self.state_root_handle.as_ref().map(|handle| handle.updates_tx().clone())
     }
 
     /// Returns a clone of the caches used by prewarming
@@ -846,7 +890,17 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
-        self.transactions.iter()
+        self.transactions.iter().map(|(_, tx)| tx)
+    }
+
+    /// Returns a clone of the indexed transaction receiver.
+    pub fn clone_transaction_receiver(&self) -> IndexedTxReceiver<Tx, Err> {
+        self.transactions.clone()
+    }
+
+    /// Takes the hashed state receiver out of the handle for use with custom waiting logic
+    pub fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+        self.state_root_handle.as_mut().map(|handle| handle.take_hashed_state_rx())
     }
 }
 
@@ -973,6 +1027,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_cache::CachedStatus;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
@@ -984,7 +1039,7 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -1132,6 +1187,65 @@ mod tests {
         assert!(cached3.is_none(), "New block cache should not be created on mismatch");
     }
 
+    #[test]
+    fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
+        let payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let parent_hash = B256::from([1u8; 32]);
+        payload_processor
+            .execution_cache
+            .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
+
+        // Checking out the cache bumps its usage_guard refcount, marking the slot as in-use.
+        // The returned SavedCache shares the same underlying ExecutionCache Arc as the slot,
+        // so any writes through the slot are observable here
+        let checked_out = payload_processor
+            .execution_cache
+            .get_cache_for(parent_hash)
+            .expect("expected parent cache checkout to succeed");
+
+        let polluted_address = Address::random();
+        let bundle_state = BundleState::builder(2..=2)
+            .state_present_account_info(
+                polluted_address,
+                AccountInfo {
+                    balance: U256::from(1337),
+                    nonce: 7,
+                    code_hash: KECCAK_EMPTY,
+                    code: None,
+                    account_id: None,
+                },
+            )
+            .build();
+
+        // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
+        // the in-use guard specifically.
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: B256::from([2u8; 32]), number: 2 },
+            parent: parent_hash,
+        };
+
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+
+        // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
+        // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.
+        let account = checked_out
+            .cache()
+            .get_or_try_insert_account_with(polluted_address, || Ok::<_, ()>(None))
+            .expect("cache read should succeed");
+
+        assert_eq!(
+            account,
+            CachedStatus::NotCached(None),
+            "checked-out parent cache should not observe state from inserted local block"
+        );
+    }
+
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
@@ -1153,25 +1267,23 @@ mod tests {
                             EvmStorageSlot::new_changed(
                                 U256::ZERO,
                                 U256::from(rng.random::<u64>()),
-                                0,
+                                TransactionId::ZERO,
                             ),
                         );
                     }
                 }
 
-                let account = revm_state::Account {
-                    info: AccountInfo {
-                        balance: U256::from(rng.random::<u64>()),
-                        nonce: rng.random::<u64>(),
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                        account_id: None,
-                    },
-                    original_info: Box::new(AccountInfo::default()),
-                    storage,
-                    status: AccountStatus::Touched,
-                    transaction_id: 0,
+                let mut account = revm_state::Account::default();
+                account.info = AccountInfo {
+                    balance: U256::from(rng.random::<u64>()),
+                    nonce: rng.random::<u64>(),
+                    code_hash: KECCAK_EMPTY,
+                    code: Some(Default::default()),
+                    account_id: None,
                 };
+                account.storage = storage;
+                account.status = AccountStatus::Touched;
+                account.transaction_id = TransactionId::ZERO;
 
                 state_update.insert(address, account);
             }

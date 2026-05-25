@@ -4,12 +4,12 @@
 //! the consensus client.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::RequestsOrHash,
     BlockId, BlockNumberOrTag,
 };
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, BlockHash, Bytes, B128, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
@@ -133,12 +133,22 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// `slotNumber` field in the `payloadAttributes`, if payload attributes
     /// are provided.
     ///
+    /// `custody_columns` maps to the third positional JSON-RPC parameter, `custodyColumns`,
+    /// the custody-column bitmask used for [EIP-8070] sparse blobpool signaling. It is
+    /// `DATA|null` and must be 16 bytes when set. When calling `engine_forkchoiceUpdatedV4`
+    /// with custody columns but without payload attributes, the second parameter must still
+    /// be supplied as `null`, for example:
+    /// `[forkchoiceState, null, custodyColumns]`.
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+    ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
     #[method(name = "forkchoiceUpdatedV4")]
     async fn fork_choice_updated_v4(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
+        custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
@@ -324,6 +334,20 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>>;
+
+    /// Fetch blob cells for the consensus layer from the blob store.
+    ///
+    /// Returns a response of the same length as the request. Missing blobs are returned as `null`
+    /// elements; missing requested cells within an available blob are returned as `null` cell and
+    /// proof entries.
+    ///
+    /// Returns `null` if syncing.
+    #[method(name = "getBlobsV4")]
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
@@ -404,6 +428,10 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
         &self,
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a block by block id.
+    #[method(name = "getBlockAccessList")]
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]

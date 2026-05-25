@@ -209,11 +209,9 @@ where
                 let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
-                let sealed_block = Arc::new(outcome.block.into_sealed_block());
-
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(sealed_block, total_fees, requests, None)
+                EthBuiltPayload::new(Arc::new(outcome.block), total_fees, requests, None)
                     .try_into_v5()
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)
