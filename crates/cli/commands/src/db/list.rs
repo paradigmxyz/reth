@@ -1,6 +1,6 @@
 use super::tui::DbListTUI;
 use alloy_primitives::hex;
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use eyre::WrapErr;
 use reth_chainspec::EthereumHardforks;
 use reth_db::{transaction::DbTx, DatabaseEnv};
@@ -22,7 +22,7 @@ pub struct Command {
     #[arg(long, short, default_value_t = false)]
     reverse: bool,
     /// How many items to take from the walker
-    #[arg(long, short, default_value_t = 5)]
+    #[arg(long, short, default_value_t = 5, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     len: usize,
     /// Search parameter for both keys and values. Prefix it with `0x` to search for binary data,
     /// and text otherwise.
@@ -141,5 +141,24 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
         })??;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_rejects_zero_len() {
+        let result = Command::try_parse_from(["list", "Headers", "--len", "0"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn command_accepts_positive_len() {
+        let command = Command::try_parse_from(["list", "Headers", "--len", "10"]).unwrap();
+
+        assert_eq!(command.len, 10);
     }
 }

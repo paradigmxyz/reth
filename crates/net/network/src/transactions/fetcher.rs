@@ -238,7 +238,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
-        if hashes_from_announcement.msg_version().is_eth68() {
+        if hashes_from_announcement.msg_version().has_eth68_metadata() {
             return self.pack_request_eth68(hashes_to_request, hashes_from_announcement)
         }
         self.pack_request_eth66(hashes_to_request, hashes_from_announcement)
@@ -1288,7 +1288,7 @@ struct TxFetcherSearchDurations {
 mod test {
     use super::*;
     use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
-    use alloy_primitives::{hex, B256};
+    use alloy_primitives::{hex, map::HashMap, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
     use reth_eth_wire_types::EthVersion;
@@ -1404,6 +1404,32 @@ mod test {
 
         assert_eq!(expected_request_hashes, eth68_hashes_to_request);
         assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
+    }
+
+    #[test]
+    fn pack_eth72_request_uses_metadata_size_limit() {
+        reth_tracing::init_test_tracing();
+
+        let tx_fetcher = &mut TransactionFetcher::<EthNetworkPrimitives>::default();
+
+        let hashes =
+            [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32]), B256::from_slice(&[3; 32])];
+        let announced_size =
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ;
+        let announcement_data = hashes
+            .into_iter()
+            .map(|hash| (hash, Some((0u8, announced_size))))
+            .collect::<HashMap<_, _>>();
+        let valid_announcement_data = ValidAnnouncementData::from_partially_valid_data(
+            PartiallyValidData::from_raw_data_eth72(announcement_data),
+        );
+
+        let mut hashes_to_request = RequestTxHashes::with_capacity(3);
+        let surplus_hashes =
+            tx_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
+
+        assert_eq!(1, hashes_to_request.len());
+        assert_eq!(2, surplus_hashes.len());
     }
 
     #[tokio::test]

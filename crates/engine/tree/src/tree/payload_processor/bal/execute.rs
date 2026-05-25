@@ -287,7 +287,7 @@ impl BlockGasTracker {
         Ok(())
     }
 
-    fn record_result<H>(&mut self, result: &ResultAndState<H>) {
+    const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
         self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
         self.block_regular_gas_used =

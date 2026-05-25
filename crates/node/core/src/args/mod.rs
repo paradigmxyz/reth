@@ -60,10 +60,6 @@ pub use pruning::{DefaultPruningValues, PruneConfigKind, PruningArgs};
 mod datadir_args;
 pub use datadir_args::DatadirArgs;
 
-/// BenchmarkArgs struct for configuring the benchmark to run
-mod benchmark_args;
-pub use benchmark_args::{BenchmarkArgs, RpcBlockFetchRetries, WaitForPersistence};
-
 /// EngineArgs for configuring the engine
 mod engine;
 pub use engine::{DefaultEngineValues, EngineArgs};
