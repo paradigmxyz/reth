@@ -475,8 +475,7 @@ where
                     })
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            let tx = WithTxEnv::new(tx);
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
@@ -779,10 +778,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| {
-            let (tx_env, tx) = tx.into_parts();
-            WithTxEnv { tx_env, tx: Arc::new(tx) }
-        });
+        let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }

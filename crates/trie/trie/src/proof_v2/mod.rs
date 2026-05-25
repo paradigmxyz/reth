@@ -535,6 +535,7 @@ where
         );
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
+        rlp_nodes_buf.reserve(num_children);
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
             let child_rlp_node = match child {
                 ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
@@ -554,7 +555,7 @@ where
 
         debug_assert_eq!(
             rlp_nodes_buf.len(),
-            branch.state_mask.count_ones() as usize,
+            num_children,
             "children length must match number of bits set in state_mask"
         );
 
