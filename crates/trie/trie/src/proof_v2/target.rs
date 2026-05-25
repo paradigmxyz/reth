@@ -20,8 +20,12 @@ use reth_trie_common::{Nibbles, ProofV2Target};
 // `min_len` of 0 will retain it.
 #[inline]
 pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
+    if target.min_len <= 1 {
+        return Nibbles::new()
+    }
+
     let mut sub_trie_prefix = target.key_nibbles;
-    sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
+    sub_trie_prefix.truncate(target.min_len as usize - 1);
     sub_trie_prefix
 }
 
