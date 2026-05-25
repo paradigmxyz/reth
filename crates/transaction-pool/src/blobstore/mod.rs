@@ -46,7 +46,7 @@ impl BlobCellAvailability {
         Self { mask: B128::ZERO }
     }
 
-    /// Returns the cell mask used in eth/72 announcements and GetCells requests.
+    /// Returns the cell mask used in eth/72 announcements and `GetCells` requests.
     pub const fn mask(&self) -> B128 {
         self.mask
     }
