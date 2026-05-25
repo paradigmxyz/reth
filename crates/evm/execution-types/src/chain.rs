@@ -452,6 +452,16 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
             .values()
             .flat_map(|block| block.body().transactions_iter().map(|tx| *tx.tx_hash()))
     }
+
+    /// Returns all transaction hashes in a pre-allocated vector.
+    #[inline]
+    pub fn transaction_hashes_vec(&self) -> Vec<TxHash> {
+        let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
+
+        let mut hashes = Vec::with_capacity(capacity);
+        hashes.extend(self.transaction_hashes());
+        hashes
+    }
 }
 
 impl<B: Block> IntoIterator for ChainBlocks<'_, B> {

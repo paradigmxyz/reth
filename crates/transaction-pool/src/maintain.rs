@@ -416,7 +416,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
-                    mined_transactions: new_blocks.transaction_hashes().collect(),
+                    mined_transactions: new_blocks.transaction_hashes_vec(),
                     update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);
@@ -483,7 +483,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     changed_accounts.push(acc);
                 }
 
-                let mined_transactions = blocks.transaction_hashes().collect();
+                let mined_transactions = blocks.transaction_hashes_vec();
 
                 // check if the range of the commit is canonical with the pool's block
                 if first_block.parent_hash() != pool_info.last_seen_block_hash {
