@@ -28,7 +28,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 
 impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     /// Creates a new [`LruCache`] using the given limit and hash builder.
-    pub fn with_hasher(limit: u32, hash_builder: S) -> Self {
+    pub const fn with_hasher(limit: u32, hash_builder: S) -> Self {
         // limit of lru map is one element more, so can give eviction feedback, which isn't
         // supported by LruMap
         Self { inner: LruMap::with_hasher(limit + 1, hash_builder), limit }
@@ -195,7 +195,7 @@ where
     S: BuildHasher,
 {
     /// Returns a new cache with default limiter and the given hash builder.
-    pub fn with_hasher(max_length: u32, hash_builder: S) -> Self {
+    pub const fn with_hasher(max_length: u32, hash_builder: S) -> Self {
         Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), hash_builder))
     }
 }
