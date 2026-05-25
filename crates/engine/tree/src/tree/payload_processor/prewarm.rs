@@ -662,6 +662,14 @@ where
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
+        if account_changes.balance_changes.is_empty() &&
+            account_changes.nonce_changes.is_empty() &&
+            account_changes.code_changes.is_empty() &&
+            account_changes.storage_changes.is_empty()
+        {
+            return;
+        }
+
         if provider.is_none() {
             let _span = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
@@ -709,14 +717,6 @@ where
                 keccak256(&code_change.new_code)
             }
         });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
 
         let account = reth_primitives_traits::Account {
             balance: balance.unwrap_or_else(|| {
