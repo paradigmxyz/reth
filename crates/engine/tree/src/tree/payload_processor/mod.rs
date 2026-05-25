@@ -26,7 +26,9 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -381,16 +383,18 @@ where
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
             proof_handle,
             state_root_tx,
+            hashed_state_tx,
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -471,8 +475,7 @@ where
                     })
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            let tx = WithTxEnv::new(tx);
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
@@ -580,6 +583,7 @@ where
         &self,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -628,6 +632,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
                 sparse_state_trie,
@@ -773,10 +778,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| {
-            let (tx_env, tx) = tx.into_parts();
-            WithTxEnv { tx_env, tx: Arc::new(tx) }
-        });
+        let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
@@ -894,6 +896,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a clone of the indexed transaction receiver.
     pub fn clone_transaction_receiver(&self) -> IndexedTxReceiver<Tx, Err> {
         self.transactions.clone()
+    }
+
+    /// Takes the hashed state receiver out of the handle for use with custom waiting logic
+    pub fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+        self.state_root_handle.as_mut().map(|handle| handle.take_hashed_state_rx())
     }
 }
 
@@ -1032,7 +1039,7 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -1260,25 +1267,23 @@ mod tests {
                             EvmStorageSlot::new_changed(
                                 U256::ZERO,
                                 U256::from(rng.random::<u64>()),
-                                0,
+                                TransactionId::ZERO,
                             ),
                         );
                     }
                 }
 
-                let account = revm_state::Account {
-                    info: AccountInfo {
-                        balance: U256::from(rng.random::<u64>()),
-                        nonce: rng.random::<u64>(),
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                        account_id: None,
-                    },
-                    original_info: Box::new(AccountInfo::default()),
-                    storage,
-                    status: AccountStatus::Touched,
-                    transaction_id: 0,
+                let mut account = revm_state::Account::default();
+                account.info = AccountInfo {
+                    balance: U256::from(rng.random::<u64>()),
+                    nonce: rng.random::<u64>(),
+                    code_hash: KECCAK_EMPTY,
+                    code: Some(Default::default()),
+                    account_id: None,
                 };
+                account.storage = storage;
+                account.status = AccountStatus::Touched;
+                account.transaction_id = TransactionId::ZERO;
 
                 state_update.insert(address, account);
             }
