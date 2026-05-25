@@ -609,12 +609,14 @@ where
 
         if has_bal {
             executor.evm_mut().db_mut().bump_bal_index();
-        }
 
-        for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
-            if has_bal {
+            for tx in block.transactions_recovered() {
+                executor.execute_transaction(tx)?;
                 executor.evm_mut().db_mut().bump_bal_index();
+            }
+        } else {
+            for tx in block.transactions_recovered() {
+                executor.execute_transaction(tx)?;
             }
         }
 
