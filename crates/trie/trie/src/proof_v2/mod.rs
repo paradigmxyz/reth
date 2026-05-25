@@ -561,10 +561,14 @@ where
 
         // Calculate the short key of the parent extension (if the branch has a parent extension).
         // It's important to calculate this short key prior to modifying the `branch_path`.
-        let short_key = trim_nibbles_prefix(
-            &self.branch_path,
-            self.branch_path.len() - branch.ext_len as usize,
-        );
+        let short_key = if branch.ext_len == 0 {
+            Nibbles::new()
+        } else {
+            trim_nibbles_prefix(
+                &self.branch_path,
+                self.branch_path.len() - branch.ext_len as usize,
+            )
+        };
 
         // Compute hash for the branch node if it has a parent extension.
         let rlp_node = if short_key.is_empty() {
