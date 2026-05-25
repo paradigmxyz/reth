@@ -190,21 +190,26 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 
     for (address, account) in update {
         if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
-
             let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
-                let info = if destroyed { None } else { Some(account.info.into()) };
-                hashed_state.accounts.insert(hashed_address, info);
-            }
-
+            let account_changed = account.info != account.original_info();
             let mut changed_storage_iter = account
                 .storage
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
+
+            if !destroyed && !account_changed && changed_storage_iter.peek().is_none() {
+                continue;
+            }
+
+            let hashed_address = keccak256(address);
+            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
+
+            if account_changed {
+                let info = if destroyed { None } else { Some(account.info.into()) };
+                hashed_state.accounts.insert(hashed_address, info);
+            }
 
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
