@@ -117,10 +117,6 @@ pub enum InsertBlockErrorKind {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
-    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
-    /// final-hash mismatch.
-    #[error(transparent)]
-    InvalidBlockAccessList(BalExecutionError),
     /// Other errors.
     #[error(transparent)]
     Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
@@ -129,11 +125,10 @@ pub enum InsertBlockErrorKind {
 impl From<BalExecutionError> for InsertBlockErrorKind {
     fn from(e: BalExecutionError) -> Self {
         match e {
-            // Worker EVM errors flow through the standard execution-error path so existing
-            // metrics and routing apply.
-            BalExecutionError::Evm(inner) => Self::Execution(inner),
+            BalExecutionError::Consensus(inner) => Self::Consensus(inner),
+            BalExecutionError::Execution(inner) => Self::Execution(inner),
             BalExecutionError::Provider(inner) => Self::Provider(inner),
-            other => Self::InvalidBlockAccessList(other),
+            BalExecutionError::Other(inner) => Self::Other(inner),
         }
     }
 }
@@ -164,9 +159,6 @@ impl InsertBlockErrorKind {
                 }
             }
             Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
-            Self::InvalidBlockAccessList(err) => {
-                Ok(InsertBlockValidationError::InvalidBlockAccessList(err))
-            }
             Self::Other(err) => Err(InternalBlockExecutionError::Other(err).into()),
         }
     }
@@ -192,10 +184,6 @@ pub enum InsertBlockValidationError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
-    /// final-hash mismatch.
-    #[error(transparent)]
-    InvalidBlockAccessList(BalExecutionError),
 }
 
 /// Errors that may occur when inserting a payload.

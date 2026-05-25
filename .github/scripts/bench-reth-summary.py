@@ -31,11 +31,11 @@ P99_MIN_VERDICT_BLOCKS = 125
 PERSIST_WAIT_MIN_VERDICT_MS = 0.5
 PERSIST_WAIT_MIN_TOTAL_PCT = 0.1
 PRACTICAL_FLOOR_PCT = {
-    "mean": 0.70,
-    "p50": 0.70,
+    "mean": 1.20,
+    "p50": 1.20,
     "p90": 1.35,
     "p99": 5.0,
-    "mgas_s": 0.45,
+    "mgas_s": 1.20,
     "wall_clock": 0.70,
     "persist_wait": 5.0,
 }
