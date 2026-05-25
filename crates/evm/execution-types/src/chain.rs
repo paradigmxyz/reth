@@ -210,6 +210,11 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks_iter().flat_map(|block| block.body().transactions())
     }
 
+    /// Returns an iterator over all transaction hashes in the chain.
+    pub fn transaction_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
+        self.transactions_iter().map(|tx| tx.tx_hash())
+    }
+
     /// Returns an iterator over all [`Recovered`] transaction references in the chain.
     pub fn transactions_recovered_iter(
         &self,
