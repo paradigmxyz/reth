@@ -405,7 +405,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
             pending_pool_imports_info,
-            bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
+            bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -2043,7 +2043,10 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         peer_kind: PeerKind,
     ) -> Self {
         Self {
-            seen_transactions: LruCache::new(max_transactions_seen_by_peer),
+            seen_transactions: LruCache::with_hasher(
+                max_transactions_seen_by_peer,
+                Default::default(),
+            ),
             request_tx,
             version,
             client_version,

@@ -134,10 +134,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         metrics.capacity_inflight_requests.increment(max_inflight_requests as u64);
 
         Self {
-            active_peers: LruMap::new(max_inflight_requests),
-            hashes_pending_fetch: LruCache::new(max_capacity_cache_txns_pending_fetch),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+            active_peers: LruMap::with_hasher(max_inflight_requests, Default::default()),
+            hashes_pending_fetch: LruCache::with_hasher(
+                max_capacity_cache_txns_pending_fetch,
+                Default::default(),
+            ),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::with_hasher(
                 max_inflight_requests + max_capacity_cache_txns_pending_fetch,
+                Default::default(),
             ),
             info,
             metrics,
@@ -552,9 +556,18 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             previously_unseen_hashes_count += 1;
 
-            if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
-                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
-            ).is_none() {
+            if self
+                .hashes_fetch_inflight_and_pending_fetch
+                .get_or_insert(*hash, || TxFetchMetadata {
+                    retries: 0,
+                    fallback_peers: LruCache::with_hasher(
+                        DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32,
+                        Default::default(),
+                    ),
+                    tx_encoded_length: None,
+                })
+                .is_none()
+            {
 
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
@@ -993,11 +1006,18 @@ impl<N: NetworkPrimitives> Stream for TransactionFetcher<N> {
 impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
     fn default() -> Self {
         Self {
-            active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
+            active_peers: LruMap::with_hasher(
+                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+                Default::default(),
+            ),
             inflight_requests: Default::default(),
-            hashes_pending_fetch: LruCache::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+            hashes_pending_fetch: LruCache::with_hasher(
+                DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+                Default::default(),
+            ),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::with_hasher(
                 DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
+                Default::default(),
             ),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),

@@ -19,25 +19,21 @@ where
     inner: LruMap<T, (), ByLength, S>,
 }
 
-impl<T: Hash + Eq + fmt::Debug, S: BuildHasher + Default> LruCache<T, S> {
+impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: u32) -> Self {
-        // limit of lru map is one element more, so can give eviction feedback, which isn't
-        // supported by LruMap
-        Self { inner: LruMap::new(limit + 1), limit }
+        Self::with_hasher(limit, Default::default())
     }
 }
 
 impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     /// Creates a new [`LruCache`] using the given limit and hash builder.
-    pub const fn with_hasher(limit: u32, hasher: S) -> Self {
+    pub fn with_hasher(limit: u32, hash_builder: S) -> Self {
         // limit of lru map is one element more, so can give eviction feedback, which isn't
         // supported by LruMap
-        Self { limit, inner: LruMap::with_hasher(limit + 1, hasher) }
+        Self { inner: LruMap::with_hasher(limit + 1, hash_builder), limit }
     }
-}
 
-impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     /// Insert an element into the set.
     ///
     /// This operation uses `get_or_insert` from the underlying `schnellru::LruMap` which:
@@ -183,14 +179,13 @@ where
     }
 }
 
-impl<K, V, S> LruMap<K, V, ByLength, S>
+impl<K, V> LruMap<K, V>
 where
     K: Hash + PartialEq,
-    S: BuildHasher + Default,
 {
-    /// Returns a new cache with given limiter and default hash builder.
+    /// Returns a new cache with default limiter and hash builder.
     pub fn new(max_length: u32) -> Self {
-        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), S::default()))
+        Self::with_hasher(max_length, Default::default())
     }
 }
 
@@ -199,9 +194,9 @@ where
     K: Hash + PartialEq,
     S: BuildHasher,
 {
-    /// Returns a new map with given limiter and hash builder.
-    pub const fn with_hasher(max_length: u32, hasher: S) -> Self {
-        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), hasher))
+    /// Returns a new cache with default limiter and the given hash builder.
+    pub fn with_hasher(max_length: u32, hash_builder: S) -> Self {
+        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), hash_builder))
     }
 }
 
@@ -245,7 +240,7 @@ mod test {
 
     #[test]
     fn test_cache_should_insert_into_empty_set() {
-        let mut cache = LruCache::with_hasher(5, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(5);
         let entry = "entry";
         assert!(cache.insert(entry));
         assert!(cache.contains(&entry));
@@ -253,7 +248,7 @@ mod test {
 
     #[test]
     fn test_cache_should_not_insert_same_value_twice() {
-        let mut cache = LruCache::with_hasher(5, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(5);
         let entry = "entry";
         assert!(cache.insert(entry));
         assert!(!cache.insert(entry));
@@ -261,7 +256,7 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let mut cache = LruCache::with_hasher(1, DefaultHashBuilder::default()); // LruCache limit will be 2, check LruCache::new
+        let mut cache = LruCache::new(1); // LruCache limit will be 2, check LruCache::new
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
@@ -273,7 +268,7 @@ mod test {
 
     #[test]
     fn test_cache_should_extend_an_array() {
-        let mut cache = LruCache::with_hasher(5, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(5);
         let entries = ["some_entry", "another_entry"];
         cache.extend(entries);
         for e in entries {
@@ -287,7 +282,7 @@ mod test {
         #[derive(Debug)]
         struct Value(i8);
 
-        let mut cache = LruMap::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruMap::new(2);
         let key_1 = Key(1);
         let value_1 = Value(11);
         cache.insert(key_1, value_1);
@@ -303,7 +298,7 @@ mod test {
 
     #[test]
     fn test_debug_impl_lru_cache() {
-        let mut cache = LruCache::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);
@@ -317,7 +312,7 @@ mod test {
 
     #[test]
     fn get() {
-        let mut cache = LruCache::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);
@@ -334,7 +329,7 @@ mod test {
 
     #[test]
     fn get_ty_custom_eq_impl() {
-        let mut cache = LruCache::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(2);
         let key_1 = CompoundKey::new(1, 11);
         cache.insert(key_1);
         let key_2 = CompoundKey::new(2, 22);
@@ -347,7 +342,7 @@ mod test {
 
     #[test]
     fn peek() {
-        let mut cache = LruCache::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);
@@ -364,7 +359,7 @@ mod test {
 
     #[test]
     fn peek_ty_custom_eq_impl() {
-        let mut cache = LruCache::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(2);
         let key_1 = CompoundKey::new(1, 11);
         cache.insert(key_1);
         let key_2 = CompoundKey::new(2, 22);
@@ -377,7 +372,7 @@ mod test {
 
     #[test]
     fn test_insert_methods() {
-        let mut cache = LruCache::with_hasher(2, DefaultHashBuilder::default());
+        let mut cache = LruCache::new(2);
 
         // Test basic insert
         assert!(cache.insert("first")); // new entry
