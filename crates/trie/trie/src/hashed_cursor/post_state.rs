@@ -1,5 +1,8 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use alloy_primitives::{map::B256Map, B256, U256};
+use crate::storage_overlay_index::{
+    StorageOverlayIndex, StorageOverlayIndexEntry, StorageOverlayIndexMut,
+};
+use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostStateSorted;
@@ -91,174 +94,6 @@ impl HashedPostStateCursorValue for U256 {
     }
 }
 
-/// Hashed post-state overlays ordered from highest to lowest precedence.
-#[derive(Clone, Debug, Default)]
-pub struct HashedPostStateOverlay {
-    states: Vec<Arc<HashedPostStateSorted>>,
-    storage_index: Arc<B256Map<StorageOverlayIndex>>,
-}
-
-impl HashedPostStateOverlay {
-    /// Create a new indexed hashed post-state overlay stack.
-    pub fn new(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
-        let storage_index = Arc::new(build_hashed_storage_index(&states));
-        Self { states, storage_index }
-    }
-
-    /// Returns `true` if there are no hashed post-state overlays.
-    pub const fn is_empty(&self) -> bool {
-        self.states.is_empty()
-    }
-
-    /// Returns the number of hashed post-state overlays.
-    pub const fn len(&self) -> usize {
-        self.states.len()
-    }
-
-    /// Returns an iterator over hashed post-state overlays.
-    pub fn iter(&self) -> impl Iterator<Item = &Arc<HashedPostStateSorted>> {
-        self.states.iter()
-    }
-
-    /// Push a hashed post-state overlay at the end of the precedence stack.
-    pub fn push(&mut self, state: Arc<HashedPostStateSorted>) {
-        self.states.push(state);
-        self.rebuild_storage_index();
-    }
-
-    /// Insert a hashed post-state overlay at `index`.
-    pub fn insert(&mut self, index: usize, state: Arc<HashedPostStateSorted>) {
-        self.states.insert(index, state);
-        self.rebuild_storage_index();
-    }
-
-    fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'_, U256>, bool) {
-        let Some(index) = self.storage_index.get(&hashed_address) else {
-            return (PostStateOverlayCursor::default(), false);
-        };
-
-        (
-            PostStateOverlayCursor {
-                cursors: index
-                    .indices
-                    .iter()
-                    .filter_map(|idx| self.states[*idx].storages.get(&hashed_address))
-                    .map(|storage| SeekablePostStateCursor::new(storage.storage_slots_ref()))
-                    .collect(),
-            },
-            index.db_wiped,
-        )
-    }
-
-    fn rebuild_storage_index(&mut self) {
-        self.storage_index = Arc::new(build_hashed_storage_index(&self.states));
-    }
-}
-
-impl From<Vec<Arc<HashedPostStateSorted>>> for HashedPostStateOverlay {
-    fn from(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
-        Self::new(states)
-    }
-}
-
-impl IntoIterator for HashedPostStateOverlay {
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-    type Item = Arc<HashedPostStateSorted>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.states.into_iter()
-    }
-}
-
-impl Index<usize> for HashedPostStateOverlay {
-    type Output = Arc<HashedPostStateSorted>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.states[index]
-    }
-}
-
-impl Deref for HashedPostStateOverlay {
-    type Target = [Arc<HashedPostStateSorted>];
-
-    fn deref(&self) -> &Self::Target {
-        &self.states
-    }
-}
-
-#[derive(Clone, Debug)]
-struct StorageOverlayIndex {
-    indices: Arc<[usize]>,
-    db_wiped: bool,
-}
-
-#[derive(Default)]
-struct StorageOverlayIndexBuilder {
-    indices: Vec<usize>,
-    db_wiped: bool,
-}
-
-fn build_hashed_storage_index(
-    states: &[Arc<HashedPostStateSorted>],
-) -> B256Map<StorageOverlayIndex> {
-    let mut index: B256Map<StorageOverlayIndexBuilder> = B256Map::default();
-
-    for (idx, state) in states.iter().enumerate() {
-        for (hashed_address, storage) in &state.storages {
-            let entry = index.entry(*hashed_address).or_default();
-            if entry.db_wiped {
-                continue;
-            }
-
-            entry.indices.push(idx);
-            if storage.is_wiped() {
-                entry.db_wiped = true;
-            }
-        }
-    }
-
-    index
-        .into_iter()
-        .map(|(hashed_address, entry)| {
-            (
-                hashed_address,
-                StorageOverlayIndex { indices: entry.indices.into(), db_wiped: entry.db_wiped },
-            )
-        })
-        .collect()
-}
-
-#[derive(Clone, Debug)]
-enum HashedPostStateSource<'a> {
-    Refs(Vec<&'a HashedPostStateSorted>),
-    Indexed(&'a HashedPostStateOverlay),
-}
-
-impl<'a> HashedPostStateSource<'a> {
-    fn from_refs(post_states: impl IntoIterator<Item = &'a HashedPostStateSorted>) -> Self {
-        Self::Refs(post_states.into_iter().collect())
-    }
-
-    fn account_overlay(&self) -> PostStateOverlayCursor<'a, Option<Account>> {
-        match self {
-            Self::Refs(post_states) => PostStateOverlayCursor::account(post_states),
-            Self::Indexed(post_states) => PostStateOverlayCursor {
-                cursors: post_states
-                    .iter()
-                    .map(|post_state| SeekablePostStateCursor::new(post_state.accounts.as_slice()))
-                    .collect(),
-            },
-        }
-    }
-
-    fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'a, U256>, bool) {
-        match self {
-            Self::Refs(post_states) => PostStateOverlayCursor::storage(post_states, hashed_address),
-            Self::Indexed(post_states) => post_states.storage_overlay(hashed_address),
-        }
-    }
-}
-
 /// A cursor to iterate over state updates and corresponding database entries.
 /// It will always give precedence to earlier post state overlays.
 #[derive(Debug)]
@@ -282,175 +117,6 @@ where
     seeked: bool,
     /// Source of post-state overlays.
     post_states: HashedPostStateSource<'a>,
-}
-
-#[derive(Debug)]
-enum DbCursorState<V> {
-    Unpositioned,
-    Positioned((B256, V)),
-    Wiped,
-}
-
-impl<V> DbCursorState<V> {
-    const fn new(cursor_wiped: bool) -> Self {
-        if cursor_wiped {
-            Self::Wiped
-        } else {
-            Self::Unpositioned
-        }
-    }
-
-    const fn is_wiped(&self) -> bool {
-        matches!(self, Self::Wiped)
-    }
-
-    const fn entry(&self) -> Option<&(B256, V)> {
-        match self {
-            Self::Positioned(entry) => Some(entry),
-            Self::Unpositioned | Self::Wiped => None,
-        }
-    }
-
-    fn set_entry(&mut self, entry: Option<(B256, V)>) {
-        if !self.is_wiped() {
-            *self = entry.map(Self::Positioned).unwrap_or(Self::Unpositioned);
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct PostStateOverlayCursor<'a, V> {
-    cursors: Vec<SeekablePostStateCursor<'a, V>>,
-}
-
-impl<'a> PostStateOverlayCursor<'a, Option<Account>> {
-    fn account(post_states: &[&'a HashedPostStateSorted]) -> Self {
-        Self {
-            cursors: post_states
-                .iter()
-                .map(|post_state| SeekablePostStateCursor::new(post_state.accounts.as_slice()))
-                .collect(),
-        }
-    }
-}
-
-impl<'a> PostStateOverlayCursor<'a, U256> {
-    fn storage(post_states: &[&'a HashedPostStateSorted], hashed_address: B256) -> (Self, bool) {
-        let mut cursors = Vec::new();
-        let mut db_wiped = false;
-
-        for post_state in post_states {
-            if let Some(storage) = post_state.storages.get(&hashed_address) {
-                cursors.push(SeekablePostStateCursor::new(storage.storage_slots_ref()));
-                if storage.is_wiped() {
-                    db_wiped = true;
-                    break;
-                }
-            }
-        }
-
-        (Self { cursors }, db_wiped)
-    }
-}
-
-impl<'a, V> PostStateOverlayCursor<'a, V>
-where
-    V: HashedPostStateCursorValue,
-{
-    fn seek_from(&mut self, start: usize, key: &B256) {
-        for cursor in self.cursors.iter_mut().skip(start) {
-            cursor.seek(key);
-        }
-    }
-
-    fn seek_until_exact(&mut self, key: &B256) -> Option<(usize, Option<V::NonZero>)> {
-        for (idx, cursor) in self.cursors.iter_mut().enumerate() {
-            if let Some((cursor_key, value)) = cursor.seek(key) &&
-                cursor_key == key
-            {
-                return Some((idx, value.into_option()))
-            }
-        }
-        None
-    }
-
-    fn first_after(&mut self, key: &B256) {
-        for cursor in &mut self.cursors {
-            cursor.first_after(key);
-        }
-    }
-
-    fn reset(&mut self) {
-        for cursor in &mut self.cursors {
-            cursor.reset();
-        }
-    }
-
-    fn min_current_key(&self) -> Option<B256> {
-        self.cursors.iter().filter_map(|cursor| cursor.current().map(|(key, _)| *key)).min()
-    }
-
-    fn highest_priority_value_at(&self, key: &B256) -> Option<Option<V::NonZero>> {
-        self.cursors.iter().find_map(|cursor| {
-            let (cursor_key, value) = cursor.current()?;
-            (cursor_key == key).then(|| value.into_option())
-        })
-    }
-
-    fn advance_key(&mut self, key: &B256) {
-        for cursor in &mut self.cursors {
-            if cursor.current().is_some_and(|(cursor_key, _)| cursor_key == key) {
-                cursor.first_after(key);
-            }
-        }
-    }
-
-    fn has_visible_value(&self) -> bool {
-        let mut cursor = self.clone();
-        cursor.reset();
-        while let Some(key) = cursor.min_current_key() {
-            if cursor.highest_priority_value_at(&key).flatten().is_some() {
-                return true
-            }
-            cursor.advance_key(&key);
-        }
-        false
-    }
-}
-
-#[derive(Clone, Debug)]
-struct SeekablePostStateCursor<'a, V> {
-    entries: &'a [(B256, V)],
-    idx: usize,
-}
-
-impl<'a, V> SeekablePostStateCursor<'a, V> {
-    const fn new(entries: &'a [(B256, V)]) -> Self {
-        Self { entries, idx: 0 }
-    }
-
-    fn current(&self) -> Option<&'a (B256, V)> {
-        self.entries.get(self.idx)
-    }
-
-    const fn reset(&mut self) {
-        self.idx = 0;
-    }
-
-    fn seek(&mut self, key: &B256) -> Option<&'a (B256, V)> {
-        self.idx = self.entries.partition_point(|(entry_key, _)| entry_key < key);
-        self.current()
-    }
-
-    fn first_after(&mut self, key: &B256) -> Option<&'a (B256, V)> {
-        if self.current().is_some_and(|(entry_key, _)| entry_key > key) {
-            return self.current()
-        }
-
-        let remaining = &self.entries[self.idx..];
-        self.idx += remaining.partition_point(|(entry_key, _)| entry_key <= key);
-        self.current()
-    }
 }
 
 impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
@@ -734,10 +400,307 @@ where
     }
 }
 
+/// Hashed post-state overlays ordered from highest to lowest precedence.
+#[derive(Clone, Debug, Default)]
+pub struct HashedPostStateOverlay {
+    states: Vec<Arc<HashedPostStateSorted>>,
+    storage_index: Arc<StorageOverlayIndex>,
+}
+
+impl HashedPostStateOverlay {
+    /// Create a new indexed hashed post-state overlay stack.
+    pub fn new(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
+        let storage_index = Arc::new(StorageOverlayIndexEntry::new(&states));
+        Self { states, storage_index }
+    }
+
+    /// Returns `true` if there are no hashed post-state overlays.
+    pub const fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
+
+    /// Returns the number of hashed post-state overlays.
+    pub const fn len(&self) -> usize {
+        self.states.len()
+    }
+
+    /// Returns an iterator over hashed post-state overlays.
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<HashedPostStateSorted>> {
+        self.states.iter()
+    }
+
+    /// Push a hashed post-state overlay at the end of the precedence stack.
+    pub fn push(&mut self, state: Arc<HashedPostStateSorted>) {
+        Arc::make_mut(&mut self.storage_index).append(self.states.len(), state.as_ref());
+        self.states.push(state);
+    }
+
+    /// Insert a hashed post-state overlay at `index`.
+    pub fn insert(&mut self, index: usize, state: Arc<HashedPostStateSorted>) {
+        if index == 0 {
+            Arc::make_mut(&mut self.storage_index).prepend(state.as_ref());
+            self.states.insert(index, state);
+        } else {
+            self.states.insert(index, state);
+            self.storage_index = Arc::new(StorageOverlayIndexEntry::new(&self.states));
+        }
+    }
+
+    fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'_, U256>, bool) {
+        let Some(index) = self.storage_index.get(&hashed_address) else {
+            return (PostStateOverlayCursor::default(), false);
+        };
+
+        (
+            PostStateOverlayCursor {
+                cursors: index
+                    .indices
+                    .iter()
+                    .filter_map(|idx| self.states[*idx].storages.get(&hashed_address))
+                    .map(|storage| SeekablePostStateCursor::new(storage.storage_slots_ref()))
+                    .collect(),
+            },
+            index.db_wiped,
+        )
+    }
+}
+
+impl From<Vec<Arc<HashedPostStateSorted>>> for HashedPostStateOverlay {
+    fn from(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
+        Self::new(states)
+    }
+}
+
+impl IntoIterator for HashedPostStateOverlay {
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type Item = Arc<HashedPostStateSorted>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.states.into_iter()
+    }
+}
+
+impl Index<usize> for HashedPostStateOverlay {
+    type Output = Arc<HashedPostStateSorted>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.states[index]
+    }
+}
+
+impl Deref for HashedPostStateOverlay {
+    type Target = [Arc<HashedPostStateSorted>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.states
+    }
+}
+
+#[derive(Clone, Debug)]
+enum HashedPostStateSource<'a> {
+    Refs(Vec<&'a HashedPostStateSorted>),
+    Indexed(&'a HashedPostStateOverlay),
+}
+
+impl<'a> HashedPostStateSource<'a> {
+    fn from_refs(post_states: impl IntoIterator<Item = &'a HashedPostStateSorted>) -> Self {
+        Self::Refs(post_states.into_iter().collect())
+    }
+
+    fn account_overlay(&self) -> PostStateOverlayCursor<'a, Option<Account>> {
+        match self {
+            Self::Refs(post_states) => PostStateOverlayCursor::account(post_states),
+            Self::Indexed(post_states) => PostStateOverlayCursor {
+                cursors: post_states
+                    .iter()
+                    .map(|post_state| SeekablePostStateCursor::new(post_state.accounts.as_slice()))
+                    .collect(),
+            },
+        }
+    }
+
+    fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'a, U256>, bool) {
+        match self {
+            Self::Refs(post_states) => PostStateOverlayCursor::storage(post_states, hashed_address),
+            Self::Indexed(post_states) => post_states.storage_overlay(hashed_address),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum DbCursorState<V> {
+    Unpositioned,
+    Positioned((B256, V)),
+    Wiped,
+}
+
+impl<V> DbCursorState<V> {
+    const fn new(cursor_wiped: bool) -> Self {
+        if cursor_wiped {
+            Self::Wiped
+        } else {
+            Self::Unpositioned
+        }
+    }
+
+    const fn is_wiped(&self) -> bool {
+        matches!(self, Self::Wiped)
+    }
+
+    const fn entry(&self) -> Option<&(B256, V)> {
+        match self {
+            Self::Positioned(entry) => Some(entry),
+            Self::Unpositioned | Self::Wiped => None,
+        }
+    }
+
+    fn set_entry(&mut self, entry: Option<(B256, V)>) {
+        if !self.is_wiped() {
+            *self = entry.map(Self::Positioned).unwrap_or(Self::Unpositioned);
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct PostStateOverlayCursor<'a, V> {
+    cursors: Vec<SeekablePostStateCursor<'a, V>>,
+}
+
+impl<'a> PostStateOverlayCursor<'a, Option<Account>> {
+    fn account(post_states: &[&'a HashedPostStateSorted]) -> Self {
+        Self {
+            cursors: post_states
+                .iter()
+                .map(|post_state| SeekablePostStateCursor::new(post_state.accounts.as_slice()))
+                .collect(),
+        }
+    }
+}
+
+impl<'a> PostStateOverlayCursor<'a, U256> {
+    fn storage(post_states: &[&'a HashedPostStateSorted], hashed_address: B256) -> (Self, bool) {
+        let mut cursors = Vec::new();
+        let mut db_wiped = false;
+
+        for post_state in post_states {
+            if let Some(storage) = post_state.storages.get(&hashed_address) {
+                cursors.push(SeekablePostStateCursor::new(storage.storage_slots_ref()));
+                if storage.is_wiped() {
+                    db_wiped = true;
+                    break;
+                }
+            }
+        }
+
+        (Self { cursors }, db_wiped)
+    }
+}
+
+impl<'a, V> PostStateOverlayCursor<'a, V>
+where
+    V: HashedPostStateCursorValue,
+{
+    fn seek_from(&mut self, start: usize, key: &B256) {
+        for cursor in self.cursors.iter_mut().skip(start) {
+            cursor.seek(key);
+        }
+    }
+
+    fn seek_until_exact(&mut self, key: &B256) -> Option<(usize, Option<V::NonZero>)> {
+        for (idx, cursor) in self.cursors.iter_mut().enumerate() {
+            if let Some((cursor_key, value)) = cursor.seek(key) &&
+                cursor_key == key
+            {
+                return Some((idx, value.into_option()))
+            }
+        }
+        None
+    }
+
+    fn first_after(&mut self, key: &B256) {
+        for cursor in &mut self.cursors {
+            cursor.first_after(key);
+        }
+    }
+
+    fn reset(&mut self) {
+        for cursor in &mut self.cursors {
+            cursor.reset();
+        }
+    }
+
+    fn min_current_key(&self) -> Option<B256> {
+        self.cursors.iter().filter_map(|cursor| cursor.current().map(|(key, _)| *key)).min()
+    }
+
+    fn highest_priority_value_at(&self, key: &B256) -> Option<Option<V::NonZero>> {
+        self.cursors.iter().find_map(|cursor| {
+            let (cursor_key, value) = cursor.current()?;
+            (cursor_key == key).then(|| value.into_option())
+        })
+    }
+
+    fn advance_key(&mut self, key: &B256) {
+        for cursor in &mut self.cursors {
+            if cursor.current().is_some_and(|(cursor_key, _)| cursor_key == key) {
+                cursor.first_after(key);
+            }
+        }
+    }
+
+    fn has_visible_value(&self) -> bool {
+        let mut cursor = self.clone();
+        cursor.reset();
+        while let Some(key) = cursor.min_current_key() {
+            if cursor.highest_priority_value_at(&key).flatten().is_some() {
+                return true
+            }
+            cursor.advance_key(&key);
+        }
+        false
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SeekablePostStateCursor<'a, V> {
+    entries: &'a [(B256, V)],
+    idx: usize,
+}
+
+impl<'a, V> SeekablePostStateCursor<'a, V> {
+    const fn new(entries: &'a [(B256, V)]) -> Self {
+        Self { entries, idx: 0 }
+    }
+
+    fn current(&self) -> Option<&'a (B256, V)> {
+        self.entries.get(self.idx)
+    }
+
+    const fn reset(&mut self) {
+        self.idx = 0;
+    }
+
+    fn seek(&mut self, key: &B256) -> Option<&'a (B256, V)> {
+        self.idx = self.entries.partition_point(|(entry_key, _)| entry_key < key);
+        self.current()
+    }
+
+    fn first_after(&mut self, key: &B256) -> Option<&'a (B256, V)> {
+        if self.current().is_some_and(|(entry_key, _)| entry_key > key) {
+            return self.current()
+        }
+
+        let remaining = &self.entries[self.idx..];
+        self.idx += remaining.partition_point(|(entry_key, _)| entry_key <= key);
+        self.current()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hashed_cursor::mock::MockHashedCursor;
+    use alloy_primitives::map::B256Map;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -944,7 +907,8 @@ mod tests {
             vec![(key(0x01), Some(account(10))), (key(0x03), Some(account(30)))],
             Default::default(),
         );
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(oldest)]);
+        let mut overlay = HashedPostStateOverlay::new(vec![Arc::new(oldest)]);
+        overlay.insert(0, Arc::new(newest));
         let mut cursor = HashedPostStateCursor::new_account_from_overlay(mock_cursor, &overlay);
 
         let mut results = Vec::new();
@@ -989,8 +953,8 @@ mod tests {
         let newest = storage_post_state(vec![(key(0x02), U256::from(2))]);
         let wiping = storage_post_state_with_wipe(vec![(key(0x01), U256::from(1))], true);
         let hidden = storage_post_state(vec![(key(0x03), U256::from(3))]);
-        let overlay =
-            HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(wiping), Arc::new(hidden)]);
+        let mut overlay = HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(wiping)]);
+        overlay.push(Arc::new(hidden));
         let mut cursor =
             HashedPostStateCursor::new_storage_from_overlay(mock_cursor, &overlay, B256::ZERO);
 

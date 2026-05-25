@@ -17,6 +17,8 @@
 /// The implementation of forward-only in-memory cursor.
 pub mod forward_cursor;
 
+mod storage_overlay_index;
+
 /// The cursor implementations for navigating account and storage tries.
 pub mod trie_cursor;
 
