@@ -9,7 +9,7 @@ use alloy_consensus::{TxEnvelope, TxReceipt};
 use alloy_eips::{
     eip1559::BaseFeeParams,
     eip7840::BlobParams,
-    eip7928::{AccountChanges, BlockAccessList, SlotChanges},
+    eip7928::{AccountChanges, BlockAccessIndex, BlockAccessList, SlotChanges},
     Typed2718,
 };
 use alloy_primitives::{Bloom, Bytes, B256};
@@ -700,18 +700,22 @@ fn merge_block_access_list(
 fn shift_account_changes(account_changes: &mut AccountChanges, tx_index_offset: u64) {
     for slot_changes in &mut account_changes.storage_changes {
         for change in &mut slot_changes.changes {
-            change.block_access_index += tx_index_offset;
+            shift_block_access_index(&mut change.block_access_index, tx_index_offset);
         }
     }
     for change in &mut account_changes.balance_changes {
-        change.block_access_index += tx_index_offset;
+        shift_block_access_index(&mut change.block_access_index, tx_index_offset);
     }
     for change in &mut account_changes.nonce_changes {
-        change.block_access_index += tx_index_offset;
+        shift_block_access_index(&mut change.block_access_index, tx_index_offset);
     }
     for change in &mut account_changes.code_changes {
-        change.block_access_index += tx_index_offset;
+        shift_block_access_index(&mut change.block_access_index, tx_index_offset);
     }
+}
+
+fn shift_block_access_index(index: &mut BlockAccessIndex, tx_index_offset: u64) {
+    *index = BlockAccessIndex::new(index.get() + tx_index_offset);
 }
 
 fn merge_account_changes(existing: &mut AccountChanges, incoming: AccountChanges) {

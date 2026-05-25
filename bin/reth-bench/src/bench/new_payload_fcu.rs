@@ -620,6 +620,7 @@ fn build_block_request(
             withdrawals: rpc_block.withdrawals.map(|withdrawals| withdrawals.into_inner()),
             parent_beacon_block_root: block.header.parent_beacon_block_root,
             slot_number: block.header.slot_number,
+            target_gas_limit: None,
         },
         transactions,
         extra_data: Some(block.header.extra_data.clone()),

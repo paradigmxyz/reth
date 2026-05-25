@@ -449,7 +449,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.3.4", default-features = false }
+alloy-eip7928 = { version = "0.4", default-features = false }
 alloy-evm = { version = "0.34.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
@@ -700,3 +700,33 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-consensus = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-contract = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-eips = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-genesis = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-json-rpc = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-network = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-network-primitives = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-node-bindings = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-provider = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-pubsub = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-client = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-admin = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-anvil = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-beacon = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-debug = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-engine = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-eth = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-mev = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-trace = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-rpc-types-txpool = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-serde = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-signer = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-signer-local = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-transport = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-transport-http = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-transport-ipc = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }
+alloy-transport-ws = { git = "https://github.com/mattsse/alloy", branch = "mattsse/bump-alloy-eip7928-0.4" }

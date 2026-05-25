@@ -1,6 +1,9 @@
 //! Helpers for `eth_blockAccessList` RPC method.
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::BlockAccessList;
+use alloy_eips::eip7928::{
+    AccountChanges, BalanceChange, BlockAccessIndex, BlockAccessList, CodeChange, NonceChange,
+    SlotChanges, StorageChange,
+};
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
@@ -58,7 +61,61 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                     .apply_post_execution_changes()
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let bal = db.take_built_alloy_bal();
+                let bal = db.take_built_alloy_bal().map(|bal| {
+                    bal.into_iter()
+                        .map(|account| AccountChanges {
+                            address: account.address,
+                            storage_changes: account
+                                .storage_changes
+                                .into_iter()
+                                .map(|slot| SlotChanges {
+                                    slot: slot.slot,
+                                    changes: slot
+                                        .changes
+                                        .into_iter()
+                                        .map(|change| StorageChange {
+                                            block_access_index: BlockAccessIndex::new(
+                                                change.block_access_index,
+                                            ),
+                                            new_value: change.new_value,
+                                        })
+                                        .collect(),
+                                })
+                                .collect(),
+                            storage_reads: account.storage_reads,
+                            balance_changes: account
+                                .balance_changes
+                                .into_iter()
+                                .map(|change| BalanceChange {
+                                    block_access_index: BlockAccessIndex::new(
+                                        change.block_access_index,
+                                    ),
+                                    post_balance: change.post_balance,
+                                })
+                                .collect(),
+                            nonce_changes: account
+                                .nonce_changes
+                                .into_iter()
+                                .map(|change| NonceChange {
+                                    block_access_index: BlockAccessIndex::new(
+                                        change.block_access_index,
+                                    ),
+                                    new_nonce: change.new_nonce,
+                                })
+                                .collect(),
+                            code_changes: account
+                                .code_changes
+                                .into_iter()
+                                .map(|change| CodeChange {
+                                    block_access_index: BlockAccessIndex::new(
+                                        change.block_access_index,
+                                    ),
+                                    new_code: change.new_code,
+                                })
+                                .collect(),
+                        })
+                        .collect()
+                });
                 Ok(bal)
             })
             .await
