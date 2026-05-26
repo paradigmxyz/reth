@@ -101,7 +101,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, trace_span, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -1257,8 +1257,8 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
-                debug_span!(
+            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                trace_span!(
                     target: "engine::tree",
                     "execute tx",
                     tx_index = senders.len() - 1,
