@@ -1240,6 +1240,10 @@ where
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
+        // Per-transaction histograms require two timestamp reads and metric records per
+        // transaction. Keep them for normal blocks, but avoid that hot-loop overhead on synthetic
+        // big blocks where block-level execution metrics still capture total latency.
+        let record_transaction_metrics = transaction_count <= 1024;
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
         // In that case, invoking the callback on every transaction would resend the previous
@@ -1248,9 +1252,11 @@ where
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
-            let wait_start = Instant::now();
+            let wait_start = record_transaction_metrics.then(Instant::now);
             let Some(tx_result) = transactions.next() else { break };
-            self.metrics.record_transaction_wait(wait_start.elapsed());
+            if let Some(wait_start) = wait_start {
+                self.metrics.record_transaction_wait(wait_start.elapsed());
+            }
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
@@ -1269,9 +1275,11 @@ where
                 trace!(target: "engine::tree", "Executing transaction");
             }
 
-            let tx_start = Instant::now();
+            let tx_start = record_transaction_metrics.then(Instant::now);
             executor.execute_transaction(tx)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
+            if let Some(tx_start) = tx_start {
+                self.metrics.record_transaction_execution(tx_start.elapsed());
+            }
 
             // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
