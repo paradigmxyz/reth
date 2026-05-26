@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
@@ -1543,6 +1543,10 @@ where
         let Some(root) = root_node else {
             return Ok(None);
         };
+
+        if matches!(&root.node, TrieNodeV2::EmptyRoot) {
+            return Ok(Some(EMPTY_ROOT_HASH));
+        }
 
         // Compute the hash of the root node
         self.rlp_encode_buf.clear();
