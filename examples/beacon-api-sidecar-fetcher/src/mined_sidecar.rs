@@ -188,13 +188,13 @@ where
                 {
                     match notification {
                         CanonStateNotification::Commit { new } => {
-                            for (_, block) in new.blocks().iter() {
+                            for block in new.blocks().values() {
                                 this.process_block(block);
                             }
                         }
                         CanonStateNotification::Reorg { old, new } => {
                             // handle reorged blocks
-                            for (_, block) in old.blocks().iter() {
+                            for block in old.blocks().values() {
                                 let txs: Vec<BlobTransactionEvent> = block
                                     .body()
                                     .transactions()
@@ -215,7 +215,7 @@ where
                                 this.queued_actions.extend(txs);
                             }
 
-                            for (_, block) in new.blocks().iter() {
+                            for block in new.blocks().values() {
                                 this.process_block(block);
                             }
                         }

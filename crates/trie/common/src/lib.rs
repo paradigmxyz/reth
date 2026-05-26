@@ -75,6 +75,9 @@ pub mod root;
 /// Incremental ordered trie root computation.
 pub mod ordered_root;
 
+/// Open-ended incremental ordered trie root computation.
+pub mod open_ended_ordered_root;
+
 /// Buffer for trie updates.
 pub mod updates;
 

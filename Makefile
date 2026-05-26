@@ -192,18 +192,6 @@ $(EEST_TESTS_DIR):
 ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
 	cargo nextest run --no-fail-fast -p ef-tests --release --features ef-tests
 
-##@ reth-bench
-
-.PHONY: reth-bench
-reth-bench: ## Build the reth-bench binary into the `target` directory.
-	cargo build --manifest-path bin/reth-bench/Cargo.toml --features "$(FEATURES)" --profile "$(PROFILE)"
-
-.PHONY: install-reth-bench
-install-reth-bench: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
-	cargo install --path bin/reth-bench --bin reth-bench --force --locked \
-		--features "$(FEATURES)" \
-		--profile "$(PROFILE)"
-
 ##@ Other
 
 .PHONY: clean
@@ -245,7 +233,7 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-debug-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,rocksdb
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,rocksdb
 
 fmt:
 	cargo +nightly fmt

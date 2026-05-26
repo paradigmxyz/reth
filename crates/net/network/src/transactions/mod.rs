@@ -37,14 +37,17 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{
+    map::{B256Map, FbBuildHasher},
+    TxHash, B256,
+};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
     HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
-    RequestTxHashes, Transactions, ValidAnnouncementData,
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
+    PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::{TransactionSigned, TxType};
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
@@ -293,7 +296,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
+    transactions_by_peers: B256Map<HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -309,7 +312,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
-    bad_imports: LruCache<TxHash>,
+    bad_imports: LruCache<TxHash, FbBuildHasher<32>>,
     /// All the connected peers.
     peers: HashMap<PeerId, PeerMetadata<N>>,
     /// Send half for the command channel.
@@ -402,7 +405,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
             pending_pool_imports_info,
-            bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
+            bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -673,21 +676,21 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         let mut should_report_peer = false;
         let mut tx_types_counter = TxTypesCounter::default();
 
-        let is_eth68_message = partially_valid_msg
+        let has_eth68_metadata = partially_valid_msg
             .msg_version()
             .expect("partially valid announcement should have a version")
-            .is_eth68();
+            .has_eth68_metadata();
 
         partially_valid_msg.retain(|tx_hash, metadata_ref_mut| {
             let (ty_byte, size_val) = match *metadata_ref_mut {
                 Some((ty, size)) => {
-                    if !is_eth68_message {
+                    if !has_eth68_metadata {
                         should_report_peer = true;
                     }
                     (ty, size)
                 }
                 None => {
-                    if is_eth68_message {
+                    if has_eth68_metadata {
                         should_report_peer = true;
                         return false;
                     }
@@ -695,7 +698,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 }
             };
 
-            if is_eth68_message && let Some((actual_ty_byte, _)) = *metadata_ref_mut {
+            if has_eth68_metadata && let Some((actual_ty_byte, _)) = *metadata_ref_mut {
                 match TxType::try_from(actual_ty_byte) {
                     Ok(parsed_tx_type) => tx_types_counter.increase_by_tx_type(parsed_tx_type),
                     Err(_) => tx_types_counter.increase_other(),
@@ -719,7 +722,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             }
         });
 
-        if is_eth68_message {
+        if has_eth68_metadata {
             self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
         }
 
@@ -1916,6 +1919,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
 enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
+    Eth72(NewPooledTransactionHashes72),
 }
 
 // === impl PooledTransactionsHashesBuilder ===
@@ -1930,6 +1934,11 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.ty());
             }
+            Self::Eth72(msg) => {
+                msg.hashes.push(*pooled_tx.hash());
+                msg.sizes.push(pooled_tx.encoded_length());
+                msg.types.push(pooled_tx.transaction.ty());
+            }
         }
     }
 
@@ -1938,6 +1947,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
+            Self::Eth72(hashes) => hashes.is_empty(),
         }
     }
 
@@ -1946,6 +1956,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.len(),
             Self::Eth68(hashes) => hashes.len(),
+            Self::Eth72(hashes) => hashes.len(),
         }
     }
 
@@ -1967,6 +1978,11 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.ty());
             }
+            Self::Eth72(msg) => {
+                msg.hashes.push(*tx.tx_hash());
+                msg.sizes.push(tx.size);
+                msg.types.push(tx.transaction.ty());
+            }
         }
     }
 
@@ -1977,6 +1993,7 @@ impl PooledTransactionsHashesBuilder {
             EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
                 Self::Eth68(Default::default())
             }
+            EthVersion::Eth72 => Self::Eth72(Default::default()),
         }
     }
 
@@ -1987,6 +2004,10 @@ impl PooledTransactionsHashesBuilder {
                 msg.into()
             }
             Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth72(mut msg) => {
                 msg.shrink_to_fit();
                 msg.into()
             }
@@ -2017,7 +2038,7 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: LruCache<TxHash>,
+    seen_transactions: LruCache<TxHash, FbBuildHasher<32>>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender<PeerRequest<N>>,
     /// negotiated version of the session.
@@ -2038,7 +2059,10 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         peer_kind: PeerKind,
     ) -> Self {
         Self {
-            seen_transactions: LruCache::new(max_transactions_seen_by_peer),
+            seen_transactions: LruCache::with_hasher(
+                max_transactions_seen_by_peer,
+                Default::default(),
+            ),
             request_tx,
             version,
             client_version,
@@ -2052,7 +2076,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     }
 
     /// Returns a mutable reference to the seen transactions LRU cache.
-    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
+    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash, FbBuildHasher<32>> {
         &mut self.seen_transactions
     }
 

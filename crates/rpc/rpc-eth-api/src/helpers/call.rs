@@ -57,9 +57,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
-        state_override: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        EstimateCall::estimate_gas_at(self, request, at, state_override)
+        EstimateCall::estimate_gas_at(self, request, at, overrides)
     }
 
     /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
@@ -88,6 +88,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             if block_state_calls.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
+
+            let _permit = self.acquire_owned_blocking_io().await;
 
             let base_block =
                 self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
@@ -315,6 +317,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             if bundles.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
+
+            let _permit = self.acquire_owned_blocking_io().await;
 
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();
