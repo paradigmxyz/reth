@@ -104,7 +104,8 @@ impl HashedPostState {
     /// post state.
     pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         // Populate account prefix set.
-        let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
+        let mut account_prefix_set =
+            PrefixSetMut::with_capacity(self.accounts.len() + self.storages.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in &self.accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
@@ -118,7 +119,9 @@ impl HashedPostState {
         let mut storage_prefix_sets =
             HashMap::with_capacity_and_hasher(self.storages.len(), Default::default());
         for (hashed_address, hashed_storage) in &self.storages {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if !self.accounts.contains_key(hashed_address) {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            }
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
