@@ -287,7 +287,7 @@ where
         let mut plan = BbEvmPlan::new(segments);
 
         // Add prior block hashes to the seeding list.
-        plan.block_hashes_to_seed.extend(payload.prior_block_hashes.clone());
+        plan.block_hashes_to_seed.extend_from_slice(&payload.prior_block_hashes);
         plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
 
         Ok(plan)
