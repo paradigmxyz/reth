@@ -467,6 +467,7 @@ impl RocksDBProviderInner {
     }
 
     /// Gets the column family handle for a table.
+    #[inline]
     fn cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         let cf = match self {
             Self::ReadWrite { db, .. } => db.cf_handle(T::NAME),
@@ -819,6 +820,7 @@ impl RocksDBProvider {
     }
 
     /// Gets the column family handle for a table.
+    #[inline]
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0.cf_handle::<T>()
     }
@@ -1502,6 +1504,7 @@ impl fmt::Debug for RocksReadSnapshot<'_> {
 
 impl<'db> RocksReadSnapshot<'db> {
     /// Gets the column family handle for a table.
+    #[inline]
     fn cf_handle<T: Table>(&self) -> Result<&'db rocksdb::ColumnFamily, DatabaseError> {
         self.provider.get_cf_handle::<T>()
     }
