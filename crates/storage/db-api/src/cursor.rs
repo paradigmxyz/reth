@@ -111,6 +111,12 @@ pub trait DbCursorRW<T: Table> {
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
+    /// Replaces the value at the cursor's current position.
+    ///
+    /// The cursor must already be positioned on the row that should be replaced. For duplicate
+    /// tables this preserves the current duplicate key and only updates the current value.
+    fn update_current(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
+
     /// Database operation that will insert a row at a given key. If the key is already
     /// present, the operation will result in an error.
     fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;

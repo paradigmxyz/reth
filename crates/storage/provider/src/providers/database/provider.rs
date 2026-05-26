@@ -2660,10 +2660,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                         storages_cursor.seek_by_key_subkey(address, entry.key)? &&
                         db_entry.key == entry.key
                     {
-                        storages_cursor.delete_current()?;
-                    }
-
-                    if !entry.value.is_zero() {
+                        if entry.value.is_zero() {
+                            storages_cursor.delete_current()?;
+                        } else {
+                            storages_cursor.update_current(address, &entry)?;
+                        }
+                    } else if !entry.value.is_zero() {
                         storages_cursor.upsert(address, &entry)?;
                     }
                 }
@@ -2707,10 +2709,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
                 {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
+                    if entry.value.is_zero() {
+                        hashed_storage_cursor.delete_current()?;
+                    } else {
+                        hashed_storage_cursor.update_current(*hashed_address, &entry)?;
+                    }
+                } else if !entry.value.is_zero() {
                     hashed_storage_cursor.upsert(*hashed_address, &entry)?;
                 }
             }

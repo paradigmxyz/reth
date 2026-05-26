@@ -364,6 +364,16 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
         Ok(())
     }
 
+    /// Replaces the current key-value pair.
+    /// **Mock behavior**: Always succeeds without modifying any data.
+    fn update_current(
+        &mut self,
+        _key: <T as Table>::Key,
+        _value: &<T as Table>::Value,
+    ) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
     /// Inserts a key-value pair at the current cursor position.
     /// **Mock behavior**: Always succeeds without modifying any data.
     fn insert(
