@@ -114,7 +114,6 @@ where
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
     let mut canonical_state =
         State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
-    load_bal_accounts(&mut canonical_state, bal)?;
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -200,29 +199,6 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
         ))
     })?;
     Ok(Arc::new(received_bal_revm))
-}
-
-fn load_bal_accounts<DB>(
-    canonical_state: &mut State<DB>,
-    bal: &AlloyBal,
-) -> Result<(), BalExecutionError>
-where
-    DB: Database,
-{
-    // Pre-load every BAL-declared address into canonical state's cache. `State::commit`
-    // (called by `commit_transaction`) panics at revm-database's
-    // `cache.rs:195` ("All accounts should be present inside cache") when it tries to
-    // apply a diff for an address not previously loaded. In the normal serial flow the
-    // EVM loads the account itself during execution, but here workers execute the tx EVM
-    // and the canonical loop only commits their outputs, so canonical may never have read
-    // those accounts itself.
-    for account_changes in bal {
-        canonical_state
-            .load_cache_account(account_changes.address)
-            .map_err(|e| BalExecutionError::Execution(BlockExecutionError::other(e)))?;
-    }
-
-    Ok(())
 }
 
 fn take_built_bal_and_log_divergence<DB>(
@@ -999,10 +975,8 @@ mod tests {
     #[test]
     fn shadow_tx_with_sstore() {
         // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
-        // commit identically across serial and BAL paths — this is the first scenario that
-        // exercises a real storage diff, validating that our account-only pre-load path
-        // (`load_cache_account` in execute_block) is sufficient even when commits include
-        // storage writes.
+        // commit identically across serial and BAL paths even though the canonical state applies
+        // a diff produced by a worker EVM.
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         use alloy_consensus::TxLegacy;
