@@ -294,7 +294,13 @@ impl Capabilities {
     /// Whether the peer supports `eth` sub-protocol.
     #[inline]
     pub const fn supports_eth(&self) -> bool {
-        self.eth_71 || self.eth_70 || self.eth_69 || self.eth_68 || self.eth_67 || self.eth_66
+        self.eth_72
+        || self.eth_71
+        || self.eth_70
+        || self.eth_69
+        || self.eth_68
+        || self.eth_67
+        || self.eth_66
     }
 
     /// Whether this peer supports eth v66 protocol.
