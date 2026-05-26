@@ -4613,7 +4613,7 @@ static inline void node_set_ds(node_t *const __restrict node, size_t size) {
 }
 
 /* The size of a key in a node */
-MDBX_NOTHROW_PURE_FUNCTION static inline size_t node_ks(const node_t *const __restrict node) {
+MDBX_NOTHROW_PURE_FUNCTION static __always_inline size_t node_ks(const node_t *const __restrict node) {
   return UNALIGNED_PEEK_16(node, node_t, ksize);
 }
 
@@ -4632,12 +4632,12 @@ static inline void node_set_flags(node_t *const __restrict node, uint8_t flags) 
 }
 
 /* Address of the key for the node */
-MDBX_NOTHROW_PURE_FUNCTION static inline void *node_key(const node_t *const __restrict node) {
+MDBX_NOTHROW_PURE_FUNCTION static __always_inline void *node_key(const node_t *const __restrict node) {
   return ptr_disp(node, NODESIZE);
 }
 
 /* Address of the data for a node */
-MDBX_NOTHROW_PURE_FUNCTION static inline void *node_data(const node_t *const __restrict node) {
+MDBX_NOTHROW_PURE_FUNCTION static __always_inline void *node_data(const node_t *const __restrict node) {
   return ptr_disp(node_key(node), node_ks(node));
 }
 
