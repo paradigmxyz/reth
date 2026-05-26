@@ -64,9 +64,9 @@ pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 /// The default eth tx fee cap is 1 ETH
 pub const DEFAULT_TX_FEE_CAP_WEI: u128 = 1_000_000_000_000_000_000u128;
 
-/// Maximum eth historical proof window. Equivalent to roughly 6 months of data on a 12
-/// second block time, and a month on a 2 second block time.
-pub const MAX_ETH_PROOF_WINDOW: u64 = 28 * 24 * 60 * 60 / 2;
+/// Maximum eth historical proof window. Equivalent to roughly 12 months of data on a 12
+/// second block time, 2 months on a 2 second block time, and 1 month on a 1 second block time.
+pub const MAX_ETH_PROOF_WINDOW: u64 = 28 * 24 * 60 * 60;
 
 /// Default timeout for send raw transaction sync in seconds.
 pub const RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS: Duration = Duration::from_secs(30);
