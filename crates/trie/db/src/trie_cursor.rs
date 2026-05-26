@@ -291,20 +291,29 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
+            let entry_exists = self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
                 .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
-            {
-                self.cursor.delete_current()?;
-            }
+                .is_some_and(|e| *e.nibbles() == nibbles);
 
-            // There is an updated version of this node, insert new entry.
-            if let Some(node) = maybe_updated {
-                self.cursor
-                    .upsert(self.hashed_address, &A::StorageValue::new(nibbles, node.clone()))?;
+            match (entry_exists, maybe_updated) {
+                (true, Some(node)) => {
+                    self.cursor.put_current(
+                        self.hashed_address,
+                        &A::StorageValue::new(nibbles, node.clone()),
+                    )?;
+                }
+                (true, None) => {
+                    self.cursor.delete_current()?;
+                }
+                (false, Some(node)) => {
+                    self.cursor.upsert(
+                        self.hashed_address,
+                        &A::StorageValue::new(nibbles, node.clone()),
+                    )?;
+                }
+                (false, None) => {}
             }
         }
 
