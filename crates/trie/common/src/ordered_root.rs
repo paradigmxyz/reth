@@ -1,8 +1,10 @@
 //! Incremental ordered trie root computation for append-only streams.
 //!
 //! Ethereum block transaction and receipt roots are ordered trie roots keyed by the RLP encoding of
-//! each item index. [`OrderedTrieRootEncodedBuilder`](crate::ordered_root::OrderedTrieRootEncodedBuilder) accepts items in their final contiguous
-//! order, without requiring the final item count until the stream ends.
+//! each item index.
+//! [`OrderedTrieRootEncodedBuilder`](crate::ordered_root::OrderedTrieRootEncodedBuilder) accepts
+//! items in their final contiguous order, without requiring the final item count until the stream
+//! ends.
 //!
 //! # Why this works
 //!
