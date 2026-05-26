@@ -339,11 +339,20 @@ where
 
                 self.dispatch_pending_targets();
 
-                // If there's still no pending updates spend some time pre-computing the account
-                // trie upper hashes
-                if self.proof_result_rx.is_empty() {
-                    self.trie.calculate_subtries();
-                }
+                // Use idle gaps to chip away at dirty subtries serially, one at a
+                // time, instead of calling `calculate_subtries()` (which routes
+                // through rayon's par_extend and parks sparse-trie on a condvar
+                // for the duration of the par-iter). At 128 proof workers, that
+                // park/wake cycle fires ~+19% more often than at 12, and is a
+                // direct contributor to the worker-count scaling regression.
+                //
+                // The bulk parallel hash still happens at end-of-block in
+                // `root_with_updates()` for whatever residual dirty subtries
+                // remain — rayon parallelism amortizes across the whole batch.
+                while self.updates.is_empty()
+                    && self.proof_result_rx.is_empty()
+                    && self.trie.hash_one_dirty_subtrie()
+                {}
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,

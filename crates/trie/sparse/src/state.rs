@@ -472,6 +472,16 @@ where
         }
     }
 
+    /// Hashes one dirty subtrie serially, returning `true` if work was done.
+    /// See [`SparseTrie::hash_one_dirty_subtrie`] for semantics.
+    pub fn hash_one_dirty_subtrie(&mut self) -> bool {
+        if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
+            trie.hash_one_dirty_subtrie()
+        } else {
+            false
+        }
+    }
+
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
         self.storage.tries.get_mut(account).and_then(|trie| trie.root())

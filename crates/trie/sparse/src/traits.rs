@@ -159,6 +159,22 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// hash recalculations after localized changes to the trie structure.
     fn update_subtrie_hashes(&mut self);
 
+    /// Hashes a single dirty subtrie serially, without spawning rayon work.
+    /// Returns `true` if a subtrie was hashed, `false` if no dirty subtries remain.
+    ///
+    /// Intended to drain dirty subtries incrementally from a producer/consumer
+    /// loop where the caller wants to use idle gaps without paying the
+    /// per-call rayon park/wake overhead of `update_subtrie_hashes`. The
+    /// remaining hashing work is picked up by the next `root()` call, which
+    /// can still parallelize across whatever's left.
+    ///
+    /// The default returns `false` (no-op), which is safe for any impl —
+    /// the caller simply falls back to bulk hashing via `update_subtrie_hashes`
+    /// or `root()`.
+    fn hash_one_dirty_subtrie(&mut self) -> bool {
+        false
+    }
+
     /// Retrieves a reference to the leaf value at the specified path.
     ///
     /// # Arguments

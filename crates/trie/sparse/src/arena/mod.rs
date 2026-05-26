@@ -2548,6 +2548,33 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
+    fn hash_one_dirty_subtrie(&mut self) -> bool {
+        // Same precondition as update_subtrie_hashes: nothing to hash unless the
+        // root is a branch and there are subtries to descend into.
+        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            return false;
+        }
+        for (idx, node) in &mut self.upper_arena {
+            let ArenaSparseNode::Subtrie(s) = node else { continue };
+            if s.num_dirty_leaves == 0 {
+                continue;
+            }
+            // Take, hash serially, put back. update_cached_rlp resets
+            // num_dirty_leaves to 0 so this subtrie won't be re-picked.
+            // The upper-trie branch above is still marked dirty; it gets
+            // hashed during the next update_subtrie_hashes/root() walk.
+            let ArenaSparseNode::Subtrie(mut subtrie) =
+                core::mem::replace(node, ArenaSparseNode::TakenSubtrie)
+            else {
+                unreachable!()
+            };
+            subtrie.update_cached_rlp();
+            self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
+            return true;
+        }
+        false
+    }
+
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
         Self::get_leaf_value_in_arena(&self.upper_arena, self.root, full_path, 0)
     }
