@@ -124,7 +124,9 @@ impl StateRootHandle {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
         move |source: StateChangeSource, state: &EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state.clone()));
+            let _ = source;
+            let hashed = evm_state_to_hashed_post_state_ref(state);
+            let _ = sender.send(StateRootMessage::HashedStateUpdate(hashed));
         }
     }
 
@@ -182,6 +184,42 @@ impl Drop for StateHookSender {
         // Send completion signal when the sender is dropped
         let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
     }
+}
+
+/// Converts a borrowed [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and
+/// storage slots.
+pub fn evm_state_to_hashed_post_state_ref(update: &EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
+
+            let destroyed = account.is_selfdestructed();
+            if account.info != account.original_info() {
+                let info = if destroyed { None } else { Some((&account.info).into()) };
+                hashed_state.accounts.insert(hashed_address, info);
+            }
+
+            let mut changed_storage_iter = account
+                .storage
+                .iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
+                .peekable();
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
+
+    hashed_state
 }
 
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
