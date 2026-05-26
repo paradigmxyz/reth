@@ -34,7 +34,7 @@ use reth_primitives_traits::{
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderFactory};
 use reth_tasks::Runtime;
 use revm::context_interface::Cfg;
-use revm_primitives::U256;
+use revm_primitives::{eip8037::CPSB_GLAMSTERDAM, U256};
 use std::{
     fmt,
     marker::PhantomData,
@@ -1424,6 +1424,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
             .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
             .unwrap_or_default() as u64,
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        CPSB_GLAMSTERDAM,
     );
 
     let gas_limit = transaction.gas_limit();

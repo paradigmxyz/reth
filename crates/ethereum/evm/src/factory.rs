@@ -7,7 +7,7 @@
 use alloc::string::String;
 use alloy_evm::{Database, EvmEnv, EvmFactory};
 use revm::{
-    context::BlockEnv,
+    context::{BlockEnv, DBErrorMarker},
     context_interface::result::{EVMError, HaltReason},
     inspector::NoOpInspector,
     primitives::hardfork::SpecId,
@@ -170,7 +170,7 @@ impl EvmFactory for RethEvmFactory {
         <Inner as EvmFactory>::Evm<DB, I>;
     type Context<DB: Database> = <Inner as EvmFactory>::Context<DB>;
     type Tx = <Inner as EvmFactory>::Tx;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type Error<DBError: DBErrorMarker> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Spec = SpecId;
     type BlockEnv = BlockEnv;
