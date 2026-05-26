@@ -235,12 +235,14 @@ impl EtlFile {
     {
         let file = NamedTempFile::new_in(dir)?;
         let mut w = BufWriter::new(file);
+        let mut lengths = [0u8; KV_LEN * 2];
         for entry in &buffer {
             let k = entry.0.as_ref();
             let v = entry.1.as_ref();
 
-            w.write_all(&k.len().to_be_bytes())?;
-            w.write_all(&v.len().to_be_bytes())?;
+            lengths[..KV_LEN].copy_from_slice(&k.len().to_be_bytes());
+            lengths[KV_LEN..].copy_from_slice(&v.len().to_be_bytes());
+            w.write_all(&lengths)?;
             w.write_all(k)?;
             w.write_all(v)?;
         }
@@ -259,14 +261,11 @@ impl EtlFile {
             return Ok(None)
         }
 
-        let mut buffer_key_length = [0; KV_LEN];
-        let mut buffer_value_length = [0; KV_LEN];
+        let mut lengths = [0; KV_LEN * 2];
+        self.file.read_exact(&mut lengths)?;
 
-        self.file.read_exact(&mut buffer_key_length)?;
-        self.file.read_exact(&mut buffer_value_length)?;
-
-        let key_length = usize::from_be_bytes(buffer_key_length);
-        let value_length = usize::from_be_bytes(buffer_value_length);
+        let key_length = usize::from_be_bytes(lengths[..KV_LEN].try_into().expect("qed"));
+        let value_length = usize::from_be_bytes(lengths[KV_LEN..].try_into().expect("qed"));
         let mut key = vec![0; key_length];
         let mut value = vec![0; value_length];
 
