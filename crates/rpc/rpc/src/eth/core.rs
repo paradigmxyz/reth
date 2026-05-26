@@ -576,7 +576,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        StageCheckpointReader,
+        PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
     use reth_storage_api::{BalProvider, BlockReader, BlockReaderIdExt, StateProviderFactory};
@@ -599,6 +599,7 @@ mod tests {
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + StageCheckpointReader
+            + PruneCheckpointReader
             + BalProvider
             + Unpin
             + Clone

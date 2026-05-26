@@ -26,7 +26,9 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -381,16 +383,18 @@ where
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
             proof_handle,
             state_root_tx,
+            hashed_state_tx,
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -471,8 +475,7 @@ where
                     })
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            let tx = WithTxEnv::new(tx);
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
@@ -580,6 +583,7 @@ where
         &self,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -628,6 +632,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
                 sparse_state_trie,
@@ -728,6 +733,16 @@ where
                 return
             }
 
+            if let Some(cache) = cached.as_ref().filter(|cache| !cache.is_available()) {
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    usage_count = cache.usage_count(),
+                    "Execution cache is in use, skip updating cache with new state for inserted executed block",
+                );
+                return
+            }
+
             // Take existing cache (if any) or create fresh caches
             let caches = match cached.take() {
                 Some(existing) => existing.cache().clone(),
@@ -763,10 +778,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| {
-            let (tx_env, tx) = tx.into_parts();
-            WithTxEnv { tx_env, tx: Arc::new(tx) }
-        });
+        let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
@@ -884,6 +896,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a clone of the indexed transaction receiver.
     pub fn clone_transaction_receiver(&self) -> IndexedTxReceiver<Tx, Err> {
         self.transactions.clone()
+    }
+
+    /// Takes the hashed state receiver out of the handle for use with custom waiting logic
+    pub fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+        self.state_root_handle.as_mut().map(|handle| handle.take_hashed_state_rx())
     }
 }
 
@@ -1010,6 +1027,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_cache::CachedStatus;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
@@ -1021,7 +1039,7 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -1169,6 +1187,65 @@ mod tests {
         assert!(cached3.is_none(), "New block cache should not be created on mismatch");
     }
 
+    #[test]
+    fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
+        let payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let parent_hash = B256::from([1u8; 32]);
+        payload_processor
+            .execution_cache
+            .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
+
+        // Checking out the cache bumps its usage_guard refcount, marking the slot as in-use.
+        // The returned SavedCache shares the same underlying ExecutionCache Arc as the slot,
+        // so any writes through the slot are observable here
+        let checked_out = payload_processor
+            .execution_cache
+            .get_cache_for(parent_hash)
+            .expect("expected parent cache checkout to succeed");
+
+        let polluted_address = Address::random();
+        let bundle_state = BundleState::builder(2..=2)
+            .state_present_account_info(
+                polluted_address,
+                AccountInfo {
+                    balance: U256::from(1337),
+                    nonce: 7,
+                    code_hash: KECCAK_EMPTY,
+                    code: None,
+                    account_id: None,
+                },
+            )
+            .build();
+
+        // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
+        // the in-use guard specifically.
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: B256::from([2u8; 32]), number: 2 },
+            parent: parent_hash,
+        };
+
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+
+        // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
+        // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.
+        let account = checked_out
+            .cache()
+            .get_or_try_insert_account_with(polluted_address, || Ok::<_, ()>(None))
+            .expect("cache read should succeed");
+
+        assert_eq!(
+            account,
+            CachedStatus::NotCached(None),
+            "checked-out parent cache should not observe state from inserted local block"
+        );
+    }
+
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
@@ -1190,25 +1267,23 @@ mod tests {
                             EvmStorageSlot::new_changed(
                                 U256::ZERO,
                                 U256::from(rng.random::<u64>()),
-                                0,
+                                TransactionId::ZERO,
                             ),
                         );
                     }
                 }
 
-                let account = revm_state::Account {
-                    info: AccountInfo {
-                        balance: U256::from(rng.random::<u64>()),
-                        nonce: rng.random::<u64>(),
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                        account_id: None,
-                    },
-                    original_info: Box::new(AccountInfo::default()),
-                    storage,
-                    status: AccountStatus::Touched,
-                    transaction_id: 0,
+                let mut account = revm_state::Account::default();
+                account.info = AccountInfo {
+                    balance: U256::from(rng.random::<u64>()),
+                    nonce: rng.random::<u64>(),
+                    code_hash: KECCAK_EMPTY,
+                    code: Some(Default::default()),
+                    account_id: None,
                 };
+                account.storage = storage;
+                account.status = AccountStatus::Touched;
+                account.transaction_id = TransactionId::ZERO;
 
                 state_update.insert(address, account);
             }
