@@ -67,13 +67,12 @@ impl<'a> BbEvmPlan<'a> {
     /// Returns the 256 block hashes relevant to a segment with the given block
     /// number. BLOCKHASH can look back 256 blocks, so we select entries in
     /// `[block_number - 256, block_number)`.
-    pub(crate) fn hashes_for_block(&self, block_number: u64) -> Vec<(u64, B256)> {
+    pub(crate) fn hashes_for_block(&self, block_number: u64) -> &[(u64, B256)] {
         let min = block_number.saturating_sub(256);
-        self.block_hashes_to_seed
-            .iter()
-            .copied()
-            .filter(|(n, _)| *n >= min && *n < block_number)
-            .collect()
+        let start = self.block_hashes_to_seed.partition_point(|(n, _)| *n < min);
+        let end =
+            start + self.block_hashes_to_seed[start..].partition_point(|(n, _)| *n < block_number);
+        &self.block_hashes_to_seed[start..end]
     }
 
     /// Returns the segment that contains the transaction at `tx_index`.
@@ -298,7 +297,8 @@ where
     fn reseed_block_hashes_for(&mut self, block_number: u64) {
         let Some(seeder) = self.block_hash_seeder else { return };
         let hashes = self.plan.hashes_for_block(block_number);
-        seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
+        let inner = self.inner.as_mut().expect("inner executor must exist");
+        seeder(inner.evm_mut().db_mut(), hashes);
     }
 
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
