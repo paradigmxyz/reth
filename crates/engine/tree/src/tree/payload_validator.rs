@@ -1228,8 +1228,12 @@ where
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre_execution")
-            .in_scope(|| executor.apply_pre_execution_changes())?;
+        if tracing::enabled!(target: "engine::tree", Level::DEBUG) {
+            debug_span!(target: "engine::tree", "pre_execution")
+                .in_scope(|| executor.apply_pre_execution_changes())?;
+        } else {
+            executor.apply_pre_execution_changes()?;
+        }
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
         // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
@@ -1238,7 +1242,8 @@ where
         }
 
         // Execute transactions
-        let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let exec_span = tracing::enabled!(target: "engine::tree", Level::DEBUG)
+            .then(|| debug_span!(target: "engine::tree", "execution").entered());
         let mut transactions = transactions.into_iter();
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
