@@ -33,7 +33,6 @@ use revm::{
     bytecode::BytecodeDecodeError,
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
-    primitives::{eip7825::TX_GAS_LIMIT_CAP, hardfork::SpecId},
 };
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
@@ -110,8 +109,9 @@ where
     let bal = input_bal.as_bal();
     let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
 
-    let is_amsterdam = evm_env.cfg_env.spec.into().is_enabled_in(SpecId::AMSTERDAM);
     let block_gas_limit = evm_env.block_env.gas_limit();
+    let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
+    let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
     let mut canonical_state =
         State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
     load_bal_accounts(&mut canonical_state, bal)?;
@@ -135,7 +135,8 @@ where
         }
         drop(result_tx);
 
-        let mut gas_tracker = BlockGasTracker::new(block_gas_limit, is_amsterdam);
+        let mut gas_tracker =
+            BlockGasTracker::new(block_gas_limit, enable_amsterdam_eip8037, tx_gas_limit_cap);
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
@@ -266,24 +267,36 @@ impl AbortGuard {
 #[derive(Debug)]
 struct BlockGasTracker {
     block_gas_limit: u64,
-    is_amsterdam: bool,
+    enable_amsterdam_eip8037: bool,
+    tx_gas_limit_cap: Option<u64>,
     cumulative_tx_gas_used: u64,
     block_regular_gas_used: u64,
 }
 
 impl BlockGasTracker {
-    const fn new(block_gas_limit: u64, is_amsterdam: bool) -> Self {
-        Self { block_gas_limit, is_amsterdam, cumulative_tx_gas_used: 0, block_regular_gas_used: 0 }
+    const fn new(
+        block_gas_limit: u64,
+        enable_amsterdam_eip8037: bool,
+        tx_gas_limit_cap: Option<u64>,
+    ) -> Self {
+        Self {
+            block_gas_limit,
+            enable_amsterdam_eip8037,
+            tx_gas_limit_cap,
+            cumulative_tx_gas_used: 0,
+            block_regular_gas_used: 0,
+        }
     }
 
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
-        let block_gas_used = if self.is_amsterdam {
+        let block_gas_used = if self.enable_amsterdam_eip8037 {
             self.block_regular_gas_used
         } else {
             self.cumulative_tx_gas_used
         };
         let block_available_gas = self.block_gas_limit.saturating_sub(block_gas_used);
-        let tx_min_gas_limit = tx_gas_limit.min(TX_GAS_LIMIT_CAP);
+        let tx_min_gas_limit =
+            self.tx_gas_limit_cap.map_or(tx_gas_limit, |cap| tx_gas_limit.min(cap));
 
         if tx_min_gas_limit > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
@@ -1181,7 +1194,7 @@ mod tests {
             );
 
         // Non-Amsterdam: block_available_gas = 1_000_000 - 600_000 = 400_000 → reject 500_000.
-        let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false);
+        let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false, None);
         non_amsterdam.record_result(&fake_result);
         assert!(
             non_amsterdam.validate_tx_limit(second_tx_gas_limit).is_err(),
@@ -1189,7 +1202,7 @@ mod tests {
         );
 
         // Amsterdam: block_available_gas = 1_000_000 - 0 = 1_000_000 → accept 500_000.
-        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true);
+        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, None);
         amsterdam.record_result(&fake_result);
         assert!(
             amsterdam.validate_tx_limit(second_tx_gas_limit).is_ok(),
@@ -1201,8 +1214,11 @@ mod tests {
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
         // A tx with gas_limit above TX_GAS_LIMIT_CAP (EIP-7825) is admitted when the
         // capped value fits in the remaining block gas and rejected when it does not.
-        use revm::context::result::{
-            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+        use revm::{
+            context::result::{
+                ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+            },
+            primitives::eip7825::TX_GAS_LIMIT_CAP,
         };
         use revm_state::EvmState;
 
@@ -1211,7 +1227,7 @@ mod tests {
 
         // Case 1: fresh block, no prior gas consumed.
         // tx_min_gas_limit = TX_GAS_LIMIT_CAP (16_777_216) ≤ block_available_gas (30M) → Ok.
-        let tracker = BlockGasTracker::new(block_gas_limit, false);
+        let tracker = BlockGasTracker::new(block_gas_limit, false, Some(TX_GAS_LIMIT_CAP));
         assert!(
             tracker.validate_tx_limit(oversized).is_ok(),
             "oversized tx must pass when capped limit fits in block gas",
@@ -1232,7 +1248,7 @@ mod tests {
                 EvmState::default(),
             );
 
-        let mut tracker = BlockGasTracker::new(block_gas_limit, false);
+        let mut tracker = BlockGasTracker::new(block_gas_limit, false, Some(TX_GAS_LIMIT_CAP));
         tracker.record_result(&fake_result);
         assert!(
             tracker.validate_tx_limit(oversized).is_err(),

@@ -1018,6 +1018,41 @@ jobs:
             echo "::add-mask::$BENCH_VICTORIAMETRICS_URL"
           fi
 
+          quote_arg() {
+            local value="$1"
+            if [[ "$value" =~ ^[A-Za-z0-9._/:=@+-]+$ ]]; then
+              printf '%s' "$value"
+            else
+              printf "'%s'" "${value//\'/\'\\\'\'}"
+            fi
+          }
+
+          derek_cmd=(derek bench)
+          [ "$BENCH_BIG_BLOCKS" = "true" ] && derek_cmd+=(big-blocks="${BENCH_BIG_BLOCKS_TARGET_GAS:-true}")
+          derek_cmd+=(
+            blocks="$BENCH_BLOCKS"
+            warmup="$BENCH_WARMUP_BLOCKS"
+            baseline="${{ needs.bench-ack.outputs.baseline-name }}"
+            feature="${{ needs.bench-ack.outputs.feature-name }}"
+            bal="$BENCH_BAL"
+            cores="$BENCH_CORES"
+            run-pairs="$BENCH_RUN_PAIRS"
+            otlp="$BENCH_OTLP"
+            slack="$BENCH_SLACK"
+          )
+          [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
+          [ -n "$BENCH_WAIT_TIME" ] && derek_cmd+=(wait-time="$BENCH_WAIT_TIME")
+          [ -n "$BENCH_BASELINE_ARGS" ] && derek_cmd+=(baseline-args="$BENCH_BASELINE_ARGS")
+          [ -n "$BENCH_FEATURE_ARGS" ] && derek_cmd+=(feature-args="$BENCH_FEATURE_ARGS")
+          DEREK_BENCH_COMMAND=""
+          for arg in "${derek_cmd[@]}"; do
+            if [ -n "$DEREK_BENCH_COMMAND" ]; then
+              DEREK_BENCH_COMMAND+=" "
+            fi
+            DEREK_BENCH_COMMAND+="$(quote_arg "$arg")"
+          done
+          echo "DEREK_BENCH_COMMAND=${DEREK_BENCH_COMMAND}" >> "$GITHUB_ENV"
+
           BENCH_ID="ci-${{ github.run_id }}"
           BENCH_REFERENCE_EPOCH=$(date +%s)
           echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
