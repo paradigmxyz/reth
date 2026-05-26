@@ -10,7 +10,7 @@ case "${fixture_variant}" in
         ;;
     osaka)
         eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
-        eels_branch="forks/osaka"
+        eels_branch="mainnet"
         ;;
     *)
         echo "unknown hive fixture variant: ${fixture_variant}"

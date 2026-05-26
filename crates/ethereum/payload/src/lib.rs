@@ -479,19 +479,18 @@ where
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
 
-    let sealed_block = Arc::new(block.into_sealed_block());
-    debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
+    debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?block.sealed_header(), "sealed built block");
 
-    if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
+    if is_osaka && block.rlp_length() > MAX_RLP_BLOCK_SIZE {
         return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {
-            rlp_length: sealed_block.rlp_length(),
+            rlp_length: block.rlp_length(),
             max_rlp_length: MAX_RLP_BLOCK_SIZE,
         }));
     }
 
     let block_access_list: Option<Bytes> =
         block_access_list.map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
-    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests, block_access_list)
+    let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 

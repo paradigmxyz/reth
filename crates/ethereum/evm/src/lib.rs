@@ -459,14 +459,14 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::PETERSBURG),
             ..Default::default()
         };
 
         let evm = evm_config.evm_with_env(db, evm_env);
 
         // Check that the spec ID is setup properly
-        assert_eq!(evm.cfg.spec, SpecId::CONSTANTINOPLE);
+        assert_eq!(evm.cfg.spec, SpecId::PETERSBURG);
     }
 
     #[test]
@@ -526,7 +526,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::PETERSBURG),
             ..Default::default()
         };
 

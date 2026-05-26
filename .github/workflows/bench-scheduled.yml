@@ -311,8 +311,9 @@ jobs:
       BENCH_NODE_BIN: reth
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      BENCH_OTLP_TRACES_ENDPOINT: ${{ secrets.BENCH_OTLP_TRACES_ENDPOINT }}
-      BENCH_OTLP_LOGS_ENDPOINT: ${{ secrets.BENCH_OTLP_LOGS_ENDPOINT }}
+      BENCH_OTLP_DISABLED: ${{ needs.resolve-refs.outputs.mode == 'release' && 'true' || 'false' }}
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
       CLICKHOUSE_URL: ${{ secrets.CLICKHOUSE_URL }}
@@ -835,7 +836,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const { verdict, fmtChange, fmtMs, metricRows, waitTimeRows, blocksLabel } = require('./.github/scripts/bench-utils');
+            const { verdict, fmtChange, fmtMs, metricRows, waitTimeRows, blocksLabel, isWin } = require('./.github/scripts/bench-utils');
 
             const token = process.env.SLACK_BENCH_BOT_TOKEN;
             const channel = process.env.SLACK_BENCH_CHANNEL;
@@ -857,11 +858,10 @@ jobs:
             const mode = process.env.BENCH_MODE || 'nightly';
             const slackMode = process.env.BENCH_SLACK || 'always';
             const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
-            const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
 
-            // on-win mode: only notify on improvements
-            if (slackMode === 'on-win' && !hasImprovement) {
-              core.info('on-win mode: no improvement detected, skipping Slack notification');
+            // on-win mode: only notify on unambiguous improvements. Mixed results are not wins.
+            if (slackMode === 'on-win' && !isWin(changes)) {
+              core.info('on-win mode: no unambiguous improvement detected, skipping Slack notification');
               return;
             }
 
