@@ -2618,9 +2618,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
+        changes.accounts.sort_unstable_by_key(|a| a.0);
+        changes.storage.sort_unstable_by_key(|a| a.address);
+        changes.contracts.sort_unstable_by_key(|a| a.0);
 
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
