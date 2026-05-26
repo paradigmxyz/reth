@@ -1,4 +1,5 @@
 use reth_trie_common::{Nibbles, ProofV2Target};
+use std::cmp::Ordering;
 
 // A helper function for getting the largest prefix of the sub-trie which contains a particular
 // target, based on its `min_len`.
@@ -23,6 +24,26 @@ pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
     let mut sub_trie_prefix = target.key_nibbles;
     sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
     sub_trie_prefix
+}
+
+#[inline]
+fn sub_trie_prefix_len(target: &ProofV2Target) -> usize {
+    (target.min_len.saturating_sub(1) as usize).min(target.key_nibbles.len())
+}
+
+#[inline]
+fn cmp_sub_trie_prefix(a: &ProofV2Target, b: &ProofV2Target) -> Ordering {
+    let a_len = sub_trie_prefix_len(a);
+    let b_len = sub_trie_prefix_len(b);
+
+    for idx in 0..a_len.min(b_len) {
+        match a.key_nibbles.get_unchecked(idx).cmp(&b.key_nibbles.get_unchecked(idx)) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+
+    a_len.cmp(&b_len)
 }
 
 // A helper function which returns the first path following a sub-trie in lexicographical order.
@@ -63,7 +84,7 @@ pub(crate) fn iter_sub_trie_targets(
     // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
     // those which don't).
     targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
+        cmp_sub_trie_prefix(a, b).then_with(|| a.min_len.cmp(&b.min_len))
     });
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
