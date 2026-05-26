@@ -355,12 +355,6 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(child_path = ?self.last_child_path()),
-    )]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -502,7 +496,6 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn pop_branch<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
