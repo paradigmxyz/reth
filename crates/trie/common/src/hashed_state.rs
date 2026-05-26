@@ -54,16 +54,19 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
+                let hashed_storage = (account.status.was_destroyed() || !account.storage.is_empty())
+                    .then(|| {
+                        HashedStorage::from_plain_storage(
+                            account.status,
+                            account
+                                .storage
+                                .iter()
+                                .map(|(slot, value)| (slot, &value.present_value)),
+                        )
+                    })
+                    .filter(|storage| !storage.is_empty());
 
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
+                (hashed_address, hashed_account, hashed_storage)
             })
             .collect()
     }
