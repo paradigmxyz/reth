@@ -810,6 +810,11 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
         self.pending.len() + self.queued.len()
     }
 
+    /// Returns an iterator over all pending and queued transactions.
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<ValidPoolTransaction<T>>> + '_ {
+        self.pending.iter().chain(self.queued.iter())
+    }
+
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
         self.pending.iter().map(|tx| tx.to_consensus())
