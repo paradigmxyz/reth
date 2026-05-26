@@ -32,8 +32,6 @@ pub struct TrieWalker<C, K = AddedRemovedKeys> {
     /// Specifically we don't skip certain branch nodes even when they are not in the `PrefixSet`,
     /// when they might be required to support leaf removal.
     added_removed_keys: Option<K>,
-    /// Whether unchanged branch nodes may be skipped during traversal.
-    branch_skips_enabled: bool,
     #[cfg(feature = "metrics")]
     /// Walker metrics.
     metrics: WalkerMetrics,
@@ -80,7 +78,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             can_skip_current_node: false,
             removed_keys: None,
             added_removed_keys: None,
-            branch_skips_enabled: true,
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };
@@ -96,13 +93,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         self
     }
 
-    /// Configures the walker to visit all branch nodes instead of skipping unchanged ones.
-    pub fn with_branch_skips_disabled(mut self) -> Self {
-        self.branch_skips_enabled = false;
-        self.update_skip_node();
-        self
-    }
-
     /// Configures the walker to not skip certain branch nodes, even when they are not in the
     /// `PrefixSet`, when they might be needed to support leaf removal.
     pub fn with_added_removed_keys<K2>(self, added_removed_keys: Option<K2>) -> TrieWalker<C, K2> {
@@ -113,7 +103,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             changes: self.changes,
             removed_keys: self.removed_keys,
             added_removed_keys,
-            branch_skips_enabled: self.branch_skips_enabled,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
@@ -182,8 +171,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
-        self.can_skip_current_node = self.branch_skips_enabled &&
-            self.stack.last().is_some_and(|node| {
+        self.can_skip_current_node = self.stack.last().is_some_and(|node| {
                 // If the current key is not removed according to the [`AddedRemovedKeys`], and all
                 // of its siblings are removed, then we don't want to skip it. This
                 // allows the `ProofRetainer` to include this node in the returned
@@ -247,7 +235,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             can_skip_current_node: false,
             removed_keys: None,
             added_removed_keys: Default::default(),
-            branch_skips_enabled: true,
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };

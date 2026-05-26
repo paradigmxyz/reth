@@ -266,14 +266,11 @@ impl<Provider: DBProvider + StorageSettingsCache + Sync> AccountRangeProvider
         start: B256,
         limit: usize,
     ) -> ProviderResult<reth_storage_api::AccountRangeResult> {
-        reth_trie_db::with_adapter!(self.0, |A| {
-            super::account_range::account_range(
-                &reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                start,
-                limit,
-            )
-        })
+        super::account_range::account_range(
+            &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+            start,
+            limit,
+        )
     }
 }
 

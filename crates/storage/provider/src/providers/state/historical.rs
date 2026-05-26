@@ -667,22 +667,15 @@ where
         start: B256,
         limit: usize,
     ) -> ProviderResult<reth_storage_api::AccountRangeResult> {
-        reth_trie_db::with_adapter!(self.provider, |A| {
-            let TrieInputSorted { nodes, state, .. } =
-                self.build_overlay(TrieInputSorted::default())?;
-            super::account_range::account_range(
-                &InMemoryTrieCursorFactory::new(
-                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    nodes.as_ref(),
-                ),
-                &HashedPostStateCursorFactory::new(
-                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    state.as_ref(),
-                ),
-                start,
-                limit,
-            )
-        })
+        let TrieInputSorted { state, .. } = self.build_overlay(TrieInputSorted::default())?;
+        super::account_range::account_range(
+            &HashedPostStateCursorFactory::new(
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                state.as_ref(),
+            ),
+            start,
+            limit,
+        )
     }
 }
 
