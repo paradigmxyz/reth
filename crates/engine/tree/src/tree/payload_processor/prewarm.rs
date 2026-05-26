@@ -34,6 +34,7 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use revm_primitives::{Address, U256};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -405,18 +406,27 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                prefetch_bal.as_bal().par_iter().for_each(|account| {
-                    if ctx.should_stop() {
-                        return;
-                    }
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider = worker
-                            .get_or_init::<Option<CachedStateProvider<StateProviderBox, true>>>(
-                                || None,
-                            );
-                        ctx.prefetch_bal_storage(&parent_span, provider, account);
+                prefetch_bal
+                    .as_bal()
+                    .par_iter()
+                    .flat_map(|account| {
+                        account
+                            .storage_reads
+                            .par_iter()
+                            .chain(account.storage_changes.par_iter().map(|slot| &slot.slot))
+                            .map(|slot| (&account.address, slot))
+                    })
+                    .for_each(|(account, slot)| {
+                        if ctx.should_stop() {
+                            return;
+                        }
+                        WorkerPool::with_worker_mut(|worker| {
+                            let provider = worker.get_or_init::<Option<
+                                CachedStateProvider<StateProviderBox, true>,
+                            >>(|| None);
+                            ctx.prefetch_bal_storage(&parent_span, provider, account, slot);
+                        });
                     });
-                });
 
                 let _ = prefetch_tx.send(());
             });
@@ -755,17 +765,12 @@ where
         &self,
         parent_span: &Span,
         provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
-        account: &alloy_eip7928::AccountChanges,
+        account: &Address,
+        slot: &U256,
     ) {
-        if self.disable_bal_batch_io ||
-            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
-        {
-            return;
-        }
-
         let state_provider = match provider {
             Some(p) => p,
-            slot @ None => {
+            provider @ None => {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: parent_span,
@@ -787,7 +792,7 @@ where
                 let saved_cache =
                     self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
                 let caches = saved_cache.cache().clone();
-                slot.insert(CachedStateProvider::new_prewarm(
+                provider.insert(CachedStateProvider::new_prewarm(
                     built,
                     caches,
                     self.cache_metrics.clone().unwrap_or_default(),
@@ -795,16 +800,7 @@ where
             }
         };
 
-        let start = Instant::now();
-
-        for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
-        }
-        for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
-        }
-
-        self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
+        state_provider.storage(*account, StorageKey::from(*slot)).unwrap_or_default();
     }
 }
 
@@ -906,6 +902,4 @@ pub struct PrewarmMetrics {
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
-    /// A histogram of BAL slot iteration duration during prefetching
-    pub(crate) bal_slot_iteration_duration: Histogram,
 }
