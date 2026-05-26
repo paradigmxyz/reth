@@ -208,7 +208,9 @@ impl OrderedTrieRootEncodedBuilder {
             };
 
             let index_buffer = alloy_rlp::encode_fixed_size(&exec_index_needed);
-            self.hb.add_leaf(Nibbles::unpack(&index_buffer), &value);
+            // SAFETY: RLP-encoded usize indices are at most 9 bytes on 64-bit targets, well below
+            // the 32-byte limit enforced by `Nibbles::unpack`.
+            self.hb.add_leaf(unsafe { Nibbles::unpack_unchecked(&index_buffer) }, &value);
 
             self.next_insert_i += 1;
         }

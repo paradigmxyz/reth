@@ -145,6 +145,8 @@ impl OpenEndedOrderedTrieRootEncodedBuilder {
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
         let index_buffer = alloy_rlp::encode_fixed_size(&index);
-        self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+        // SAFETY: RLP-encoded usize indices are at most 9 bytes on 64-bit targets, well below the
+        // 32-byte limit enforced by `Nibbles::unpack`.
+        self.hb.add_leaf(unsafe { Nibbles::unpack_unchecked(&index_buffer) }, bytes);
     }
 }
