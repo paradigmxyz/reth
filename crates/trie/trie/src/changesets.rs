@@ -58,7 +58,10 @@ where
     let account_nodes = compute_account_changesets(factory, trie_updates)?;
 
     // Compute storage trie changesets
-    let mut storage_tries = B256Map::default();
+    let mut storage_tries = B256Map::with_capacity_and_hasher(
+        trie_updates.storage_tries_ref().len(),
+        Default::default(),
+    );
 
     // Create storage cursor once and reuse it for all addresses
     let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
