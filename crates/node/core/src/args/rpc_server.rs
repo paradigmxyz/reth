@@ -650,8 +650,8 @@ pub struct RpcServerArgs {
 
     /// Override the gas limit used by `testing_buildBlockV1`.
     ///
-    /// When set, `testing_buildBlockV1` will use this value instead of inheriting
-    /// the parent block's gas limit. Accepts short notation: K for thousand, M for
+    /// When set, `testing_buildBlockV1` will use this exact value instead of moving toward the
+    /// payload builder's configured gas limit. Accepts short notation: K for thousand, M for
     /// million, G for billion (e.g., 1G = 1 billion).
     #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT", hide = true)]
     pub testing_gas_limit: Option<u64>,
