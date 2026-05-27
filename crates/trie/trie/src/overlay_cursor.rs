@@ -1,6 +1,6 @@
 use std::{fmt, slice, sync::Arc};
 
-const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 64;
+const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 128;
 
 #[derive(Debug)]
 pub(crate) enum DbCursorState<K, V> {
@@ -168,6 +168,11 @@ where
 {
     let mut start =
         position.as_ref().map(|position| **position).unwrap_or_default().min(entries.len());
+    if entries.get(start).is_some_and(|(entry_key, _)| !mode.skips(entry_key, key)) &&
+        (start == 0 || mode.skips(&entries[start - 1].0, key))
+    {
+        return Some(start)
+    }
     if start > 0 && !mode.skips(&entries[start - 1].0, key) {
         start = 0;
     }
@@ -219,5 +224,37 @@ unsafe impl<O: Send + Sync, K: Sync, V: Sync> Sync for OverlayLayer<O, K, V> {}
 impl<O, K, V> fmt::Debug for OverlayLayer<O, K, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OverlayLayer").field("entries_len", &self.entries_len).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layer(entries: Arc<Vec<(u8, u8)>>) -> OverlayLayer<Vec<(u8, u8)>, u8, u8> {
+        OverlayLayer::new(Arc::clone(&entries), entries.as_slice())
+    }
+
+    #[test]
+    fn seek_reuses_current_position_when_it_already_satisfies_bound() {
+        let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
+        let overlay = [layer(entries)];
+        let mut cursor = PositionedOverlayCursor::new(&overlay);
+
+        assert_eq!(cursor.next_key(&100, true), Some(100));
+        assert_eq!(cursor.next_key(&100, true), Some(100));
+        assert_eq!(cursor.next_key(&99, false), Some(100));
+        assert_eq!(cursor.next_key(&100, false), Some(101));
+    }
+
+    #[test]
+    fn seek_can_move_backwards_from_current_position() {
+        let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
+        let overlay = [layer(entries)];
+        let mut cursor = PositionedOverlayCursor::new(&overlay);
+
+        assert_eq!(cursor.next_key(&150, true), Some(150));
+        assert_eq!(cursor.next_key(&75, true), Some(75));
+        assert_eq!(cursor.seek_exact(&25), Some(&25));
     }
 }

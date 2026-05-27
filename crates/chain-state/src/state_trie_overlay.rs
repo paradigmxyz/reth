@@ -337,15 +337,27 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             let span = tracing::Span::current();
 
             worker_pool.spawn(move || {
-                let _span = tracing::debug_span!(
-                    target: "chain_state::state_trie_overlay",
-                    parent: span,
-                    "compute_state_trie_overlay_cache_fill",
-                    tip_hash = %key.tip_hash,
-                    anchor_hash = %key.anchor_hash,
-                )
-                .entered();
-                manager.compute_and_cache_overlay(key, path);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _span = tracing::debug_span!(
+                        target: "chain_state::state_trie_overlay",
+                        parent: &span,
+                        "compute_state_trie_overlay_cache_fill",
+                        tip_hash = %key.tip_hash,
+                        anchor_hash = %key.anchor_hash,
+                    )
+                    .entered();
+                    manager.compute_and_cache_overlay(key, path);
+                }));
+
+                if result.is_err() {
+                    manager.remove_pending_overlay(key);
+                    debug!(
+                        target: "chain_state::state_trie_overlay",
+                        tip_hash = %key.tip_hash,
+                        anchor_hash = %key.anchor_hash,
+                        "state trie overlay cache fill panicked"
+                    );
+                }
             });
         }
     }
