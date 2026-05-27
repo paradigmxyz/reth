@@ -4,8 +4,9 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
-    CacheWaitDurations, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
+    WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -121,6 +122,8 @@ where
     execution_cache: PayloadExecutionCache,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
+    /// Metrics for shared execution cache state.
+    cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -185,6 +188,8 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
+            cache_state_metrics: (!config.disable_cache_metrics())
+                .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
         }
@@ -527,6 +532,7 @@ where
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
+            cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
@@ -722,7 +728,7 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
-        let cache_metrics = self.cache_metrics.clone();
+        let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
@@ -756,7 +762,7 @@ where
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return
             }
-            new_cache.update_metrics(cache_metrics.as_ref());
+            new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache
             *cached = Some(new_cache);
