@@ -15,7 +15,7 @@
 //! on public-facing RPC endpoints without proper authentication.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::eip2718::Decodable2718;
+use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{map::HashSet, Address, U256};
 use alloy_rlp::Encodable;
@@ -29,7 +29,6 @@ use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
 use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR,
     transaction::{recover::try_recover_signers, signed::RecoveryError},
     AlloyBlockHeader as BlockTrait, TxTy,
 };
@@ -38,7 +37,7 @@ use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, HeaderProvider};
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
 use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
@@ -147,11 +146,21 @@ where
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
                 let mut block_transactions_rlp_length = 0usize;
 
-                /// If no transactions are provided in the request, use all transactions from the
-                /// pool.
+                // If no transactions are provided in the request, use transactions from the pool.
                 let use_pool_transactions = request.transactions.is_empty();
                 let recovered_txs = if use_pool_transactions {
-                    eth_api.pool().all_transactions().all().collect()
+                    let mut best_txs = eth_api.pool().best_transactions_with_attributes(
+                        BestTransactionsAttributes::new(
+                            base_fee,
+                            builder
+                                .evm_mut()
+                                .block()
+                                .blob_gasprice()
+                                .map(|gasprice| gasprice as u64),
+                        ),
+                    );
+                    best_txs.no_updates();
+                    best_txs.map(|tx| tx.to_consensus()).collect()
                 } else {
                     // Decode and recover all transactions in parallel
                     try_recover_signers(&request.transactions, |tx| {
@@ -161,7 +170,7 @@ where
                     .or(Err(EthApiError::InvalidTransactionSignature))?
                 };
                 let allow_skip_invalid_transactions =
-                    skip_invalid_transactions && !use_pool_transactions;
+                    skip_invalid_transactions || use_pool_transactions;
 
                 for (idx, tx) in recovered_txs.into_iter().enumerate() {
                     let signer = tx.signer();
@@ -242,14 +251,6 @@ where
             })
             .await
     }
-}
-
-/// Calculate the next block gas limit from the parent gas limit and desired target.
-fn calculate_block_gas_limit(parent_gas_limit: u64, desired_gas_limit: u64) -> u64 {
-    let delta = (parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR).saturating_sub(1);
-    let min_gas_limit = parent_gas_limit - delta;
-    let max_gas_limit = parent_gas_limit + delta;
-    desired_gas_limit.clamp(min_gas_limit, max_gas_limit)
 }
 
 #[async_trait]
