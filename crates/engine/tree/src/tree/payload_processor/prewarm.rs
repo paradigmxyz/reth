@@ -550,7 +550,7 @@ where
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+    Option<EvmFor<Evm, State<StateProviderDatabase<reth_provider::StateProviderBox>>>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
