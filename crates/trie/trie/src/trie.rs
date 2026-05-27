@@ -620,7 +620,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            Span::current().record("storage_root", format!("{EMPTY_ROOT_HASH:?}"));
+            Span::current().record("storage_root", tracing::field::debug(EMPTY_ROOT_HASH));
             return Ok(StorageRootProgress::Complete(
                 EMPTY_ROOT_HASH,
                 0,
@@ -696,7 +696,7 @@ where
         }
 
         let root = hash_builder.root();
-        Span::current().record("storage_root", format!("{root:?}"));
+        Span::current().record("storage_root", tracing::field::debug(root));
 
         let removed_keys = storage_node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys);
