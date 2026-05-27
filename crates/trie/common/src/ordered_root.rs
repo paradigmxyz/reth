@@ -136,9 +136,37 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
-        let index_buffer = alloy_rlp::encode_fixed_size(&index);
-        self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+        self.hb.add_leaf(ordered_index_nibbles(index), bytes);
     }
+}
+
+#[inline]
+fn ordered_index_nibbles(index: usize) -> Nibbles {
+    const MAX_INDEX_RLP_LEN: usize = 1 + core::mem::size_of::<usize>();
+
+    let mut index_buffer = [0u8; MAX_INDEX_RLP_LEN];
+    let len = match index {
+        0 => {
+            index_buffer[0] = 0x80;
+            1
+        }
+        1..=0x7f => {
+            index_buffer[0] = index as u8;
+            1
+        }
+        _ => {
+            let bytes = index.to_be_bytes();
+            let first_non_zero =
+                bytes.iter().position(|byte| *byte != 0).expect("non-zero index has a byte");
+            let integer_len = bytes.len() - first_non_zero;
+            index_buffer[0] = 0x80 + integer_len as u8;
+            index_buffer[1..][..integer_len].copy_from_slice(&bytes[first_non_zero..]);
+            1 + integer_len
+        }
+    };
+
+    // SAFETY: RLP-encoded usize keys are at most 1 + size_of::<usize>() bytes.
+    unsafe { Nibbles::unpack_unchecked(&index_buffer[..len]) }
 }
 
 #[cfg(test)]
@@ -213,6 +241,28 @@ mod tests {
             let expected = ordered_trie_root_encoded(&items);
 
             assert_eq!(root_with_push_next(&items), expected, "push_next mismatch for len={len}");
+        }
+    }
+
+    #[test]
+    fn ordered_index_nibbles_matches_rlp_encoding() {
+        for index in [
+            0,
+            1,
+            2,
+            0x7f,
+            0x80,
+            0x81,
+            0xff,
+            0x100,
+            0x101,
+            0xffff,
+            0x1_0000,
+            1_000_000,
+            usize::MAX,
+        ] {
+            let expected = Nibbles::unpack(alloy_rlp::encode_fixed_size(&index));
+            assert_eq!(ordered_index_nibbles(index), expected, "index {index}");
         }
     }
 
