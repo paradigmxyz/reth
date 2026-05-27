@@ -10,7 +10,7 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_eips::merge::SLOT_DURATION;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{map::U256Map, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
@@ -198,12 +198,16 @@ where
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
         let new_execution_outcome = committed.execution_outcome();
-        for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
+        let accounts = new_execution_outcome.bundle_accounts_iter();
+        cached.accounts.reserve(accounts.size_hint().0);
+
+        for (addr, acc) in accounts {
             if let Some(info) = acc.info.clone() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing
-                let storage =
-                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                let mut storage =
+                    U256Map::with_capacity_and_hasher(acc.storage.len(), Default::default());
+                storage.extend(acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)));
                 cached.insert_account(addr, info, storage);
             }
         }
