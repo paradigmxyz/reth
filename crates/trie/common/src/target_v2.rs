@@ -8,6 +8,8 @@ use alloy_primitives::{map::B256Map, B256};
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
 #[derive(Debug, Copy, Clone)]
 pub struct ProofV2Target {
+    /// Original 32-byte key.
+    pub key: B256,
     /// The key of the proof target, as nibbles.
     pub key_nibbles: Nibbles,
     /// The minimum length of a node's path for it to be retained.
@@ -20,12 +22,12 @@ impl ProofV2Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key_nibbles = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self { key_nibbles, min_len: 0 }
+        Self { key, key_nibbles, min_len: 0 }
     }
 
     /// Returns the key the target was initialized with.
     pub fn key(&self) -> B256 {
-        B256::from_slice(&self.key_nibbles.pack())
+        self.key
     }
 
     /// Only match trie nodes whose path is at least this long.
