@@ -81,7 +81,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending = None::<HashMap<usize, R>>;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +98,29 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
-                    next += 1;
+                let drained_pending = if let Some(pending_receipts) = pending.as_mut() {
+                    while let Some(receipt) = pending_receipts.remove(&next) {
+                        push(receipt);
+                        next += 1;
+                    }
+
+                    pending_receipts.is_empty()
+                } else {
+                    false
+                };
+
+                if drained_pending {
+                    pending = None;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                pending
+                    .get_or_insert_with(|| {
+                        HashMap::with_capacity_and_hasher(
+                            receipts_len.unwrap_or_default().saturating_sub(next),
+                            Default::default(),
+                        )
+                    })
+                    .insert(indexed_receipt.index, indexed_receipt.receipt);
             }
         }
 
@@ -117,7 +134,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        if let Some(pending) = pending.filter(|pending| !pending.is_empty()) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
