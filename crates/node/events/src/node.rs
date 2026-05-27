@@ -252,8 +252,8 @@ impl NodeState {
                     gas_used=%format_gas(block.gas_used()),
                     gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
                     gas_limit=%format_gas(block.gas_limit()),
-                    full=%format!("{:.1}%", full),
-                    base_fee=%format!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    full=%Percent(full),
+                    base_fee=%Gwei(block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
@@ -407,6 +407,24 @@ impl<T: Display> Display for OptionalField<T> {
         } else {
             write!(f, "None")
         }
+    }
+}
+
+/// Displays a percentage with one fractional digit.
+struct Percent(f64);
+
+impl Display for Percent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.1}%", self.0)
+    }
+}
+
+/// Displays a wei-denominated fee value as gwei with two fractional digits.
+struct Gwei(f64);
+
+impl Display for Gwei {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.2}Gwei", self.0)
     }
 }
 
