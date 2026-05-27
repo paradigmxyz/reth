@@ -20,7 +20,6 @@ use std::sync::{
 
 mod wal_test;
 
-#[allow(unfulfilled_lint_expectations)]
 struct TestState {
     received_blocks: AtomicU64,
     saw_trie_updates: AtomicBool,
@@ -28,7 +27,6 @@ struct TestState {
 }
 
 /// ExEx that tests assertions about notifications and state
-#[expect(dead_code)]
 async fn test_assertion_exex<
     Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 >(
@@ -42,38 +40,29 @@ async fn test_assertion_exex<
 
     println!("Assertion ExEx started");
 
-    // Clone state for the async block
-    let state_clone = state.clone();
-
     // Process notifications
     while let Some(result) = ctx.notifications.next().await {
-        // Handle the Result with ?
         let notification = result?;
 
-        // Check for committed chain
         if let Some(committed_chain) = notification.committed_chain() {
             let range = committed_chain.range();
             let blocks_count = *range.end() - *range.start() + 1;
             println!("Received committed chain: {range:?}");
 
-            // Increment blocks count
             #[expect(clippy::unnecessary_cast)]
-            state_clone.received_blocks.fetch_add(blocks_count as u64, Ordering::SeqCst);
+            state.received_blocks.fetch_add(blocks_count as u64, Ordering::SeqCst);
 
-            // Send event that we've processed this height
             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
 
-            // Check for finalization
-            state_clone.last_finalized_block.store(committed_chain.tip().number, Ordering::SeqCst);
+            state.last_finalized_block.store(committed_chain.tip().number, Ordering::SeqCst);
+            // Mark that we received at least one committed notification
+            state.saw_trie_updates.store(true, Ordering::SeqCst);
         }
-
-        // For example, if we see any block, we'll set saw_trie_updates to true
-        // This is a simplification
-        state_clone.saw_trie_updates.store(true, Ordering::SeqCst);
     }
 
     // Report results at the end
     report_test_results(&state);
+
 
     Ok(())
 }
@@ -91,7 +80,7 @@ fn report_test_results(state: &TestState) {
     println!("====================================");
 
     assert!(blocks_received > 0, "No blocks were received by the ExEx");
-    assert!(saw_trie_updates, "No trie updates were observed in any notifications");
+    assert!(saw_trie_updates, "No committed chain notifications were observed");
     assert!(last_finalized > 0, "No finalization events were observed");
 }
 
@@ -123,7 +112,11 @@ async fn run_exex_test() -> eyre::Result<()> {
 
     println!("Test built, running...");
 
-    test.run::<EthereumNode>().await?;
+    test.run_with_exex::<EthereumNode, _>(|builder| {
+            builder.install_exex("assertion-exex", |ctx| async move {
+                Ok(test_assertion_exex(ctx))
+            })
+        }).await?;
 
     println!("Test completed successfully");
 

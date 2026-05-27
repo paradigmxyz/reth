@@ -367,4 +367,25 @@ where
 
         Ok(())
     }
+
+    /// Runs the test scenario with an ExEx installer.
+    pub async fn run_with_exex<N, G>(mut self, exex_installer: G) -> Result<()>
+    where
+        N: NodeBuilderHelper<Payload = I>,
+        G: Fn(crate::ExExInstallerBuilder<N>) -> crate::ExExInstallerBuilder<N>
+            + Clone
+            + Send
+            + 'static,
+    {
+        let mut setup = self.setup.take();
+        if let Some(ref mut s) = setup {
+            s.apply_with_exex::<N, G>(&mut self.env, exex_installer).await?;
+        }
+        let actions = std::mem::take(&mut self.actions);
+        for action in actions {
+            action.execute(&mut self.env).await?;
+        }
+        drop(setup);
+        Ok(())
+    }
 }

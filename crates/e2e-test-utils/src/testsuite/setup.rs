@@ -183,14 +183,34 @@ where
         N: NodeBuilderHelper<Payload = I>,
     {
         // Note: this future is quite large so we box it
-        Box::pin(self.apply_::<N>(env)).await
+        Box::pin(self.apply_::<N, _>(env, |b| b)).await
     }
 
-    /// Apply the setup to the environment
-    async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
+    /// Apply the setup with an ExEx installer.
+    pub async fn apply_with_exex<N, G>(
+        &mut self,
+        env: &mut Environment<I>,
+        exex_installer: G,
+    ) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I>,
-    {
+        G: Fn(crate::ExExInstallerBuilder<N>) -> crate::ExExInstallerBuilder<N>
+            + Clone
+            + Send
+            + 'static,
+{
+    // Store installer for use during node launch
+    // TODO: thread installer through apply_ to build_with_exex
+    let _ = exex_installer; // temporary until full plumbing
+    Box::pin(self.apply_::<N, G>(env, exex_installer)).await
+}  
+    /// Apply the setup to the environment
+    async fn apply_<N, G>(&mut self, env: &mut Environment<I>, exex_installer: G) -> Result<()>
+        where
+            N: NodeBuilderHelper<Payload = I>,
+            G: Fn(crate::ExExInstallerBuilder<N>) -> crate::ExExInstallerBuilder<N>
+                + Clone + Send + 'static,
+        {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
             return self.apply_with_import::<N>(env, &rlp_path).await;
@@ -223,7 +243,7 @@ where
             builder = builder.with_storage_v2();
         }
 
-        let result = builder.build().await;
+        let result = builder.build_with_exex(exex_installer).await;
 
         let mut node_clients = Vec::new();
         match result {

@@ -109,14 +109,46 @@ where
             config
         })
     }
-
-    /// Builds and launches the test nodes.
+    /// Builds and launches the test nodes with an optional ExEx installer.
+    ///
+    /// Use [`Self::build_with_exex`] to register ExEx instances.
     pub async fn build(
         self,
     ) -> eyre::Result<(
         Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         Wallet,
     )> {
+        self.build_inner(|b| b).await
+    }
+
+    /// Builds and launches the test nodes with an ExEx installer.
+    ///
+    /// The closure is called per-node after `with_add_ons`. Must be `Fn + Clone`
+    /// to support multi-node setups.
+    pub async fn build_with_exex<G>(
+        self,
+        exex_installer: G,
+    ) -> eyre::Result<(
+        Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        Wallet,
+    )>
+    where
+        G: Fn(reth_node_builder::WithLaunchContext<reth_node_builder::NodeBuilderWithComponents<reth_node_builder::RethFullAdapter<TmpDB, N>, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::ComponentsBuilder, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::AddOns>>) -> reth_node_builder::WithLaunchContext<reth_node_builder::NodeBuilderWithComponents<reth_node_builder::RethFullAdapter<TmpDB, N>, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::ComponentsBuilder, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::AddOns>> + Clone + Send + 'static,
+    {
+        self.build_inner(exex_installer).await
+    }
+
+    /// Internal build implementation.
+    async fn build_inner<G>(
+        self,
+        exex_installer: G,
+    ) -> eyre::Result<(
+        Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        Wallet,
+    )>
+    where
+        G: Fn(reth_node_builder::WithLaunchContext<reth_node_builder::NodeBuilderWithComponents<reth_node_builder::RethFullAdapter<TmpDB, N>, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::ComponentsBuilder, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::AddOns>>) -> reth_node_builder::WithLaunchContext<reth_node_builder::NodeBuilderWithComponents<reth_node_builder::RethFullAdapter<TmpDB, N>, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::ComponentsBuilder, <N as reth_node_builder::Node<crate::TmpNodeAdapter<N>>>::AddOns>> + Clone + Send + 'static,
+    {
         let runtime = Runtime::test();
 
         let network_config = NetworkArgs {
@@ -155,11 +187,13 @@ where
 
                 let span = span!(Level::INFO, "node", idx);
                 let node = N::default();
-                let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+                let builder = NodeBuilder::new(node_config)
                     .testing_node(runtime.clone())
                     .with_types_and_provider::<N, BlockchainProvider<_>>()
                     .with_components(node.components_builder())
-                    .with_add_ons(node.add_ons())
+                    .with_add_ons(node.add_ons());
+                let builder = exex_installer.clone()(builder);
+                let NodeHandle { node, node_exit_future: _ } = builder
                     .launch_with_fn(|builder| {
                         let launcher = EngineNodeLauncher::new(
                             builder.task_executor().clone(),

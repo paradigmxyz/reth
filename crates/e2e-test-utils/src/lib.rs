@@ -129,6 +129,8 @@ where
 pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type TmpNodeAdapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
     FullNodeTypesAdapter<N, TmpDB, Provider>;
+/// Type alias for the ExEx installer builder stage
+pub type ExExInstallerBuilder<N> = reth_node_builder::WithLaunchContext<reth_node_builder::NodeBuilderWithComponents<reth_node_builder::RethFullAdapter<TmpDB, N>, <N as reth_node_builder::Node<TmpNodeAdapter<N>>>::ComponentsBuilder, <N as reth_node_builder::Node<TmpNodeAdapter<N>>>::AddOns>>;
 
 /// Type alias for a `NodeAdapter`
 pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> = NodeAdapter<
