@@ -177,7 +177,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 };
 
                 if !state.is_empty() {
-                    overlay.hashed_post_state.insert(0, Arc::clone(state));
+                    overlay.prepend_hashed_post_state(Arc::clone(state));
                 }
 
                 Ok(overlay)
@@ -348,17 +348,15 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             let mut overlay = self.resolve_overlays(anchor_hash)?;
 
             if !trie_reverts.is_empty() {
-                overlay.trie_updates.push(Arc::new(trie_reverts));
+                overlay.push_trie_updates(Arc::new(trie_reverts));
             }
 
             if !hashed_state_reverts.is_empty() {
-                overlay.hashed_post_state.push(Arc::new(hashed_state_reverts));
+                overlay.push_hashed_post_state(Arc::new(hashed_state_reverts));
             }
 
-            trie_updates_total_len =
-                overlay.trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
-            hashed_state_updates_total_len =
-                overlay.hashed_post_state.iter().map(|state| state.total_len()).sum::<usize>();
+            trie_updates_total_len = overlay.trie_updates_total_len();
+            hashed_state_updates_total_len = overlay.hashed_post_state_total_len();
 
             debug!(
                 target: "providers::state::overlay",
@@ -374,10 +372,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
-            trie_updates_total_len =
-                overlay.trie_updates.iter().map(|updates| updates.total_len()).sum::<usize>();
-            hashed_state_updates_total_len =
-                overlay.hashed_post_state.iter().map(|state| state.total_len()).sum::<usize>();
+            trie_updates_total_len = overlay.trie_updates_total_len();
+            hashed_state_updates_total_len = overlay.hashed_post_state_total_len();
 
             overlay
         };
@@ -567,7 +563,7 @@ where
                 tx.cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account_from_overlay(cursor, &self.overlay.trie_updates))
+        Ok(InMemoryTrieCursor::new_account(cursor, &self.overlay.trie_updates))
     }
 
     fn storage_trie_cursor(
@@ -586,11 +582,7 @@ where
                 hashed_address,
             ))
         };
-        Ok(InMemoryTrieCursor::new_storage_from_overlay(
-            cursor,
-            &self.overlay.trie_updates,
-            hashed_address,
-        ))
+        Ok(InMemoryTrieCursor::new_storage(cursor, &self.overlay.trie_updates, hashed_address))
     }
 }
 
@@ -619,7 +611,7 @@ where
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
         let cursor = db_hashed_cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateCursor::new_account_from_overlay(cursor, &self.overlay.hashed_post_state))
+        Ok(HashedPostStateCursor::new_account(cursor, &self.overlay.hashed_post_state))
     }
 
     fn hashed_storage_cursor(
@@ -628,7 +620,7 @@ where
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
         let cursor = db_hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateCursor::new_storage_from_overlay(
+        Ok(HashedPostStateCursor::new_storage(
             cursor,
             &self.overlay.hashed_post_state,
             hashed_address,

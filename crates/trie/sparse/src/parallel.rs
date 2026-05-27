@@ -3426,7 +3426,7 @@ mod tests {
         test_utils::create_test_provider_factory, StorageSettingsCache, TrieWriter,
     };
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
+        hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor, HashedPostStateOverlay},
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
@@ -3728,11 +3728,13 @@ mod tests {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
             }))
             .into_sorted();
+        let hashed_post_state =
+            HashedPostStateOverlay::new(vec![alloc::sync::Arc::new(hashed_post_state)]);
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateCursor::new_account(
                 NoopHashedCursor::<Account>::default(),
-                [&hashed_post_state],
+                &hashed_post_state,
             ),
         );
 

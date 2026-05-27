@@ -10,13 +10,15 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot, StateRootProgress,
-    TrieInputSorted,
+    hashed_cursor::{HashedPostStateCursorFactory, HashedPostStateOverlay},
+    trie_cursor::{InMemoryTrieCursorFactory, TrieUpdatesOverlay},
+    updates::TrieUpdates,
+    HashedPostStateSorted, HashedStorageSorted, StateRoot, StateRootProgress, TrieInputSorted,
 };
 use std::{
     collections::HashSet,
     ops::{Bound, RangeBounds, RangeInclusive},
+    sync::Arc,
 };
 use tracing::{debug, instrument};
 
@@ -208,9 +210,10 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         post_state: &HashedPostStateSorted,
     ) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
+        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state.clone())]);
         StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), [post_state]),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
         )
         .with_prefix_sets(prefix_sets)
         .root()
@@ -221,24 +224,24 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         post_state: &HashedPostStateSorted,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
+        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state.clone())]);
         StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), [post_state]),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
         )
         .with_prefix_sets(prefix_sets)
         .root_with_updates()
     }
 
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError> {
+        let nodes_overlay = TrieUpdatesOverlay::new(vec![Arc::clone(&input.nodes)]);
+        let state_overlay = HashedPostStateOverlay::new(vec![Arc::clone(&input.state)]);
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::<_, A>::new(tx),
-                [input.nodes.as_ref()],
+                &nodes_overlay,
             ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                [input.state.as_ref()],
-            ),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root()
@@ -248,15 +251,14 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         tx: &'a TX,
         input: TrieInputSorted,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
+        let nodes_overlay = TrieUpdatesOverlay::new(vec![Arc::clone(&input.nodes)]);
+        let state_overlay = HashedPostStateOverlay::new(vec![Arc::clone(&input.state)]);
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::<_, A>::new(tx),
-                [input.nodes.as_ref()],
+                &nodes_overlay,
             ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                [input.state.as_ref()],
-            ),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()

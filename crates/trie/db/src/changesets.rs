@@ -20,7 +20,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory, TrieUpdatesOverlay},
     TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
@@ -155,8 +155,8 @@ where
     // Step 5: Compute changesets using cumulative trie updates for block-1 as overlay
     // Create an overlay cursor factory that has the trie state from after block-1
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-    let overlay_factory =
-        InMemoryTrieCursorFactory::new(db_cursor_factory, [&cumulative_trie_updates_prev]);
+    let trie_overlay = TrieUpdatesOverlay::new(vec![Arc::new(cumulative_trie_updates_prev)]);
+    let overlay_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &trie_overlay);
 
     let changesets =
         compute_trie_changesets(&overlay_factory, &trie_updates).map_err(ProviderError::other)?;
@@ -262,7 +262,8 @@ where
     // Step 4: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, [&reverts]);
+    let trie_overlay = TrieUpdatesOverlay::new(vec![Arc::new(reverts)]);
+    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &trie_overlay);
 
     // Step 5: Collect all account trie nodes that changed in the target block
     let account_nodes_ref = changesets.account_nodes_ref();
