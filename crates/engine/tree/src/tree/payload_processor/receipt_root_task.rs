@@ -12,7 +12,7 @@ use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
-use tracing::debug_span;
+use tracing::trace_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
 
@@ -70,7 +70,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     pub fn run(self, receipts_len: impl Into<Option<usize>>) {
         let receipts_len = receipts_len.into();
 
-        let _span = debug_span!(
+        let _span = trace_span!(
             target: "engine::tree::payload_processor",
             "receipt_root",
             receipts_len,
