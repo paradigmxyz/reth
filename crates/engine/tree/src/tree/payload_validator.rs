@@ -514,9 +514,9 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
+        if let Some(caches) = handle.caches() {
             state_provider = Box::new(
-                CachedStateProvider::new(state_provider, caches, cache_metrics)
+                CachedStateProvider::new(state_provider, caches, handle.cache_metrics())
                     .with_cache_stats(cache_stats.clone()),
             );
         };
@@ -1139,7 +1139,6 @@ where
         let cache = handle.caches().ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no execution cache available".into())
         })?;
-        let cache_metrics = handle.cache_metrics().unwrap_or_default();
         let saved_cache = SavedCache::new(env.parent_hash, cache);
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
@@ -1154,7 +1153,6 @@ where
             Ok(StateProviderDatabase::new(CachedStateProvider::new_prewarm(
                 provider,
                 saved_cache.cache().clone(),
-                cache_metrics.clone(),
             )))
         };
         let execution_start = Instant::now();
