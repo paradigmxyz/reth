@@ -20,9 +20,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{HashedPostStateCursorFactory, HashedPostStateOverlay},
     proof::{Proof, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{InMemoryTrieCursorFactory, TrieUpdatesOverlay},
     updates::{TrieUpdates, TrieUpdatesSorted},
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
@@ -312,10 +312,11 @@ where
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let overlay = overlay_builder.build_overlay(self.provider)?;
+        let (trie_updates, hashed_post_state) = overlay.into_layers();
 
         Ok(TrieInputSorted::new(
-            TrieUpdatesSorted::merge_batch(overlay.trie_updates),
-            HashedPostStateSorted::merge_batch(overlay.hashed_post_state),
+            TrieUpdatesSorted::merge_batch(trie_updates),
+            HashedPostStateSorted::merge_batch(hashed_post_state),
             prefix_sets,
         ))
     }
@@ -616,14 +617,16 @@ where
         reth_trie_db::with_adapter!(self.provider, |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let nodes_overlay = TrieUpdatesOverlay::new(vec![nodes]);
+            let state_overlay = HashedPostStateOverlay::new(vec![state]);
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    [nodes.as_ref()],
+                    &nodes_overlay,
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    [state.as_ref()],
+                    &state_overlay,
                 ),
             )
             .with_prefix_sets_mut(prefix_sets)

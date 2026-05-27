@@ -1,8 +1,8 @@
-//! Flattened state trie overlays for in-memory blocks.
+//! State trie overlay stacks for in-memory blocks.
 //!
 //! Payload validation needs a view of the state trie as of an in-memory parent block even when that
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
-//! builds reusable flattened state trie overlays on demand.
+//! builds reusable state trie overlays on demand.
 
 use crate::{EthPrimitives, ExecutedBlock};
 use alloy_primitives::B256;
@@ -25,9 +25,9 @@ use std::time::Instant;
 use std::{fmt, sync::Arc};
 use tracing::debug;
 
-/// Manages flattened state trie overlays for in-memory blocks.
+/// Manages state trie overlays for in-memory blocks.
 ///
-/// The manager owns the in-memory block graph and a cache of flattened state trie overlays keyed by
+/// The manager owns the in-memory block graph and a cache of state trie overlays keyed by
 /// `(anchor_hash, tip_hash)`. Cache entries can also mark in-flight background computations.
 #[derive(Clone)]
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
@@ -308,8 +308,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
 
         if let Some((_, cached_overlay)) = cached_prefix {
-            trie_updates.extend(cached_overlay.trie_updates.iter().cloned());
-            hashed_post_state.extend(cached_overlay.hashed_post_state.iter().cloned());
+            trie_updates.extend(cached_overlay.trie_update_layers.iter().cloned());
+            hashed_post_state.extend(cached_overlay.hashed_post_state_layers.iter().cloned());
         }
 
         StateTrieOverlay::new(trie_updates, hashed_post_state)
@@ -474,6 +474,8 @@ pub struct StateTrieOverlay {
     pub trie_updates: TrieUpdatesOverlay,
     /// Hashed post state overlays.
     pub hashed_post_state: HashedPostStateOverlay,
+    trie_update_layers: Vec<Arc<TrieUpdatesSorted>>,
+    hashed_post_state_layers: Vec<Arc<HashedPostStateSorted>>,
 }
 
 impl StateTrieOverlay {
@@ -483,9 +485,49 @@ impl StateTrieOverlay {
         hashed_post_state: Vec<Arc<HashedPostStateSorted>>,
     ) -> Self {
         Self {
-            trie_updates: TrieUpdatesOverlay::new(trie_updates),
-            hashed_post_state: HashedPostStateOverlay::new(hashed_post_state),
+            trie_updates: TrieUpdatesOverlay::new(trie_updates.clone()),
+            hashed_post_state: HashedPostStateOverlay::new(hashed_post_state.clone()),
+            trie_update_layers: trie_updates,
+            hashed_post_state_layers: hashed_post_state,
         }
+    }
+
+    /// Returns `true` if this overlay has no layers.
+    pub const fn is_empty(&self) -> bool {
+        self.trie_update_layers.is_empty() && self.hashed_post_state_layers.is_empty()
+    }
+
+    /// Add a trie updates layer at the end of the precedence stack.
+    pub fn push_trie_updates(&mut self, trie_updates: Arc<TrieUpdatesSorted>) {
+        self.trie_update_layers.push(trie_updates);
+        self.trie_updates = TrieUpdatesOverlay::new(self.trie_update_layers.clone());
+    }
+
+    /// Add a hashed post-state layer at the end of the precedence stack.
+    pub fn push_hashed_post_state(&mut self, hashed_post_state: Arc<HashedPostStateSorted>) {
+        self.hashed_post_state_layers.push(hashed_post_state);
+        self.hashed_post_state = HashedPostStateOverlay::new(self.hashed_post_state_layers.clone());
+    }
+
+    /// Add a hashed post-state layer at the beginning of the precedence stack.
+    pub fn prepend_hashed_post_state(&mut self, hashed_post_state: Arc<HashedPostStateSorted>) {
+        self.hashed_post_state_layers.insert(0, hashed_post_state);
+        self.hashed_post_state = HashedPostStateOverlay::new(self.hashed_post_state_layers.clone());
+    }
+
+    /// Total number of trie update entries across all layers.
+    pub fn trie_updates_total_len(&self) -> usize {
+        self.trie_update_layers.iter().map(|updates| updates.total_len()).sum()
+    }
+
+    /// Total number of hashed post-state entries across all layers.
+    pub fn hashed_post_state_total_len(&self) -> usize {
+        self.hashed_post_state_layers.iter().map(|state| state.total_len()).sum()
+    }
+
+    /// Consume the overlay into its original layer stacks.
+    pub fn into_layers(self) -> (Vec<Arc<TrieUpdatesSorted>>, Vec<Arc<HashedPostStateSorted>>) {
+        (self.trie_update_layers, self.hashed_post_state_layers)
     }
 }
 
@@ -565,8 +607,7 @@ fn compute_overlay<N: NodePrimitives>(
 ) -> StateTrieOverlay {
     let started_at = Instant::now();
     let block_count = blocks.len();
-    let parent_overlay_reused =
-        !parent_overlay.trie_updates.is_empty() || !parent_overlay.hashed_post_state.is_empty();
+    let parent_overlay_reused = !parent_overlay.is_empty();
     tracing::Span::current().record("block_count", block_count);
     tracing::Span::current().record("parent_overlay", parent_overlay_reused);
 
@@ -593,7 +634,7 @@ fn flatten_overlay<N: NodePrimitives>(
     parent_overlay: StateTrieOverlay,
 ) -> StateTrieOverlay {
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
-    let StateTrieOverlay { trie_updates: parent_trie_updates, hashed_post_state } = parent_overlay;
+    let (parent_trie_updates, parent_hashed_post_state) = parent_overlay.into_layers();
 
     #[cfg(feature = "rayon")]
     let (trie_updates, hashed_post_state) = rayon::join(
@@ -610,7 +651,7 @@ fn flatten_overlay<N: NodePrimitives>(
                 trie_data
                     .iter()
                     .map(|data| Arc::clone(&data.hashed_state))
-                    .chain(hashed_post_state),
+                    .chain(parent_hashed_post_state),
             )
         },
     );
@@ -621,7 +662,10 @@ fn flatten_overlay<N: NodePrimitives>(
             trie_data.iter().map(|data| Arc::clone(&data.trie_updates)).chain(parent_trie_updates),
         ),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)).chain(hashed_post_state),
+            trie_data
+                .iter()
+                .map(|data| Arc::clone(&data.hashed_state))
+                .chain(parent_hashed_post_state),
         ),
     );
 
@@ -697,20 +741,18 @@ mod tests {
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
 
-        let state = manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap()
-            .hashed_post_state;
+        let overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        let state = &overlay.hashed_post_state_layers;
         assert_eq!(state.len(), 3);
-        assert_eq!(state_account_count(&state), 3);
+        assert_eq!(state_account_count(state), 3);
 
         let short_anchor = blocks[1].recovered_block().hash();
-        let short = manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
-            .unwrap()
-            .hashed_post_state;
+        let short_overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+        let short = &short_overlay.hashed_post_state_layers;
         assert_eq!(short.len(), 1);
-        assert_eq!(state_account_count(&short), 1);
+        assert_eq!(state_account_count(short), 1);
         manager.compute_and_cache_overlay(
             OverlayCacheKey {
                 anchor_hash: short_anchor,
@@ -718,10 +760,9 @@ mod tests {
             },
             None,
         );
-        let cached_short = manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
-            .unwrap()
-            .hashed_post_state;
+        let cached_short_overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+        let cached_short = &cached_short_overlay.hashed_post_state_layers;
         assert_eq!(cached_short.len(), 1);
         assert_eq!(cached_short[0].accounts.len(), 1);
     }
@@ -739,14 +780,13 @@ mod tests {
         manager
             .compute_and_cache_overlay(OverlayCacheKey { anchor_hash, tip_hash: prefix_tip }, None);
 
-        let state = manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap()
-            .hashed_post_state;
+        let overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        let state = &overlay.hashed_post_state_layers;
         assert_eq!(state.len(), 2);
         assert_eq!(state[0].accounts.len(), 1);
         assert_eq!(state[1].accounts.len(), 2);
-        assert_eq!(state_account_count(&state), 3);
+        assert_eq!(state_account_count(state), 3);
     }
 
     #[test]
@@ -762,12 +802,11 @@ mod tests {
         let prefix_key = OverlayCacheKey { anchor_hash, tip_hash: prefix_tip };
         manager.overlays.insert(prefix_key, OverlayCacheEntry::Pending);
 
-        let state = manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap()
-            .hashed_post_state;
+        let overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        let state = &overlay.hashed_post_state_layers;
         assert_eq!(state.len(), 3);
-        assert_eq!(state_account_count(&state), 3);
+        assert_eq!(state_account_count(state), 3);
         assert!(matches!(
             manager.overlays.get(&prefix_key).as_deref(),
             Some(OverlayCacheEntry::Pending)
@@ -840,7 +879,8 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
 
-        let state = manager.overlay_for_parent(child_hash, anchor_hash).unwrap().hashed_post_state;
+        let overlay = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+        let state = &overlay.hashed_post_state_layers;
         assert_eq!(state.len(), 1);
         assert_eq!(state[0].accounts.len(), 2);
     }
@@ -902,10 +942,9 @@ mod tests {
             .overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
             .is_err());
 
-        let state = manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap()
-            .hashed_post_state;
-        assert_eq!(state_account_count(&state), 1);
+        let overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        let state = &overlay.hashed_post_state_layers;
+        assert_eq!(state_account_count(state), 1);
     }
 }

@@ -55,6 +55,7 @@ pub fn storage_root_prehashed<I: IntoIterator<Item = (B256, U256)>>(storage: I) 
 use crate::{
     hashed_cursor::{
         mock::MockHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
+        HashedPostStateOverlay,
     },
     proof_v2::StorageProofCalculator,
     trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
@@ -65,7 +66,7 @@ use reth_trie_common::{
     prefix_set::PrefixSetMut, updates::StorageTrieUpdates, BranchNodeCompact,
     HashedPostStateSorted, HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
 };
-use std::{collections::BTreeMap, iter::once};
+use std::{collections::BTreeMap, iter::once, sync::Arc};
 
 /// General-purpose test harness for storage trie tests.
 ///
@@ -125,8 +126,9 @@ impl TrieTestHarness {
             Vec::new(),
             once((self.hashed_address(), hashed_storage.into_sorted())).collect(),
         );
+        let overlay = HashedPostStateOverlay::new(vec![Arc::new(overlay)]);
         let overlay_cursor_factory =
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), [&overlay]);
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
 
         let (root, _, updates) = StorageRoot::new_hashed(
             self.trie_cursor_factory.clone(),
