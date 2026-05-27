@@ -383,8 +383,13 @@ where
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut out = Vec::new();
-        self.append_pooled_transactions_max(max, &mut out);
+        if max == 0 {
+            return Vec::new()
+        }
+
+        let pool = self.get_pool_data();
+        let mut out = Vec::with_capacity(max.min(pool.all().len()));
+        out.extend(pool.all().transactions_iter().filter(|tx| tx.propagate).take(max).cloned());
         out
     }
 
@@ -459,13 +464,13 @@ where
         if max == 0 {
             return Vec::new();
         }
-        self.get_pool_data()
-            .all()
-            .transactions_iter()
-            .filter(|tx| tx.propagate)
-            .take(max)
-            .map(|tx| *tx.hash())
-            .collect()
+
+        let pool = self.get_pool_data();
+        let mut out = Vec::with_capacity(max.min(pool.all().len()));
+        out.extend(
+            pool.all().transactions_iter().filter(|tx| tx.propagate).take(max).map(|tx| *tx.hash()),
+        );
+        out
     }
 
     /// Converts the internally tracked transaction to the pooled format.
