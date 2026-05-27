@@ -206,16 +206,27 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         hashes_to_request: &mut RequestTxHashes,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
+        let saturated_peers =
+            SaturatedPeers::new(self.active_peers.iter().filter_map(|(peer_id, inflight)| {
+                (*inflight >= self.info.max_inflight_requests_per_peer).then_some(*peer_id)
+            }));
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
             let &hash = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash);
+            let idle_peer = self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).and_then(
+                |TxFetchMetadata { fallback_peers, .. }| {
+                    fallback_peers
+                        .iter()
+                        .find(|peer_id| !saturated_peers.contains(peer_id))
+                        .copied()
+                },
+            );
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
-                break idle_peer.copied()
+                break idle_peer
             }
 
             if let Some(ref mut bud) = budget {
@@ -1025,6 +1036,41 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
     }
 }
 
+#[derive(Debug, Default)]
+struct SaturatedPeers {
+    peers: HashMap<[u8; 8], smallvec::SmallVec<[PeerId; 1]>, FbBuildHasher<8>>,
+}
+
+impl SaturatedPeers {
+    fn new(peers: impl IntoIterator<Item = PeerId>) -> Self {
+        let iter = peers.into_iter();
+        let mut saturated_peers: HashMap<
+            [u8; 8],
+            smallvec::SmallVec<[PeerId; 1]>,
+            FbBuildHasher<8>,
+        > = HashMap::with_capacity_and_hasher(iter.size_hint().0, Default::default());
+
+        for peer_id in iter {
+            saturated_peers.entry(peer_prefix(&peer_id)).or_default().push(peer_id);
+        }
+
+        Self { peers: saturated_peers }
+    }
+
+    #[inline]
+    fn contains(&self, peer_id: &PeerId) -> bool {
+        self.peers
+            .get(&peer_prefix(peer_id))
+            .is_some_and(|peers| peers.iter().any(|saturated_peer| saturated_peer == peer_id))
+    }
+}
+
+fn peer_prefix(peer_id: &PeerId) -> [u8; 8] {
+    let mut prefix = [0u8; 8];
+    prefix.copy_from_slice(&peer_id.as_slice()[..8]);
+    prefix
+}
+
 /// Metadata of a transaction hash that is yet to be fetched.
 #[derive(Debug, Constructor)]
 pub struct TxFetchMetadata {
@@ -1455,6 +1501,74 @@ mod test {
 
         assert_eq!(1, hashes_to_request.len());
         assert_eq!(2, surplus_hashes.len());
+    }
+
+    #[test]
+    fn saturated_peers_check_full_peer_id_on_prefix_match() {
+        let saturated_peer = PeerId::new([1; 64]);
+        let mut same_prefix_peer = [1; 64];
+        same_prefix_peer[63] = 2;
+        let same_prefix_peer = PeerId::new(same_prefix_peer);
+
+        let saturated_peers = SaturatedPeers::new([saturated_peer]);
+
+        assert!(saturated_peers.contains(&saturated_peer));
+        assert!(!saturated_peers.contains(&same_prefix_peer));
+    }
+
+    #[test]
+    fn find_any_idle_skips_saturated_only_fallback() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let hash = B256::from_slice(&[1; 32]);
+        let busy_peer = PeerId::new([1; 64]);
+
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, busy_peer, 0, None);
+        tx_fetcher.active_peers.insert(busy_peer, tx_fetcher.info.max_inflight_requests_per_peer);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        assert_eq!(found, None);
+        assert!(hashes_to_request.is_empty());
+    }
+
+    #[test]
+    fn find_any_idle_prefers_idle_over_saturated_fallback() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let hash = B256::from_slice(&[1; 32]);
+        let busy_peer = PeerId::new([1; 64]);
+        let idle_peer = PeerId::new([2; 64]);
+
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, busy_peer, 0, None);
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, idle_peer, 0, None);
+        tx_fetcher.active_peers.insert(busy_peer, tx_fetcher.info.max_inflight_requests_per_peer);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        assert_eq!(found, Some(idle_peer));
+        assert!(hashes_to_request.contains(&hash));
+    }
+
+    #[test]
+    fn find_any_idle_treats_below_limit_peer_as_idle() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        tx_fetcher.info.max_inflight_requests_per_peer = 2;
+
+        let hash = B256::from_slice(&[1; 32]);
+        let peer = PeerId::new([1; 64]);
+
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash, peer, 0, None);
+        tx_fetcher.active_peers.insert(peer, 1);
+
+        let mut hashes_to_request = RequestTxHashes::default();
+        let found = tx_fetcher
+            .find_any_idle_fallback_peer_for_any_pending_hash(&mut hashes_to_request, None);
+
+        assert_eq!(found, Some(peer));
+        assert!(hashes_to_request.contains(&hash));
     }
 
     #[tokio::test]
