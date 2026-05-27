@@ -27,4 +27,4 @@ elif [ -n "${TXGEN_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_PAT:-${DEREK_TOKEN:-}}}}" 
 fi
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-cargo install --git "$TXGEN_REPO" --locked txgen-ethereum bench-cli
+cargo install --force --git "$TXGEN_REPO" --locked txgen-ethereum bench-cli
