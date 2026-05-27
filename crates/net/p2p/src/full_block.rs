@@ -1254,10 +1254,9 @@ mod tests {
     use super::*;
     use crate::{error::RequestError, test_utils::TestFullBlockClient};
     use alloy_consensus::Header;
-    use alloy_primitives::{keccak256, Bytes};
+    use alloy_primitives::{keccak256, map::B256Map, Bytes};
     use parking_lot::Mutex;
     use std::{
-        collections::HashMap,
         ops::Range,
         sync::{
             atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -1522,7 +1521,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct FullBlockWithAccessListsClient {
         inner: TestFullBlockClient,
-        access_lists: Arc<Mutex<HashMap<B256, Bytes>>>,
+        access_lists: Arc<Mutex<B256Map<Bytes>>>,
         access_list_requests: Arc<AtomicUsize>,
         access_list_soft_limit: Arc<AtomicUsize>,
         access_list_pending_polls: Arc<AtomicUsize>,
@@ -1537,7 +1536,7 @@ mod tests {
         fn default() -> Self {
             Self {
                 inner: TestFullBlockClient::default(),
-                access_lists: Arc::new(Mutex::new(HashMap::default())),
+                access_lists: Arc::new(Mutex::new(B256Map::default())),
                 access_list_requests: Arc::new(AtomicUsize::new(0)),
                 access_list_soft_limit: Arc::new(AtomicUsize::new(usize::MAX)),
                 access_list_pending_polls: Arc::new(AtomicUsize::new(0)),

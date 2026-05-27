@@ -432,7 +432,7 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.4.0", default-features = false }
 
 # revm
-revm = { version = "40.0.2", default-features = false }
+revm = { version = "40.0.3", default-features = false }
 revm-bytecode = { version = "11.0.0", default-features = false }
 revm-database = { version = "15.0.0", default-features = false }
 revm-state = { version = "12.0.0", default-features = false }
