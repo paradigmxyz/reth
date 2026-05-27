@@ -15,6 +15,11 @@ use tracing::error;
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
+#[inline]
+const fn cache_entry_fits(input_len: usize, output_len: usize) -> bool {
+    input_len.saturating_add(output_len) <= MAX_CACHE_SIZE as usize
+}
+
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
@@ -205,7 +210,7 @@ where
                     error!(target: "engine::tree", precompile_id = self.precompile.precompile_id().name(), "cacheable precompile decremented reservoir, skipping cache insertion");
                 } else if output.state_gas_used != 0 {
                     error!(target: "engine::tree", precompile_id = self.precompile.precompile_id().name(), "cacheable precompile used state gas, skipping cache insertion");
-                } else {
+                } else if cache_entry_fits(calldata.len(), output.bytes.len()) {
                     let size = self.cache.insert(
                         Bytes::copy_from_slice(calldata),
                         CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
