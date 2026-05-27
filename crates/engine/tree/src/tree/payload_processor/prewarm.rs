@@ -14,8 +14,8 @@
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    CachedStateMetrics, CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache,
-    StateProviderBuilder,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
+    PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -279,7 +279,7 @@ where
 
         let Self {
             execution_cache,
-            ctx: PrewarmContext { env, metrics, cache_metrics, saved_cache, .. },
+            ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
             ..
         } = self;
         let hash = env.hash;
@@ -301,7 +301,7 @@ where
                     return;
                 }
 
-                new_cache.update_metrics(cache_metrics.as_ref());
+                new_cache.update_metrics(cache_state_metrics.as_ref());
 
                 if valid_block_rx.recv().is_ok() {
                     // Replace the shared cache with the new one; the previous cache (if any) is
@@ -528,6 +528,8 @@ where
     /// Metrics for the execution cache.
     /// Metrics for the execution cache. `None` disables metrics recording.
     pub cache_metrics: Option<CachedStateMetrics>,
+    /// Metrics for shared execution cache state. `None` disables metrics recording.
+    pub cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution

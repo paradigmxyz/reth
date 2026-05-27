@@ -271,6 +271,23 @@ pub struct CachedStateMetrics {
     /// Code cache misses
     code_cache_misses: Gauge,
 
+    /// Storage cache hits
+    storage_cache_hits: Gauge,
+
+    /// Storage cache misses
+    storage_cache_misses: Gauge,
+
+    /// Account cache hits
+    account_cache_hits: Gauge,
+
+    /// Account cache misses
+    account_cache_misses: Gauge,
+}
+
+/// Metrics for shared execution cache state.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.caching")]
+pub struct CachedStateCacheMetrics {
     /// Code cache size (number of entries)
     code_cache_size: Gauge,
 
@@ -280,12 +297,6 @@ pub struct CachedStateMetrics {
     /// Code cache collisions (hash collisions causing eviction)
     code_cache_collisions: Gauge,
 
-    /// Storage cache hits
-    storage_cache_hits: Gauge,
-
-    /// Storage cache misses
-    storage_cache_misses: Gauge,
-
     /// Storage cache size (number of entries)
     storage_cache_size: Gauge,
 
@@ -294,12 +305,6 @@ pub struct CachedStateMetrics {
 
     /// Storage cache collisions (hash collisions causing eviction)
     storage_cache_collisions: Gauge,
-
-    /// Account cache hits
-    account_cache_hits: Gauge,
-
-    /// Account cache misses
-    account_cache_misses: Gauge,
 
     /// Account cache size (number of entries)
     account_cache_size: Gauge,
@@ -317,17 +322,14 @@ impl CachedStateMetrics {
         // code cache
         self.code_cache_hits.set(0);
         self.code_cache_misses.set(0);
-        self.code_cache_collisions.set(0);
 
         // storage cache
         self.storage_cache_hits.set(0);
         self.storage_cache_misses.set(0);
-        self.storage_cache_collisions.set(0);
 
         // account cache
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
-        self.account_cache_collisions.set(0);
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`] with a `source` label
@@ -968,7 +970,7 @@ impl ExecutionCache {
 
     /// Updates the provided metrics with the current stats from the cache's stats handlers,
     /// and resets the hit/miss/collision counters.
-    pub fn update_metrics(&self, metrics: &CachedStateMetrics) {
+    pub fn update_metrics(&self, metrics: &CachedStateCacheMetrics) {
         metrics.code_cache_size.set(self.0.code_stats.size() as f64);
         metrics.code_cache_capacity.set(self.0.code_stats.capacity() as f64);
         metrics.code_cache_collisions.set(self.0.code_stats.collisions() as f64);
@@ -1028,7 +1030,7 @@ impl SavedCache {
     }
 
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
-    pub fn update_metrics(&self, metrics: Option<&CachedStateMetrics>) {
+    pub fn update_metrics(&self, metrics: Option<&CachedStateCacheMetrics>) {
         if let Some(metrics) = metrics {
             self.caches.update_metrics(metrics);
         }
