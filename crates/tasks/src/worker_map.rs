@@ -5,7 +5,14 @@
 //! named task, like a 1-thread thread pool keyed by name.
 
 use dashmap::DashMap;
-use std::{panic::AssertUnwindSafe, thread};
+use std::{
+    panic::AssertUnwindSafe,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    thread,
+};
 use tokio::sync::{mpsc, oneshot};
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
@@ -14,6 +21,8 @@ type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 struct WorkerThread {
     /// Sender to submit work to this worker's thread.
     tx: mpsc::UnboundedSender<BoxedTask>,
+    /// Number of tasks currently running or queued on this worker.
+    pending: Arc<AtomicUsize>,
     /// The OS thread handle. Taken during shutdown to join.
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -31,7 +40,63 @@ impl WorkerThread {
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
-        Self { tx, handle: Some(handle) }
+        Self { tx, pending: Arc::new(AtomicUsize::new(0)), handle: Some(handle) }
+    }
+
+    /// Spawns a closure on this worker.
+    fn spawn<F, R>(&self, f: F) -> oneshot::Receiver<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.pending.fetch_add(1, Ordering::AcqRel);
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let pending = self.pending.clone();
+
+        let task: BoxedTask = Box::new(move || {
+            let _decrement_pending = DecrementPendingOnDrop(pending);
+            let _ = result_tx.send(f());
+        });
+
+        if self.tx.send(task).is_err() {
+            self.pending.fetch_sub(1, Ordering::AcqRel);
+        }
+
+        result_rx
+    }
+
+    /// Attempts to spawn a closure if this worker has no task running or queued.
+    fn try_spawn<F, R>(&self, f: F) -> Option<oneshot::Receiver<R>>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.pending.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).ok()?;
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let pending = self.pending.clone();
+
+        let task: BoxedTask = Box::new(move || {
+            let _decrement_pending = DecrementPendingOnDrop(pending);
+            let _ = result_tx.send(f());
+        });
+
+        if self.tx.send(task).is_err() {
+            self.pending.fetch_sub(1, Ordering::AcqRel);
+            return None
+        }
+
+        Some(result_rx)
+    }
+}
+
+/// Decrements a worker's pending task count when a task finishes, including after panic.
+struct DecrementPendingOnDrop(Arc<AtomicUsize>);
+
+impl Drop for DecrementPendingOnDrop {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -65,16 +130,24 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let (result_tx, result_rx) = oneshot::channel();
-
-        let task: BoxedTask = Box::new(move || {
-            let _ = result_tx.send(f());
-        });
-
         let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
-        let _ = worker.tx.send(task);
+        worker.spawn(f)
+    }
 
-        result_rx
+    /// Attempts to spawn a closure on the dedicated worker thread for the given name.
+    ///
+    /// Returns `None` if the named worker already has a task running or queued.
+    pub(crate) fn try_spawn_on<F, R>(
+        &self,
+        name: &'static str,
+        f: F,
+    ) -> Option<oneshot::Receiver<R>>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
+        worker.try_spawn(f)
     }
 }
 
@@ -162,5 +235,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name, "custom-worker");
+    }
+
+    #[tokio::test]
+    async fn worker_map_try_spawn_busy() {
+        let map = WorkerMap::new();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+        let first = map.try_spawn_on("busy-worker", move || {
+            release_rx.recv().unwrap();
+            1
+        });
+        assert!(first.is_some());
+
+        let second = map.try_spawn_on("busy-worker", || 2);
+        assert!(second.is_none(), "busy worker should reject queued work");
+
+        release_tx.send(()).unwrap();
+        assert_eq!(first.unwrap().await.unwrap(), 1);
+
+        let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
+        assert_eq!(third.await.unwrap(), 3);
     }
 }

@@ -257,6 +257,12 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     {
     }
 
+    fn retain_contains<A>(&self, _announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+    }
+
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
     }

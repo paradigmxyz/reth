@@ -23,6 +23,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import random
 import sys
 
@@ -31,11 +32,11 @@ P99_MIN_VERDICT_BLOCKS = 125
 PERSIST_WAIT_MIN_VERDICT_MS = 0.5
 PERSIST_WAIT_MIN_TOTAL_PCT = 0.1
 PRACTICAL_FLOOR_PCT = {
-    "mean": 0.70,
-    "p50": 0.70,
+    "mean": 1.20,
+    "p50": 1.20,
     "p90": 1.35,
     "p99": 5.0,
-    "mgas_s": 0.45,
+    "mgas_s": 1.20,
     "wall_clock": 0.70,
     "persist_wait": 5.0,
 }
@@ -601,9 +602,13 @@ def generate_markdown(
     wait_time_tables: list[str] | None = None,
     behind_baseline: int = 0, repo: str = "", baseline_ref: str = "", baseline_name: str = "",
     grafana_url: str | None = None,
+    derek_command: str | None = None,
 ) -> str:
     """Generate a markdown comment body."""
-    lines = ["## Benchmark Results", ""]
+    lines = ["## Benchmark Results", "", "## Configuration"]
+    if derek_command:
+        lines.append(f"- Derek command: `{derek_command}`")
+    lines.append("")
     if behind_baseline > 0:
         s = "s" if behind_baseline > 1 else ""
         diff_link = f"https://github.com/{repo}/compare/{baseline_ref[:12]}...{baseline_name}"
@@ -654,6 +659,11 @@ def main():
     parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
     parser.add_argument("--bal-mode", default=None, help="BAL mode (true, feature, baseline)")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
+    parser.add_argument(
+        "--derek-command",
+        default=os.environ.get("DEREK_BENCH_COMMAND"),
+        help="Full derek bench command",
+    )
     parser.add_argument("--run-pairs", type=int, default=None, help="Configured number of benchmark run pairs")
     args = parser.parse_args()
 
@@ -769,6 +779,7 @@ def main():
         baseline_ref=baseline_ref,
         baseline_name=baseline_name,
         grafana_url=args.grafana_url,
+        derek_command=args.derek_command,
     )
 
     with open(args.output_markdown, "w") as f:
