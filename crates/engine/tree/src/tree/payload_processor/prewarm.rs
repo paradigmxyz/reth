@@ -31,7 +31,7 @@ use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::{database::StateProviderDatabase, state::EvmState, State};
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
@@ -579,7 +579,7 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let db = State::builder().with_database(StateProviderDatabase::new(state_provider)).build();
 
         let mut evm_env = self.env.evm_env.clone();
 
@@ -593,7 +593,7 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        let mut evm = self.evm_config.evm_with_env(db, evm_env);
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
