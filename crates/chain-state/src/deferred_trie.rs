@@ -8,7 +8,7 @@ use std::{
     fmt,
     sync::{Arc, LazyLock},
 };
-use tracing::{debug_span, instrument};
+use tracing::debug_span;
 
 /// Shared handle to asynchronously populated per-block trie data.
 ///
@@ -129,7 +129,6 @@ impl DeferredTrieData {
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
-    #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
         let mut state = self.state.lock();
         match &mut *state {
