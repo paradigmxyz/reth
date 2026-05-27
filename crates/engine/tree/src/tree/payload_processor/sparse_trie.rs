@@ -32,7 +32,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
-use tracing::{debug, debug_span, error, instrument, trace_span};
+use tracing::{debug, error, instrument, trace_span};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
@@ -535,7 +535,7 @@ where
             return Ok(());
         }
 
-        let _span = debug_span!("process_new_updates").entered();
+        let _span = trace_span!("process_new_updates").entered();
         self.pending_updates = 0;
 
         // Firstly apply all new storage and account updates to the tries.
@@ -706,17 +706,17 @@ where
         }
 
         let parent_span =
-            debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
+            trace_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
             let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
+                trace_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
                     "storage_root",
                     ?address
                 )
             } else {
-                debug_span!(
+                trace_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
                     "storage_root",
