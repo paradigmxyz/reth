@@ -48,7 +48,6 @@ impl IntegerList {
     ///
     /// Panics if the list is not pre-sorted.
     #[inline]
-    #[track_caller]
     pub fn new_pre_sorted(list: impl IntoIterator<Item = u64>) -> Self {
         Self::new(list).expect("IntegerList must be pre-sorted and non-empty")
     }
