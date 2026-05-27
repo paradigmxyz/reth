@@ -40,7 +40,7 @@
 
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::{InstrumentedStateProvider, StateProviderStats},
+    instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
@@ -521,34 +521,42 @@ where
             );
         };
 
-        let state_provider_stats = if slow_block_enabled || self.config.state_provider_metrics() {
-            let instrumented_state_provider =
-                InstrumentedStateProvider::new(state_provider, "engine");
-            let stats = slow_block_enabled.then(|| instrumented_state_provider.stats());
-            state_provider = Box::new(instrumented_state_provider);
-            stats
-        } else {
-            None
-        };
+        let instrument_state_provider = slow_block_enabled || self.config.state_provider_metrics();
+        let state_provider_metrics =
+            instrument_state_provider.then(|| StateProviderMetrics::with_source("engine"));
+        let state_provider_stats =
+            instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
+
+        if instrument_state_provider {
+            let stats = state_provider_stats
+                .as_ref()
+                .expect("instrumented state provider requires shared stats");
+            let metrics = state_provider_metrics
+                .as_ref()
+                .expect("instrumented state provider requires metrics");
+            state_provider = Box::new(InstrumentedStateProvider::with_stats(
+                state_provider,
+                metrics.clone(),
+                Arc::clone(stats),
+            ));
+        }
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let (output, senders, receipt_root_rx, built_bal) = if bal_eligible {
+        let execution_result = if bal_eligible {
             let provider_builder =
                 bal_provider_builder.expect("eligibility implies builder was cloned");
-            ensure_ok!(self.execute_block_bal(
-                state_provider,
-                env,
-                &input,
-                &handle,
-                provider_builder
-            ))
+            self.execute_block_bal(state_provider, env, &input, &handle, provider_builder)
         } else {
-            ensure_ok!(self.execute_block(state_provider, env, &input, &mut handle))
+            self.execute_block(state_provider, env, &input, &mut handle)
         };
         let execution_duration = execute_block_start.elapsed();
+        if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
+            metrics.record_totals(stats);
+        }
+        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -827,7 +835,7 @@ where
             .into())
         }
 
-        let timing_stats = state_provider_stats.map(|stats| {
+        let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
                 &block,
                 stats,
