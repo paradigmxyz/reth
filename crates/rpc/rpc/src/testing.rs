@@ -147,7 +147,8 @@ where
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
                 let mut block_transactions_rlp_length = 0usize;
 
-                /// If no transactions are provided in the request, use all transactions from the pool.
+                /// If no transactions are provided in the request, use all transactions from the
+                /// pool.
                 let use_pool_transactions = request.transactions.is_empty();
                 let recovered_txs = if use_pool_transactions {
                     eth_api.pool().all_transactions().all().collect()
