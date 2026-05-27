@@ -20,7 +20,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, StorageKey, B256};
+use alloy_primitives::{keccak256, map::B256Map, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -644,7 +644,13 @@ where
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut storage_map = reth_trie::HashedStorage {
+                wiped: false,
+                storage: B256Map::with_capacity_and_hasher(
+                    account_changes.storage_changes.len(),
+                    Default::default(),
+                ),
+            };
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
