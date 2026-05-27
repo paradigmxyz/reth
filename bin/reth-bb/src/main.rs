@@ -7,13 +7,15 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 mod evm;
 mod evm_config;
 
-use alloy_rpc_types::engine::ExecutionData;
+use alloy_consensus::EMPTY_ROOT_HASH;
+use alloy_eips::Decodable2718;
+use alloy_rpc_types::engine::{ExecutionData, PayloadError};
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::noop::NoopConsensus;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
-use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, NewPayloadError, NodeTypes, PayloadTypes, PayloadValidator,
@@ -73,6 +75,28 @@ pub struct BbEngineValidator {
     inner: EthereumEngineValidator,
 }
 
+impl BbEngineValidator {
+    fn convert_intermediate_payload(
+        payload: ExecutionData,
+    ) -> Result<SealedBlock<Block>, NewPayloadError> {
+        let ExecutionData { payload, sidecar } = payload;
+        let hash = payload.block_hash();
+
+        let block = payload
+            .into_block_with_sidecar_raw_with_transactions_root(&sidecar, EMPTY_ROOT_HASH)
+            .and_then(|block| {
+                block.try_map_transactions(|tx| {
+                    TransactionSigned::decode_2718_exact(tx.as_ref())
+                        .map_err(alloy_rlp::Error::from)
+                        .map_err(PayloadError::from)
+                })
+            })
+            .map_err(NewPayloadError::from)?;
+
+        Ok(SealedBlock::new_unchecked(block, hash))
+    }
+}
+
 impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
     type Block = Block;
 
@@ -80,15 +104,21 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         &self,
         payload: BigBlockData<ExecutionData>,
     ) -> Result<SealedBlock<Block>, NewPayloadError> {
-        let mut blocks = payload
-            .env_switches
-            .into_iter()
-            .map(|data| {
-                PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)
-            })
+        let mut env_switches = payload.env_switches.into_iter();
+        let last_payload = env_switches.next_back().expect("big block payload has env switches");
+
+        // Intermediate synthetic headers are discarded after parent/gas/transaction extraction.
+        // Skip transaction-root hashing for those segments; keep the final payload on the normal
+        // validator path because its sealed hash is preserved.
+        let blocks = env_switches
+            .map(Self::convert_intermediate_payload)
             .collect::<Result<Vec<SealedBlock<Block>>, NewPayloadError>>()?;
 
-        let (mut block, hash) = blocks.pop().unwrap().split();
+        let (mut block, hash) = PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(
+            &self.inner,
+            last_payload,
+        )?
+        .split();
 
         // Override the block number
         block.header.number = payload.block_number;
