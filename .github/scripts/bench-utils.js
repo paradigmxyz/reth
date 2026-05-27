@@ -17,18 +17,25 @@ function fmtChange(ch) {
   const details = [];
   if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
   if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  if (ch.informational) details.push('informational');
   const detailStr = details.length ? ` (${details.join(', ')})` : '';
-  return `${pctStr}${detailStr} ${SIG_EMOJI[ch.sig]}`;
+  const sig = ch.informational ? 'neutral' : ch.sig;
+  return `${pctStr}${detailStr} ${SIG_EMOJI[sig]}`;
 }
 
 function verdict(changes) {
-  const vals = Object.values(changes);
+  const vals = Object.values(changes).filter(v => !v.informational);
   const hasBad = vals.some(v => v.sig === 'bad');
   const hasGood = vals.some(v => v.sig === 'good');
   if (hasBad && hasGood) return { emoji: '⚠️', label: 'Mixed Results' };
   if (hasBad) return { emoji: '❌', label: 'Regression' };
   if (hasGood) return { emoji: '✅', label: 'Improvement' };
   return { emoji: '⚪', label: 'No Difference' };
+}
+
+function isWin(changes) {
+  const vals = Object.values(changes || {}).filter(v => !v.informational);
+  return vals.some(v => v.sig === 'good') && !vals.some(v => v.sig === 'bad');
 }
 
 function loadSamplyUrls(workDir) {
@@ -120,6 +127,7 @@ module.exports = {
   fmtS,
   fmtChange,
   verdict,
+  isWin,
   loadSamplyUrls,
   blocksLabel,
   metricRows,

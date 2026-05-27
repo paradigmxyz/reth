@@ -550,6 +550,50 @@ impl Runtime {
         crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
     }
 
+    /// Attempts to spawn a blocking closure on a dedicated, named OS thread.
+    ///
+    /// Returns `None` if the named worker already has a task running or queued, allowing the caller
+    /// to fall back to another executor instead of serializing behind the named worker.
+    pub fn try_spawn_blocking_named<F, R>(
+        &self,
+        name: &'static str,
+        func: F,
+    ) -> Option<crate::LazyHandle<R>>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.0.worker_map.try_spawn_on(name, func).map(crate::LazyHandle::new)
+    }
+
+    /// Spawns a blocking closure on a named OS thread if it is idle, otherwise falls back to
+    /// tokio's unnamed blocking thread pool.
+    ///
+    /// Returns `true` if the closure was spawned on the named thread.
+    pub fn spawn_blocking_named_or_tokio<F>(&self, name: &'static str, func: F) -> bool
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let func = Arc::new(parking_lot::Mutex::new(Some(func)));
+        let named_func = func.clone();
+
+        if self
+            .try_spawn_blocking_named(name, move || {
+                if let Some(func) = named_func.lock().take() {
+                    func();
+                }
+            })
+            .is_some()
+        {
+            return true
+        }
+
+        if let Some(func) = func.lock().take() {
+            self.spawn_blocking(func);
+        }
+        false
+    }
+
     /// Spawns the task onto the runtime.
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///

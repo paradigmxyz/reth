@@ -85,23 +85,27 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 
 /// A wrapper of a state provider and a shared cache.
 ///
-/// The const generic `PREWARM` controls whether every cache miss is populated. This is only
-/// relevant for pre-warm transaction execution with the intention to pre-populate the cache with
-/// data for regular block execution. During regular block execution the cache doesn't need to be
-/// populated because the actual EVM database `State` also caches
-/// internally during block execution and the cache is then updated after the block with the entire
-/// [`BundleState`] output of that block which contains all accessed accounts, code, storage. See
-/// also [`ExecutionCache::insert_state`].
+/// [`CacheFillMode`] controls whether misses populate the shared cache. This is used by background
+/// prewarmers and speculative execution workers that intentionally seed the cache for other
+/// readers. Canonical execution usually leaves this disabled because the EVM database `State`
+/// already caches reads during the block, and the shared cache is updated after the block from the
+/// final [`BundleState`]. See also [`ExecutionCache::insert_state`].
+///
+/// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
+/// [`CacheStats`] are controlled separately by [`Self::with_cache_stats`].
 #[derive(Debug)]
-pub struct CachedStateProvider<S, const PREWARM: bool = false> {
+pub struct CachedStateProvider<S> {
     /// The state provider
     state_provider: S,
 
     /// The caches used for the provider
     caches: ExecutionCache,
 
-    /// Metrics for the cached state provider
-    metrics: CachedStateMetrics,
+    /// Metrics for the cached state provider.
+    metrics: Option<CachedStateMetrics>,
+
+    /// Whether cache misses should populate the shared execution cache.
+    fill_mode: CacheFillMode,
 
     /// Optional cache statistics for detailed block logging. Only tracked when slow block
     /// threshold is configured.
@@ -110,33 +114,113 @@ pub struct CachedStateProvider<S, const PREWARM: bool = false> {
 
 impl<S> CachedStateProvider<S> {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
-    /// [`CachedStateMetrics`].
+    /// optional [`CachedStateMetrics`].
     pub const fn new(
         state_provider: S,
         caches: ExecutionCache,
-        metrics: CachedStateMetrics,
+        metrics: Option<CachedStateMetrics>,
     ) -> Self {
-        Self { state_provider, caches, metrics, cache_stats: None }
+        Self::new_with_mode(state_provider, caches, CacheFillMode::LookupOnly, metrics)
     }
-}
 
-impl<S> CachedStateProvider<S, true> {
-    /// Creates a new [`CachedStateProvider`] with prewarming enabled.
-    pub const fn new_prewarm(
+    /// Creates a cache-filling [`CachedStateProvider`].
+    ///
+    /// Doesn't accept metrics because prewarming path does not need to report hit/misses.
+    pub const fn new_prewarm(state_provider: S, caches: ExecutionCache) -> Self {
+        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None)
+    }
+
+    /// Creates a cache-filling [`CachedStateProvider`] that also reports hit/miss metrics.
+    pub const fn new_cache_filling(
         state_provider: S,
         caches: ExecutionCache,
-        metrics: CachedStateMetrics,
+        metrics: Option<CachedStateMetrics>,
     ) -> Self {
-        Self { state_provider, caches, metrics, cache_stats: None }
+        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, metrics)
     }
-}
 
-impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
+    /// Creates a [`CachedStateProvider`] with an explicit cache fill mode.
+    pub const fn new_with_mode(
+        state_provider: S,
+        caches: ExecutionCache,
+        fill_mode: CacheFillMode,
+        metrics: Option<CachedStateMetrics>,
+    ) -> Self {
+        Self { state_provider, caches, metrics, fill_mode, cache_stats: None }
+    }
+
     /// Enables cache statistics tracking for detailed block logging.
     pub fn with_cache_stats(mut self, stats: Option<Arc<CacheStats>>) -> Self {
         self.cache_stats = stats;
         self
     }
+
+    fn record_account_hit(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.account_cache_hits.increment(1);
+        }
+        if let Some(stats) = &self.cache_stats {
+            stats.record_account_hit();
+        }
+    }
+
+    fn record_account_miss(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.account_cache_misses.increment(1);
+        }
+        if let Some(stats) = &self.cache_stats {
+            stats.record_account_miss();
+        }
+    }
+
+    fn record_storage_hit(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.storage_cache_hits.increment(1);
+        }
+        if let Some(stats) = &self.cache_stats {
+            stats.record_storage_hit();
+        }
+    }
+
+    fn record_storage_miss(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.storage_cache_misses.increment(1);
+        }
+        if let Some(stats) = &self.cache_stats {
+            stats.record_storage_miss();
+        }
+    }
+
+    fn record_code_hit(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.code_cache_hits.increment(1);
+        }
+        if let Some(stats) = &self.cache_stats {
+            stats.record_code_hit();
+        }
+    }
+
+    fn record_code_miss(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.code_cache_misses.increment(1);
+        }
+        if let Some(stats) = &self.cache_stats {
+            stats.record_code_miss();
+        }
+    }
+
+    const fn should_fill_on_miss(&self) -> bool {
+        matches!(self.fill_mode, CacheFillMode::FillOnMiss)
+    }
+}
+
+/// Whether cache misses should populate the shared execution cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheFillMode {
+    /// Only read existing cache entries.
+    LookupOnly,
+    /// Insert values loaded from the underlying provider.
+    FillOnMiss,
 }
 
 /// Represents the status of a key in the cache.
@@ -429,121 +513,95 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
     }
 }
 
-impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
+impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if PREWARM {
+        if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
-                // During prewarm we only record stats (not prometheus metrics)
                 CachedStatus::NotCached(value) => {
-                    if let Some(stats) = &self.cache_stats {
-                        stats.record_account_miss();
-                    }
+                    self.record_account_miss();
                     Ok(value)
                 }
                 CachedStatus::Cached(value) => {
-                    if let Some(stats) = &self.cache_stats {
-                        stats.record_account_hit();
-                    }
+                    self.record_account_hit();
                     Ok(value)
                 }
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
-            self.metrics.account_cache_hits.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_account_hit();
-            }
+            self.record_account_hit();
             Ok(account)
         } else {
-            self.metrics.account_cache_misses.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_account_miss();
-            }
+            self.record_account_miss();
             self.state_provider.basic_account(address)
         }
     }
 }
 
-impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
+#[inline]
+fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
+    if value.is_zero() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if PREWARM {
+        if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
-                // During prewarm we only record stats (not prometheus metrics)
                 CachedStatus::NotCached(value) => {
-                    if let Some(stats) = &self.cache_stats {
-                        stats.record_storage_miss();
-                    }
-                    Ok(Some(value).filter(|v| !v.is_zero()))
+                    self.record_storage_miss();
+                    Ok(nonzero_storage_value(value))
                 }
                 CachedStatus::Cached(value) => {
-                    if let Some(stats) = &self.cache_stats {
-                        stats.record_storage_hit();
-                    }
-                    Ok(Some(value).filter(|v| !v.is_zero()))
+                    self.record_storage_hit();
+                    Ok(nonzero_storage_value(value))
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
-            self.metrics.storage_cache_hits.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_storage_hit();
-            }
-            Ok(Some(value).filter(|v| !v.is_zero()))
+            self.record_storage_hit();
+            Ok(nonzero_storage_value(value))
         } else {
-            self.metrics.storage_cache_misses.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_storage_miss();
-            }
+            self.record_storage_miss();
             self.state_provider.storage(account, storage_key)
         }
     }
 }
 
-impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
+impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if PREWARM {
+        if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
-                // During prewarm we only record stats (not prometheus metrics)
                 CachedStatus::NotCached(code) => {
-                    if let Some(stats) = &self.cache_stats {
-                        stats.record_code_miss();
-                    }
+                    self.record_code_miss();
                     Ok(code)
                 }
                 CachedStatus::Cached(code) => {
-                    if let Some(stats) = &self.cache_stats {
-                        stats.record_code_hit();
-                    }
+                    self.record_code_hit();
                     Ok(code)
                 }
             }
         } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-            self.metrics.code_cache_hits.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_code_hit();
-            }
+            self.record_code_hit();
             Ok(code)
         } else {
-            self.metrics.code_cache_misses.increment(1);
-            if let Some(stats) = &self.cache_stats {
-                stats.record_code_miss();
-            }
+            self.record_code_miss();
             self.state_provider.bytecode_by_hash(code_hash)
         }
     }
 }
 
-impl<S: StateRootProvider, const PREWARM: bool> StateRootProvider
-    for CachedStateProvider<S, PREWARM>
-{
+impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         self.state_provider.state_root(hashed_state)
     }
@@ -567,9 +625,7 @@ impl<S: StateRootProvider, const PREWARM: bool> StateRootProvider
     }
 }
 
-impl<S: StateProofProvider, const PREWARM: bool> StateProofProvider
-    for CachedStateProvider<S, PREWARM>
-{
+impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
     fn proof(
         &self,
         input: TrieInput,
@@ -597,9 +653,7 @@ impl<S: StateProofProvider, const PREWARM: bool> StateProofProvider
     }
 }
 
-impl<S: StorageRootProvider, const PREWARM: bool> StorageRootProvider
-    for CachedStateProvider<S, PREWARM>
-{
+impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
     fn storage_root(
         &self,
         address: Address,
@@ -627,7 +681,7 @@ impl<S: StorageRootProvider, const PREWARM: bool> StorageRootProvider
     }
 }
 
-impl<S: BlockHashReader, const PREWARM: bool> BlockHashReader for CachedStateProvider<S, PREWARM> {
+impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
     }
@@ -641,9 +695,7 @@ impl<S: BlockHashReader, const PREWARM: bool> BlockHashReader for CachedStatePro
     }
 }
 
-impl<S: HashedPostStateProvider, const PREWARM: bool> HashedPostStateProvider
-    for CachedStateProvider<S, PREWARM>
-{
+impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
     fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
@@ -1019,7 +1071,7 @@ mod tests {
         let state_provider = CachedStateProvider::new(
             provider,
             caches,
-            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
         );
 
         let res = state_provider.storage(address, storage_key);
@@ -1042,7 +1094,7 @@ mod tests {
         let state_provider = CachedStateProvider::new(
             provider,
             caches,
-            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
         );
 
         let res = state_provider.storage(address, storage_key);

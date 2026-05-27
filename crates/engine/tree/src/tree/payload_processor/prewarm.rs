@@ -411,9 +411,7 @@ where
                     }
                     WorkerPool::with_worker_mut(|worker| {
                         let provider = worker
-                            .get_or_init::<Option<CachedStateProvider<StateProviderBox, true>>>(
-                                || None,
-                            );
+                            .get_or_init::<Option<CachedStateProvider<StateProviderBox>>>(|| None);
                         ctx.prefetch_bal_storage(&parent_span, provider, account);
                     });
                 });
@@ -576,11 +574,7 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(
-                state_provider,
-                caches,
-                self.cache_metrics.clone().unwrap_or_default(),
-            ));
+            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -686,11 +680,7 @@ where
             {
                 (false, Some(saved)) => {
                     let caches = saved.cache().clone();
-                    Box::new(CachedStateProvider::new_prewarm(
-                        inner,
-                        caches,
-                        self.cache_metrics.clone().unwrap_or_default(),
-                    ))
+                    Box::new(CachedStateProvider::new_prewarm(inner, caches))
                 }
                 _ => Box::new(inner),
             };
@@ -754,7 +744,7 @@ where
     fn prefetch_bal_storage(
         &self,
         parent_span: &Span,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
+        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
         if self.disable_bal_batch_io ||
@@ -787,11 +777,7 @@ where
                 let saved_cache =
                     self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
                 let caches = saved_cache.cache().clone();
-                slot.insert(CachedStateProvider::new_prewarm(
-                    built,
-                    caches,
-                    self.cache_metrics.clone().unwrap_or_default(),
-                ))
+                slot.insert(CachedStateProvider::new_prewarm(built, caches))
             }
         };
 
@@ -828,7 +814,10 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         }
 
         let hashed_address = keccak256(addr);
-        targets.account_targets.push(hashed_address.into());
+
+        if account.info != account.original_info() {
+            targets.account_targets.push(hashed_address.into());
+        }
 
         let mut storage_slots = Vec::with_capacity(account.storage.len());
         for (key, slot) in account.storage {
