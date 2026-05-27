@@ -64,12 +64,15 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
-    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
+    MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
+            // Create a database with fill_on_miss=true ensuring misses
+            // are inserted for the other workers.
+            let database = make_db(true).map_err(BalWorkerError::Setup)?;
             let mut worker_state = State::builder()
-                .with_database(make_db().map_err(BalWorkerError::Setup)?)
+                .with_database(database)
                 .with_bal(received_bal_revm)
                 .with_bundle_update()
                 .build();

@@ -70,7 +70,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
-use reth_execution_cache::{CacheStats, SavedCache};
+use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -442,7 +442,6 @@ where
             )
             .into())
         };
-        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
@@ -494,10 +493,7 @@ where
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
-        // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
-        // `provider_builder` (consumed by `spawn_payload_processor` below).
         let bal_eligible = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
-        let bal_provider_builder = bal_eligible.then(|| provider_builder.clone());
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -511,46 +507,61 @@ where
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
-
-        // Use cached state provider before executing, used in execution after prewarming threads
-        // complete
-        if let Some(caches) = handle.caches() {
-            state_provider = Box::new(
-                CachedStateProvider::new(state_provider, caches, handle.cache_metrics())
-                    .with_cache_stats(cache_stats.clone()),
-            );
-        };
-
         let instrument_state_provider = slow_block_enabled || self.config.state_provider_metrics();
         let state_provider_metrics =
             instrument_state_provider.then(|| StateProviderMetrics::with_source("engine"));
         let state_provider_stats =
             instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
+        let execution_cache = handle.caches().map(|caches| (caches, handle.cache_metrics()));
 
-        if instrument_state_provider {
-            let stats = state_provider_stats
-                .as_ref()
-                .expect("instrumented state provider requires shared stats");
-            let metrics = state_provider_metrics
-                .as_ref()
-                .expect("instrumented state provider requires metrics");
-            state_provider = Box::new(InstrumentedStateProvider::with_stats(
-                state_provider,
-                metrics.clone(),
-                Arc::clone(stats),
-            ));
-        }
+        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
+            let provider = provider_builder.build()?;
+            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
+                let fill_mode = if fill_on_miss {
+                    CacheFillMode::FillOnMiss
+                } else {
+                    CacheFillMode::LookupOnly
+                };
+                Box::new(CachedStateProvider::new_with_mode(
+                    provider,
+                    caches.clone(),
+                    fill_mode,
+                    cache_metrics.clone(),
+                    cache_stats.clone(),
+                )) as StateProviderBox
+            } else {
+                provider
+            };
+
+            if instrument_state_provider {
+                let stats = state_provider_stats
+                    .as_ref()
+                    .expect("instrumented state provider requires shared stats");
+                let metrics = state_provider_metrics
+                    .as_ref()
+                    .expect("instrumented state provider requires metrics");
+                provider = Box::new(InstrumentedStateProvider::with_stats(
+                    provider,
+                    metrics.clone(),
+                    Arc::clone(stats),
+                ));
+            }
+
+            Ok(provider)
+        };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let execution_result = if bal_eligible {
-            let provider_builder =
-                bal_provider_builder.expect("eligibility implies builder was cloned");
-            self.execute_block_bal(state_provider, env, &input, &handle, provider_builder)
+            self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
-            self.execute_block(state_provider, env, &input, &mut handle)
+            let state_provider = make_state_provider(false);
+            match state_provider {
+                Ok(state_provider) => self.execute_block(state_provider, env, &input, &mut handle),
+                Err(err) => Err(err.into()),
+            }
         };
         let execution_duration = execute_block_start.elapsed();
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
@@ -1117,13 +1128,12 @@ where
     /// 5. Returns the rebuilt BAL for post-execution consensus validation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block_bal<S, Tx, Err, BalP, T>(
+    fn execute_block_bal<Tx, Err, MakeStateProvider, T>(
         &self,
-        _state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
-        provider_builder: StateProviderBuilder<N, BalP>,
+        make_state_provider: &MakeStateProvider,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
@@ -1134,34 +1144,24 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: StateProvider + Send,
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
-        let cache = handle.caches().ok_or_else(|| {
-            InsertBlockErrorKind::Other("BAL execute path: no execution cache available".into())
-        })?;
-        let saved_cache = SavedCache::new(env.parent_hash, cache);
-
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
 
-        let make_db = move || {
-            let provider = provider_builder
-                .build()
+        let make_db = |fill_on_miss| {
+            let provider = make_state_provider(fill_on_miss)
                 .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
-            Ok(StateProviderDatabase::new(CachedStateProvider::new_prewarm(
-                provider,
-                saved_cache.cache().clone(),
-            )))
+            Ok(StateProviderDatabase::new(provider))
         };
         let execution_start = Instant::now();
         let ctx =
