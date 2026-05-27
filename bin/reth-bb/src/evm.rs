@@ -448,14 +448,15 @@ where
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
-        let gas_used = self.inner_mut().commit_transaction(output);
+        let offset = self.gas_used_offset;
+        let inner = self.inner_mut();
+        let gas_used = inner.commit_transaction(output);
 
         // Fix up cumulative_gas_used on the just-committed receipt so that
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
-        let offset = self.gas_used_offset;
         if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
+            let Some(receipt) = inner.receipts.last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }
