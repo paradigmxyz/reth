@@ -317,6 +317,7 @@ pub trait EstimateCall: Call {
     {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
+            let _permit = self.acquire_owned_blocking_io().await;
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
