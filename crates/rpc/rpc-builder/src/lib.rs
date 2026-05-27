@@ -38,8 +38,9 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    eth::helpers::types::EthSimulateTxConverter, AdminApi, DebugApi, EngineEthApi, EthApi,
+    EthApiBuilder, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
+    Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::RethEngineApi;
@@ -264,7 +265,14 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         &self,
     ) -> EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<
+            Ethereum,
+            EvmConfig,
+            EthReceiptConverter<ChainSpec>,
+            (),
+            (),
+            EthSimulateTxConverter,
+        >,
     >
     where
         Provider: Clone,
@@ -292,7 +300,14 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         &self,
     ) -> EthApi<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<
+            Ethereum,
+            EvmConfig,
+            EthReceiptConverter<ChainSpec>,
+            (),
+            (),
+            EthSimulateTxConverter,
+        >,
     >
     where
         Provider: Clone,
@@ -301,7 +316,14 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         EvmConfig: ConfigureEvm + Clone,
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
             RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
+        RpcConverter<
+            Ethereum,
+            EvmConfig,
+            EthReceiptConverter<ChainSpec>,
+            (),
+            (),
+            EthSimulateTxConverter,
+        >: RpcConvert,
         (): PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()

@@ -3,7 +3,10 @@
 
 use std::{sync::Arc, time::Duration};
 
-use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
+use crate::{
+    eth::helpers::types::{EthRpcConverter, EthSimulateTxConverter},
+    EthApiBuilder,
+};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -42,6 +45,9 @@ pub type EthRpcConverterFor<N, NetworkT = Ethereum> = RpcConverter<
     NetworkT,
     <N as FullNodeComponents>::Evm,
     EthReceiptConverter<<<N as FullNodeTypes>::Provider as ChainSpecProvider>::ChainSpec>,
+    (),
+    (),
+    EthSimulateTxConverter,
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
@@ -122,7 +128,14 @@ impl
         evm_config: EvmConfig,
     ) -> EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<
+            Ethereum,
+            EvmConfig,
+            EthReceiptConverter<ChainSpec>,
+            (),
+            (),
+            EthSimulateTxConverter,
+        >,
     >
     where
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
