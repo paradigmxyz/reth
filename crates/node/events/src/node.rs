@@ -374,11 +374,13 @@ impl NodeState {
                 debug!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
-                let stats = format!(
-                    "[{}]",
-                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
-                );
-                debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    let stats = format!(
+                        "[{}]",
+                        stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                    );
+                    debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
+                }
             }
         }
     }
