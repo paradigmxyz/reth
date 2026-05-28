@@ -175,7 +175,7 @@ where
             execution_cache.cache().clone(),
             // It's ok to recreate the cache every time, because it's cheap to do so for a vanilla
             // Ethereum builder every 12s.
-            CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder),
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder)),
         ));
     }
     let state = StateProviderDatabase::new(state_provider.as_ref());
