@@ -34,6 +34,20 @@ type Index = DefaultKey;
 /// Alias for the slotmap used as the node arena throughout the arena trie.
 type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
+#[inline(always)]
+fn arena_node(arena: &NodeArena, idx: Index) -> &ArenaSparseNode {
+    // SAFETY: trie node indexes are produced by this arena and retained only while the node is
+    // live. Callers that may observe removed nodes continue to use checked SlotMap access.
+    unsafe { arena.get_unchecked(idx) }
+}
+
+#[inline(always)]
+fn arena_node_mut(arena: &mut NodeArena, idx: Index) -> &mut ArenaSparseNode {
+    // SAFETY: trie mutation paths update indexes immediately when nodes are moved or replaced, so
+    // hot-path mutable accesses here only use live keys from the current arena.
+    unsafe { arena.get_unchecked_mut(idx) }
+}
+
 const TRACE_TARGET: &str = "trie::arena";
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
@@ -1307,7 +1321,7 @@ impl ArenaParallelSparseTrie {
         mut path_offset: usize,
     ) -> Option<&'a Vec<u8>> {
         loop {
-            match &arena[current] {
+            match arena_node(arena, current) {
                 ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
                 ArenaSparseNode::Leaf { key, value, .. } => {
                     let remaining = full_path.slice(path_offset..);
@@ -1355,7 +1369,7 @@ impl ArenaParallelSparseTrie {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         loop {
-            match &arena[current] {
+            match arena_node(arena, current) {
                 ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => {
                     return Ok(LeafLookup::NonExistent);
                 }
@@ -2451,7 +2465,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn is_root_cached(&self) -> bool {
-        self.upper_arena[self.root].is_cached()
+        arena_node(&self.upper_arena, self.root).is_cached()
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]

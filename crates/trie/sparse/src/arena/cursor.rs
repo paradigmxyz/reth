@@ -1,6 +1,7 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
+    arena_node, arena_node_mut, ArenaSparseNode, ArenaSparseNodeBranchChild,
+    ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -141,7 +142,7 @@ impl ArenaCursor {
                 _ => false,
             });
             if child_is_dirty {
-                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
+                *arena_node_mut(arena, parent.index).state_mut() = ArenaSparseNodeState::Dirty;
             }
         }
 
@@ -207,7 +208,7 @@ impl ArenaCursor {
         let child_nibble =
             child_nibble.expect("if cursor has a parent then the head path can't be empty");
 
-        let parent_branch = arena[parent.index].branch_mut();
+        let parent_branch = arena_node_mut(arena, parent.index).branch_mut();
         let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
             .expect("child nibble not found in parent state_mask");
 
@@ -253,7 +254,7 @@ impl ArenaCursor {
             };
             let head_idx = head.index;
 
-            let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
+            let ArenaSparseNode::Branch(branch) = arena_node(arena, head_idx) else {
                 self.needs_pop = true;
                 return NextResult::NonBranch;
             };
@@ -268,12 +269,12 @@ impl ArenaCursor {
                     continue;
                 }
 
-                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
+                let child_idx = match &branch.children[branch_child_idx] {
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,
                 };
 
-                if should_descend(child_depth, &arena[child_idx]) {
+                if should_descend(child_depth, arena_node(arena, child_idx)) {
                     // Record where to resume iteration when we return to this entry.
                     self.stack.last_mut().expect("head exists").next_dense_idx =
                         branch_child_idx.get() + 1;
@@ -309,7 +310,8 @@ impl ArenaCursor {
             let head = self.stack.last().expect("cursor has root");
             let head_idx = head.index;
 
-            let head_branch = match &arena[head_idx] {
+            let head_node = arena_node(arena, head_idx);
+            let head_branch = match head_node {
                 ArenaSparseNode::EmptyRoot => {
                     return SeekResult::EmptyRoot;
                 }
@@ -326,7 +328,7 @@ impl ArenaCursor {
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }
-                _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
+                _ => unreachable!("unexpected node type on stack: {:?}", head_node),
             };
 
             let head_branch_logical_path = logical_branch_path(arena, head);
@@ -363,12 +365,12 @@ impl ArenaCursor {
 /// `entry.path + branch.short_key`.
 fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibbles {
     let mut path = entry.path;
-    path.extend(&arena[entry.index].branch_ref().short_key);
+    path.extend(&arena_node(arena, entry.index).branch_ref().short_key);
     path
 }
 
 /// Returns the length of the logical path of a branch stack entry.
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
 fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
-    entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+    entry.path.len() + arena_node(arena, entry.index).branch_ref().short_key.len()
 }
