@@ -1229,6 +1229,8 @@ jobs:
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "logs-url=${LOGS_URL}" >> "$GITHUB_OUTPUT"
           echo "traces-url=${TRACES_URL}" >> "$GITHUB_OUTPUT"
+          echo "observability-from-ms=${FROM_MS}" >> "$GITHUB_OUTPUT"
+          echo "observability-to-ms=${TO_MS}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
           echo "Logs URL: ${LOGS_URL}"
           echo "Traces URL: ${TRACES_URL}"
@@ -1380,6 +1382,12 @@ jobs:
           TRACES_URL='${{ steps.metrics.outputs.traces-url }}'
           if [ -n "$TRACES_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --traces-url $TRACES_URL"
+          fi
+          OBSERVABILITY_FROM_MS='${{ steps.metrics.outputs.observability-from-ms }}'
+          OBSERVABILITY_TO_MS='${{ steps.metrics.outputs.observability-to-ms }}'
+          if [ -n "$OBSERVABILITY_FROM_MS" ] && [ -n "$OBSERVABILITY_TO_MS" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --observability-from-ms $OBSERVABILITY_FROM_MS"
+            SUMMARY_ARGS="$SUMMARY_ARGS --observability-to-ms $OBSERVABILITY_TO_MS"
           fi
           if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"

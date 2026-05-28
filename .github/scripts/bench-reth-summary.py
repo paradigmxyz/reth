@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -28,6 +29,8 @@ from pathlib import Path
 import random
 import re
 import sys
+import time
+from urllib.parse import quote
 
 BOOTSTRAP_ITERATIONS = 10_000
 EPSILON = 1e-9
@@ -49,6 +52,9 @@ PRACTICAL_FLOOR_PCT = {
     "wall_clock": 0.70,
     "persist_wait": 5.0,
 }
+LOGS_DATASOURCE_UID = "cfk1hzy08xekgd"
+TRACES_DATASOURCE_UID = "dfk1hrnxca9s0a"
+GRAFANA_EXPLORE_URL = "https://tempoxyz.grafana.net/explore"
 
 
 def _opt_int(row: dict, key: str) -> int | None:
@@ -1795,6 +1801,95 @@ def target_metric_change_str(change: dict) -> str:
     )
 
 
+def iso_from_epoch_ms(epoch_ms: int) -> str:
+    dt = datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
+    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def grafana_explore_url(panes: dict) -> str:
+    encoded = quote(json.dumps(panes, separators=(",", ":")), safe="")
+    return f"{GRAFANA_EXPLORE_URL}?schemaVersion=1&panes={encoded}&orgId=1"
+
+
+def build_grafana_logs_url(benchmark_id: str, from_ms: int, to_ms: int) -> str:
+    return grafana_explore_url({
+        "pw4": {
+            "datasource": LOGS_DATASOURCE_UID,
+            "queries": [{
+                "refId": "A",
+                "datasource": {
+                    "type": "victoriametrics-logs-datasource",
+                    "uid": LOGS_DATASOURCE_UID,
+                },
+                "editorMode": "code",
+                "expr": f"benchmark_id:{benchmark_id}",
+                "queryType": "instant",
+            }],
+            "range": {
+                "from": iso_from_epoch_ms(from_ms),
+                "to": iso_from_epoch_ms(to_ms),
+            },
+            "panelsState": {
+                "logs": {
+                    "sortOrder": "Descending",
+                    "columns": ["Time", "Line"],
+                    "visualisationType": "table",
+                    "labelFieldName": "labels",
+                },
+            },
+            "compact": False,
+        },
+    })
+
+
+def build_grafana_traces_url(benchmark_id: str, from_ms: int, to_ms: int) -> str:
+    return grafana_explore_url({
+        "g39": {
+            "datasource": TRACES_DATASOURCE_UID,
+            "queries": [{
+                "refId": "A",
+                "datasource": {"type": "tempo", "uid": TRACES_DATASOURCE_UID},
+                "queryType": "traceqlSearch",
+                "serviceMapUseNativeHistograms": False,
+                "filters": [{
+                    "id": "benchmark-id",
+                    "operator": "=",
+                    "scope": "resource",
+                    "tag": "benchmark_id",
+                    "value": [benchmark_id],
+                    "valueType": "string",
+                    "isCustomValue": True,
+                }],
+                "query": "{resource.benchmark_id=" + json.dumps(benchmark_id) + "}",
+            }],
+            "range": {
+                "from": iso_from_epoch_ms(from_ms),
+                "to": iso_from_epoch_ms(to_ms),
+            },
+            "panelsState": {"logs": {"visualisationType": "table"}},
+            "compact": False,
+        },
+    })
+
+
+def resolve_observability_range(
+    from_ms: int | None = None,
+    to_ms: int | None = None,
+) -> tuple[int | None, int | None]:
+    if from_ms is None:
+        reference_epoch = os.environ.get("BENCH_REFERENCE_EPOCH")
+        if reference_epoch:
+            try:
+                from_ms = int(float(reference_epoch) * 1000)
+            except ValueError:
+                from_ms = None
+
+    if to_ms is None and from_ms is not None:
+        to_ms = int(time.time() * 1000)
+
+    return from_ms, to_ms
+
+
 def generate_observability_section(summary: dict) -> list[str]:
     observability = summary.get("observability") or {}
     links = [
@@ -1879,6 +1974,8 @@ def main():
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     parser.add_argument("--logs-url", default=None, help="Grafana Explore URL for benchmark logs")
     parser.add_argument("--traces-url", default=None, help="Grafana Explore URL for benchmark traces")
+    parser.add_argument("--observability-from-ms", type=int, default=None, help="Grafana observability range start in epoch milliseconds")
+    parser.add_argument("--observability-to-ms", type=int, default=None, help="Grafana observability range end in epoch milliseconds")
     parser.add_argument("--target-metrics-config", default=None, help="Target metrics config path")
     parser.add_argument(
         "--derek-command",
@@ -2003,12 +2100,31 @@ def main():
     }
     if args.benchmark_id:
         summary["benchmark_id"] = args.benchmark_id
+    observability_from_ms, observability_to_ms = resolve_observability_range(
+        args.observability_from_ms,
+        args.observability_to_ms,
+    )
+    logs_url = args.logs_url
+    traces_url = args.traces_url
+    if args.benchmark_id and observability_from_ms and observability_to_ms:
+        logs_url = logs_url or build_grafana_logs_url(
+            args.benchmark_id,
+            observability_from_ms,
+            observability_to_ms,
+        )
+        traces_url = traces_url or build_grafana_traces_url(
+            args.benchmark_id,
+            observability_from_ms,
+            observability_to_ms,
+        )
     observability = {
         key: value for key, value in {
             "benchmark_id": args.benchmark_id,
+            "from_ms": observability_from_ms,
+            "to_ms": observability_to_ms,
             "grafana_url": args.grafana_url,
-            "logs_url": args.logs_url,
-            "traces_url": args.traces_url,
+            "logs_url": logs_url,
+            "traces_url": traces_url,
         }.items() if value
     }
     if observability:
