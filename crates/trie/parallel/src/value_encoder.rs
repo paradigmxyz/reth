@@ -1,7 +1,7 @@
 use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, Account};
@@ -47,6 +47,52 @@ impl ValueEncoderStats {
     }
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct ValueEncoderStatsCells {
+    storage_wait_time: Cell<Duration>,
+    dispatched_count: Cell<u64>,
+    from_cache_count: Cell<u64>,
+    sync_count: Cell<u64>,
+    dispatched_missing_root_count: Cell<u64>,
+}
+
+impl ValueEncoderStatsCells {
+    #[inline]
+    fn add_storage_wait_time(&self, elapsed: Duration) {
+        self.storage_wait_time.set(self.storage_wait_time.get() + elapsed);
+    }
+
+    #[inline]
+    fn increment_dispatched(&self) {
+        self.dispatched_count.set(self.dispatched_count.get() + 1);
+    }
+
+    #[inline]
+    fn increment_from_cache(&self) {
+        self.from_cache_count.set(self.from_cache_count.get() + 1);
+    }
+
+    #[inline]
+    fn increment_sync(&self) {
+        self.sync_count.set(self.sync_count.get() + 1);
+    }
+
+    #[inline]
+    fn increment_dispatched_missing_root(&self) {
+        self.dispatched_missing_root_count.set(self.dispatched_missing_root_count.get() + 1);
+    }
+
+    fn into_stats(self) -> ValueEncoderStats {
+        ValueEncoderStats {
+            storage_wait_time: self.storage_wait_time.into_inner(),
+            dispatched_count: self.dispatched_count.into_inner(),
+            from_cache_count: self.from_cache_count.into_inner(),
+            sync_count: self.sync_count.into_inner(),
+            dispatched_missing_root_count: self.dispatched_missing_root_count.into_inner(),
+        }
+    }
+}
+
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
 pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
     /// A storage proof job was dispatched to the worker pool.
@@ -61,7 +107,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
-        stats: Rc<RefCell<ValueEncoderStats>>,
+        stats: Rc<ValueEncoderStatsCells>,
         /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
@@ -107,7 +153,7 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
                 })?;
                 let result = msg.result?;
 
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
+                stats.add_storage_wait_time(wait_start.elapsed());
 
                 storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
                 Ok(())
@@ -153,7 +199,7 @@ where
                         )))
                     })?
                     .result?;
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
+                stats.add_storage_wait_time(wait_start.elapsed());
 
                 storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
 
@@ -166,7 +212,7 @@ where
                         // the account proof targets, but _is_ in storage proof targets, will need
                         // to be encoded as part of general trie traversal, so we need to handle
                         // that case here.
-                        stats.borrow_mut().dispatched_missing_root_count += 1;
+                        stats.increment_dispatched_missing_root();
 
                         let mut calculator = storage_calculator.borrow_mut();
                         let root_node = calculator.storage_root_node(hashed_address)?;
@@ -223,7 +269,7 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// buffers across multiple storage root calculations.
     storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     /// Shared stats for tracking wait time and variant counts.
-    stats: Rc<RefCell<ValueEncoderStats>>,
+    stats: Rc<ValueEncoderStatsCells>,
 }
 
 impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
@@ -264,9 +310,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
-        let mut stats = Rc::into_inner(self.stats)
-            .expect("no deferred encoders are still allocated")
-            .into_inner();
+        let stats = Rc::into_inner(self.stats).expect("no deferred encoders are still allocated");
 
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
@@ -280,12 +324,12 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                     )))
                 })?
                 .result?;
-            stats.storage_wait_time += wait_start.elapsed();
+            stats.add_storage_wait_time(wait_start.elapsed());
 
             storage_proof_results.insert(*hashed_address, result.proof);
         }
 
-        Ok((storage_proof_results, stats))
+        Ok((storage_proof_results, stats.into_stats()))
     }
 }
 
@@ -305,7 +349,7 @@ where
         // If the proof job has already been dispatched for this account then it's not necessary to
         // dispatch another.
         if let Some(rx) = self.dispatched.remove(&hashed_address) {
-            self.stats.borrow_mut().dispatched_count += 1;
+            self.stats.increment_dispatched();
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
@@ -322,12 +366,12 @@ where
 
         // If the root is already calculated then just use it directly
         if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
-            self.stats.borrow_mut().from_cache_count += 1;
+            self.stats.increment_from_cache();
             return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
         }
 
         // Compute storage root synchronously using the shared calculator
-        self.stats.borrow_mut().sync_count += 1;
+        self.stats.increment_sync();
         AsyncAccountDeferredValueEncoder::Sync {
             storage_calculator: self.storage_calculator.clone(),
             hashed_address,
