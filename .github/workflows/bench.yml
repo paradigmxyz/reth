@@ -1549,7 +1549,6 @@ jobs:
               core,
               context,
               chartSha: '${{ steps.push-charts.outputs.sha }}',
-              grafanaUrl: '${{ steps.metrics.outputs.grafana-url }}',
               logsUrl: '${{ steps.metrics.outputs.logs-url }}',
               tracesUrl: '${{ steps.metrics.outputs.traces-url }}',
               runId: '${{ github.run_id }}',

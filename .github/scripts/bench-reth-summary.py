@@ -1893,7 +1893,6 @@ def resolve_observability_range(
 def generate_observability_section(summary: dict) -> list[str]:
     observability = summary.get("observability") or {}
     links = [
-        ("Grafana", observability.get("grafana_url")),
         ("Logs", observability.get("logs_url")),
         ("Traces", observability.get("traces_url")),
     ]
