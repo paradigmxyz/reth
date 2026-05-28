@@ -6,7 +6,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
-use revm_state::EvmState;
+use revm_state::{Account, EvmState};
 use std::sync::Arc;
 use tracing::trace;
 
@@ -124,7 +124,33 @@ impl StateRootHandle {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
         move |source: StateChangeSource, state: &EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state.clone()));
+            let state = state
+                .iter()
+                .filter_map(|(address, account)| {
+                    // Skip untouched and unchanged accounts
+                    if !account.is_touched() ||
+                        (account.original_info() == account.info &&
+                            account.storage.iter().all(|(_, value)| !value.is_changed()))
+                    {
+                        return None
+                    }
+
+                    let storage = account
+                        .storage
+                        .iter()
+                        .filter(|(_, value)| value.is_changed())
+                        .map(|(key, value)| (*key, value.clone()))
+                        .collect();
+
+                    let mut acc = Account::from(account.original_info());
+                    acc.storage = storage;
+                    acc.status = account.status;
+                    acc.info = account.info.clone();
+
+                    Some((*address, acc))
+                })
+                .collect();
+            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state));
         }
     }
 
@@ -189,30 +215,28 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
+        let hashed_address = keccak256(address);
+        trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
-            let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
-                let info = if destroyed { None } else { Some(account.info.into()) };
-                hashed_state.accounts.insert(hashed_address, info);
-            }
+        let destroyed = account.is_selfdestructed();
+        if account.info != account.original_info() {
+            let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+        }
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
+        let mut changed_storage_iter = account
+            .storage
+            .into_iter()
+            .filter(|(_slot, value)| value.is_changed())
+            .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+            .peekable();
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
+        if destroyed {
+            hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+        } else if changed_storage_iter.peek().is_some() {
+            hashed_state
+                .storages
+                .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
         }
     }
 
