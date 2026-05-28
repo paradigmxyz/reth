@@ -29,7 +29,7 @@ where
     R: Receipt,
     ChainSpec: EthereumHardforks,
 {
-    validate_block_post_execution_with_experimental_bal_hashes(
+    validate_block_post_execution_with_bal_hashes(
         block,
         chain_spec,
         result,
@@ -39,15 +39,14 @@ where
     )
 }
 
-/// Validate a block with regard to execution results, optionally validating pre-Amsterdam BAL
-/// hashes for experimental networks.
-pub(crate) fn validate_block_post_execution_with_experimental_bal_hashes<B, R, ChainSpec>(
+/// Validate a block with regard to execution results, optionally allowing pre-Amsterdam BAL hashes.
+pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list_hash: Option<B256>,
-    validate_experimental_bal_hashes: bool,
+    allow_bal_hashes: bool,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -107,16 +106,12 @@ where
     }
 
     // Validate that the header block access list hash matches the calculated block access list hash
-    let is_experimental_bal_hash = validate_experimental_bal_hashes &&
+    let is_allowed_pre_amsterdam_bal_hash = allow_bal_hashes &&
         !chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
         block.header().block_access_list_hash().is_some();
 
-    if is_experimental_bal_hash && block_access_list_hash.is_none() {
-        return Err(ConsensusError::BlockAccessListHashMissing)
-    }
-
     if (chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) ||
-        is_experimental_bal_hash) &&
+        is_allowed_pre_amsterdam_bal_hash) &&
         let Some(block_access_list_hash) = block_access_list_hash
     {
         let Some(block_bal_hash) = block.header().block_access_list_hash() else {

@@ -50,8 +50,8 @@ pub struct EthBeaconConsensus<ChainSpec> {
     skip_blob_gas_used_check: bool,
     /// When true, skips the requests hash check in post-execution validation.
     skip_requests_hash_check: bool,
-    /// When true, accepts and validates BAL hashes before Amsterdam activation.
-    validate_experimental_bal_hashes: bool,
+    /// When true, allows BAL hashes before Amsterdam activation.
+    allow_bal_hashes: bool,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
@@ -63,7 +63,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             skip_gas_limit_ramp_check: false,
             skip_blob_gas_used_check: false,
             skip_requests_hash_check: false,
-            validate_experimental_bal_hashes: false,
+            allow_bal_hashes: false,
         }
     }
 
@@ -96,9 +96,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         self
     }
 
-    /// Accepts and validates BAL hashes before Amsterdam activation.
-    pub const fn with_validate_experimental_bal_hashes(mut self, validate: bool) -> Self {
-        self.validate_experimental_bal_hashes = validate;
+    /// Allows BAL hashes before Amsterdam activation.
+    pub const fn with_allow_bal_hashes(mut self, allow: bool) -> Self {
+        self.allow_bal_hashes = allow;
         self
     }
 
@@ -120,13 +120,13 @@ where
         receipt_root_bloom: Option<ReceiptRootBloom>,
         block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
-        let res = validation::validate_block_post_execution_with_experimental_bal_hashes(
+        let res = validation::validate_block_post_execution_with_bal_hashes(
             block,
             &self.chain_spec,
             result,
             receipt_root_bloom,
             block_access_list_hash,
-            self.validate_experimental_bal_hashes,
+            self.allow_bal_hashes,
         );
 
         if self.skip_requests_hash_check &&
@@ -253,9 +253,7 @@ where
                 return Err(ConsensusError::SlotNumberMissing)
             }
         } else {
-            if header.block_access_list_hash().is_some() &&
-                !self.validate_experimental_bal_hashes
-            {
+            if header.block_access_list_hash().is_some() && !self.allow_bal_hashes {
                 return Err(ConsensusError::BlockAccessListHashUnexpected)
             }
             if header.slot_number().is_some() {
@@ -429,13 +427,13 @@ mod tests {
     }
 
     #[test]
-    fn prague_header_accepts_experimental_block_access_list_hash_before_amsterdam() {
+    fn prague_header_allows_block_access_list_hash_before_amsterdam() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(B256::ZERO);
 
         assert!(EthBeaconConsensus::new(chain_spec)
-            .with_validate_experimental_bal_hashes(true)
+            .with_allow_bal_hashes(true)
             .validate_header(&SealedHeader::seal_slow(header,))
             .is_ok());
     }
@@ -455,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn prague_header_rejects_slot_number_with_experimental_bal_hashes_before_amsterdam() {
+    fn prague_header_rejects_slot_number_with_allowed_bal_hashes_before_amsterdam() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(B256::ZERO);
@@ -463,7 +461,7 @@ mod tests {
 
         assert!(matches!(
             EthBeaconConsensus::new(chain_spec)
-                .with_validate_experimental_bal_hashes(true)
+                .with_allow_bal_hashes(true)
                 .validate_header(&SealedHeader::seal_slow(header,))
                 .unwrap_err(),
             ConsensusError::SlotNumberUnexpected
@@ -471,13 +469,12 @@ mod tests {
     }
 
     #[test]
-    fn prague_post_execution_validates_experimental_block_access_list_hash_before_amsterdam() {
+    fn prague_post_execution_allows_block_access_list_hash_before_amsterdam() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
         let expected_hash = B256::repeat_byte(0x42);
         let block = prague_recovered_block_with_bal_hash(expected_hash);
         let result = BlockExecutionResult::<Receipt>::default();
-        let consensus =
-            EthBeaconConsensus::new(chain_spec).with_validate_experimental_bal_hashes(true);
+        let consensus = EthBeaconConsensus::new(chain_spec).with_allow_bal_hashes(true);
 
         assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
             &consensus,
@@ -488,13 +485,10 @@ mod tests {
         )
         .is_ok());
 
-        assert!(matches!(
-            FullConsensus::<EthPrimitives>::validate_block_post_execution(
-                &consensus, &block, &result, None, None,
-            )
-            .unwrap_err(),
-            ConsensusError::BlockAccessListHashMissing
-        ));
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus, &block, &result, None, None,
+        )
+        .is_ok());
 
         assert!(matches!(
             FullConsensus::<EthPrimitives>::validate_block_post_execution(
