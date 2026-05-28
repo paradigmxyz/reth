@@ -56,12 +56,14 @@ where
     type Error = Either<A::Error, B::Error>;
     fn convert(&self, raw: Either<RA, RB>) -> Result<Self::Tx, Self::Error> {
         match (self, raw) {
-            (Self::Left(a), Either::Left(raw)) => {
-                a.convert(raw).map(Either::Left).map_err(Either::Left)
-            }
-            (Self::Right(b), Either::Right(raw)) => {
-                b.convert(raw).map(Either::Right).map_err(Either::Right)
-            }
+            (Self::Left(a), Either::Left(raw)) => match a.convert(raw) {
+                Ok(tx) => Ok(Either::Left(tx)),
+                Err(err) => Err(Either::Left(err)),
+            },
+            (Self::Right(b), Either::Right(raw)) => match b.convert(raw) {
+                Ok(tx) => Ok(Either::Right(tx)),
+                Err(err) => Err(Either::Right(err)),
+            },
             _ => unreachable!(),
         }
     }
