@@ -1795,12 +1795,32 @@ def target_metric_change_str(change: dict) -> str:
     )
 
 
+def generate_observability_section(summary: dict) -> list[str]:
+    observability = summary.get("observability") or {}
+    benchmark_id = summary.get("benchmark_id") or observability.get("benchmark_id")
+    links = [
+        ("Metrics dashboard", observability.get("grafana_url")),
+        ("Logs", observability.get("logs_url")),
+        ("Traces", observability.get("traces_url")),
+    ]
+    links = [(label, url) for label, url in links if url]
+
+    if not benchmark_id and not links:
+        return []
+
+    lines = ["", "### Observability", ""]
+    if benchmark_id:
+        lines.append(f"- Benchmark ID: `{benchmark_id}`")
+    for label, url in links:
+        lines.append(f"- [{label}]({url})")
+    return lines
+
+
 def generate_markdown(
     summary: dict, comparison_table: str,
     wait_time_tables: list[str] | None = None,
     target_metric_table: str = "",
     behind_baseline: int = 0, repo: str = "", baseline_ref: str = "", baseline_name: str = "",
-    grafana_url: str | None = None,
     derek_command: str | None = None,
 ) -> str:
     """Generate a markdown comment body."""
@@ -1827,9 +1847,7 @@ def generate_markdown(
     if target_metric_table:
         lines.append("")
         lines.append(target_metric_table)
-    if grafana_url:
-        lines.append("")
-        lines.append(f"**[Grafana Dashboard]({grafana_url})**")
+    lines.extend(generate_observability_section(summary))
     return "\n".join(lines)
 
 
@@ -1860,7 +1878,10 @@ def main():
     parser.add_argument("--warmup-blocks", default=None, help="Number of warmup blocks")
     parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
     parser.add_argument("--bal-mode", default=None, help="BAL mode (true, feature, baseline)")
+    parser.add_argument("--benchmark-id", default=os.environ.get("BENCH_ID"), help="Benchmark ID used for OTLP labels")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
+    parser.add_argument("--logs-url", default=None, help="Grafana Explore URL for benchmark logs")
+    parser.add_argument("--traces-url", default=None, help="Grafana Explore URL for benchmark traces")
     parser.add_argument("--target-metrics-config", default=None, help="Target metrics config path")
     parser.add_argument(
         "--derek-command",
@@ -1983,6 +2004,18 @@ def main():
         "changes": compute_changes(baseline_stats, feature_stats, ci_stats),
         "wait_times": wait_time_data,
     }
+    if args.benchmark_id:
+        summary["benchmark_id"] = args.benchmark_id
+    observability = {
+        key: value for key, value in {
+            "benchmark_id": args.benchmark_id,
+            "grafana_url": args.grafana_url,
+            "logs_url": args.logs_url,
+            "traces_url": args.traces_url,
+        }.items() if value
+    }
+    if observability:
+        summary["observability"] = observability
     if target_metric_summary:
         summary["target_metrics"] = target_metric_summary
     with open(args.output_summary, "w") as f:
@@ -1997,7 +2030,6 @@ def main():
         repo=args.repo,
         baseline_ref=baseline_ref,
         baseline_name=baseline_name,
-        grafana_url=args.grafana_url,
         derek_command=args.derek_command,
     )
 

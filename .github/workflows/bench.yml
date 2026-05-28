@@ -1142,15 +1142,68 @@ jobs:
 
           .github/scripts/bench-update-status.sh "Finalizing results..."
 
-      - name: Generate Grafana URL
+      - name: Generate observability URLs
         id: metrics
         if: "!cancelled()"
         run: |
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( $(date +%s) * 1000 ))
           GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          OBSERVABILITY_URLS="$(python3 - "$BENCH_ID" "$FROM_MS" "$TO_MS" <<'PY'
+          import json
+          import sys
+          from urllib.parse import quote
+
+          bench_id, from_ms, to_ms = sys.argv[1:4]
+          logs_uid = "cfk1hzy08xekgd"
+          traces_uid = "dfk1hrnxca9s0a"
+
+          def explore_url(datasource_uid, queries):
+              panes = {
+                  "bench": {
+                      "datasource": {"uid": datasource_uid},
+                      "queries": queries,
+                      "range": {"from": str(from_ms), "to": str(to_ms)},
+                  },
+              }
+              encoded = quote(json.dumps(panes, separators=(",", ":")), safe="")
+              return f"https://tempoxyz.grafana.net/explore?schemaVersion=1&panes={encoded}&orgId=1"
+
+          logs_query = {
+              "refId": "A",
+              "datasource": {"uid": logs_uid},
+              "expr": f"benchmark_id:{bench_id}",
+              "query": f"benchmark_id:{bench_id}",
+          }
+          traces_query = {
+              "refId": "A",
+              "datasource": {"uid": traces_uid},
+              "query": f'{{resource.benchmark_id="{bench_id}"}}',
+              "queryType": "traceqlSearch",
+              "filters": [
+                  {
+                      "id": "resource.benchmark_id",
+                      "operator": "=",
+                      "scope": "resource",
+                      "tag": "benchmark_id",
+                      "value": [bench_id],
+                      "valueType": "string",
+                  },
+              ],
+          }
+
+          print(explore_url(logs_uid, [logs_query]))
+          print(explore_url(traces_uid, [traces_query]))
+          PY
+          )"
+          LOGS_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '1p')"
+          TRACES_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '2p')"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
+          echo "logs-url=${LOGS_URL}" >> "$GITHUB_OUTPUT"
+          echo "traces-url=${TRACES_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
+          echo "Logs URL: ${LOGS_URL}"
+          echo "Traces URL: ${TRACES_URL}"
 
       - name: Scan logs for errors
         if: "!cancelled()"
@@ -1285,9 +1338,20 @@ jobs:
           if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --bal-mode $BENCH_BAL"
           fi
+          if [ -n "${BENCH_ID:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --benchmark-id $BENCH_ID"
+          fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
+          if [ -n "$LOGS_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --logs-url $LOGS_URL"
+          fi
+          TRACES_URL='${{ steps.metrics.outputs.traces-url }}'
+          if [ -n "$TRACES_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --traces-url $TRACES_URL"
           fi
           if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
@@ -1418,12 +1482,6 @@ jobs:
               }
             }
 
-            // Grafana dashboard link
-            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
-            if (grafanaUrl) {
-              comment += `\n\n### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n`;
-            }
-
             // Node errors (panics / ERROR logs)
             try {
               const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
@@ -1456,6 +1514,8 @@ jobs:
               context,
               chartSha: '${{ steps.push-charts.outputs.sha }}',
               grafanaUrl: '${{ steps.metrics.outputs.grafana-url }}',
+              logsUrl: '${{ steps.metrics.outputs.logs-url }}',
+              tracesUrl: '${{ steps.metrics.outputs.traces-url }}',
               runId: '${{ github.run_id }}',
             });
 
