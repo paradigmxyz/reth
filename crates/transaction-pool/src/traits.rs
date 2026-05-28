@@ -550,11 +550,22 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
+    ///
     /// In other words, removes all transactions from the given set that are currently present in
-    /// the pool. Returns hashes already known to the pool.
+    /// the pool.
     ///
     /// Consumer: P2P
     fn retain_unknown<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData;
+
+    /// Retains only those hashes that are known to the pool.
+    ///
+    /// In other words, removes all transactions from the given set that are not currently present
+    /// in the pool.
+    ///
+    /// Consumer: P2P
+    fn retain_contains<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData;
 
@@ -797,6 +808,11 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns the combined number of all transactions.
     pub const fn count(&self) -> usize {
         self.pending.len() + self.queued.len()
+    }
+
+    /// Returns an iterator over all pending and queued transactions.
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<ValidPoolTransaction<T>>> + '_ {
+        self.pending.iter().chain(self.queued.iter())
     }
 
     /// Returns an iterator over all pending [`Recovered`] transactions.

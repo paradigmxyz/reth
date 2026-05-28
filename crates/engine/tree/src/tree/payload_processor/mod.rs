@@ -4,8 +4,9 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
-    CacheWaitDurations, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
+    WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -26,7 +27,9 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -119,6 +122,8 @@ where
     execution_cache: PayloadExecutionCache,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
+    /// Metrics for shared execution cache state.
+    cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -183,6 +188,8 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
+            cache_state_metrics: (!config.disable_cache_metrics())
+                .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
         }
@@ -269,6 +276,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -291,17 +299,14 @@ where
             halve_workers,
             config,
         );
-        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
-        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
-        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
-        // the block follows today's sequential execution and transaction-prewarm path.
+        // BAL blocks only bypass the normal execution state hook when the validator decided that
+        // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
+        // so the block follows today's sequential execution and transaction-prewarm path.
         //
         // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
-        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
-        // prewarm, not this dispatch decision.
-        let parallel_bal_execution = !config.disable_state_cache() &&
-            !config.disable_bal_parallel_execution() &&
-            env.decoded_bal.is_some();
+        // BAL state prefetching. State-cache disabled mode still uses the BAL executor, but
+        // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
+        // `disable_bal_batch_io` controls the prefetch half when a cache exists.
         let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -381,16 +386,18 @@ where
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
             proof_handle,
             state_root_tx,
+            hashed_state_tx,
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -471,8 +478,7 @@ where
                     })
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            let tx = WithTxEnv::new(tx);
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
@@ -524,6 +530,7 @@ where
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
+            cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
@@ -580,6 +587,7 @@ where
         &self,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -628,6 +636,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
                 sparse_state_trie,
@@ -717,7 +726,7 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
-        let cache_metrics = self.cache_metrics.clone();
+        let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
@@ -751,7 +760,7 @@ where
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return
             }
-            new_cache.update_metrics(cache_metrics.as_ref());
+            new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache
             *cached = Some(new_cache);
@@ -773,10 +782,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| {
-            let (tx_env, tx) = tx.into_parts();
-            WithTxEnv { tx_env, tx: Arc::new(tx) }
-        });
+        let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
@@ -894,6 +900,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a clone of the indexed transaction receiver.
     pub fn clone_transaction_receiver(&self) -> IndexedTxReceiver<Tx, Err> {
         self.transactions.clone()
+    }
+
+    /// Takes the hashed state receiver out of the handle for use with custom waiting logic
+    pub fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+        self.state_root_handle.as_mut().map(|handle| handle.take_hashed_state_rx())
     }
 }
 
@@ -1360,6 +1371,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
+            false,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");

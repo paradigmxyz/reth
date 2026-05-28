@@ -436,6 +436,14 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
     }
 }
 
+impl<Executor: BlockExecutor> ExecutorTx<Executor>
+    for (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>)
+{
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        self
+    }
+}
+
 impl<Executor> ExecutorTx<Executor>
     for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
 where
@@ -662,13 +670,28 @@ impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
 {
 }
 
-/// A container for a transaction and a transaction environment.
+/// A transaction stored together with its `TxEnv`.
+///
+/// See also [`ExecutableTxParts`] for types that can be split into a transaction environment and
+/// recovered transaction.
 #[derive(Debug)]
 pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
     pub tx: Arc<T>,
+}
+
+impl<TxEnv, T> WithTxEnv<TxEnv, T> {
+    /// Creates a transaction/environment pair from a type that can be split with
+    /// [`ExecutableTxParts::into_parts`].
+    pub fn new<Tx, InnerTx>(tx: Tx) -> Self
+    where
+        Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = T>,
+    {
+        let (tx_env, tx) = tx.into_parts();
+        Self { tx_env, tx: Arc::new(tx) }
+    }
 }
 
 impl<TxEnv: Clone, T> Clone for WithTxEnv<TxEnv, T> {

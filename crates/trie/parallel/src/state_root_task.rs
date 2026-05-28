@@ -85,6 +85,8 @@ pub struct StateRootHandle {
     /// Receiver for the final state root result.
     state_root_rx:
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Receiver for the hashed post state.
+    hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
 }
 
 impl StateRootHandle {
@@ -95,8 +97,14 @@ impl StateRootHandle {
         state_root_rx: std::sync::mpsc::Receiver<
             Result<StateRootComputeOutcome, ParallelStateRootError>,
         >,
+        hashed_state_rx: std::sync::mpsc::Receiver<HashedPostState>,
     ) -> Self {
-        Self { cached_trie_state_root, updates_tx, state_root_rx: Some(state_root_rx) }
+        Self {
+            cached_trie_state_root,
+            updates_tx,
+            state_root_rx: Some(state_root_rx),
+            hashed_state_rx: Some(hashed_state_rx),
+        }
     }
 
     /// Returns the state root that the cached sparse trie is anchored at.
@@ -142,6 +150,15 @@ impl StateRootHandle {
         &mut self,
     ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         self.state_root_rx.take().expect("state_root already taken")
+    }
+
+    /// Takes the hashed state receiver
+    ///
+    /// # Panics
+    ///
+    /// If called more than once.
+    pub const fn take_hashed_state_rx(&mut self) -> std::sync::mpsc::Receiver<HashedPostState> {
+        self.hashed_state_rx.take().expect("hashed_state already taken")
     }
 }
 
