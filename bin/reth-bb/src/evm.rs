@@ -30,7 +30,7 @@ use revm::{
     Inspector,
 };
 use std::sync::{Arc, Mutex};
-use tracing::{debug, trace};
+use tracing::{trace, Level};
 
 // ---------------------------------------------------------------------------
 // BbEvmPlan — runtime segment tracking state
@@ -306,7 +306,7 @@ where
         let seg_idx = plan.next_segment;
         let prev_seg_idx = seg_idx - 1;
 
-        debug!(
+        trace!(
             target: "engine::bb::evm",
             seg_idx,
             tx_counter = plan.tx_counter,
@@ -356,19 +356,21 @@ where
         self.blob_gas_used_offset += result.blob_gas_used;
         self.accumulated_requests.extend(result.requests);
 
-        let last_receipt_cumulative =
-            result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
-        let seg_block_number = prev_segment.evm_env.block_env.number.saturating_to::<u64>();
-        debug!(
-            target: "engine::bb::evm",
-            prev_seg_idx,
-            seg_block_number,
-            segment_gas_used = result.gas_used,
-            gas_used_offset = self.gas_used_offset,
-            last_receipt_cumulative,
-            receipt_count = result.receipts.len(),
-            "Finished segment"
-        );
+        if tracing::enabled!(target: "engine::bb::evm", Level::TRACE) {
+            let last_receipt_cumulative =
+                result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+            let seg_block_number = prev_segment.evm_env.block_env.number.saturating_to::<u64>();
+            trace!(
+                target: "engine::bb::evm",
+                prev_seg_idx,
+                seg_block_number,
+                segment_gas_used = result.gas_used,
+                gas_used_offset = self.gas_used_offset,
+                last_receipt_cumulative,
+                receipt_count = result.receipts.len(),
+                "Finished segment"
+            );
+        }
 
         // Swap EVM env to the next segment's values (using real gas_limit).
         let ctx = evm.ctx_mut();
@@ -498,17 +500,19 @@ where
         result.gas_used += self.gas_used_offset;
         result.blob_gas_used += self.blob_gas_used_offset;
 
-        let last_receipt_cumulative =
-            result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
-        debug!(
-            target: "engine::bb::evm",
-            last_segment_gas,
-            gas_used_offset = self.gas_used_offset,
-            total_gas_used = result.gas_used,
-            last_receipt_cumulative,
-            receipt_count = result.receipts.len(),
-            "Finished final segment"
-        );
+        if tracing::enabled!(target: "engine::bb::evm", Level::TRACE) {
+            let last_receipt_cumulative =
+                result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+            trace!(
+                target: "engine::bb::evm",
+                last_segment_gas,
+                gas_used_offset = self.gas_used_offset,
+                total_gas_used = result.gas_used,
+                last_receipt_cumulative,
+                receipt_count = result.receipts.len(),
+                "Finished final segment"
+            );
+        }
 
         // Merge requests accumulated from earlier segment boundaries into
         // the final result.
