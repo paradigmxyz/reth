@@ -1,19 +1,17 @@
-use std::{collections::HashMap, time::Duration};
+use std::{array, time::Duration};
 
-use itertools::Itertools;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_static_file_types::{StaticFileMap, StaticFileSegment};
-use strum::{EnumIter, IntoEnumIterator};
+
+const STATIC_FILE_OPERATION_COUNT: usize = 6;
 
 /// Metrics for the static file provider.
 #[derive(Debug)]
 pub struct StaticFileProviderMetrics {
     segments: StaticFileMap<StaticFileSegmentMetrics>,
-    segment_operations: HashMap<
-        (StaticFileSegment, StaticFileProviderOperation),
-        StaticFileProviderOperationMetrics,
-    >,
+    segment_operations:
+        StaticFileMap<[StaticFileProviderOperationMetrics; STATIC_FILE_OPERATION_COUNT]>,
 }
 
 impl Default for StaticFileProviderMetrics {
@@ -32,18 +30,20 @@ impl Default for StaticFileProviderMetrics {
                     })
                     .collect(),
             ),
-            segment_operations: StaticFileSegment::iter()
-                .cartesian_product(StaticFileProviderOperation::iter())
-                .map(|(segment, operation)| {
-                    (
-                        (segment, operation),
-                        StaticFileProviderOperationMetrics::new_with_labels(&[
-                            ("segment", segment.as_str()),
-                            ("operation", operation.as_str()),
-                        ]),
-                    )
-                })
-                .collect(),
+            segment_operations: Box::new(
+                StaticFileSegment::iter()
+                    .map(|segment| {
+                        let operations = array::from_fn(|operation_index| {
+                            let operation = StaticFileProviderOperation::ALL[operation_index];
+                            StaticFileProviderOperationMetrics::new_with_labels(&[
+                                ("segment", segment.as_str()),
+                                ("operation", operation.as_str()),
+                            ])
+                        });
+                        (segment, operations)
+                    })
+                    .collect(),
+            ),
         }
     }
 }
@@ -71,10 +71,8 @@ impl StaticFileProviderMetrics {
         operation: StaticFileProviderOperation,
         duration: Option<Duration>,
     ) {
-        let segment_operation = self
-            .segment_operations
-            .get(&(segment, operation))
-            .expect("segment operation metrics should exist");
+        let operations = self.segment_operations.get(segment).expect("segment metrics should exist");
+        let segment_operation = &operations[operation.index()];
 
         segment_operation.calls_total.increment(1);
 
@@ -90,23 +88,18 @@ impl StaticFileProviderMetrics {
         count: u64,
         duration: Option<Duration>,
     ) {
-        self.segment_operations
-            .get(&(segment, operation))
-            .expect("segment operation metrics should exist")
-            .calls_total
-            .increment(count);
+        let operations = self.segment_operations.get(segment).expect("segment metrics should exist");
+        let segment_operation = &operations[operation.index()];
+
+        segment_operation.calls_total.increment(count);
 
         if let Some(duration) = duration {
-            self.segment_operations
-                .get(&(segment, operation))
-                .expect("segment operation metrics should exist")
-                .write_duration_seconds
-                .record(duration.as_secs_f64() / count as f64);
+            segment_operation.write_duration_seconds.record(duration.as_secs_f64() / count as f64);
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum StaticFileProviderOperation {
     InitCursor,
     OpenWriter,
@@ -117,6 +110,26 @@ pub(crate) enum StaticFileProviderOperation {
 }
 
 impl StaticFileProviderOperation {
+    const ALL: [Self; STATIC_FILE_OPERATION_COUNT] = [
+        Self::InitCursor,
+        Self::OpenWriter,
+        Self::Append,
+        Self::Prune,
+        Self::IncrementBlock,
+        Self::CommitWriter,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::InitCursor => 0,
+            Self::OpenWriter => 1,
+            Self::Append => 2,
+            Self::Prune => 3,
+            Self::IncrementBlock => 4,
+            Self::CommitWriter => 5,
+        }
+    }
+
     const fn as_str(&self) -> &'static str {
         match self {
             Self::InitCursor => "init-cursor",
