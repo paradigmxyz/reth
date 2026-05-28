@@ -685,6 +685,7 @@ pub struct WithTxEnv<TxEnv, T> {
 impl<TxEnv, T> WithTxEnv<TxEnv, T> {
     /// Creates a transaction/environment pair from a type that can be split with
     /// [`ExecutableTxParts::into_parts`].
+    #[inline]
     pub fn new<Tx, InnerTx>(tx: Tx) -> Self
     where
         Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = T>,
@@ -695,16 +696,19 @@ impl<TxEnv, T> WithTxEnv<TxEnv, T> {
 }
 
 impl<TxEnv: Clone, T> Clone for WithTxEnv<TxEnv, T> {
+    #[inline]
     fn clone(&self) -> Self {
         Self { tx_env: self.tx_env.clone(), tx: self.tx.clone() }
     }
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
+    #[inline]
     fn tx(&self) -> &Tx {
         self.tx.tx()
     }
 
+    #[inline]
     fn signer(&self) -> &Address {
         self.tx.signer()
     }
@@ -713,6 +717,7 @@ impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
 impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<TxEnv, T> {
     type Recovered = Arc<T>;
 
+    #[inline]
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
     }
