@@ -2656,9 +2656,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 for entry in storage {
                     tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                    if let Some(db_entry) =
-                        storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                        db_entry.key == entry.key
+                    if !wipe_storage &&
+                        let Some(db_entry) =
+                            storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                            db_entry.key == entry.key
                     {
                         storages_cursor.delete_current()?;
                     }
