@@ -53,9 +53,12 @@ const BINARY_SEARCH_THRESHOLD: usize = 128;
 impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
+    #[inline]
     pub fn seek(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k >= key) {
-            return self.current()
+        let idx = self.idx;
+        if idx < self.entries.len() && &self.entries[idx].0 >= key {
+            // SAFETY: `idx` was bounds-checked above.
+            return Some(unsafe { self.entries.get_unchecked(idx) })
         }
 
         self.advance_while(|k| k < key)
@@ -63,9 +66,12 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
 
     /// Returns the first entry from the current cursor position that's greater than the provided
     /// key. This method advances the cursor forward.
+    #[inline]
     pub fn first_after(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k > key) {
-            return self.current()
+        let idx = self.idx;
+        if idx < self.entries.len() && &self.entries[idx].0 > key {
+            // SAFETY: `idx` was bounds-checked above.
+            return Some(unsafe { self.entries.get_unchecked(idx) })
         }
 
         self.advance_while(|k| k <= key)
@@ -78,6 +84,7 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     ///
     /// Returns the first entry for which `predicate` returns `false` or `None`. The cursor will
     /// point to the returned entry.
+    #[inline]
     fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<&(K, V)> {
         let remaining = self.entries.len().saturating_sub(self.idx);
         if remaining >= BINARY_SEARCH_THRESHOLD {
