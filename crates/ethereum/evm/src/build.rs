@@ -64,23 +64,22 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
         let logs_bloom = logs_bloom
             .unwrap_or_else(|| calculate_logs_bloom(receipts.iter().flat_map(|r| r.logs())));
 
-        let withdrawals = self
-            .chain_spec
-            .is_shanghai_active_at_timestamp(timestamp)
+        let shanghai_active = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
+        let cancun_active = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
+        let prague_active = self.chain_spec.is_prague_active_at_timestamp(timestamp);
+
+        let withdrawals = shanghai_active
             .then(|| Withdrawals::new(ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default()));
 
         let withdrawals_root =
             withdrawals.as_deref().map(|w| proofs::calculate_withdrawals_root(w));
-        let requests_hash = self
-            .chain_spec
-            .is_prague_active_at_timestamp(timestamp)
-            .then(|| requests.requests_hash());
+        let requests_hash = prague_active.then(|| requests.requests_hash());
 
         let mut excess_blob_gas = None;
         let mut block_blob_gas_used = None;
 
         // only determine cancun fields when active
-        if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
+        if cancun_active {
             block_blob_gas_used = Some(*blob_gas_used);
             excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
                 parent.maybe_next_block_excess_blob_gas(

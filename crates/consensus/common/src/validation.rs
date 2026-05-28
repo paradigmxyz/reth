@@ -211,22 +211,25 @@ where
         ))
     }
 
+    let timestamp = block.timestamp();
+
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
+    if chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         validate_shanghai_withdrawals(block)?;
     }
 
-    if chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
+    if chain_spec.is_cancun_active_at_timestamp(timestamp) {
         validate_cancun_gas(block)?;
     }
 
-    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
-        block.rlp_length() > MAX_RLP_BLOCK_SIZE
-    {
-        return Err(ConsensusError::BlockTooLarge {
-            rlp_length: block.rlp_length(),
-            max_rlp_length: MAX_RLP_BLOCK_SIZE,
-        })
+    if chain_spec.is_osaka_active_at_timestamp(timestamp) {
+        let rlp_length = block.rlp_length();
+        if rlp_length > MAX_RLP_BLOCK_SIZE {
+            return Err(ConsensusError::BlockTooLarge {
+                rlp_length,
+                max_rlp_length: MAX_RLP_BLOCK_SIZE,
+            })
+        }
     }
 
     Ok(())
