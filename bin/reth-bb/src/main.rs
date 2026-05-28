@@ -80,13 +80,23 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         &self,
         payload: BigBlockData<ExecutionData>,
     ) -> Result<SealedBlock<Block>, NewPayloadError> {
-        let mut blocks = payload
-            .env_switches
-            .into_iter()
-            .map(|data| {
-                PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)
-            })
-            .collect::<Result<Vec<SealedBlock<Block>>, NewPayloadError>>()?;
+        let segment_count = payload.env_switches.len();
+        let last_segment_index = segment_count.saturating_sub(1);
+        let mut preceding_gas_used = 0u64;
+        let mut first_parent_hash = None;
+        let mut blocks = Vec::with_capacity(segment_count);
+
+        for (idx, data) in payload.env_switches.into_iter().enumerate() {
+            let block =
+                PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)?;
+            if idx == 0 && segment_count > 1 {
+                first_parent_hash = Some(block.parent_hash);
+            }
+            if idx < last_segment_index {
+                preceding_gas_used += block.gas_used;
+            }
+            blocks.push(block);
+        }
 
         let (mut block, hash) = blocks.pop().unwrap().split();
 
@@ -95,12 +105,12 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
 
         // Set block's parent hash to the parent of the first block in this batch so that engine
         // tree state is consistent.
-        if let Some(first) = blocks.first() {
-            block.header.parent_hash = first.parent_hash;
+        if let Some(parent_hash) = first_parent_hash {
+            block.header.parent_hash = parent_hash;
         }
 
         // Update block's gas usage to make sure metrics are correct
-        block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
+        block.header.gas_used += preceding_gas_used;
 
         // Prepend transactions from previous blocks to make sure that persistence indices are
         // correct.
