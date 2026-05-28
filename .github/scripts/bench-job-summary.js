@@ -11,7 +11,7 @@
 //
 // Usage from actions/github-script:
 //   const jobSummary = require('./.github/scripts/bench-job-summary.js');
-//   await jobSummary({ core, context, chartSha, grafanaUrl, runId });
+//   await jobSummary({ core, context, chartSha, logsUrl, tracesUrl, runId });
 
 const fs = require('fs');
 const { verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows, fmtChange } = require('./bench-utils');
@@ -30,7 +30,7 @@ function fmtTargetMetricValue(metric, v) {
   return fmtMetricValue(v);
 }
 
-module.exports = async function ({ core, context, chartSha, grafanaUrl, runId }) {
+module.exports = async function ({ core, context, chartSha, logsUrl, tracesUrl, runId }) {
   let summary;
   try {
     summary = JSON.parse(fs.readFileSync(process.env.BENCH_WORK_DIR + '/summary.json', 'utf8'));
@@ -45,6 +45,9 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
   const commitUrl = `https://github.com/${repo}/commit`;
 
   const { emoji, label } = verdict(summary.changes);
+  const observability = summary.observability || {};
+  const resolvedLogsUrl = logsUrl || observability.logs_url;
+  const resolvedTracesUrl = tracesUrl || observability.traces_url;
   const baselineLink = `[\`${summary.baseline.name}\`](${commitUrl}/${summary.baseline.ref})`;
   const featureLink = `[\`${summary.feature.name}\`](${commitUrl}/${summary.feature.ref})`;
   const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -122,9 +125,12 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
     md += `### Samply Profiles\n\n${samplyLinks.join('\n')}\n\n`;
   }
 
-  // Grafana
-  if (grafanaUrl) {
-    md += `### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n\n`;
+  // Observability
+  const observabilityLinks = [];
+  if (resolvedLogsUrl) observabilityLinks.push(`- [Logs](${resolvedLogsUrl})`);
+  if (resolvedTracesUrl) observabilityLinks.push(`- [Traces](${resolvedTracesUrl})`);
+  if (observabilityLinks.length > 0) {
+    md += `### Observability\n\n${observabilityLinks.join('\n')}\n\n`;
   }
 
   // Node errors
