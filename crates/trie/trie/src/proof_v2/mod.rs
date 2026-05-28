@@ -1544,12 +1544,21 @@ where
             return Ok(None);
         };
 
-        // Compute the hash of the root node
-        self.rlp_encode_buf.clear();
-        root.node.encode(&mut self.rlp_encode_buf);
-        let root_hash = keccak256(&self.rlp_encode_buf);
+        self.compute_root_hash_from_root_node(root).map(Some)
+    }
 
-        Ok(Some(root_hash))
+    /// Computes the root hash from a proof node that is already known to be at the root path.
+    ///
+    /// This avoids searching proof slices in root-only storage root calculations.
+    pub fn compute_root_hash_from_root_node(
+        &mut self,
+        root_node: &ProofTrieNodeV2,
+    ) -> Result<B256, StateProofError> {
+        debug_assert!(root_node.path.is_empty(), "root hash requires a root-path proof node");
+
+        self.rlp_encode_buf.clear();
+        root_node.node.encode(&mut self.rlp_encode_buf);
+        Ok(keccak256(&self.rlp_encode_buf))
     }
 
     /// Calculates the root node of the trie.

@@ -170,9 +170,7 @@ where
 
                         let mut calculator = storage_calculator.borrow_mut();
                         let root_node = calculator.storage_root_node(hashed_address)?;
-                        let storage_root = calculator
-                            .compute_root_hash(&[root_node])?
-                            .expect("storage_root_node returns a node at empty path");
+                        let storage_root = calculator.compute_root_hash_from_root_node(&root_node)?;
 
                         cached_storage_roots.insert(hashed_address, storage_root);
                         storage_root
@@ -187,9 +185,7 @@ where
                 let account = *account;
                 let mut calculator = storage_calculator.borrow_mut();
                 let root_node = calculator.storage_root_node(hashed_address)?;
-                let storage_root = calculator
-                    .compute_root_hash(&[root_node])?
-                    .expect("storage_root_node returns a node at empty path");
+                let storage_root = calculator.compute_root_hash_from_root_node(&root_node)?;
 
                 cached_storage_roots.insert(hashed_address, storage_root);
                 (account, storage_root)

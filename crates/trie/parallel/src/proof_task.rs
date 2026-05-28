@@ -442,14 +442,15 @@ where
         let proof_start = Instant::now();
 
         // If targets is empty it means the caller only wants the root node.
-        let proof = if targets.is_empty() {
+        let (proof, root) = if targets.is_empty() {
             let root_node = calculator.storage_root_node(hashed_address)?;
-            vec![root_node]
+            let root = Some(calculator.compute_root_hash_from_root_node(&root_node)?);
+            (vec![root_node], root)
         } else {
-            calculator.storage_proof(hashed_address, &mut targets)?
+            let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+            let root = calculator.compute_root_hash(&proof)?;
+            (proof, root)
         };
-
-        let root = calculator.compute_root_hash(&proof)?;
 
         trace!(
             target: "trie::proof_task",
