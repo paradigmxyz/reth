@@ -1,50 +1,42 @@
-use std::{collections::HashMap, time::Duration};
+use std::{array, time::Duration};
 
-use itertools::Itertools;
 use metrics::{Counter, Histogram};
 use reth_db::Tables;
 use reth_metrics::Metrics;
-use strum::{EnumIter, IntoEnumIterator};
 
 pub(super) const ROCKSDB_TABLES: &[&str] = &[
     Tables::TransactionHashNumbers.name(),
     Tables::StoragesHistory.name(),
     Tables::AccountsHistory.name(),
 ];
+const ROCKSDB_TABLE_OPERATION_COUNT: usize = 3;
 
 /// Metrics for the `RocksDB` provider.
 #[derive(Debug)]
 pub(crate) struct RocksDBMetrics {
-    operations: HashMap<(&'static str, RocksDBOperation), RocksDBOperationMetrics>,
+    operations: [[RocksDBOperationMetrics; ROCKSDB_TABLE_OPERATION_COUNT]; ROCKSDB_TABLES.len()],
+    batch_write: RocksDBOperationMetrics,
 }
 
 impl Default for RocksDBMetrics {
     fn default() -> Self {
-        let mut operations = ROCKSDB_TABLES
-            .iter()
-            .copied()
-            .cartesian_product(RocksDBOperation::iter())
-            .map(|(table, operation)| {
-                (
-                    (table, operation),
-                    RocksDBOperationMetrics::new_with_labels(&[
-                        ("table", table),
-                        ("operation", operation.as_str()),
-                    ]),
-                )
+        let operations = array::from_fn(|table_index| {
+            let table = ROCKSDB_TABLES[table_index];
+            array::from_fn(|operation_index| {
+                let operation = RocksDBOperation::TABLE_OPERATIONS[operation_index];
+                RocksDBOperationMetrics::new_with_labels(&[
+                    ("table", table),
+                    ("operation", operation.as_str()),
+                ])
             })
-            .collect::<HashMap<_, _>>();
+        });
 
-        // Add special "Batch" entry for batch write operations
-        operations.insert(
-            ("Batch", RocksDBOperation::BatchWrite),
-            RocksDBOperationMetrics::new_with_labels(&[
-                ("table", "Batch"),
-                ("operation", RocksDBOperation::BatchWrite.as_str()),
-            ]),
-        );
+        let batch_write = RocksDBOperationMetrics::new_with_labels(&[
+            ("table", "Batch"),
+            ("operation", RocksDBOperation::BatchWrite.as_str()),
+        ]);
 
-        Self { operations }
+        Self { operations, batch_write }
     }
 }
 
@@ -56,8 +48,19 @@ impl RocksDBMetrics {
         table: &'static str,
         duration: Duration,
     ) {
-        let metrics =
-            self.operations.get(&(table, operation)).expect("operation metrics should exist");
+        let metrics = match operation {
+            RocksDBOperation::BatchWrite => {
+                debug_assert_eq!(table, "Batch");
+                &self.batch_write
+            }
+            operation => {
+                let table_index = ROCKSDB_TABLES
+                    .iter()
+                    .position(|candidate| *candidate == table)
+                    .expect("operation table metrics should exist");
+                &self.operations[table_index][operation.table_operation_index()]
+            }
+        };
 
         metrics.calls_total.increment(1);
         metrics.duration_seconds.record(duration.as_secs_f64());
@@ -65,7 +68,7 @@ impl RocksDBMetrics {
 }
 
 /// `RocksDB` operations that are tracked
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum RocksDBOperation {
     Get,
     Put,
@@ -74,6 +77,18 @@ pub(crate) enum RocksDBOperation {
 }
 
 impl RocksDBOperation {
+    const TABLE_OPERATIONS: [Self; ROCKSDB_TABLE_OPERATION_COUNT] =
+        [Self::Get, Self::Put, Self::Delete];
+
+    fn table_operation_index(self) -> usize {
+        match self {
+            Self::Get => 0,
+            Self::Put => 1,
+            Self::Delete => 2,
+            Self::BatchWrite => unreachable!("batch writes are stored separately"),
+        }
+    }
+
     const fn as_str(&self) -> &'static str {
         match self {
             Self::Get => "get",
