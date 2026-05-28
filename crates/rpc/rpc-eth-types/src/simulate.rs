@@ -435,7 +435,7 @@ where
                         ..SimulateError::invalid_params()
                     }),
                     gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent()),
+                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
                     logs: Vec::new(),
                     status: false,
                 }
@@ -443,14 +443,14 @@ where
             ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
                 SimCallResult {
-                    return_data: output,
+                    return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: SIMULATE_REVERT_CODE,
-                        ..SimulateError::invalid_params()
+                        data: Some(output),
                     }),
                     gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent()),
+                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
                     status: false,
                     logs: Vec::new(),
                 }
@@ -459,7 +459,7 @@ where
                 return_data: output.into_data(),
                 error: None,
                 gas_used: gas.tx_gas_used(),
-                max_used_gas: Some(gas.total_gas_spent()),
+                max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
                 logs: logs
                     .into_iter()
                     .map(|log| {
