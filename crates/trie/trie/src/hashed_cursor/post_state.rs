@@ -97,6 +97,8 @@ where
     db_cursor_state: DbCursorState<B256, V::NonZero>,
     /// In-memory cursors over post state overlays.
     post_state_cursor: PostStateOverlayCursor<'a, V>,
+    /// Lower-priority overlays that still need positioning after a lazy exact overlay hit.
+    deferred_overlay_seek_start: Option<usize>,
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
@@ -118,6 +120,7 @@ where
             cursor,
             db_cursor_state: DbCursorState::new(false),
             post_state_cursor,
+            deferred_overlay_seek_start: None,
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
@@ -141,6 +144,7 @@ where
             cursor,
             db_cursor_state: DbCursorState::new(cursor_wiped),
             post_state_cursor,
+            deferred_overlay_seek_start: None,
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
@@ -198,13 +202,9 @@ where
     }
 
     /// Performs a k-way merge over the positioned overlay cursors and the DB cursor.
-    fn choose_next_entry(
-        &mut self,
-        mut overlay_bound: B256,
-        mut overlay_bound_inclusive: bool,
-    ) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
+    fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
-            let mem_key = self.post_state_cursor.next_key(&overlay_bound, overlay_bound_inclusive);
+            let mem_key = self.post_state_cursor.min_current_key();
             let db_key = self.db_cursor_state.entry().map(|(key, _)| *key);
             let Some(next_key) = mem_key.into_iter().chain(db_key).min() else {
                 return Ok(None);
@@ -215,8 +215,7 @@ where
                     return Ok(Some((next_key, value)))
                 }
 
-                overlay_bound = next_key;
-                overlay_bound_inclusive = false;
+                self.post_state_cursor.advance_key(&next_key);
                 if self.db_cursor_state.entry().is_some_and(|(db_key, _)| db_key == &next_key) {
                     self.cursor_next()?;
                 }
@@ -251,16 +250,24 @@ where
             self.seeked = true;
         }
 
-        if let Some(Some(value)) = self.post_state_cursor.seek_exact(&key) {
-            self.db_cursor_state.invalidate_position();
-            let entry = Some((key, value));
-            self.set_last_key(&entry);
-            return Ok(entry)
+        self.deferred_overlay_seek_start = None;
+        match self.post_state_cursor.seek_until_exact(&key) {
+            Some((idx, Some(value))) => {
+                self.db_cursor_state.invalidate_position();
+                self.deferred_overlay_seek_start = Some(idx + 1);
+                let entry = Some((key, value));
+                self.set_last_key(&entry);
+                return Ok(entry)
+            }
+            Some((idx, None)) => {
+                self.post_state_cursor.seek_from(idx + 1, &key);
+            }
+            None => {}
         }
 
         self.cursor_seek(key)?;
 
-        let entry = self.choose_next_entry(key, true)?;
+        let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
         Ok(entry)
     }
@@ -282,13 +289,18 @@ where
             return Ok(None);
         };
 
+        if let Some(start) = self.deferred_overlay_seek_start.take() {
+            self.post_state_cursor.seek_from(start, &last_key);
+        }
+        self.post_state_cursor.first_after(&last_key);
+
         match self.db_cursor_state.entry().map(|(db_key, _)| *db_key) {
             Some(db_key) if db_key == last_key => self.cursor_next()?,
             Some(db_key) if db_key > last_key && self.db_cursor_state.position_valid() => {}
             _ => self.cursor_first_after(last_key)?,
         }
 
-        let entry = self.choose_next_entry(last_key, false)?;
+        let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
         Ok(entry)
     }
@@ -298,6 +310,7 @@ where
 
         self.db_cursor_state.set_entry(None);
         self.post_state_cursor.reset();
+        self.deferred_overlay_seek_start = None;
         self.last_key = None;
         #[cfg(debug_assertions)]
         {
@@ -461,16 +474,28 @@ impl<'a, V> PostStateOverlayCursor<'a, V>
 where
     V: HashedPostStateCursorValue,
 {
-    fn seek_exact(&mut self, key: &B256) -> Option<Option<V::NonZero>> {
-        self.cursor.seek_exact(key).map(|value| (*value).into_option())
+    fn seek_from(&mut self, start: usize, key: &B256) {
+        self.cursor.seek_from(start, key);
     }
 
-    fn next_key(&mut self, key: &B256, inclusive: bool) -> Option<B256> {
-        self.cursor.next_key(key, inclusive)
+    fn seek_until_exact(&mut self, key: &B256) -> Option<(usize, Option<V::NonZero>)> {
+        self.cursor.seek_until_exact(key).map(|(idx, value)| (idx, (*value).into_option()))
+    }
+
+    fn first_after(&mut self, key: &B256) {
+        self.cursor.first_after(key);
+    }
+
+    fn min_current_key(&self) -> Option<B256> {
+        self.cursor.min_current_key()
     }
 
     fn highest_priority_value_at(&self, key: &B256) -> Option<Option<V::NonZero>> {
         self.cursor.highest_priority_value_at(key).map(|value| (*value).into_option())
+    }
+
+    fn advance_key(&mut self, key: &B256) {
+        self.cursor.advance_key(key);
     }
 
     const fn has_visible_value(&self) -> bool {

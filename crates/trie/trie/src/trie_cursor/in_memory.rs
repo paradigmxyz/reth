@@ -64,6 +64,8 @@ pub struct InMemoryTrieCursor<'a, C> {
     db_cursor_state: DbCursorState<Nibbles, BranchNodeCompact>,
     /// In-memory cursors over trie update overlays.
     in_memory_cursor: OverlayCursor<'a>,
+    /// Lower-priority overlays that still need positioning after a lazy exact overlay hit.
+    deferred_overlay_seek_start: Option<usize>,
     /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
     #[cfg(debug_assertions)]
@@ -81,6 +83,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             cursor,
             db_cursor_state: DbCursorState::new(false),
             in_memory_cursor,
+            deferred_overlay_seek_start: None,
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
@@ -99,6 +102,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             cursor,
             db_cursor_state: DbCursorState::new(db_wiped),
             in_memory_cursor,
+            deferred_overlay_seek_start: None,
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
@@ -150,13 +154,9 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     }
 
     /// Performs a k-way merge over the positioned overlay cursors and the DB cursor.
-    fn choose_next_entry(
-        &mut self,
-        mut overlay_bound: Nibbles,
-        mut overlay_bound_inclusive: bool,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
-            let mem_key = self.in_memory_cursor.next_key(&overlay_bound, overlay_bound_inclusive);
+            let mem_key = self.in_memory_cursor.min_current_key();
             let db_key = self.db_cursor_state.entry().map(|(key, _)| *key);
             let Some(next_key) = mem_key.into_iter().chain(db_key).min() else {
                 return Ok(None);
@@ -169,8 +169,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
                     return Ok(Some((next_key, node)))
                 }
 
-                overlay_bound = next_key;
-                overlay_bound_inclusive = false;
+                self.in_memory_cursor.advance_key(&next_key);
                 if self.db_cursor_state.entry().is_some_and(|(db_key, _)| db_key == &next_key) {
                     self.cursor_next()?;
                 }
@@ -194,9 +193,13 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             self.seeked = true;
         }
 
-        let entry = if let Some(mem_value) = self.in_memory_cursor.seek_exact(&key).cloned() {
+        self.deferred_overlay_seek_start = None;
+        let entry = if let Some((idx, mem_value)) = self.in_memory_cursor.seek_until_exact(&key) {
             self.db_cursor_state.invalidate_position();
-            mem_value.map(|node| (key, node))
+            if mem_value.is_some() {
+                self.deferred_overlay_seek_start = Some(idx + 1);
+            }
+            mem_value.clone().map(|node| (key, node))
         } else {
             let db_entry = self.get_cursor_mut().map(|c| c.seek_exact(key)).transpose()?.flatten();
             self.db_cursor_state.set_entry(db_entry);
@@ -216,15 +219,23 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             self.seeked = true;
         }
 
-        if let Some(Some(node)) = self.in_memory_cursor.seek_exact(&key).cloned() {
-            self.db_cursor_state.invalidate_position();
-            let entry = Some((key, node));
-            self.set_last_key(&entry);
-            return Ok(entry);
+        self.deferred_overlay_seek_start = None;
+        match self.in_memory_cursor.seek_until_exact(&key) {
+            Some((idx, Some(node))) => {
+                self.db_cursor_state.invalidate_position();
+                self.deferred_overlay_seek_start = Some(idx + 1);
+                let entry = Some((key, node.clone()));
+                self.set_last_key(&entry);
+                return Ok(entry);
+            }
+            Some((idx, None)) => {
+                self.in_memory_cursor.seek_from(idx + 1, &key);
+            }
+            None => {}
         }
 
         self.cursor_seek(key)?;
-        let entry = self.choose_next_entry(key, true)?;
+        let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
         Ok(entry)
     }
@@ -240,13 +251,18 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             return Ok(None);
         };
 
+        if let Some(start) = self.deferred_overlay_seek_start.take() {
+            self.in_memory_cursor.seek_from(start, &last_key);
+        }
+        self.in_memory_cursor.first_after(&last_key);
+
         match self.db_cursor_state.entry().map(|(db_key, _)| *db_key) {
             Some(db_key) if db_key == last_key => self.cursor_next()?,
             Some(db_key) if db_key > last_key && self.db_cursor_state.position_valid() => {}
             _ => self.cursor_first_after(last_key)?,
         }
 
-        let entry = self.choose_next_entry(last_key, false)?;
+        let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
         Ok(entry)
     }
@@ -263,6 +279,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         self.db_cursor_state.set_entry(None);
         self.in_memory_cursor.reset();
+        self.deferred_overlay_seek_start = None;
         self.last_key = None;
         #[cfg(debug_assertions)]
         {
