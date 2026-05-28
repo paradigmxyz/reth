@@ -276,6 +276,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -298,17 +299,14 @@ where
             halve_workers,
             config,
         );
-        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
-        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
-        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
-        // the block follows today's sequential execution and transaction-prewarm path.
+        // BAL blocks only bypass the normal execution state hook when the validator decided that
+        // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
+        // so the block follows today's sequential execution and transaction-prewarm path.
         //
         // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
-        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
-        // prewarm, not this dispatch decision.
-        let parallel_bal_execution = !config.disable_state_cache() &&
-            !config.disable_bal_parallel_execution() &&
-            env.decoded_bal.is_some();
+        // BAL state prefetching. State-cache disabled mode still uses the BAL executor, but
+        // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
+        // `disable_bal_batch_io` controls the prefetch half when a cache exists.
         let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -1373,6 +1371,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
+            false,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
