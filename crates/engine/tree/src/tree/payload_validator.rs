@@ -514,6 +514,25 @@ where
             instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
         let execution_cache = handle.caches().map(|caches| (caches, handle.cache_metrics()));
 
+        // This state provider factory is parametrized by:
+        //
+        // 1. fill_on_miss?
+        // 2. instrument_state_provider?
+        //
+        // `fill_on_miss` controls whether the loaded value after a cache miss will be inserted
+        // back into the cache. On a glance it seems to be always useful to do this. However,
+        // in practice, for the serial/non-BAL execution, it's not needed and is net negative:
+        //
+        // - It's not necessary because the revm machinery provides layer of caching itself. That
+        //   means a value for a miss will be recorded in revm's cache.
+        // - Inserting back into the cache is not free.
+        // - After execution, the execution post-state will be dumped into the execution cache as
+        //   whole anyway.
+        //
+        // Therefore, there `fill_on_miss` is going to be false for those paths.
+        //
+        // The second parameter `instrument_state_provider` controls whether we should
+        // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
             let provider = provider_builder.build()?;
             let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
