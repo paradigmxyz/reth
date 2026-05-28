@@ -98,6 +98,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             self.spawn_with_state_at_block(block, move |this, mut db| {
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
+                let mut block_hashes = std::collections::BTreeMap::new();
 
                 // Track previous block number and timestamp for validation
                 let mut prev_block_number = parent.number();
@@ -105,7 +106,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                 for block in block_state_calls {
                     // Validate block number ordering if overridden
-                    if let Some(number) = block.block_overrides.as_ref().and_then(|o| o.number) {
+                    let target_block_number = if let Some(number) =
+                        block.block_overrides.as_ref().and_then(|o| o.number)
+                    {
                         let number: u64 = number.try_into().unwrap_or(u64::MAX);
                         if number <= prev_block_number {
                             return Err(EthApiError::other(EthSimulateError::BlockNumberInvalid {
@@ -114,7 +117,104 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             })
                             .into());
                         }
+                        number
+                    } else {
+                        parent.number().saturating_add(1)
+                    };
+
+                    while parent.number().saturating_add(1) < target_block_number {
+                        if blocks.len() >= this.max_simulate_blocks() as usize {
+                            return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
+                        }
+
+                        let attributes = this.next_env_attributes(&parent)?;
+
+                        let mut evm_env = this
+                            .evm_config()
+                            .next_evm_env(&parent, &attributes)
+                            .map_err(RethError::other)
+                            .map_err(Self::Error::from_eth_err)?;
+
+                        evm_env.cfg_env.disable_eip3607 = true;
+
+                        if !validation {
+                            evm_env.cfg_env.disable_nonce_check = true;
+                            evm_env.cfg_env.disable_base_fee = true;
+                            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+                            evm_env.block_env.inner_mut().basefee = 0;
+                        }
+
+                        evm_env.block_env.inner_mut().prevrandao = Some(B256::ZERO);
+
+                        let chain_id = evm_env.cfg_env.chain_id;
+
+                        let ctx = this
+                            .evm_config()
+                            .context_for_next_block(&parent, attributes)
+                            .map_err(RethError::other)
+                            .map_err(Self::Error::from_eth_err)?;
+                        let map_err = |e: EthApiError| -> Self::Error {
+                            match e.as_simulate_error() {
+                                Some(sim_err) => {
+                                    Self::Error::from_eth_err(EthApiError::other(sim_err))
+                                }
+                                None => Self::Error::from_eth_err(e),
+                            }
+                        };
+
+                        let result = if trace_transfers {
+                            let inspector = TransferInspector::new(false).with_logs(true);
+                            let evm = this
+                                .evm_config()
+                                .evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                            let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+
+                            simulate::execute_transactions(
+                                builder,
+                                Vec::new(),
+                                this.call_gas_limit(),
+                                chain_id,
+                                this.converter(),
+                            )
+                            .map_err(map_err)?
+                            .0
+                        } else {
+                            let evm = this.evm_config().evm_with_env(&mut db, evm_env);
+                            let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+
+                            simulate::execute_transactions(
+                                builder,
+                                Vec::new(),
+                                this.call_gas_limit(),
+                                chain_id,
+                                this.converter(),
+                            )
+                            .map_err(map_err)?
+                            .0
+                        };
+
+                        let block_hash = result.block.hash();
+                        let block_number = result.block.number();
+                        block_hashes.insert(block_number, block_hash);
+                        db.override_block_hashes(block_hashes.clone());
+                        parent = result.block.clone_sealed_header();
+                        prev_block_number = parent.number();
+                        prev_timestamp = parent.timestamp();
+
+                        let block = simulate::build_simulated_block::<Self::Error, _>(
+                            result.block,
+                            Vec::new(),
+                            return_full_transactions.into(),
+                            this.converter(),
+                        )?;
+
+                        blocks.push(block);
                     }
+
+                    if blocks.len() >= this.max_simulate_blocks() as usize {
+                        return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
+                    }
+
                     // Validate timestamp ordering if overridden
                     if let Some(time) = block
                         .block_overrides
@@ -266,6 +366,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(map_err)?
                     };
 
+                    let block_hash = result.block.hash();
+                    let block_number = result.block.number();
+                    block_hashes.insert(block_number, block_hash);
+                    db.override_block_hashes(block_hashes.clone());
                     parent = result.block.clone_sealed_header();
 
                     // Update tracking for next iteration's validation

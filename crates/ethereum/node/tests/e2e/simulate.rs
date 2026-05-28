@@ -1,5 +1,5 @@
 use crate::utils::eth_payload_attributes;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -77,6 +77,112 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     assert!(call.status, "expected call to succeed");
     assert!(call.error.is_none(), "expected no error");
     assert_eq!(call.max_used_gas, Some(call.gas_used), "expected maxUsedGas in call result");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_includes_skipped_blocks() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let payload: SimulatePayload<TransactionRequest> =
+        SimulatePayload::default().extend(SimBlock::default().with_block_overrides(
+            BlockOverrides { number: Some(U256::from(2)), ..Default::default() },
+        ));
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "earliest")).await?;
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].inner.header.number, 1);
+    assert!(result[0].calls.is_empty());
+    assert_eq!(result[1].inner.header.number, 2);
+    assert_eq!(result[1].inner.header.inner.parent_hash, result[0].inner.header.hash);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_blockhash_uses_skipped_block_hashes() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let contract: Address = "0xc100000000000000000000000000000000000000".parse()?;
+    let return_parent_hash = Bytes::from_static(&[
+        0x43, // NUMBER
+        0x60, 0x01, // PUSH1 1
+        0x03, // SUB
+        0x40, // BLOCKHASH
+        0x60, 0x00, // PUSH1 0
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32
+        0x60, 0x00, // PUSH1 0
+        0xf3, // RETURN
+    ]);
+
+    let state_overrides =
+        StateOverridesBuilder::default().with_code(contract, return_parent_hash).build();
+    let tx = TransactionRequest::default().to(contract).gas_limit(100_000);
+    let payload = SimulatePayload::default().extend(
+        SimBlock::default()
+            .with_block_overrides(BlockOverrides {
+                number: Some(U256::from(2)),
+                ..Default::default()
+            })
+            .with_state_overrides(state_overrides)
+            .call(tx),
+    );
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "earliest")).await?;
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[1].calls.len(), 1);
+    assert_eq!(
+        result[1].calls[0].return_data,
+        Bytes::copy_from_slice(result[0].inner.header.hash.as_slice())
+    );
 
     Ok(())
 }
