@@ -2,9 +2,9 @@
 //!
 //! Read `execute_block` as two execution paths over the same parent state.
 //!
-//! Worker states run transactions speculatively. Each worker gets one fresh database from
-//! `make_db`, installs the received BAL, sets the transaction BAL index for each streamed
-//! transaction, and returns uncommitted transaction results.
+//! Worker states run transactions speculatively. Each worker gets one fresh cache-filling database
+//! from `make_db(true)`, installs the received BAL, sets the transaction BAL index for each
+//! streamed transaction, and returns uncommitted transaction results.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
@@ -60,7 +60,7 @@ where
     Tx: ExecutableTxFor<Evm> + Send + 'a,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
-    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'a,
+    MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
@@ -103,7 +103,7 @@ where
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
-    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
+    MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
@@ -112,8 +112,11 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
-    let mut canonical_state =
-        State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
+    let mut canonical_state = State::builder()
+        .with_database(make_db(false)?)
+        .with_bundle_update()
+        .with_bal_builder()
+        .build();
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -498,6 +501,7 @@ mod tests {
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
+        let make_db = |_: bool| make_db();
         execute_block(
             runtime,
             &evm_config,
@@ -1122,11 +1126,13 @@ mod tests {
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
+        let make_db = db_factory(system_contracts_db());
+        let make_db = |_: bool| make_db();
 
         let result = execute_block(
             &Runtime::test(),
             &evm_config,
-            &db_factory(system_contracts_db()),
+            &make_db,
             to_arc_decoded(BlockAccessList::default()),
             evm_env,
             execution_ctx,
