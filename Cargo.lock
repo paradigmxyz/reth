@@ -10638,8 +10638,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "11.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b378c2653331fe60969d9745e802cd773d82a20d8aaced914dfcf26ab8f0d9"
+source = "git+https://github.com/bluealloy/revm?rev=4ac164a#4ac164a6400f773e45e8c1995f1dc6490347dbc0"
 dependencies = [
  "bitvec",
  "phf",
@@ -10808,8 +10807,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "24.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe5102d804892908d4ebf68da29b8562895922dffa26c230ff2c4dadcf93916f"
+source = "git+https://github.com/bluealloy/revm?rev=4ac164a#4ac164a6400f773e45e8c1995f1dc6490347dbc0"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10819,8 +10817,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "12.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40eff6067185cf80932e06f6a9c8045b012ecb6f99a8d6edc618ec2792373e14"
+source = "git+https://github.com/bluealloy/revm?rev=4ac164a#4ac164a6400f773e45e8c1995f1dc6490347dbc0"
 dependencies = [
  "alloy-eip7928 0.4.1",
  "bitflags 2.11.1",

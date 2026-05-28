@@ -3,11 +3,7 @@
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{
-    keccak256,
-    map::{AddressMap, U256Map},
-    B256, U256,
-};
+use alloy_primitives::{keccak256, map::AddressMap, B256, U256};
 use derive_more::derive::Deref;
 use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
@@ -66,7 +62,7 @@ pub struct ChangedAccount {
     /// New account info if it changed, `Some(None)` if the account was destroyed.
     pub new_info: Option<Option<Account>>,
     /// Changed storage slots with their new values.
-    pub changed_storage: U256Map<U256>,
+    pub changed_storage: Vec<(U256, U256)>,
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -210,7 +206,6 @@ pub fn changed_accounts(state: &EvmState) -> AddressMap<ChangedAccount> {
             }
 
             let destroyed = account.is_selfdestructed();
-            let changed_info = account.info != account.original_info();
             let mut changed_storage = account
                 .storage
                 .iter()
@@ -218,7 +213,7 @@ pub fn changed_accounts(state: &EvmState) -> AddressMap<ChangedAccount> {
                 .map(|(key, value)| (*key, value.present_value()))
                 .peekable();
 
-            if !destroyed && !changed_info && changed_storage.peek().is_none() {
+            if !destroyed && !account.is_changed() && changed_storage.peek().is_none() {
                 return None
             }
 
@@ -228,7 +223,7 @@ pub fn changed_accounts(state: &EvmState) -> AddressMap<ChangedAccount> {
                     new_info: if destroyed {
                         Some(None)
                     } else {
-                        changed_info.then(|| Some((&account.info).into()))
+                        account.is_changed().then(|| Some((&account.info).into()))
                     },
                     changed_storage: changed_storage.collect(),
                 },
