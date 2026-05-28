@@ -50,11 +50,11 @@ where
 /// Convenience type to override cli or default pool configuration during build.
 #[derive(Debug, Clone, Default)]
 pub struct PoolBuilderConfigOverrides {
-    /// Max number of transaction in the pending sub-pool
+    /// Max number of transactions in the pending sub-pool
     pub pending_limit: Option<SubPoolLimit>,
-    /// Max number of transaction in the basefee sub-pool
+    /// Max number of transactions in the basefee sub-pool
     pub basefee_limit: Option<SubPoolLimit>,
-    /// Max number of transaction in the queued sub-pool
+    /// Max number of transactions in the queued sub-pool
     pub queued_limit: Option<SubPoolLimit>,
     /// Max number of transactions in the blob sub-pool
     pub blob_limit: Option<SubPoolLimit>,
