@@ -7,7 +7,7 @@ use alloy_consensus::{
     BlockHeader, TxReceipt,
 };
 use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Log, TxHash};
+use alloy_primitives::{map::HashSet, Address, BlockHash, BlockNumber, Log, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
@@ -459,6 +459,16 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
         let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
 
         let mut hashes = Vec::with_capacity(capacity);
+        hashes.extend(self.transaction_hashes());
+        hashes
+    }
+
+    /// Returns all transaction hashes in a pre-allocated set.
+    #[inline]
+    pub fn transaction_hashes_set(&self) -> HashSet<TxHash> {
+        let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
+
+        let mut hashes = HashSet::with_capacity_and_hasher(capacity, Default::default());
         hashes.extend(self.transaction_hashes());
         hashes
     }
