@@ -3,10 +3,15 @@
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressMap, U256Map},
+    B256, U256,
+};
 use derive_more::derive::Deref;
+use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
-use revm_state::{Account, EvmState};
+use revm_state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -40,7 +45,7 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
-    StateUpdate(Source, EvmState),
+    StateUpdate(Source, AddressMap<ChangedAccount>),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
@@ -53,6 +58,15 @@ pub enum StateRootMessage {
     /// This is triggered by block execution, indicating that no additional state updates are
     /// expected.
     FinishedStateUpdates,
+}
+
+/// Represents a changed account value passed to state root task.
+#[derive(Debug, Clone, Default)]
+pub struct ChangedAccount {
+    /// New account info, `None` if unchanged.
+    pub new_info: Option<Account>,
+    /// Changed storage slots with their new values.
+    pub changed_storage: U256Map<U256>,
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -128,26 +142,28 @@ impl StateRootHandle {
                 .iter()
                 .filter_map(|(address, account)| {
                     // Skip untouched and unchanged accounts
-                    if !account.is_touched() ||
-                        (account.original_info() == account.info &&
-                            account.storage.iter().all(|(_, value)| !value.is_changed()))
-                    {
+                    if !account.is_touched() {
                         return None
                     }
 
-                    let storage = account
+                    let changed_info = account.info != account.original_info();
+                    let mut changed_storage = account
                         .storage
                         .iter()
                         .filter(|(_, value)| value.is_changed())
-                        .map(|(key, value)| (*key, value.clone()))
-                        .collect();
+                        .map(|(key, value)| (*key, value.present_value()))
+                        .peekable();
 
-                    let mut acc = Account::from(account.original_info());
-                    acc.storage = storage;
-                    acc.status = account.status;
-                    acc.info = account.info.clone();
+                    if !changed_info && !changed_storage.peek().is_some() {
+                        return None
+                    }
 
-                    Some((*address, acc))
+                    let account = ChangedAccount {
+                        new_info: changed_info.then(|| (&account.info).into()),
+                        changed_storage: changed_storage.collect(),
+                    };
+
+                    Some((*address, account))
                 })
                 .collect();
             let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state));
@@ -211,32 +227,28 @@ impl Drop for StateHookSender {
 }
 
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
-pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+pub fn evm_state_to_hashed_post_state(update: AddressMap<ChangedAccount>) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
         let hashed_address = keccak256(address);
         trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
-        let destroyed = account.is_selfdestructed();
-        if account.info != account.original_info() {
-            let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
+        if let Some(new_info) = account.new_info {
+            hashed_state.accounts.insert(hashed_address, Some(new_info));
         }
 
-        let mut changed_storage_iter = account
-            .storage
-            .into_iter()
-            .filter(|(_slot, value)| value.is_changed())
-            .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-            .peekable();
-
-        if destroyed {
-            hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-        } else if changed_storage_iter.peek().is_some() {
-            hashed_state
-                .storages
-                .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+        if !account.changed_storage.is_empty() {
+            hashed_state.storages.insert(
+                hashed_address,
+                HashedStorage::from_iter(
+                    false,
+                    account
+                        .changed_storage
+                        .into_iter()
+                        .map(|(slot, value)| (keccak256(B256::from(slot)), value)),
+                ),
+            );
         }
     }
 
