@@ -1019,7 +1019,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
+        payload_processor::{
+            changed_accounts, evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor,
+        },
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
@@ -1335,7 +1337,7 @@ mod tests {
         }
 
         for update in &state_updates {
-            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
+            hashed_state.extend(evm_state_to_hashed_post_state(changed_accounts(update)));
 
             for (address, account) in update {
                 let storage: HashMap<B256, U256> = account
