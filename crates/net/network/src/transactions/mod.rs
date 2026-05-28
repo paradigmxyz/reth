@@ -38,7 +38,7 @@ use crate::{
     NetworkHandle, TxTypesCounter,
 };
 use alloy_primitives::{
-    map::{B256Map, FbBuildHasher},
+    map::{B256Map, B256Set, FbBuildHasher},
     TxHash, B256,
 };
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
@@ -187,7 +187,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     pub async fn get_transaction_hashes(
         &self,
         peers: Vec<PeerId>,
-    ) -> Result<HashMap<PeerId, HashSet<TxHash>>, RecvError> {
+    ) -> Result<HashMap<PeerId, B256Set>, RecvError> {
         if peers.is_empty() {
             return Ok(Default::default())
         }
@@ -197,10 +197,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     }
 
     /// Request the transaction hashes known by a specific peer.
-    pub async fn get_peer_transaction_hashes(
-        &self,
-        peer: PeerId,
-    ) -> Result<HashSet<TxHash>, RecvError> {
+    pub async fn get_peer_transaction_hashes(&self, peer: PeerId) -> Result<B256Set, RecvError> {
         let res = self.get_transaction_hashes(vec![peer]).await?;
         Ok(res.into_values().next().unwrap_or_default())
     }
@@ -1195,7 +1192,7 @@ where
                     let hashes = self
                         .peers
                         .get(&peer_id)
-                        .map(|peer| peer.seen_transactions.iter().copied().collect::<HashSet<_>>())
+                        .map(|peer| peer.seen_transactions.iter().copied().collect::<B256Set>())
                         .unwrap_or_default();
                     res.insert(peer_id, hashes);
                 }
@@ -2112,10 +2109,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Propagate a collection of broadcastable transactions in full to all peers.
     BroadcastTransactions(Vec<PropagateTransaction<N::BroadcastedTransaction>>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
-    GetTransactionHashes {
-        peers: Vec<PeerId>,
-        tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
-    },
+    GetTransactionHashes { peers: Vec<PeerId>, tx: oneshot::Sender<HashMap<PeerId, B256Set>> },
     /// Requests a clone of the sender channel to the peer.
     GetPeerSender {
         peer_id: PeerId,
@@ -2917,9 +2911,9 @@ mod tests {
         let PeerRequest::GetPooledTransactions { request, response } = req else { unreachable!() };
         let GetPooledTransactions(hashes) = request;
 
-        let hashes = hashes.into_iter().collect::<HashSet<_>>();
+        let hashes = hashes.into_iter().collect::<B256Set>();
 
-        assert_eq!(hashes, seen_hashes.into_iter().collect::<HashSet<_>>());
+        assert_eq!(hashes, seen_hashes.into_iter().collect::<B256Set>());
 
         // fail request to peer_1
         response
@@ -3197,7 +3191,7 @@ mod tests {
         })
         .await;
 
-        let mut requested_hashes_in_getpooled = HashSet::new();
+        let mut requested_hashes_in_getpooled = B256Set::default();
         let mut unexpected_request_received = false;
 
         match tokio::time::timeout(std::time::Duration::from_millis(200), mock_session_rx.recv())

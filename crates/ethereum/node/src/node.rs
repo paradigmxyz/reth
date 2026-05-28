@@ -31,7 +31,7 @@ use reth_node_builder::{
         PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
         RpcAddOns, RpcHandle, Stack, WitnessCache,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter,
+    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
@@ -305,7 +305,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: Hardforks + EthereumHardforks,
+            ChainSpec: EthChainSpec + Hardforks + EthereumHardforks,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
@@ -340,6 +340,7 @@ where
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
+        let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -357,6 +358,7 @@ where
                 let mut testing_api = TestingApi::new(
                     container.registry.eth_api().clone(),
                     container.registry.evm_config().clone(),
+                    testing_desired_gas_limit,
                 );
                 if testing_skip_invalid_transactions {
                     testing_api = testing_api.with_skip_invalid_transactions();
