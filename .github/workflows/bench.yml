@@ -1150,6 +1150,7 @@ jobs:
           TO_MS=$(( $(date +%s) * 1000 ))
           GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           OBSERVABILITY_URLS="$(python3 - "$BENCH_ID" "$FROM_MS" "$TO_MS" <<'PY'
+          from datetime import datetime, timezone
           import json
           import sys
           from urllib.parse import quote
@@ -1158,42 +1159,69 @@ jobs:
           logs_uid = "cfk1hzy08xekgd"
           traces_uid = "dfk1hrnxca9s0a"
 
-          def explore_url(datasource_uid, queries):
-              panes = {
-                  "bench": {
-                      "datasource": {"uid": datasource_uid},
-                      "queries": queries,
-                      "range": {"from": str(from_ms), "to": str(to_ms)},
-                  },
-              }
+          def iso_from_epoch_ms(ms):
+              dt = datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
+              return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+          from_time = iso_from_epoch_ms(from_ms)
+          to_time = iso_from_epoch_ms(to_ms)
+
+          def explore_url(panes):
               encoded = quote(json.dumps(panes, separators=(",", ":")), safe="")
               return f"https://tempoxyz.grafana.net/explore?schemaVersion=1&panes={encoded}&orgId=1"
 
-          logs_query = {
-              "refId": "A",
-              "datasource": {"uid": logs_uid},
-              "expr": f"benchmark_id:{bench_id}",
-              "query": f"benchmark_id:{bench_id}",
-          }
-          traces_query = {
-              "refId": "A",
-              "datasource": {"uid": traces_uid},
-              "query": f'{{resource.benchmark_id="{bench_id}"}}',
-              "queryType": "traceqlSearch",
-              "filters": [
-                  {
-                      "id": "resource.benchmark_id",
-                      "operator": "=",
-                      "scope": "resource",
-                      "tag": "benchmark_id",
-                      "value": [bench_id],
-                      "valueType": "string",
+          logs_pane = {
+              "pw4": {
+                  "datasource": logs_uid,
+                  "queries": [{
+                      "refId": "A",
+                      "datasource": {"type": "victoriametrics-logs-datasource", "uid": logs_uid},
+                      "editorMode": "code",
+                      "expr": f"benchmark_id:{bench_id}",
+                      "queryType": "instant",
+                  }],
+                  "range": {"from": from_time, "to": to_time},
+                  "panelsState": {
+                      "logs": {
+                          "sortOrder": "Descending",
+                          "columns": ["Time", "Line"],
+                          "visualisationType": "table",
+                          "labelFieldName": "labels",
+                      },
                   },
-              ],
+                  "compact": False,
+              },
+          }
+          traceql_query = "{resource.benchmark_id=" + json.dumps(bench_id) + "}"
+          traces_pane = {
+              "g39": {
+                  "datasource": traces_uid,
+                  "queries": [{
+                      "refId": "A",
+                      "datasource": {"type": "tempo", "uid": traces_uid},
+                      "queryType": "traceqlSearch",
+                      "serviceMapUseNativeHistograms": False,
+                      "filters": [
+                          {
+                              "id": "benchmark-id",
+                              "operator": "=",
+                              "scope": "resource",
+                              "tag": "benchmark_id",
+                              "value": [bench_id],
+                              "valueType": "string",
+                              "isCustomValue": True,
+                          },
+                      ],
+                      "query": traceql_query,
+                  }],
+                  "range": {"from": from_time, "to": to_time},
+                  "panelsState": {"logs": {"visualisationType": "table"}},
+                  "compact": False,
+              },
           }
 
-          print(explore_url(logs_uid, [logs_query]))
-          print(explore_url(traces_uid, [traces_query]))
+          print(explore_url(logs_pane))
+          print(explore_url(traces_pane))
           PY
           )"
           LOGS_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '1p')"

@@ -1797,20 +1797,17 @@ def target_metric_change_str(change: dict) -> str:
 
 def generate_observability_section(summary: dict) -> list[str]:
     observability = summary.get("observability") or {}
-    benchmark_id = summary.get("benchmark_id") or observability.get("benchmark_id")
     links = [
-        ("Metrics dashboard", observability.get("grafana_url")),
+        ("Grafana", observability.get("grafana_url")),
         ("Logs", observability.get("logs_url")),
         ("Traces", observability.get("traces_url")),
     ]
     links = [(label, url) for label, url in links if url]
 
-    if not benchmark_id and not links:
+    if not links:
         return []
 
     lines = ["", "### Observability", ""]
-    if benchmark_id:
-        lines.append(f"- Benchmark ID: `{benchmark_id}`")
     for label, url in links:
         lines.append(f"- [{label}]({url})")
     return lines

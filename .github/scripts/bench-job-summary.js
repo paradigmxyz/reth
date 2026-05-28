@@ -46,7 +46,6 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
 
   const { emoji, label } = verdict(summary.changes);
   const observability = summary.observability || {};
-  const benchmarkId = summary.benchmark_id || observability.benchmark_id;
   const resolvedGrafanaUrl = grafanaUrl || observability.grafana_url;
   const resolvedLogsUrl = logsUrl || observability.logs_url;
   const resolvedTracesUrl = tracesUrl || observability.traces_url;
@@ -129,8 +128,7 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
 
   // Observability
   const observabilityLinks = [];
-  if (benchmarkId) observabilityLinks.push(`- Benchmark ID: \`${benchmarkId}\``);
-  if (resolvedGrafanaUrl) observabilityLinks.push(`- [Metrics dashboard](${resolvedGrafanaUrl})`);
+  if (resolvedGrafanaUrl) observabilityLinks.push(`- [Grafana](${resolvedGrafanaUrl})`);
   if (resolvedLogsUrl) observabilityLinks.push(`- [Logs](${resolvedLogsUrl})`);
   if (resolvedTracesUrl) observabilityLinks.push(`- [Traces](${resolvedTracesUrl})`);
   if (observabilityLinks.length > 0) {
