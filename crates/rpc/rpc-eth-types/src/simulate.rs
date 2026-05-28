@@ -103,6 +103,9 @@ pub enum EthSimulateError {
     /// Attempted to move a non-precompile address.
     #[error("account {0} is not a precompile")]
     NotAPrecompile(Address),
+    /// Attempted to move a precompile to its own address.
+    #[error("cannot move precompile {0} to itself")]
+    MovePrecompileToSelf(Address),
 }
 
 impl EthSimulateError {
@@ -120,6 +123,7 @@ impl EthSimulateError {
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
             Self::TooManyBlocks | Self::GasLimitReached => -38026,
+            Self::MovePrecompileToSelf(_) => -38022,
             Self::NotAPrecompile(_) => -32000,
         }
     }
@@ -146,6 +150,15 @@ pub fn apply_precompile_overrides(
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
+
+    for (source, dest) in &moves {
+        if source == dest {
+            if precompiles.get(source).is_none() {
+                return Err(EthSimulateError::NotAPrecompile(*source))
+            }
+            return Err(EthSimulateError::MovePrecompileToSelf(*source))
+        }
+    }
 
     precompiles.move_precompiles(moves).map_err(
         |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
@@ -368,4 +381,60 @@ where
         |header, size| converter.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_precompile_overrides, EthSimulateError};
+    use alloy_evm::precompiles::PrecompilesMap;
+    use alloy_primitives::address;
+    use alloy_rpc_types_eth::state::{AccountOverride, StateOverride};
+    use revm::precompile::Precompiles;
+
+    #[test]
+    fn precompile_self_move_requires_existing_precompile() {
+        let address = address!("c100000000000000000000000000000000000000");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            address,
+            AccountOverride { move_precompile_to: Some(address), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+        assert!(matches!(err, EthSimulateError::NotAPrecompile(addr) if addr == address));
+    }
+
+    #[test]
+    fn precompile_self_move_errors_for_existing_precompile() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            address,
+            AccountOverride { move_precompile_to: Some(address), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+        assert!(matches!(err, EthSimulateError::MovePrecompileToSelf(addr) if addr == address));
+    }
+
+    #[test]
+    fn moved_precompile_is_callable() {
+        let source = address!("0000000000000000000000000000000000000001");
+        let dest = address!("0000000000000000000000000000000000123456");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            source,
+            AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&source).is_none());
+        assert!(precompiles.get(&dest).is_some());
+    }
 }
