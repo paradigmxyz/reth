@@ -14,7 +14,7 @@ use alloy_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         ExecutableTx, GasOutput, OnStateHook, StateChangeSource, StateDB,
     },
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
+    eth::{EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
     Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
@@ -478,16 +478,7 @@ where
         // EthBlockExecutor::finish() applies the correct withdrawal balance
         // increments and post-execution system calls.
         let last_seg = self.plan.segments.last().unwrap();
-        let last_ctx = EthBlockExecutionCtx {
-            parent_hash: last_seg.ctx.parent_hash,
-            parent_beacon_block_root: last_seg.ctx.parent_beacon_block_root,
-            ommers: last_seg.ctx.ommers,
-            withdrawals: last_seg.ctx.withdrawals.clone(),
-            extra_data: last_seg.ctx.extra_data.clone(),
-            tx_count_hint: last_seg.ctx.tx_count_hint,
-            slot_number: last_seg.ctx.slot_number,
-        };
-        self.inner_mut().ctx = last_ctx;
+        self.inner_mut().ctx = last_seg.ctx.clone();
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
