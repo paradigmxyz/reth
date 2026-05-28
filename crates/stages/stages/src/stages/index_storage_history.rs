@@ -124,7 +124,7 @@ where
         }
 
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
-        let collector = if provider.cached_storage_settings().storage_v2 {
+        let collector = if use_rocksdb {
             collect_storage_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(

@@ -120,7 +120,7 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
 
-        let collector = if provider.cached_storage_settings().storage_v2 {
+        let collector = if use_rocksdb {
             // Use the provider-based collection that can read from static files.
             collect_account_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
