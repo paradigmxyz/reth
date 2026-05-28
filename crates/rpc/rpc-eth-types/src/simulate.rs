@@ -327,7 +327,6 @@ where
                         message: error.to_string(),
                         code: SIMULATE_REVERT_CODE,
                         data: Some(output),
-                        ..SimulateError::invalid_params()
                     }),
                     gas_used: gas.tx_gas_used(),
                     max_used_gas: Some(gas.tx_gas_used()),
