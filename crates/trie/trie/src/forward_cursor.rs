@@ -54,21 +54,21 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
     pub fn seek(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k >= key) {
+        if self.current().is_some_and(|(k, _)| k.cmp(key).is_ge()) {
             return self.current()
         }
 
-        self.advance_while(|k| k < key)
+        self.advance_while(|k| k.cmp(key).is_lt())
     }
 
     /// Returns the first entry from the current cursor position that's greater than the provided
     /// key. This method advances the cursor forward.
     pub fn first_after(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k > key) {
+        if self.current().is_some_and(|(k, _)| k.cmp(key).is_gt()) {
             return self.current()
         }
 
-        self.advance_while(|k| k <= key)
+        self.advance_while(|k| k.cmp(key).is_le())
     }
 
     /// Advances the cursor forward while `predicate` returns `true` or until the collection is
