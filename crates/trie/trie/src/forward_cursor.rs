@@ -50,6 +50,9 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 /// For small slices, linear scan has better cache locality and lower overhead.
 const BINARY_SEARCH_THRESHOLD: usize = 128;
 
+/// Number of entries to scan linearly before falling back to binary search on large slices.
+const BINARY_SEARCH_PROBE: usize = 8;
+
 impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
@@ -75,12 +78,21 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// exhausted.
     ///
     /// Uses binary search for large remaining slices (>= 128 entries), linear scan for small ones.
+    /// Large slices get a short linear probe first because forward trie seeks are often adjacent.
     ///
     /// Returns the first entry for which `predicate` returns `false` or `None`. The cursor will
     /// point to the returned entry.
     fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<&(K, V)> {
         let remaining = self.entries.len().saturating_sub(self.idx);
         if remaining >= BINARY_SEARCH_THRESHOLD {
+            let probe_end = self.idx + BINARY_SEARCH_PROBE;
+            while self.idx < probe_end && predicate(&self.entries[self.idx].0) {
+                self.idx += 1;
+            }
+            if self.idx < probe_end {
+                return self.current()
+            }
+
             let slice = &self.entries[self.idx..];
             let pos = slice.partition_point(|(k, _)| predicate(k));
             self.idx += pos;
@@ -142,6 +154,15 @@ mod tests {
 
         // Seek past end
         assert_eq!(cursor.seek(&1000), None);
+    }
+
+    #[test]
+    fn test_cursor_large_probe() {
+        let entries: Vec<(i32, ())> = (0..200).map(|i| (i * 2, ())).collect();
+        let mut cursor = ForwardInMemoryCursor::new(&entries);
+
+        assert_eq!(cursor.seek(&10), Some(&(10, ())));
+        assert_eq!(cursor.idx, 5);
     }
 
     #[test]
