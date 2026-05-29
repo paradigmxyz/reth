@@ -1075,7 +1075,9 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        executor.evm_mut().db_mut().set_state_hook(handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>));
+        executor.evm_mut().db_mut().set_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
+        );
 
         let execution_start = Instant::now();
 
