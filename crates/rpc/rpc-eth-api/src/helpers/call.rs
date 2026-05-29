@@ -128,16 +128,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .and_then(|overrides| overrides.time)
                         .unwrap_or(attributes.timestamp);
                     attributes.parent_beacon_block_root =
-                        if this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp) {
-                            Some(
+                        this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp).then(
+                            || {
                                 block_overrides
                                     .as_ref()
                                     .and_then(|overrides| overrides.beacon_root)
-                                    .unwrap_or_default(),
-                            )
-                        } else {
-                            None
-                        };
+                                    .unwrap_or_default()
+                            },
+                        );
 
                     let mut evm_env = this
                         .evm_config()
