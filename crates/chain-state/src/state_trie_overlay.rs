@@ -450,6 +450,15 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
+    if let [block] = blocks.as_slice() {
+        let trie_data = block.trie_data();
+        return TrieInputSorted::new(
+            trie_data.trie_updates,
+            trie_data.hashed_state,
+            Default::default(),
+        )
+    }
+
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
