@@ -45,18 +45,22 @@ impl<K: PartialEq, V> DbCursorState<K, V> {
 #[derive(Debug)]
 pub(crate) struct PositionedOverlayCursor<'a, K, V> {
     layers: Vec<PositionedOverlayLayer<'a, K, V>>,
+    exact_index: &'a [OverlayExactIndexEntry<K>],
 }
 
 impl<K, V> Default for PositionedOverlayCursor<'_, K, V> {
     fn default() -> Self {
-        Self { layers: Vec::new() }
+        Self { layers: Vec::new(), exact_index: &[] }
     }
 }
 
 impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
-    pub(crate) fn new<O>(layers: &'a [OverlayLayer<O, K, V>]) -> Self {
-        let mut cursor = Self { layers: Vec::with_capacity(layers.len()) };
-        cursor.retarget(layers);
+    pub(crate) fn new<O>(
+        layers: &'a [OverlayLayer<O, K, V>],
+        exact_index: &'a [OverlayExactIndexEntry<K>],
+    ) -> Self {
+        let mut cursor = Self { layers: Vec::with_capacity(layers.len()), exact_index: &[] };
+        cursor.retarget(layers, exact_index);
         cursor
     }
 
@@ -66,9 +70,14 @@ impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
         }
     }
 
-    pub(crate) fn retarget<O>(&mut self, layers: &'a [OverlayLayer<O, K, V>]) {
+    pub(crate) fn retarget<O>(
+        &mut self,
+        layers: &'a [OverlayLayer<O, K, V>],
+        exact_index: &'a [OverlayExactIndexEntry<K>],
+    ) {
         self.layers.clear();
         self.layers.extend(layers.iter().map(|layer| PositionedOverlayLayer::new(layer.entries())));
+        self.exact_index = exact_index;
     }
 }
 
@@ -85,6 +94,21 @@ where
 
     #[inline(always)]
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
+        if !self.exact_index.is_empty() {
+            let Ok(index_idx) = self.exact_index.binary_search_by(|entry| entry.key.cmp(key))
+            else {
+                self.seek_from(0, key);
+                return None;
+            };
+            let entry = &self.exact_index[index_idx];
+            let layer = &mut self.layers[entry.layer_idx];
+            if layer.position > entry.entry_idx {
+                return None
+            }
+            layer.position = entry.entry_idx;
+            return Some((entry.layer_idx, &layer.entries[entry.entry_idx].1))
+        }
+
         for (layer_idx, layer) in self.layers.iter_mut().enumerate() {
             let Some(entry) = layer.seek_exact(key) else {
                 continue;
@@ -273,6 +297,41 @@ where
     (*position < entries.len()).then_some(*position)
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OverlayExactIndexEntry<K> {
+    key: K,
+    layer_idx: usize,
+    entry_idx: usize,
+}
+
+pub(crate) fn build_overlay_exact_index<O, K, V>(
+    layers: &[OverlayLayer<O, K, V>],
+) -> Vec<OverlayExactIndexEntry<K>>
+where
+    K: Copy + Ord,
+{
+    let entry_count = layers.iter().map(|layer| layer.entries_len).sum();
+    let mut index = Vec::with_capacity(entry_count);
+
+    for (layer_idx, layer) in layers.iter().enumerate() {
+        index.extend(layer.entries().iter().enumerate().map(|(entry_idx, (key, _))| {
+            OverlayExactIndexEntry { key: *key, layer_idx, entry_idx }
+        }));
+    }
+
+    index.sort_unstable_by(|a, b| a.key.cmp(&b.key).then_with(|| a.layer_idx.cmp(&b.layer_idx)));
+
+    let mut write_idx = 0;
+    for read_idx in 0..index.len() {
+        if write_idx == 0 || index[write_idx - 1].key != index[read_idx].key {
+            index[write_idx] = index[read_idx];
+            write_idx += 1;
+        }
+    }
+    index.truncate(write_idx);
+    index
+}
+
 #[derive(Clone)]
 pub(crate) struct OverlayLayer<O, K, V> {
     _owner: Arc<O>,
@@ -317,7 +376,8 @@ mod tests {
     fn seek_reuses_current_position_when_it_already_satisfies_bound() {
         let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
         let overlay = [layer(entries)];
-        let mut cursor = PositionedOverlayCursor::new(&overlay);
+        let exact_index = build_overlay_exact_index(&overlay);
+        let mut cursor = PositionedOverlayCursor::new(&overlay, &exact_index);
 
         cursor.seek_from(0, &100);
         assert_eq!(cursor.min_current_key(), Some(100));
@@ -333,7 +393,8 @@ mod tests {
     fn seek_does_not_move_backwards_from_current_position() {
         let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
         let overlay = [layer(entries)];
-        let mut cursor = PositionedOverlayCursor::new(&overlay);
+        let exact_index = build_overlay_exact_index(&overlay);
+        let mut cursor = PositionedOverlayCursor::new(&overlay, &exact_index);
 
         cursor.seek_from(0, &150);
         assert_eq!(cursor.min_current_key(), Some(150));
@@ -347,7 +408,8 @@ mod tests {
     fn seek_does_not_recover_after_past_end() {
         let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
         let overlay = [layer(entries)];
-        let mut cursor = PositionedOverlayCursor::new(&overlay);
+        let exact_index = build_overlay_exact_index(&overlay);
+        let mut cursor = PositionedOverlayCursor::new(&overlay, &exact_index);
 
         cursor.seek_from(0, &250);
         assert_eq!(cursor.min_current_key(), None);

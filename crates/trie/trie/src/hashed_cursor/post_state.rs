@@ -1,5 +1,8 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::overlay_cursor::{DbCursorState, OverlayLayer, PositionedOverlayCursor};
+use crate::overlay_cursor::{
+    build_overlay_exact_index, DbCursorState, OverlayExactIndexEntry, OverlayLayer,
+    PositionedOverlayCursor,
+};
 use alloy_primitives::{map::B256Map, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
@@ -257,8 +260,8 @@ where
                 self.set_last_key(&entry);
                 return Ok(entry)
             }
-            Some((idx, None)) => {
-                self.post_state_cursor.seek_from(idx + 1, &key);
+            Some((_, None)) => {
+                self.post_state_cursor.seek_from(0, &key);
             }
             None => {}
         }
@@ -341,9 +344,9 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let (layers, cursor_wiped, has_visible_value) =
+        let (layers, exact_index, cursor_wiped, has_visible_value) =
             self.post_states.storage_overlay_layers(hashed_address);
-        self.post_state_cursor.retarget(layers, has_visible_value);
+        self.post_state_cursor.retarget(layers, exact_index, has_visible_value);
         self.db_cursor_state = DbCursorState::new(cursor_wiped);
     }
 }
@@ -352,6 +355,7 @@ where
 #[derive(Clone, Debug, Default)]
 pub struct HashedPostStateOverlay {
     account_overlay: Arc<Vec<PostStateOverlayLayer<Option<Account>>>>,
+    account_exact_index: Arc<Vec<OverlayExactIndexEntry<B256>>>,
     storage_overlays: Arc<B256Map<HashedStorageOverlay>>,
 }
 
@@ -359,8 +363,9 @@ impl HashedPostStateOverlay {
     /// Create a new indexed hashed post-state overlay stack.
     pub fn new(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
         let account_overlay = Self::build_account_overlay(&states);
+        let account_exact_index = Arc::new(build_overlay_exact_index(account_overlay.as_slice()));
         let storage_overlays = Self::build_storage_overlays(&states);
-        Self { account_overlay, storage_overlays }
+        Self { account_overlay, account_exact_index, storage_overlays }
     }
 
     /// Returns `true` if the overlay does not contain any hashed post-state updates.
@@ -408,6 +413,7 @@ impl HashedPostStateOverlay {
         }
 
         for overlay in overlays.values_mut() {
+            overlay.exact_index = build_overlay_exact_index(&overlay.layers);
             overlay.has_visible_value = has_visible_storage_value(&overlay.layers);
         }
 
@@ -415,23 +421,33 @@ impl HashedPostStateOverlay {
     }
 
     fn account_overlay(&self) -> PostStateOverlayCursor<'_, Option<Account>> {
-        PostStateOverlayCursor::new(self.account_overlay.as_slice(), false)
+        PostStateOverlayCursor::new(
+            self.account_overlay.as_slice(),
+            self.account_exact_index.as_slice(),
+            false,
+        )
     }
 
     fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'_, U256>, bool) {
-        let (layers, db_wiped, has_visible_value) = self.storage_overlay_layers(hashed_address);
-        (PostStateOverlayCursor::new(layers, has_visible_value), db_wiped)
+        let (layers, exact_index, db_wiped, has_visible_value) =
+            self.storage_overlay_layers(hashed_address);
+        (PostStateOverlayCursor::new(layers, exact_index, has_visible_value), db_wiped)
     }
 
     fn storage_overlay_layers(
         &self,
         hashed_address: B256,
-    ) -> (&[PostStateOverlayLayer<U256>], bool, bool) {
+    ) -> (&[PostStateOverlayLayer<U256>], &[OverlayExactIndexEntry<B256>], bool, bool) {
         let Some(overlay) = self.storage_overlays.get(&hashed_address) else {
-            return (&[], false, false);
+            return (&[], &[], false, false);
         };
 
-        (overlay.layers.as_slice(), overlay.db_wiped, overlay.has_visible_value)
+        (
+            overlay.layers.as_slice(),
+            overlay.exact_index.as_slice(),
+            overlay.db_wiped,
+            overlay.has_visible_value,
+        )
     }
 }
 
@@ -449,21 +465,30 @@ struct PostStateOverlayCursor<'a, V> {
 
 impl<V> Default for PostStateOverlayCursor<'_, V> {
     fn default() -> Self {
-        Self::new(&[], false)
+        Self::new(&[], &[], false)
     }
 }
 
 impl<'a, V> PostStateOverlayCursor<'a, V> {
-    fn new(layers: &'a [PostStateOverlayLayer<V>], has_visible_value: bool) -> Self {
-        Self { cursor: PositionedOverlayCursor::new(layers), has_visible_value }
+    fn new(
+        layers: &'a [PostStateOverlayLayer<V>],
+        exact_index: &'a [OverlayExactIndexEntry<B256>],
+        has_visible_value: bool,
+    ) -> Self {
+        Self { cursor: PositionedOverlayCursor::new(layers, exact_index), has_visible_value }
     }
 
     fn reset(&mut self) {
         self.cursor.reset();
     }
 
-    fn retarget(&mut self, layers: &'a [PostStateOverlayLayer<V>], has_visible_value: bool) {
-        self.cursor.retarget(layers);
+    fn retarget(
+        &mut self,
+        layers: &'a [PostStateOverlayLayer<V>],
+        exact_index: &'a [OverlayExactIndexEntry<B256>],
+        has_visible_value: bool,
+    ) {
+        self.cursor.retarget(layers, exact_index);
         self.has_visible_value = has_visible_value;
     }
 }
@@ -504,6 +529,7 @@ where
 #[derive(Clone, Debug, Default)]
 struct HashedStorageOverlay {
     layers: Vec<PostStateOverlayLayer<U256>>,
+    exact_index: Vec<OverlayExactIndexEntry<B256>>,
     db_wiped: bool,
     has_visible_value: bool,
 }
