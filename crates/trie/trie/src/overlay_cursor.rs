@@ -92,27 +92,21 @@ impl<O, K, V> PositionedOverlayCursor<'_, O, K, V>
 where
     K: Ord,
 {
+    #[inline(always)]
     pub(crate) fn seek_from(&mut self, start: usize, key: &K) {
         for layer_idx in start..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let _ = seek_overlay_entries(
-                entries,
-                self.positions.get_mut(layer_idx),
-                key,
-                OverlaySeekMode::Inclusive,
-            );
+            let _ = seek_overlay_entries_inclusive(entries, self.positions.get_mut(layer_idx), key);
         }
     }
 
+    #[inline(always)]
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
         for layer_idx in 0..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let Some(idx) = seek_overlay_entries(
-                entries,
-                self.positions.get_mut(layer_idx),
-                key,
-                OverlaySeekMode::Inclusive,
-            ) else {
+            let Some(idx) =
+                seek_overlay_entries_inclusive(entries, self.positions.get_mut(layer_idx), key)
+            else {
                 continue;
             };
             if &entries[idx].0 == key {
@@ -123,18 +117,15 @@ where
         None
     }
 
+    #[inline(always)]
     pub(crate) fn first_after(&mut self, key: &K) {
         for layer_idx in 0..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let _ = seek_overlay_entries(
-                entries,
-                self.positions.get_mut(layer_idx),
-                key,
-                OverlaySeekMode::Exclusive,
-            );
+            let _ = seek_overlay_entries_exclusive(entries, self.positions.get_mut(layer_idx), key);
         }
     }
 
+    #[inline(always)]
     pub(crate) fn highest_priority_value_at(&self, key: &K) -> Option<&V> {
         self.layers.iter().zip(&self.positions).find_map(|(layer, position)| {
             let entries = layer.entries();
@@ -144,17 +135,14 @@ where
         })
     }
 
+    #[inline(always)]
     pub(crate) fn advance_key(&mut self, key: &K) {
         for layer_idx in 0..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
             if entries.get(self.positions[layer_idx]).is_some_and(|(entry_key, _)| entry_key == key)
             {
-                let _ = seek_overlay_entries(
-                    entries,
-                    self.positions.get_mut(layer_idx),
-                    key,
-                    OverlaySeekMode::Exclusive,
-                );
+                let _ =
+                    seek_overlay_entries_exclusive(entries, self.positions.get_mut(layer_idx), key);
             }
         }
     }
@@ -164,6 +152,7 @@ impl<O, K, V> PositionedOverlayCursor<'_, O, K, V>
 where
     K: Copy + Ord,
 {
+    #[inline(always)]
     pub(crate) fn min_current_key(&self) -> Option<K> {
         self.layers
             .iter()
@@ -173,47 +162,88 @@ where
     }
 }
 
-#[derive(Clone, Copy)]
-enum OverlaySeekMode {
-    Inclusive,
-    Exclusive,
-}
-
-impl OverlaySeekMode {
-    fn skips<K: Ord>(self, entry_key: &K, bound: &K) -> bool {
-        match self {
-            Self::Inclusive => entry_key < bound,
-            Self::Exclusive => entry_key <= bound,
-        }
-    }
-}
-
-fn seek_overlay_entries<K, V>(
+#[inline(always)]
+fn seek_overlay_entries_inclusive<K, V>(
     entries: &[(K, V)],
     mut position: Option<&mut usize>,
     key: &K,
-    mode: OverlaySeekMode,
 ) -> Option<usize>
 where
     K: Ord,
 {
     let mut start =
         position.as_ref().map(|position| **position).unwrap_or_default().min(entries.len());
-    if entries.get(start).is_some_and(|(entry_key, _)| !mode.skips(entry_key, key)) &&
-        (start == 0 || mode.skips(&entries[start - 1].0, key))
+
+    if entries.get(start).is_some_and(|(entry_key, _)| entry_key >= key) &&
+        (start == 0 || &entries[start - 1].0 < key)
     {
         return Some(start)
     }
-    if start > 0 && !mode.skips(&entries[start - 1].0, key) {
+
+    if start > 0 && &entries[start - 1].0 >= key {
         start = 0;
+    }
+
+    if entries.last().is_none_or(|(entry_key, _)| entry_key < key) {
+        if let Some(position) = position.as_mut() {
+            **position = entries.len();
+        }
+        return None
     }
 
     let remaining = &entries[start..];
     let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
-        remaining.partition_point(|(entry_key, _)| mode.skips(entry_key, key))
+        remaining.partition_point(|(entry_key, _)| entry_key < key)
     } else {
         let mut advance = 0;
-        while advance < remaining.len() && mode.skips(&remaining[advance].0, key) {
+        while advance < remaining.len() && &remaining[advance].0 < key {
+            advance += 1;
+        }
+        advance
+    };
+
+    let idx = start + advance;
+    if let Some(position) = position.as_mut() {
+        **position = idx;
+    }
+    (idx < entries.len()).then_some(idx)
+}
+
+#[inline(always)]
+fn seek_overlay_entries_exclusive<K, V>(
+    entries: &[(K, V)],
+    mut position: Option<&mut usize>,
+    key: &K,
+) -> Option<usize>
+where
+    K: Ord,
+{
+    let mut start =
+        position.as_ref().map(|position| **position).unwrap_or_default().min(entries.len());
+
+    if entries.get(start).is_some_and(|(entry_key, _)| entry_key > key) &&
+        (start == 0 || &entries[start - 1].0 <= key)
+    {
+        return Some(start)
+    }
+
+    if start > 0 && &entries[start - 1].0 > key {
+        start = 0;
+    }
+
+    if entries.last().is_none_or(|(entry_key, _)| entry_key <= key) {
+        if let Some(position) = position.as_mut() {
+            **position = entries.len();
+        }
+        return None
+    }
+
+    let remaining = &entries[start..];
+    let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+        remaining.partition_point(|(entry_key, _)| entry_key <= key)
+    } else {
+        let mut advance = 0;
+        while advance < remaining.len() && &remaining[advance].0 <= key {
             advance += 1;
         }
         advance
@@ -293,5 +323,27 @@ mod tests {
         cursor.seek_from(0, &75);
         assert_eq!(cursor.min_current_key(), Some(75));
         assert_eq!(cursor.seek_until_exact(&25), Some((0, &25)));
+    }
+
+    #[test]
+    fn seek_can_recover_after_past_end_fast_path() {
+        let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
+        let overlay = [layer(entries)];
+        let mut cursor = PositionedOverlayCursor::new(&overlay);
+
+        cursor.seek_from(0, &250);
+        assert_eq!(cursor.min_current_key(), None);
+        assert_eq!(cursor.positions, vec![201]);
+
+        assert_eq!(cursor.seek_until_exact(&25), Some((0, &25)));
+        assert_eq!(cursor.positions, vec![25]);
+
+        cursor.first_after(&250);
+        assert_eq!(cursor.min_current_key(), None);
+        assert_eq!(cursor.positions, vec![201]);
+
+        cursor.first_after(&25);
+        assert_eq!(cursor.min_current_key(), Some(26));
+        assert_eq!(cursor.positions, vec![26]);
     }
 }
