@@ -11,7 +11,7 @@ use reth_storage_errors::any::AnyError;
 use revm_primitives::Bytes;
 
 use crate::evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan};
-use alloy_consensus::Header;
+use alloy_consensus::{transaction::SignerRecoverable, Header};
 use alloy_eips::Decodable2718;
 use alloy_evm::{
     eth::{spec::EthExecutorSpec, EthBlockExecutionCtx},
@@ -30,7 +30,7 @@ use reth_evm::{
 use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
 use revm::{primitives::hardfork::SpecId, state::bal::BlockAccessIndex};
-use std::sync::Arc;
+use std::{cell::RefCell, sync::Arc};
 
 // ---------------------------------------------------------------------------
 // Execution plan types
@@ -67,6 +67,10 @@ pub struct BbEvmConfig<C = ChainSpec> {
     executor_factory: BbBlockExecutorFactory<Arc<C>>,
     /// Block assembler.
     block_assembler: BbBlockAssembler,
+}
+
+std::thread_local! {
+    static TX_RECOVERY_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::new());
 }
 
 impl<C> BbEvmConfig<C> {
@@ -306,7 +310,9 @@ where
         let convert = |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
+            let signer = TX_RECOVERY_BUF
+                .with(|buf| tx.recover_with_buf(&mut buf.borrow_mut()))
+                .map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
         };
 
