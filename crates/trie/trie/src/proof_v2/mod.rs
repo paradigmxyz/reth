@@ -365,17 +365,14 @@ where
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
     ) -> Result<(), StateProofError> {
+        if matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))) {
+            trace!(target: TRACE_TARGET, "Last child already committed, leaving stack unchanged");
+            return Ok(())
+        }
+
         let Some(child_path) = self.last_child_path() else { return Ok(()) };
         let child =
             self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
-
-        // If the child is already an `RlpNode` then there is nothing to do, push it back on with no
-        // changes.
-        if let ProofTrieBranchChild::RlpNode(_rlp_node) = &child {
-            trace!(target: TRACE_TARGET, ?_rlp_node, "Already RlpNode, pushing onto stack");
-            self.child_stack.push(child);
-            return Ok(())
-        }
 
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
@@ -538,6 +535,7 @@ where
         );
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
+        rlp_nodes_buf.reserve(num_children);
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
             let child_rlp_node = match child {
                 ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
@@ -557,7 +555,7 @@ where
 
         debug_assert_eq!(
             rlp_nodes_buf.len(),
-            branch.state_mask.count_ones() as usize,
+            num_children,
             "children length must match number of bits set in state_mask"
         );
 

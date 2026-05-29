@@ -573,6 +573,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 })
             }
+            PeerRequest::GetCells { request, response } => self
+                .delegate_eth_request(IncomingEthRequest::GetCells { peer_id, request, response }),
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,
@@ -711,6 +713,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
             NetworkHandleMessage::AddTrustedPeerId(peer_id) => {
                 self.swarm.state_mut().add_trusted_peer_id(peer_id);
+            }
+            NetworkHandleMessage::AddTrustedPeerNode(trusted_peer) => {
+                if !self.swarm.is_shutting_down() {
+                    self.swarm.state_mut().add_trusted_peer_node(trusted_peer);
+                }
             }
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
                 // only add peer if we are not shutting down

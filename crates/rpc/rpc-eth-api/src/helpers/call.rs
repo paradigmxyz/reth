@@ -18,6 +18,7 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
@@ -57,9 +58,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
-        state_override: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        EstimateCall::estimate_gas_at(self, request, at, state_override)
+        EstimateCall::estimate_gas_at(self, request, at, overrides)
     }
 
     /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
@@ -89,44 +90,33 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
+            let _permit = self.acquire_owned_blocking_io().await;
+
             let base_block =
                 self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
-            let mut parent = base_block.sealed_header().clone();
+            let parent = base_block.sealed_header().clone();
+            let max_simulate_blocks = self.max_simulate_blocks();
 
             self.spawn_with_state_at_block(block, move |this, mut db| {
+                let mut parent = parent;
+
+                let chain_id = this.provider().chain_spec().chain_id();
+
+                // Validate block ordering and fill gaps with empty blocks so every entry has an
+                // explicit `number` and `time` override and the chain is contiguous (see the
+                // execution-apis spec note: "If the block number is increased more than 1 compared
+                // to the previous block, new empty blocks are generated in between.").
+                let block_state_calls = simulate::sanitize_chain(
+                    block_state_calls,
+                    &parent,
+                    chain_id,
+                    max_simulate_blocks,
+                )?;
+
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
 
-                // Track previous block number and timestamp for validation
-                let mut prev_block_number = parent.number();
-                let mut prev_timestamp = parent.timestamp();
-
                 for block in block_state_calls {
-                    // Validate block number ordering if overridden
-                    if let Some(number) = block.block_overrides.as_ref().and_then(|o| o.number) {
-                        let number: u64 = number.try_into().unwrap_or(u64::MAX);
-                        if number <= prev_block_number {
-                            return Err(EthApiError::other(EthSimulateError::BlockNumberInvalid {
-                                got: number,
-                                parent: prev_block_number,
-                            })
-                            .into());
-                        }
-                    }
-                    // Validate timestamp ordering if overridden
-                    if let Some(time) = block
-                        .block_overrides
-                        .as_ref()
-                        .and_then(|o| o.time)
-                        .filter(|&t| t <= prev_timestamp)
-                    {
-                        return Err(EthApiError::other(EthSimulateError::BlockTimestampInvalid {
-                            got: time,
-                            parent: prev_timestamp,
-                        })
-                        .into());
-                    }
-
                     let attributes = this.next_env_attributes(&parent)?;
 
                     let mut evm_env = this
@@ -173,7 +163,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
 
                     let block_gas_limit = evm_env.block_env.gas_limit();
-                    let chain_id = evm_env.cfg_env.chain_id;
 
                     let default_gas_limit = {
                         let total_specified_gas =
@@ -266,10 +255,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     parent = result.block.clone_sealed_header();
 
-                    // Update tracking for next iteration's validation
-                    prev_block_number = parent.number();
-                    prev_timestamp = parent.timestamp();
-
                     let block = simulate::build_simulated_block::<Self::Error, _>(
                         result.block,
                         results,
@@ -315,6 +300,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             if bundles.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
+
+            let _permit = self.acquire_owned_blocking_io().await;
 
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();

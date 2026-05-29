@@ -24,6 +24,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
+either.workspace = true
 rayon = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
@@ -68,6 +69,8 @@ std = [
     "tracing/std",
     "serde?/std",
     "serde_json?/std",
+    "reth-tracing/std",
+    "either/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 trie-debug = ["std", "dep:serde", "dep:serde_json", "alloy-primitives/serde", "alloy-trie/serde"]

@@ -37,11 +37,11 @@ pub const DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS: usize = 1;
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
-    /// Max number of transaction in the pending sub-pool
+    /// Max number of transactions in the pending sub-pool
     pub pending_limit: SubPoolLimit,
-    /// Max number of transaction in the basefee sub-pool
+    /// Max number of transactions in the basefee sub-pool
     pub basefee_limit: SubPoolLimit,
-    /// Max number of transaction in the queued sub-pool
+    /// Max number of transactions in the queued sub-pool
     pub queued_limit: SubPoolLimit,
     /// Max number of transactions in the blob sub-pool
     pub blob_limit: SubPoolLimit,

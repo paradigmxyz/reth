@@ -650,8 +650,8 @@ pub struct RpcServerArgs {
 
     /// Override the gas limit used by `testing_buildBlockV1`.
     ///
-    /// When set, `testing_buildBlockV1` will use this value instead of inheriting
-    /// the parent block's gas limit. Accepts short notation: K for thousand, M for
+    /// When set, `testing_buildBlockV1` will use this exact value instead of moving toward the
+    /// payload builder's configured gas limit. Accepts short notation: K for thousand, M for
     /// million, G for billion (e.g., 1G = 1 billion).
     #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT", hide = true)]
     pub testing_gas_limit: Option<u64>,
@@ -1060,6 +1060,7 @@ mod tests {
                 max_blocks: 5000,
                 max_receipts: 2000,
                 max_headers: 1000,
+                max_bals: 1000,
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 30_000,
             },
@@ -1149,6 +1150,8 @@ mod tests {
             "--rpc-cache.max-receipts",
             "2000",
             "--rpc-cache.max-headers",
+            "1000",
+            "--rpc-cache.max-bals",
             "1000",
             "--rpc-cache.max-concurrent-db-requests",
             "512",
