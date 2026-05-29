@@ -456,7 +456,6 @@ pub trait PendingEnvBuilder<Evm: ConfigureEvm>: Send + Sync + Unpin + 'static {
         &self,
         parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
         _block_overrides: Option<&BlockOverrides>,
-        _is_cancun_active: bool,
     ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
         self.pending_env_attributes(parent)
     }
@@ -475,7 +474,6 @@ pub trait BuildPendingEnv<Header> {
     fn build_pending_env_with_overrides(
         parent: &SealedHeader<Header>,
         _block_overrides: Option<&BlockOverrides>,
-        _is_cancun_active: bool,
     ) -> Self
     where
         Self: Sized,
@@ -499,13 +497,8 @@ where
         &self,
         parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
         block_overrides: Option<&BlockOverrides>,
-        is_cancun_active: bool,
     ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
-        Ok(Evm::NextBlockEnvCtx::build_pending_env_with_overrides(
-            parent,
-            block_overrides,
-            is_cancun_active,
-        ))
+        Ok(Evm::NextBlockEnvCtx::build_pending_env_with_overrides(parent, block_overrides))
     }
 }
 
@@ -526,10 +519,9 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
     fn build_pending_env_with_overrides(
         parent: &SealedHeader<H>,
         block_overrides: Option<&BlockOverrides>,
-        is_cancun_active: bool,
     ) -> Self {
         let mut attributes = Self::build_pending_env(parent);
-        if is_cancun_active {
+        if parent.parent_beacon_block_root().is_some() {
             attributes.parent_beacon_block_root = Some(
                 block_overrides.and_then(|overrides| overrides.beacon_root).unwrap_or_default(),
             );
@@ -568,7 +560,6 @@ mod tests {
         let attrs = NextBlockEnvAttributes::build_pending_env_with_overrides(
             &sealed,
             Some(&block_overrides),
-            true,
         );
 
         assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));

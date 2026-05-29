@@ -123,15 +123,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .as_ref()
                         .and_then(|overrides| overrides.time)
                         .unwrap_or_else(|| parent.timestamp().saturating_add(12));
-                    let is_cancun_active =
-                        this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp);
+
                     let attributes = this
                         .pending_env_builder()
-                        .pending_env_attributes_with_overrides(
-                            &parent,
-                            block_overrides.as_ref(),
-                            is_cancun_active,
-                        )
+                        .pending_env_attributes_with_overrides(&parent, block_overrides.as_ref())
                         .map_err(Self::Error::from_eth_err)?;
 
                     let mut evm_env = this
