@@ -5,7 +5,7 @@ const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 64;
 #[derive(Debug)]
 pub(crate) enum DbCursorState<K, V> {
     Unpositioned,
-    Positioned { entry: (K, V), position_valid: bool },
+    Positioned((K, V)),
     Wiped,
 }
 
@@ -24,39 +24,21 @@ impl<K, V> DbCursorState<K, V> {
 
     pub(crate) const fn entry(&self) -> Option<&(K, V)> {
         match self {
-            Self::Positioned { entry, .. } => Some(entry),
+            Self::Positioned(entry) => Some(entry),
             Self::Unpositioned | Self::Wiped => None,
         }
     }
 
-    pub(crate) const fn position_valid(&self) -> bool {
-        matches!(self, Self::Positioned { position_valid: true, .. })
-    }
-
     pub(crate) fn set_entry(&mut self, entry: Option<(K, V)>) {
         if !self.is_wiped() {
-            *self = entry
-                .map(|entry| Self::Positioned { entry, position_valid: true })
-                .unwrap_or(Self::Unpositioned);
-        }
-    }
-
-    pub(crate) const fn validate_position(&mut self) {
-        if let Self::Positioned { position_valid, .. } = self {
-            *position_valid = true;
-        }
-    }
-
-    pub(crate) const fn invalidate_position(&mut self) {
-        if let Self::Positioned { position_valid, .. } = self {
-            *position_valid = false;
+            *self = entry.map(Self::Positioned).unwrap_or(Self::Unpositioned);
         }
     }
 }
 
 impl<K: PartialEq, V> DbCursorState<K, V> {
     pub(crate) fn is_positioned_at(&self, key: &K) -> bool {
-        matches!(self, Self::Positioned { entry: (db_key, _), .. } if db_key == key)
+        matches!(self, Self::Positioned((db_key, _)) if db_key == key)
     }
 }
 
@@ -96,7 +78,7 @@ where
     pub(crate) fn seek_from(&mut self, start: usize, key: &K) {
         for layer_idx in start..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let _ = seek_overlay_entries_inclusive(entries, self.positions.get_mut(layer_idx), key);
+            let _ = seek_overlay_entries(entries, &mut self.positions[layer_idx], key);
         }
     }
 
@@ -104,8 +86,7 @@ where
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
         for layer_idx in 0..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let Some(idx) =
-                seek_overlay_entries_inclusive(entries, self.positions.get_mut(layer_idx), key)
+            let Some(idx) = seek_overlay_entries(entries, &mut self.positions[layer_idx], key)
             else {
                 continue;
             };
@@ -121,7 +102,7 @@ where
     pub(crate) fn first_after(&mut self, key: &K) {
         for layer_idx in 0..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let _ = seek_overlay_entries_exclusive(entries, self.positions.get_mut(layer_idx), key);
+            let _ = seek_overlay_entries_after(entries, &mut self.positions[layer_idx], key);
         }
     }
 
@@ -141,8 +122,7 @@ where
             let entries = self.layers[layer_idx].entries();
             if entries.get(self.positions[layer_idx]).is_some_and(|(entry_key, _)| entry_key == key)
             {
-                let _ =
-                    seek_overlay_entries_exclusive(entries, self.positions.get_mut(layer_idx), key);
+                let _ = seek_overlay_entries_after(entries, &mut self.positions[layer_idx], key);
             }
         }
     }
@@ -163,35 +143,11 @@ where
 }
 
 #[inline(always)]
-fn seek_overlay_entries_inclusive<K, V>(
-    entries: &[(K, V)],
-    mut position: Option<&mut usize>,
-    key: &K,
-) -> Option<usize>
+fn seek_overlay_entries<K, V>(entries: &[(K, V)], position: &mut usize, key: &K) -> Option<usize>
 where
     K: Ord,
 {
-    let mut start =
-        position.as_ref().map(|position| **position).unwrap_or_default().min(entries.len());
-
-    if entries.get(start).is_some_and(|(entry_key, _)| entry_key >= key) &&
-        (start == 0 || &entries[start - 1].0 < key)
-    {
-        return Some(start)
-    }
-
-    if start > 0 && &entries[start - 1].0 >= key {
-        start = 0;
-    }
-
-    if entries.last().is_none_or(|(entry_key, _)| entry_key < key) {
-        if let Some(position) = position.as_mut() {
-            **position = entries.len();
-        }
-        return None
-    }
-
-    let remaining = &entries[start..];
+    let remaining = &entries[*position..];
     let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
         remaining.partition_point(|(entry_key, _)| entry_key < key)
     } else {
@@ -202,43 +158,24 @@ where
         advance
     };
 
-    let idx = start + advance;
-    if let Some(position) = position.as_mut() {
-        **position = idx;
-    }
-    (idx < entries.len()).then_some(idx)
+    *position += advance;
+    (*position < entries.len()).then_some(*position)
 }
 
 #[inline(always)]
-fn seek_overlay_entries_exclusive<K, V>(
+fn seek_overlay_entries_after<K, V>(
     entries: &[(K, V)],
-    mut position: Option<&mut usize>,
+    position: &mut usize,
     key: &K,
 ) -> Option<usize>
 where
     K: Ord,
 {
-    let mut start =
-        position.as_ref().map(|position| **position).unwrap_or_default().min(entries.len());
-
-    if entries.get(start).is_some_and(|(entry_key, _)| entry_key > key) &&
-        (start == 0 || &entries[start - 1].0 <= key)
-    {
-        return Some(start)
+    if entries.get(*position).is_some_and(|(entry_key, _)| entry_key > key) {
+        return Some(*position)
     }
 
-    if start > 0 && &entries[start - 1].0 > key {
-        start = 0;
-    }
-
-    if entries.last().is_none_or(|(entry_key, _)| entry_key <= key) {
-        if let Some(position) = position.as_mut() {
-            **position = entries.len();
-        }
-        return None
-    }
-
-    let remaining = &entries[start..];
+    let remaining = &entries[*position..];
     let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
         remaining.partition_point(|(entry_key, _)| entry_key <= key)
     } else {
@@ -249,11 +186,8 @@ where
         advance
     };
 
-    let idx = start + advance;
-    if let Some(position) = position.as_mut() {
-        **position = idx;
-    }
-    (idx < entries.len()).then_some(idx)
+    *position += advance;
+    (*position < entries.len()).then_some(*position)
 }
 
 #[derive(Clone)]
@@ -313,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn seek_can_move_backwards_from_current_position() {
+    fn seek_does_not_move_backwards_from_current_position() {
         let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
         let overlay = [layer(entries)];
         let mut cursor = PositionedOverlayCursor::new(&overlay);
@@ -321,12 +255,13 @@ mod tests {
         cursor.seek_from(0, &150);
         assert_eq!(cursor.min_current_key(), Some(150));
         cursor.seek_from(0, &75);
-        assert_eq!(cursor.min_current_key(), Some(75));
-        assert_eq!(cursor.seek_until_exact(&25), Some((0, &25)));
+        assert_eq!(cursor.min_current_key(), Some(150));
+        assert_eq!(cursor.seek_until_exact(&25), None);
+        assert_eq!(cursor.min_current_key(), Some(150));
     }
 
     #[test]
-    fn seek_can_recover_after_past_end_fast_path() {
+    fn seek_does_not_recover_after_past_end() {
         let entries = Arc::new((0..=200).map(|value| (value, value)).collect::<Vec<_>>());
         let overlay = [layer(entries)];
         let mut cursor = PositionedOverlayCursor::new(&overlay);
@@ -335,15 +270,15 @@ mod tests {
         assert_eq!(cursor.min_current_key(), None);
         assert_eq!(cursor.positions, vec![201]);
 
-        assert_eq!(cursor.seek_until_exact(&25), Some((0, &25)));
-        assert_eq!(cursor.positions, vec![25]);
+        assert_eq!(cursor.seek_until_exact(&25), None);
+        assert_eq!(cursor.positions, vec![201]);
 
         cursor.first_after(&250);
         assert_eq!(cursor.min_current_key(), None);
         assert_eq!(cursor.positions, vec![201]);
 
         cursor.first_after(&25);
-        assert_eq!(cursor.min_current_key(), Some(26));
-        assert_eq!(cursor.positions, vec![26]);
+        assert_eq!(cursor.min_current_key(), None);
+        assert_eq!(cursor.positions, vec![201]);
     }
 }

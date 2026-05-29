@@ -122,7 +122,6 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// Positions the DB cursor state using the underlying cursor.
     fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
         if self.db_cursor_state.is_positioned_at(&key) {
-            self.db_cursor_state.validate_position();
             return Ok(())
         }
 
@@ -195,7 +194,6 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         self.deferred_overlay_seek_start = None;
         let entry = if let Some((idx, mem_value)) = self.in_memory_cursor.seek_until_exact(&key) {
-            self.db_cursor_state.invalidate_position();
             if mem_value.is_some() {
                 self.deferred_overlay_seek_start = Some(idx + 1);
             }
@@ -222,7 +220,6 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.deferred_overlay_seek_start = None;
         match self.in_memory_cursor.seek_until_exact(&key) {
             Some((idx, Some(node))) => {
-                self.db_cursor_state.invalidate_position();
                 self.deferred_overlay_seek_start = Some(idx + 1);
                 let entry = Some((key, node.clone()));
                 self.set_last_key(&entry);
@@ -258,7 +255,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         match self.db_cursor_state.entry().map(|(db_key, _)| *db_key) {
             Some(db_key) if db_key == last_key => self.cursor_next()?,
-            Some(db_key) if db_key > last_key && self.db_cursor_state.position_valid() => {}
+            Some(db_key) if db_key > last_key => {}
             _ => self.cursor_first_after(last_key)?,
         }
 
@@ -821,58 +818,6 @@ mod tests {
     }
 
     #[test]
-    fn test_seek_overlay_exact_hit_repositions_stale_ahead_db_on_next() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
-        ];
-
-        let in_memory_nodes = vec![(
-            Nibbles::from_nibbles([0x2]),
-            Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-        )];
-
-        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-        let overlay = TrieUpdatesOverlay::new(vec![Arc::new(trie_updates)]);
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &overlay);
-
-        let result = cursor.seek(Nibbles::from_nibbles([0x5])).unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x5]),
-                BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)
-            ))
-        );
-        assert_eq!(visited_keys.lock().len(), 1);
-
-        let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x2]),
-                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
-            ))
-        );
-        assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
-
-        let result = cursor.next().unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x3]),
-                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-            ))
-        );
-        assert_eq!(visited_keys.lock().len(), 2, "next should reposition the stale DB cursor");
-    }
-
-    #[test]
     fn test_multiple_consecutive_deletes() {
         let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
             .map(|i| {
@@ -1025,6 +970,7 @@ mod tests {
         ];
 
         for seek_key in seek_keys {
+            cursor.reset();
             tracing::debug!("seeking to {seek_key:?}");
             let result = cursor.seek(seek_key).unwrap();
             assert_eq!(
@@ -1037,40 +983,6 @@ mod tests {
         // next() should also always return None
         let result = cursor.next().unwrap();
         assert_eq!(result, None, "Expected None from next() but got {:?}", result);
-    }
-
-    #[test]
-    fn test_seek_can_move_backwards() {
-        let db_nodes = BTreeMap::from([
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(1, 1, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(3, 3, 0, vec![], None)),
-        ]);
-        let db_nodes_arc = Arc::new(db_nodes);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-
-        let trie_updates = TrieUpdatesSorted::new(
-            vec![(
-                Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(2, 2, 0, vec![], None)),
-            )],
-            Default::default(),
-        );
-        let overlay = TrieUpdatesOverlay::new(vec![Arc::new(trie_updates)]);
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &overlay);
-
-        assert_eq!(
-            cursor.seek(Nibbles::from_nibbles([0x3])).unwrap(),
-            Some((Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(3, 3, 0, vec![], None)))
-        );
-        assert_eq!(
-            cursor.seek(Nibbles::from_nibbles([0x1])).unwrap(),
-            Some((Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(1, 1, 0, vec![], None)))
-        );
-        assert_eq!(
-            cursor.next().unwrap(),
-            Some((Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(2, 2, 0, vec![], None)))
-        );
     }
 
     #[test]
@@ -1557,9 +1469,14 @@ mod tests {
                     "Initial seek returned",
                 );
                 assert_eq!(control_first, test_first, "Initial seek mismatch");
+                let mut seek_floor = control_first.as_ref().map(|(key, _)| *key);
 
                 // Execute a sequence of random operations
                 for op in ops {
+                    if reference_position.is_none() {
+                        break
+                    }
+
                     match op {
                         CursorOp::Next => {
                             let control_result =
@@ -1571,8 +1488,11 @@ mod tests {
                                 "Next returned",
                             );
                             assert_eq!(control_result, test_result, "Next operation mismatch");
+                            let Some((key, _)) = control_result else { break };
+                            seek_floor = Some(key);
                         }
                         CursorOp::Seek(key) => {
+                            let key = seek_floor.map_or(key, |floor| key.max(floor));
                             let control_result =
                                 reference_seek(&expected_combined, &mut reference_position, key);
                             let test_result = test_cursor.seek(key).unwrap();
@@ -1583,8 +1503,11 @@ mod tests {
                                 "Seek returned",
                             );
                             assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
+                            let Some((key, _)) = control_result else { break };
+                            seek_floor = Some(key);
                         }
                         CursorOp::SeekExact(key) => {
+                            let key = seek_floor.map_or(key, |floor| key.max(floor));
                             let control_result =
                                 reference_seek_exact(&expected_combined, &mut reference_position, key);
                             let test_result = test_cursor.seek_exact(key).unwrap();
@@ -1595,6 +1518,8 @@ mod tests {
                                 "SeekExact returned",
                             );
                             assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
+                            let Some((key, _)) = control_result else { break };
+                            seek_floor = Some(key);
                         }
                     }
                 }

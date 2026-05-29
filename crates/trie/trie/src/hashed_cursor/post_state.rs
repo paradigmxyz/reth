@@ -170,7 +170,6 @@ where
     /// Positions the DB cursor state using the underlying cursor.
     fn cursor_seek(&mut self, key: B256) -> Result<(), DatabaseError> {
         if self.db_cursor_state.is_positioned_at(&key) {
-            self.db_cursor_state.validate_position();
             return Ok(())
         }
 
@@ -253,7 +252,6 @@ where
         self.deferred_overlay_seek_start = None;
         match self.post_state_cursor.seek_until_exact(&key) {
             Some((idx, Some(value))) => {
-                self.db_cursor_state.invalidate_position();
                 self.deferred_overlay_seek_start = Some(idx + 1);
                 let entry = Some((key, value));
                 self.set_last_key(&entry);
@@ -296,7 +294,7 @@ where
 
         match self.db_cursor_state.entry().map(|(db_key, _)| *db_key) {
             Some(db_key) if db_key == last_key => self.cursor_next()?,
-            Some(db_key) if db_key > last_key && self.db_cursor_state.position_valid() => {}
+            Some(db_key) if db_key > last_key => {}
             _ => self.cursor_first_after(last_key)?,
         }
 
@@ -633,33 +631,6 @@ mod tests {
     }
 
     #[test]
-    fn test_seek_overlay_exact_hit_repositions_stale_ahead_db_on_next() {
-        let db_nodes = vec![(key(0x03), U256::from(3)), (key(0x05), U256::from(5))];
-        let post_state_nodes = vec![(key(0x02), U256::from(2))];
-
-        let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let post_state = storage_post_state(post_state_nodes);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
-
-        let result = cursor.seek(key(0x05)).unwrap();
-        assert_eq!(result, Some((key(0x05), U256::from(5))));
-        assert_eq!(visited_keys.lock().len(), 1);
-
-        let result = cursor.seek(key(0x02)).unwrap();
-        assert_eq!(result, Some((key(0x02), U256::from(2))));
-        assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
-
-        let result = cursor.next().unwrap();
-        assert_eq!(result, Some((key(0x03), U256::from(3))));
-        assert_eq!(visited_keys.lock().len(), 2, "next should reposition the stale DB cursor");
-    }
-
-    #[test]
     fn test_seek_overlay_exact_deletion_still_seeks_db() {
         let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::ZERO)];
@@ -704,22 +675,6 @@ mod tests {
         let result = cursor.next().unwrap();
         assert_eq!(result, Some((key(0x06), U256::from(6))));
         assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
-    }
-
-    #[test]
-    fn test_seek_can_move_backwards() {
-        let db_nodes = BTreeMap::from([(key(0x01), U256::from(1)), (key(0x03), U256::from(3))]);
-        let db_nodes_arc = Arc::new(db_nodes);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
-
-        let post_state = storage_post_state(vec![(key(0x02), U256::from(2))]);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
-
-        assert_eq!(cursor.seek(key(0x03)).unwrap(), Some((key(0x03), U256::from(3))));
-        assert_eq!(cursor.seek(key(0x01)).unwrap(), Some((key(0x01), U256::from(1))));
-        assert_eq!(cursor.next().unwrap(), Some((key(0x02), U256::from(2))));
     }
 
     #[test]
@@ -1067,9 +1022,14 @@ mod tests {
                     "Initial seek returned",
                 );
                 assert_eq!(control_first, test_first, "Initial seek mismatch");
+                let mut seek_floor = control_first.as_ref().map(|(key, _)| *key);
 
                 // Execute a sequence of random operations
                 for op in ops {
+                    if reference_position.is_none() {
+                        break
+                    }
+
                     match op {
                         CursorOp::Next => {
                             let control_result =
@@ -1081,8 +1041,11 @@ mod tests {
                                 "Next returned",
                             );
                             assert_eq!(control_result, test_result, "Next operation mismatch");
+                            let Some((key, _)) = control_result else { break };
+                            seek_floor = Some(key);
                         }
                         CursorOp::Seek(key) => {
+                            let key = seek_floor.map_or(key, |floor| key.max(floor));
                             let control_result =
                                 reference_seek(&expected_combined, &mut reference_position, key);
                             let test_result = test_cursor.seek(key).unwrap();
@@ -1093,6 +1056,8 @@ mod tests {
                                 "Seek returned",
                             );
                             assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
+                            let Some((key, _)) = control_result else { break };
+                            seek_floor = Some(key);
                         }
                     }
                 }
