@@ -645,25 +645,58 @@ fn flatten_overlay<N: NodePrimitives>(
     blocks: Vec<ExecutedBlock<N>>,
     parent_overlay: StateTrieOverlay,
 ) -> StateTrieOverlay {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
     let (parent_trie_updates, parent_hashed_post_state) = parent_overlay.into_layers();
+
+    if !parent_trie_updates.is_empty() || !parent_hashed_post_state.is_empty() {
+        let mut trie_updates = flatten_trie_update_layers(parent_trie_updates);
+        let mut hashed_post_state = flatten_hashed_post_state_layers(parent_hashed_post_state);
+
+        for block in blocks.iter().rev() {
+            let trie_data = block.trie_data();
+
+            #[cfg(feature = "rayon")]
+            {
+                rayon::join(
+                    || {
+                        if !trie_data.trie_updates.is_empty() {
+                            Arc::make_mut(&mut trie_updates)
+                                .extend_ref_and_sort(&trie_data.trie_updates);
+                        }
+                    },
+                    || {
+                        if !trie_data.hashed_state.is_empty() {
+                            Arc::make_mut(&mut hashed_post_state)
+                                .extend_ref_and_sort(&trie_data.hashed_state);
+                        }
+                    },
+                );
+            }
+
+            #[cfg(not(feature = "rayon"))]
+            {
+                if !trie_data.trie_updates.is_empty() {
+                    Arc::make_mut(&mut trie_updates).extend_ref_and_sort(&trie_data.trie_updates);
+                }
+                if !trie_data.hashed_state.is_empty() {
+                    Arc::make_mut(&mut hashed_post_state)
+                        .extend_ref_and_sort(&trie_data.hashed_state);
+                }
+            }
+        }
+
+        return StateTrieOverlay::new(vec![trie_updates], vec![hashed_post_state])
+    }
 
     #[cfg(feature = "rayon")]
     let (trie_updates, hashed_post_state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
-                trie_data
-                    .iter()
-                    .map(|data| Arc::clone(&data.trie_updates))
-                    .chain(parent_trie_updates),
+                blocks.iter().map(|block| Arc::clone(&block.trie_data().trie_updates)),
             )
         },
         || {
             HashedPostStateSorted::merge_batch(
-                trie_data
-                    .iter()
-                    .map(|data| Arc::clone(&data.hashed_state))
-                    .chain(parent_hashed_post_state),
+                blocks.iter().map(|block| Arc::clone(&block.trie_data().hashed_state)),
             )
         },
     );
@@ -671,17 +704,34 @@ fn flatten_overlay<N: NodePrimitives>(
     #[cfg(not(feature = "rayon"))]
     let (trie_updates, hashed_post_state) = (
         TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.trie_updates)).chain(parent_trie_updates),
+            blocks.iter().map(|block| Arc::clone(&block.trie_data().trie_updates)),
         ),
         HashedPostStateSorted::merge_batch(
-            trie_data
-                .iter()
-                .map(|data| Arc::clone(&data.hashed_state))
-                .chain(parent_hashed_post_state),
+            blocks.iter().map(|block| Arc::clone(&block.trie_data().hashed_state)),
         ),
     );
 
     StateTrieOverlay::new(vec![trie_updates], vec![hashed_post_state])
+}
+
+#[cfg(any(test, feature = "rayon"))]
+fn flatten_trie_update_layers(layers: Vec<Arc<TrieUpdatesSorted>>) -> Arc<TrieUpdatesSorted> {
+    match layers.len() {
+        0 => Arc::new(TrieUpdatesSorted::default()),
+        1 => layers.into_iter().next().expect("len checked"),
+        _ => TrieUpdatesSorted::merge_batch(layers),
+    }
+}
+
+#[cfg(any(test, feature = "rayon"))]
+fn flatten_hashed_post_state_layers(
+    layers: Vec<Arc<HashedPostStateSorted>>,
+) -> Arc<HashedPostStateSorted> {
+    match layers.len() {
+        0 => Arc::new(HashedPostStateSorted::default()),
+        1 => layers.into_iter().next().expect("len checked"),
+        _ => HashedPostStateSorted::merge_batch(layers),
+    }
 }
 
 #[cfg(test)]
