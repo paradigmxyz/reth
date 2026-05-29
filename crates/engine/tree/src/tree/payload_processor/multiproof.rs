@@ -4,7 +4,7 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 
 pub use reth_trie_parallel::state_root_task::{
-    evm_state_to_hashed_post_state, Source, StateHookSender, StateRootComputeOutcome,
+    evm_state_to_hashed_post_state, StateHookSender, StateRootComputeOutcome,
     StateRootHandle, StateRootMessage,
 };
 

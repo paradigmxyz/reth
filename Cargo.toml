@@ -449,7 +449,7 @@ alloy-sol-types = { version = "1.6.0", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.0", default-features = false, features = ["rlp"] }
-alloy-evm = { version = "0.35.0", default-features = false }
+alloy-evm = { version = "0.35.1", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -699,3 +699,6 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "e9bc4c4" }

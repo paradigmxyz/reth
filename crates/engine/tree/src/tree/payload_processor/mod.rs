@@ -1024,7 +1024,6 @@ mod tests {
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
-    use alloy_evm::block::StateChangeSource;
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1377,7 +1376,7 @@ mod tests {
         let mut state_hook = handle.state_hook().expect("state hook is None");
 
         for (i, update) in state_updates.into_iter().enumerate() {
-            state_hook.on_state(StateChangeSource::Transaction(i), &update);
+            state_hook.on_state(&update);
         }
         drop(state_hook);
 

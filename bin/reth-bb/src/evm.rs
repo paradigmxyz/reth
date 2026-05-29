@@ -12,7 +12,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        ExecutableTx, GasOutput, OnStateHook, StateChangeSource, StateDB,
+        ExecutableTx, GasOutput, OnStateHook, StateDB,
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
@@ -275,16 +275,6 @@ where
         Ok(())
     }
 
-    /// Creates a forwarding `OnStateHook` that delegates to the shared hook.
-    fn forwarding_hook(&self) -> Option<Box<dyn OnStateHook>> {
-        let shared = self.shared_hook.clone();
-        Some(Box::new(move |source: StateChangeSource, state: &revm::state::EvmState| {
-            if let Some(hook) = shared.lock().unwrap().as_mut() {
-                hook.on_state(source, state);
-            }
-        }))
-    }
-
     const fn inner(&self) -> &EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
@@ -383,12 +373,6 @@ where
 
         // Carry forward receipts from prior segments.
         new_inner.receipts = result.receipts;
-
-        // Re-install the forwarding state hook so the parallel state root
-        // task continues to receive state changes.
-        if self.shared_hook.lock().unwrap().is_some() {
-            new_inner.set_state_hook(self.forwarding_hook());
-        }
 
         self.inner = Some(new_inner);
 
@@ -519,15 +503,6 @@ where
         }
 
         Ok((evm, result))
-    }
-
-    fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-        // Store the real hook in the shared slot and give the inner
-        // executor a lightweight forwarder. This way the hook survives
-        // inner executor finish/reconstruct cycles at segment boundaries.
-        *self.shared_hook.lock().unwrap() = hook;
-        let fwd = self.forwarding_hook();
-        self.inner_mut().set_state_hook(fwd);
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
