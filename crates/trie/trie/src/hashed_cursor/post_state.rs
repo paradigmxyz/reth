@@ -443,7 +443,7 @@ impl AsRef<Self> for HashedPostStateOverlay {
 
 #[derive(Debug)]
 struct PostStateOverlayCursor<'a, V> {
-    cursor: PositionedOverlayCursor<'a, HashedPostStateSorted, B256, V>,
+    cursor: PositionedOverlayCursor<'a, B256, V>,
     has_visible_value: bool,
 }
 

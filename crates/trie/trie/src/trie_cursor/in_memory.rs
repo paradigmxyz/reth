@@ -383,8 +383,7 @@ struct TrieStorageOverlay {
     db_wiped: bool,
 }
 
-type OverlayCursor<'a> =
-    PositionedOverlayCursor<'a, TrieUpdatesSorted, Nibbles, Option<BranchNodeCompact>>;
+type OverlayCursor<'a> = PositionedOverlayCursor<'a, Nibbles, Option<BranchNodeCompact>>;
 type TrieOverlayLayer = OverlayLayer<TrieUpdatesSorted, Nibbles, Option<BranchNodeCompact>>;
 
 #[cfg(test)]
