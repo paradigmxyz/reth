@@ -479,7 +479,9 @@ where
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let tx = WithTxEnv::new(tx);
-                            let _ = prewarm_tx.send((idx, tx.clone()));
+                            if idx > 0 {
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                            }
                             tx
                         });
                         let _ = execute_tx.send((idx, tx));
@@ -783,7 +785,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
-        if let Ok(tx) = &tx {
+        if idx > 0 && let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send((idx, tx));
