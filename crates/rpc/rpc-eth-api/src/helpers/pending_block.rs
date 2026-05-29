@@ -559,8 +559,7 @@ mod tests {
 
     #[test]
     fn pending_env_applies_parent_beacon_root_override() {
-        let mut header = Header::default();
-        header.parent_beacon_block_root = Some(B256::ZERO);
+        let header = Header { parent_beacon_block_root: Some(B256::ZERO), ..Default::default() };
         let sealed = SealedHeader::new(header, B256::ZERO);
         let beacon_root = B256::repeat_byte(0x42);
         let block_overrides =

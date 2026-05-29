@@ -122,7 +122,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let timestamp = block_overrides
                         .as_ref()
                         .and_then(|overrides| overrides.time)
-                        .unwrap_or(parent.timestamp().saturating_add(12));
+                        .unwrap_or_else(|| parent.timestamp().saturating_add(12));
                     let is_cancun_active =
                         this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp);
                     let attributes = this
