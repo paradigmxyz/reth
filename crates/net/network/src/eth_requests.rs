@@ -371,6 +371,7 @@ where
         mut request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
+        self.metrics.eth_block_access_lists_requests_received_total.increment(1);
         request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
