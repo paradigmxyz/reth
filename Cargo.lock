@@ -6458,6 +6458,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "partial-stateless"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "bincode",
+ "revm-database",
+ "revm-primitives",
+ "revm-state",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
