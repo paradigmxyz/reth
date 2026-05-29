@@ -481,7 +481,7 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root(),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
             extra_data: parent.extra_data().clone(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
@@ -497,7 +497,7 @@ mod tests {
     use reth_primitives_traits::SealedHeader;
 
     #[test]
-    fn pending_env_keeps_parent_beacon_root() {
+    fn pending_env_defaults_parent_beacon_root() {
         let mut header = Header::default();
         let beacon_root = B256::repeat_byte(0x42);
         header.parent_beacon_block_root = Some(beacon_root);
@@ -505,7 +505,7 @@ mod tests {
 
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
 
-        assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
+        assert_eq!(attrs.parent_beacon_block_root, Some(B256::ZERO));
     }
 
     #[test]

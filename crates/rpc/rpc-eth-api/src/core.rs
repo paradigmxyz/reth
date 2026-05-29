@@ -16,6 +16,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
@@ -453,6 +454,7 @@ impl<T>
     > for T
 where
     T: FullEthApi,
+    T::Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
