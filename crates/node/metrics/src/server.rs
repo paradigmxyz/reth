@@ -167,7 +167,7 @@ impl MetricServer {
                 let pprof_dump_dir = pprof_dump_dir.clone();
                 async move {
                     let response =
-                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                        handle_request(req.uri().path(), hook, handle, &pprof_dump_dir).await;
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -327,9 +327,9 @@ fn describe_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
 
-async fn handle_request(
+async fn handle_request<F: Hook + 'static>(
     path: &str,
-    hook: impl Fn(),
+    hook: Arc<F>,
     handle: &crate::recorder::PrometheusRecorder,
     pprof_dump_dir: &PathBuf,
 ) -> Response<Full<Bytes>> {
@@ -337,11 +337,28 @@ async fn handle_request(
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
-            hook();
-            let metrics = handle.handle().render();
-            let mut response = Response::new(Full::new(Bytes::from(metrics)));
-            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
-            response
+            let handle = handle.handle().clone();
+            match tokio::task::spawn_blocking(move || {
+                hook();
+                handle.render()
+            })
+            .await
+            {
+                Ok(metrics) => {
+                    let mut response = Response::new(Full::new(Bytes::from(metrics)));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+                    response
+                }
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to render metrics: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response
+                }
+            }
         }
     }
 }
