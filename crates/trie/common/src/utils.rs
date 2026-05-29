@@ -13,9 +13,17 @@ where
     K: Ord + Clone + 'a,
     V: Clone + 'a,
 {
-    slices
-        .into_iter()
-        .filter(|s| !s.is_empty())
+    let mut slices = slices.into_iter().filter(|s| !s.is_empty());
+    let Some(first) = slices.next() else {
+        return Vec::new();
+    };
+    let Some(second) = slices.next() else {
+        return first.to_vec();
+    };
+
+    core::iter::once(first)
+        .chain(core::iter::once(second))
+        .chain(slices)
         .enumerate()
         // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
         .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))

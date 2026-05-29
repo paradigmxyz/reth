@@ -703,10 +703,7 @@ impl TrieUpdatesSorted {
         let storage_tries = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_nodes = match entry.slices.as_slice() {
-                    [single] => single.to_vec(),
-                    _ => kway_merge_sorted(entry.slices),
-                };
+                let storage_nodes = kway_merge_sorted(entry.slices);
                 (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
             })
             .collect();
