@@ -2,11 +2,17 @@ use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
     ArenaSparseSubtrie, Index, NodeArena,
 };
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
+use std::sync::OnceLock;
+
+fn empty_branch_hashes() -> Arc<Vec<B256>> {
+    static EMPTY_BRANCH_HASHES: OnceLock<Arc<Vec<B256>>> = OnceLock::new();
+    EMPTY_BRANCH_HASHES.get_or_init(|| Arc::new(Vec::new())).clone()
+}
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,9 +132,24 @@ impl ArenaSparseNodeBranch {
 
     /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
     pub(super) fn branch_node_compact(&self, arena: &NodeArena) -> BranchNodeCompact {
+        let hash_mask = self.branch_masks.hash_mask;
+        let tree_mask = self.branch_masks.tree_mask;
+        debug_assert!(tree_mask.is_subset_of(self.state_mask));
+        debug_assert!(hash_mask.is_subset_of(self.state_mask));
+
+        if hash_mask.is_empty() {
+            return BranchNodeCompact {
+                state_mask: self.state_mask,
+                tree_mask,
+                hash_mask,
+                hashes: empty_branch_hashes(),
+                root_hash: None,
+            }
+        }
+
         let mut hashes = Vec::new();
         for (nibble, child) in self.child_iter() {
-            if self.branch_masks.hash_mask.is_bit_set(nibble) {
+            if hash_mask.is_bit_set(nibble) {
                 let hash = match child {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node.as_hash().expect("blinded child must be a hash")
@@ -140,13 +161,14 @@ impl ArenaSparseNodeBranch {
                 hashes.push(hash);
             }
         }
-        BranchNodeCompact::new(
-            self.state_mask,
-            self.branch_masks.tree_mask,
-            self.branch_masks.hash_mask,
-            hashes,
-            None,
-        )
+        debug_assert_eq!(hash_mask.count_ones() as usize, hashes.len());
+        BranchNodeCompact {
+            state_mask: self.state_mask,
+            tree_mask,
+            hash_mask,
+            hashes: Arc::new(hashes),
+            root_hash: None,
+        }
     }
 }
 
