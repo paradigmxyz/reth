@@ -12,7 +12,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        ExecutableTx, GasOutput, OnStateHook, StateDB,
+        ExecutableTx, GasOutput, StateDB,
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
@@ -29,7 +29,6 @@ use revm::{
     primitives::hardfork::SpecId,
     Inspector,
 };
-use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
 
 // ---------------------------------------------------------------------------
@@ -152,10 +151,6 @@ where
     /// Cumulative blob gas used by all segments that have been finished at
     /// boundaries.
     blob_gas_used_offset: u64,
-    /// Shared state hook that survives inner executor finish/reconstruct
-    /// cycles at segment boundaries. Each inner executor receives a
-    /// forwarding hook that delegates to this shared instance.
-    shared_hook: Arc<Mutex<Option<Box<dyn OnStateHook>>>>,
     /// Callback to reseed block hashes into the DB's cache at segment
     /// boundaries. See [`BlockHashSeeder`].
     block_hash_seeder: Option<BlockHashSeeder<DB>>,
@@ -207,7 +202,6 @@ where
             accumulated_requests: Requests::default(),
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
-            shared_hook: Arc::new(Mutex::new(None)),
             block_hash_seeder,
             bal_index_reader,
             bal_index_bumper,

@@ -1375,7 +1375,7 @@ mod tests {
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
 
-        for (i, update) in state_updates.into_iter().enumerate() {
+        for update in state_updates {
             state_hook.on_state(&update);
         }
         drop(state_hook);
