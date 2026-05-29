@@ -1,9 +1,9 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
+    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities, Cells,
     DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
-    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
     Receipts70, UnifiedStatus,
 };
@@ -262,6 +262,15 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
+    /// Requests cells from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetCells {
+        /// The request for cells.
+        request: GetCells,
+        /// The channel to send the response for cells.
+        response: oneshot::Sender<RequestResult<Cells>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -283,6 +292,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
+            Self::GetCells { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -291,6 +301,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     pub fn is_supported_by_eth_version(&self, version: EthVersion) -> bool {
         match self {
             Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
+            Self::GetCells { .. } => version >= EthVersion::Eth72,
             _ => true,
         }
     }
@@ -324,6 +335,9 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
                     request_id,
                     message: request.clone(),
                 })
+            }
+            Self::GetCells { request, .. } => {
+                EthMessage::GetCells(RequestPair { request_id, message: request.clone() })
             }
         }
     }
@@ -388,5 +402,15 @@ mod tests {
 
         assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
         assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
+    }
+
+    #[test]
+    fn test_get_cells_version_support() {
+        let (tx, _rx) = oneshot::channel();
+        let req: PeerRequest<EthNetworkPrimitives> =
+            PeerRequest::GetCells { request: GetCells::default(), response: tx };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth71));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth72));
     }
 }

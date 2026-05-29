@@ -73,8 +73,10 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
 
     assert_eq!(result.len(), 1, "expected exactly 1 simulated block");
     assert_eq!(result[0].calls.len(), 1, "expected exactly 1 call result");
-    assert!(result[0].calls[0].status, "expected call to succeed");
-    assert!(result[0].calls[0].error.is_none(), "expected no error");
+    let call = &result[0].calls[0];
+    assert!(call.status, "expected call to succeed");
+    assert!(call.error.is_none(), "expected no error");
+    assert_eq!(call.max_used_gas, Some(call.gas_used), "expected maxUsedGas in call result");
 
     Ok(())
 }

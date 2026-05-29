@@ -575,9 +575,9 @@ mod tests {
         let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
         let snap2_msg = SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
             request_id: 1,
-            block_access_lists: BlockAccessLists(vec![alloy_primitives::Bytes::from_static(&[
-                alloy_rlp::EMPTY_LIST_CODE,
-            ])]),
+            block_access_lists: BlockAccessLists(vec![Some(alloy_primitives::Bytes::from_static(
+                &[alloy_rlp::EMPTY_LIST_CODE],
+            ))]),
         });
 
         let encoded = EthSnapStreamInner::<EthNetworkPrimitives>::new_with_snap_version(

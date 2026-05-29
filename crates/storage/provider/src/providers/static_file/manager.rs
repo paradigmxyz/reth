@@ -8,9 +8,12 @@ use crate::{
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
-use alloy_consensus::{transaction::TransactionMeta, Header};
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    Header,
+};
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{b256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
@@ -932,6 +935,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Returns a list of `SegmentHeader`s from the deleted jars.
     pub fn delete_segment(&self, segment: StaticFileSegment) -> ProviderResult<Vec<SegmentHeader>> {
         let mut deleted_headers = Vec::new();
+
+        self.writers.remove(segment);
 
         while let Some(block_height) = self.get_highest_static_file_block(segment) {
             debug!(
@@ -2713,10 +2718,8 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
             let manager = self.clone();
 
             // Spawn the task onto the global rayon pool
-            // This task will send the results through the channel after it has calculated
-            // the hash.
+            // This task will send the cached transaction hash through the channel.
             rayon::spawn(move || {
-                let mut rlp_buf = Vec::with_capacity(128);
                 let _ = manager.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
                     chunk_range,
@@ -2724,9 +2727,7 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
                         Ok(cursor
                             .get_one::<TransactionMask<Self::Transaction>>(number.into())?
                             .map(|transaction| {
-                                rlp_buf.clear();
-                                let _ = channel_tx
-                                    .send(calculate_hash((number, transaction), &mut rlp_buf));
+                                let _ = channel_tx.send(transaction_hash((number, transaction)));
                             }))
                     },
                     |_| true,
@@ -2758,7 +2759,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
             let mut cursor = jar_provider.cursor()?;
             if cursor
                 .get_one::<TransactionMask<Self::Transaction>>((&tx_hash).into())?
-                .and_then(|tx| (tx.trie_hash() == tx_hash).then_some(tx))
+                .and_then(|tx| (*tx.tx_hash() == tx_hash).then_some(tx))
                 .is_some()
             {
                 Ok(cursor.number())
@@ -2800,7 +2801,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
             Ok(jar_provider
                 .cursor()?
                 .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
-                .and_then(|tx| (tx.trie_hash() == hash).then_some(tx)))
+                .and_then(|tx| (*tx.tx_hash() == hash).then_some(tx)))
         })
     }
 
@@ -3002,18 +3003,14 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
     }
 }
 
-/// Calculates the tx hash for the given transaction and its id.
+/// Returns the tx hash for the given transaction and its id.
 #[inline]
-fn calculate_hash<T>(
-    entry: (TxNumber, T),
-    rlp_buf: &mut Vec<u8>,
-) -> Result<(B256, TxNumber), Box<ProviderError>>
+fn transaction_hash<T>(entry: (TxNumber, T)) -> Result<(B256, TxNumber), Box<ProviderError>>
 where
-    T: Encodable2718,
+    T: TxHashRef,
 {
     let (tx_id, tx) = entry;
-    tx.encode_2718(rlp_buf);
-    Ok((keccak256(rlp_buf), tx_id))
+    Ok((*tx.tx_hash(), tx_id))
 }
 
 #[cfg(test)]

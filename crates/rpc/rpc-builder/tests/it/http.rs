@@ -319,6 +319,7 @@ where
         call_request.clone(),
         Some(block_number.into()),
         None,
+        None,
     )
     .await
     .unwrap_err();
@@ -446,6 +447,22 @@ where
     DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap_err();
     DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::debug_account_at(
+        client,
+        block_id,
+        Index::default(),
+        Address::default(),
+    )
+    .await
+    .unwrap_err();
+    DebugApiClient::<TransactionRequest>::debug_account_info_at(
+        client,
+        block_id,
+        Index::default(),
+        Address::default(),
+    )
+    .await
+    .unwrap_err();
 }
 
 async fn test_basic_net_calls<C>(client: &C)

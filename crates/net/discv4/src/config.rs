@@ -49,6 +49,13 @@ pub struct Discv4Config {
     pub enable_lookup: bool,
     /// Whether to enforce EIP-868 extension.
     pub enable_eip868: bool,
+    /// Whether to only respond with nodes that have a known EIP-868 ENR record (fork ID) in
+    /// `Neighbours` responses.
+    ///
+    /// When enabled, the node will filter out entries that have not yet been confirmed to support
+    /// EIP-868 (i.e., have no `fork_id`) when responding to `FindNode` requests. This helps
+    /// callers discover only peers that advertise their fork ID.
+    pub enforce_eip868_neighbours: bool,
     /// Whether to respect expiration timestamps in messages.
     pub enforce_expiration_timestamps: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
@@ -123,6 +130,7 @@ impl Default for Discv4Config {
             enable_dht_random_walk: true,
             enable_lookup: true,
             enable_eip868: true,
+            enforce_eip868_neighbours: false,
             enforce_expiration_timestamps: true,
             additional_eip868_rlp_pairs: Default::default(),
             external_ip_resolver: Some(Default::default()),
@@ -215,6 +223,16 @@ impl Discv4ConfigBuilder {
     /// Whether to enable EIP-868
     pub const fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
+        self
+    }
+
+    /// Whether to only include nodes with a known EIP-868 ENR record (fork ID) in `Neighbours`
+    /// responses.
+    pub const fn enforce_eip868_neighbours(
+        &mut self,
+        enforce_eip868_neighbours: bool,
+    ) -> &mut Self {
+        self.config.enforce_eip868_neighbours = enforce_eip868_neighbours;
         self
     }
 
