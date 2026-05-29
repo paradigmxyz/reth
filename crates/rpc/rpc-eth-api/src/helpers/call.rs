@@ -18,7 +18,7 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
@@ -117,7 +117,24 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     Vec::with_capacity(block_state_calls.len());
 
                 for block in block_state_calls {
-                    let attributes = this.next_env_attributes(&parent)?;
+                    let SimBlock { block_overrides, state_overrides, calls } = block;
+
+                    let mut attributes = this.next_env_attributes(&parent)?;
+                    let timestamp = block_overrides
+                        .as_ref()
+                        .and_then(|overrides| overrides.time)
+                        .unwrap_or(attributes.timestamp);
+                    attributes.parent_beacon_block_root =
+                        if this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp) {
+                            Some(
+                                block_overrides
+                                    .as_ref()
+                                    .and_then(|overrides| overrides.beacon_root)
+                                    .unwrap_or_default(),
+                            )
+                        } else {
+                            None
+                        };
 
                     let mut evm_env = this
                         .evm_config()
@@ -135,8 +152,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
                         evm_env.block_env.inner_mut().basefee = 0;
                     }
-
-                    let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     // Set prevrandao to zero for simulated blocks by default,
                     // matching spec behavior where MixDigest is zero-initialized.
