@@ -9,8 +9,9 @@ use alloy_primitives::map::AddressSet;
 use core::fmt;
 use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use rustc_hash::FxHashSet;
 use std::{
-    collections::{BTreeSet, HashSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -97,7 +98,7 @@ pub struct BestTransactions<T: TransactionOrdering> {
     /// then can be moved from the `all` set to the `independent` set.
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
-    pub(crate) invalid: HashSet<SenderId>,
+    pub(crate) invalid: FxHashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
     /// iterator was static filtered
     ///
