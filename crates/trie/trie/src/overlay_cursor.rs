@@ -46,11 +46,12 @@ impl<K: PartialEq, V> DbCursorState<K, V> {
 pub(crate) struct PositionedOverlayCursor<'a, K, V> {
     layers: Vec<PositionedOverlayLayer<'a, K, V>>,
     exact_index: &'a [OverlayExactIndexEntry<K>],
+    exact_index_position: usize,
 }
 
 impl<K, V> Default for PositionedOverlayCursor<'_, K, V> {
     fn default() -> Self {
-        Self { layers: Vec::new(), exact_index: &[] }
+        Self { layers: Vec::new(), exact_index: &[], exact_index_position: 0 }
     }
 }
 
@@ -59,7 +60,11 @@ impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
         layers: &'a [OverlayLayer<O, K, V>],
         exact_index: &'a [OverlayExactIndexEntry<K>],
     ) -> Self {
-        let mut cursor = Self { layers: Vec::with_capacity(layers.len()), exact_index: &[] };
+        let mut cursor = Self {
+            layers: Vec::with_capacity(layers.len()),
+            exact_index: &[],
+            exact_index_position: 0,
+        };
         cursor.retarget(layers, exact_index);
         cursor
     }
@@ -68,6 +73,7 @@ impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
         for layer in &mut self.layers {
             layer.reset();
         }
+        self.exact_index_position = 0;
     }
 
     pub(crate) fn retarget<O>(
@@ -78,6 +84,7 @@ impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
         self.layers.clear();
         self.layers.extend(layers.iter().map(|layer| PositionedOverlayLayer::new(layer.entries())));
         self.exact_index = exact_index;
+        self.exact_index_position = 0;
     }
 }
 
@@ -95,18 +102,16 @@ where
     #[inline(always)]
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
         if !self.exact_index.is_empty() {
-            let Ok(index_idx) = self.exact_index.binary_search_by(|entry| entry.key.cmp(key))
-            else {
+            let Some((layer_idx, entry_idx)) = self.seek_exact_index(key) else {
                 self.seek_from(0, key);
                 return None;
             };
-            let entry = &self.exact_index[index_idx];
-            let layer = &mut self.layers[entry.layer_idx];
-            if layer.position > entry.entry_idx {
+            let layer = &mut self.layers[layer_idx];
+            if layer.position > entry_idx {
                 return None
             }
-            layer.position = entry.entry_idx;
-            return Some((entry.layer_idx, &layer.entries[entry.entry_idx].1))
+            layer.position = entry_idx;
+            return Some((layer_idx, &layer.entries[entry_idx].1))
         }
 
         for (layer_idx, layer) in self.layers.iter_mut().enumerate() {
@@ -117,6 +122,33 @@ where
         }
 
         None
+    }
+
+    #[inline(always)]
+    fn seek_exact_index(&mut self, key: &K) -> Option<(usize, usize)> {
+        if let Some(entry) = self.exact_index.get(self.exact_index_position) {
+            match entry.key.cmp(key) {
+                std::cmp::Ordering::Less => self.exact_index_position += 1,
+                std::cmp::Ordering::Equal => return Some((entry.layer_idx, entry.entry_idx)),
+                std::cmp::Ordering::Greater => return None,
+            }
+        }
+
+        let remaining = &self.exact_index[self.exact_index_position..];
+        let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+            remaining.partition_point(|entry| &entry.key < key)
+        } else {
+            let mut advance = 0;
+            while advance < remaining.len() && &remaining[advance].key < key {
+                advance += 1;
+            }
+            advance
+        };
+
+        self.exact_index_position += advance;
+        self.exact_index
+            .get(self.exact_index_position)
+            .and_then(|entry| (&entry.key == key).then_some((entry.layer_idx, entry.entry_idx)))
     }
 
     #[inline(always)]
