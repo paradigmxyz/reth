@@ -26,6 +26,47 @@ use tracing::info;
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 
+/// Block numbers collected for one history-index key.
+///
+/// Most account history entries in a flush window only contain a single block number, so keep that
+/// first value inline and allocate the spill vector only when the key is observed again.
+enum InlineBlockNumbers {
+    One(u64),
+    Many(Vec<u64>),
+}
+
+impl InlineBlockNumbers {
+    const fn new(block_number: u64) -> Self {
+        Self::One(block_number)
+    }
+
+    fn push(&mut self, block_number: u64) {
+        match self {
+            Self::One(first) => {
+                let mut blocks = Vec::with_capacity(2);
+                blocks.push(*first);
+                blocks.push(block_number);
+                *self = Self::Many(blocks);
+            }
+            Self::Many(blocks) => blocks.push(block_number),
+        }
+    }
+
+    fn last(&self) -> u64 {
+        match self {
+            Self::One(block) => *block,
+            Self::Many(blocks) => *blocks.last().expect("block list is non-empty"),
+        }
+    }
+
+    fn into_block_number_list(self) -> BlockNumberList {
+        match self {
+            Self::One(block) => BlockNumberList::new_pre_sorted([block]),
+            Self::Many(blocks) => BlockNumberList::new_pre_sorted(blocks),
+        }
+    }
+}
+
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
 ///
@@ -100,12 +141,12 @@ where
 }
 
 /// Allows collecting indices from a cache with a custom insert fn
-fn collect_indices<K, F>(
-    cache: impl Iterator<Item = (K, Vec<u64>)>,
+fn collect_indices<K, V, F>(
+    cache: impl Iterator<Item = (K, V)>,
     mut insert_fn: F,
 ) -> Result<(), StageError>
 where
-    F: FnMut(K, Vec<u64>) -> Result<(), StageError>,
+    F: FnMut(K, V) -> Result<(), StageError>,
 {
     for (key, indices) in cache {
         insert_fn(key, indices)?
@@ -123,12 +164,11 @@ where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: AddressMap<Vec<u64>> = AddressMap::default();
+    let mut cache: AddressMap<InlineBlockNumbers> = AddressMap::default();
 
-    let mut insert_fn = |address: Address, indices: Vec<u64>| {
-        let last = indices.last().expect("indices is non-empty");
-        collector
-            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
+    let mut insert_fn = |address: Address, indices: InlineBlockNumbers| {
+        let last = indices.last();
+        collector.insert(ShardedKey::new(address, last), indices.into_block_number_list())?;
         Ok(())
     };
 
@@ -146,7 +186,10 @@ where
 
     for changeset_result in walker {
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
-        cache.entry(address).or_default().push(block_number);
+        cache
+            .entry(address)
+            .and_modify(|indices| indices.push(block_number))
+            .or_insert_with(|| InlineBlockNumbers::new(block_number));
 
         if block_number != current_block_number {
             current_block_number = block_number;
