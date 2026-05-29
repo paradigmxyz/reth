@@ -18,7 +18,7 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["ethereum"] }
 alloy-consensus.workspace = true
 reth-primitives-traits.workspace = true
-reth-codecs = { workspace = true, optional = true }
+reth-codecs = { workspace = true, optional = true, features = ["alloy"] }
 
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
@@ -47,7 +47,7 @@ rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["alloy"] }
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 
