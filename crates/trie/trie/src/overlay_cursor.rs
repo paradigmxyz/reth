@@ -86,13 +86,12 @@ where
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
         for layer_idx in 0..self.layers.len() {
             let entries = self.layers[layer_idx].entries();
-            let Some(idx) = seek_overlay_entries(entries, &mut self.positions[layer_idx], key)
+            let Some(idx) =
+                seek_overlay_entries_exact(entries, &mut self.positions[layer_idx], key)
             else {
                 continue;
             };
-            if &entries[idx].0 == key {
-                return Some((layer_idx, &entries[idx].1))
-            }
+            return Some((layer_idx, &entries[idx].1))
         }
 
         None
@@ -147,8 +146,11 @@ fn seek_overlay_entries<K, V>(entries: &[(K, V)], position: &mut usize, key: &K)
 where
     K: Ord,
 {
-    if entries.get(*position).is_some_and(|(entry_key, _)| entry_key >= key) {
-        return Some(*position)
+    if let Some((entry_key, _)) = entries.get(*position) {
+        match entry_key.cmp(key) {
+            std::cmp::Ordering::Less => *position += 1,
+            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => return Some(*position),
+        }
     }
 
     let remaining = &entries[*position..];
@@ -167,6 +169,49 @@ where
 }
 
 #[inline(always)]
+fn seek_overlay_entries_exact<K, V>(
+    entries: &[(K, V)],
+    position: &mut usize,
+    key: &K,
+) -> Option<usize>
+where
+    K: Ord,
+{
+    if let Some((entry_key, _)) = entries.get(*position) {
+        match entry_key.cmp(key) {
+            std::cmp::Ordering::Less => *position += 1,
+            std::cmp::Ordering::Equal => return Some(*position),
+            std::cmp::Ordering::Greater => return None,
+        }
+    }
+
+    let remaining = &entries[*position..];
+    if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+        *position += remaining.partition_point(|(entry_key, _)| entry_key < key);
+        return entries
+            .get(*position)
+            .and_then(|(entry_key, _)| (entry_key == key).then_some(*position))
+    }
+
+    for (advance, (entry_key, _)) in remaining.iter().enumerate() {
+        match entry_key.cmp(key) {
+            std::cmp::Ordering::Less => {}
+            std::cmp::Ordering::Equal => {
+                *position += advance;
+                return Some(*position)
+            }
+            std::cmp::Ordering::Greater => {
+                *position += advance;
+                return None
+            }
+        }
+    }
+
+    *position = entries.len();
+    None
+}
+
+#[inline(always)]
 fn seek_overlay_entries_after<K, V>(
     entries: &[(K, V)],
     position: &mut usize,
@@ -175,8 +220,11 @@ fn seek_overlay_entries_after<K, V>(
 where
     K: Ord,
 {
-    if entries.get(*position).is_some_and(|(entry_key, _)| entry_key > key) {
-        return Some(*position)
+    if let Some((entry_key, _)) = entries.get(*position) {
+        match entry_key.cmp(key) {
+            std::cmp::Ordering::Greater => return Some(*position),
+            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => *position += 1,
+        }
     }
 
     let remaining = &entries[*position..];
