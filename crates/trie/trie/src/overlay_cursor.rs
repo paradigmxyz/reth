@@ -311,6 +311,10 @@ where
     K: Copy + Ord,
 {
     let entry_count = layers.iter().map(|layer| layer.entries_len).sum();
+    if layers.len() < 2 || entry_count < OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+        return Vec::new()
+    }
+
     let mut index = Vec::with_capacity(entry_count);
 
     for (layer_idx, layer) in layers.iter().enumerate() {
