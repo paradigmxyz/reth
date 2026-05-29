@@ -57,6 +57,14 @@ pub struct MultiProofTargetsV2 {
 }
 
 impl MultiProofTargetsV2 {
+    /// Creates a new target set with pre-allocated account and storage target capacity.
+    pub fn with_capacity(account_targets: usize, storage_targets: usize) -> Self {
+        Self {
+            account_targets: Vec::with_capacity(account_targets),
+            storage_targets: B256Map::with_capacity_and_hasher(storage_targets, Default::default()),
+        }
+    }
+
     /// Returns true is there are no account or storage targets.
     pub fn is_empty(&self) -> bool {
         self.account_targets.is_empty() && self.storage_targets.is_empty()
@@ -109,7 +117,12 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
     type Item = MultiProofTargetsV2;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut chunk = MultiProofTargetsV2::default();
+        let storage_target_capacity =
+            self.storage_targets.len() + usize::from(self.current_account_storage.is_some());
+        let mut chunk = MultiProofTargetsV2::with_capacity(
+            self.account_targets.len().min(self.size),
+            storage_target_capacity.min(self.size),
+        );
         let mut count = 0;
 
         // First, finish any remaining storage slots from previous account
