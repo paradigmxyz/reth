@@ -6,7 +6,7 @@ use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
-use alloy_rpc_types_eth::BlockNumberOrTag;
+use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
 use futures::Future;
 use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -450,6 +450,16 @@ pub trait PendingEnvBuilder<Evm: ConfigureEvm>: Send + Sync + Unpin + 'static {
         &self,
         parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
     ) -> Result<Evm::NextBlockEnvCtx, EthApiError>;
+
+    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block with block overrides.
+    fn pending_env_attributes_with_overrides(
+        &self,
+        parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
+        _block_overrides: Option<&BlockOverrides>,
+        _is_cancun_active: bool,
+    ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
+        self.pending_env_attributes(parent)
+    }
 }
 
 /// Trait that should be implemented on [`ConfigureEvm::NextBlockEnvCtx`] to provide a way for it to
@@ -460,6 +470,18 @@ pub trait PendingEnvBuilder<Evm: ConfigureEvm>: Send + Sync + Unpin + 'static {
 pub trait BuildPendingEnv<Header> {
     /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block.
     fn build_pending_env(parent: &SealedHeader<Header>) -> Self;
+
+    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block with block overrides.
+    fn build_pending_env_with_overrides(
+        parent: &SealedHeader<Header>,
+        _block_overrides: Option<&BlockOverrides>,
+        _is_cancun_active: bool,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        Self::build_pending_env(parent)
+    }
 }
 
 impl<Evm> PendingEnvBuilder<Evm> for ()
@@ -471,6 +493,19 @@ where
         parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
     ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
         Ok(Evm::NextBlockEnvCtx::build_pending_env(parent))
+    }
+
+    fn pending_env_attributes_with_overrides(
+        &self,
+        parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
+        block_overrides: Option<&BlockOverrides>,
+        is_cancun_active: bool,
+    ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
+        Ok(Evm::NextBlockEnvCtx::build_pending_env_with_overrides(
+            parent,
+            block_overrides,
+            is_cancun_active,
+        ))
     }
 }
 
@@ -486,6 +521,20 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             extra_data: parent.extra_data().clone(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         }
+    }
+
+    fn build_pending_env_with_overrides(
+        parent: &SealedHeader<H>,
+        block_overrides: Option<&BlockOverrides>,
+        is_cancun_active: bool,
+    ) -> Self {
+        let mut attributes = Self::build_pending_env(parent);
+        if is_cancun_active {
+            attributes.parent_beacon_block_root = Some(
+                block_overrides.and_then(|overrides| overrides.beacon_root).unwrap_or_default(),
+            );
+        }
+        attributes
     }
 }
 
@@ -506,6 +555,24 @@ mod tests {
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
 
         assert_eq!(attrs.parent_beacon_block_root, Some(B256::ZERO));
+    }
+
+    #[test]
+    fn pending_env_applies_parent_beacon_root_override() {
+        let mut header = Header::default();
+        header.parent_beacon_block_root = Some(B256::ZERO);
+        let sealed = SealedHeader::new(header, B256::ZERO);
+        let beacon_root = B256::repeat_byte(0x42);
+        let block_overrides =
+            BlockOverrides { beacon_root: Some(beacon_root), ..Default::default() };
+
+        let attrs = NextBlockEnvAttributes::build_pending_env_with_overrides(
+            &sealed,
+            Some(&block_overrides),
+            true,
+        );
+
+        assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
     }
 
     #[test]

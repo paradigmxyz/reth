@@ -22,7 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, NextBlockEnvAttributes, TransactionEnvMut, TxEnvFor,
+    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -71,10 +71,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         payload: SimulatePayload<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>,
         block: Option<BlockId>,
-    ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send
-    where
-        Self::Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-    {
+    ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
                 return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
@@ -122,20 +119,20 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 for block in block_state_calls {
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
-                    let mut attributes = this.next_env_attributes(&parent)?;
                     let timestamp = block_overrides
                         .as_ref()
                         .and_then(|overrides| overrides.time)
-                        .unwrap_or(attributes.timestamp);
-                    attributes.parent_beacon_block_root =
-                        this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp).then(
-                            || {
-                                block_overrides
-                                    .as_ref()
-                                    .and_then(|overrides| overrides.beacon_root)
-                                    .unwrap_or_default()
-                            },
-                        );
+                        .unwrap_or(parent.timestamp().saturating_add(12));
+                    let is_cancun_active =
+                        this.provider().chain_spec().is_cancun_active_at_timestamp(timestamp);
+                    let attributes = this
+                        .pending_env_builder()
+                        .pending_env_attributes_with_overrides(
+                            &parent,
+                            block_overrides.as_ref(),
+                            is_cancun_active,
+                        )
+                        .map_err(Self::Error::from_eth_err)?;
 
                     let mut evm_env = this
                         .evm_config()
