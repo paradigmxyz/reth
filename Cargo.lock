@@ -10638,7 +10638,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "11.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=4ac164a#4ac164a6400f773e45e8c1995f1dc6490347dbc0"
+source = "git+https://github.com/bluealloy/revm?rev=fe8d5c6#fe8d5c6e3edf47185c1e250b75cbcecbc1bb1d5d"
 dependencies = [
  "bitvec",
  "phf",
@@ -10807,7 +10807,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "24.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=4ac164a#4ac164a6400f773e45e8c1995f1dc6490347dbc0"
+source = "git+https://github.com/bluealloy/revm?rev=fe8d5c6#fe8d5c6e3edf47185c1e250b75cbcecbc1bb1d5d"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10817,7 +10817,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "12.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=4ac164a#4ac164a6400f773e45e8c1995f1dc6490347dbc0"
+source = "git+https://github.com/bluealloy/revm?rev=fe8d5c6#fe8d5c6e3edf47185c1e250b75cbcecbc1bb1d5d"
 dependencies = [
  "alloy-eip7928 0.4.1",
  "bitflags 2.11.1",
