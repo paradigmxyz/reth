@@ -49,10 +49,11 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, AccountChanges, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{keccak256, map::B256Set, B256};
+use alloy_rlp::{Encodable, Header};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -165,6 +166,18 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
     }
+}
+
+fn compute_block_access_list_hash_preallocated(bal: &[AccountChanges]) -> B256 {
+    let payload_length = bal.iter().map(Encodable::length).sum();
+    let mut buf = Vec::with_capacity(payload_length + alloy_rlp::length_of_length(payload_length));
+
+    Header { list: true, payload_length }.encode(&mut buf);
+    for account in bal {
+        account.encode(&mut buf);
+    }
+
+    keccak256(&buf)
 }
 
 /// A helper type that provides reusable payload validation logic for network-specific validators.
@@ -1618,7 +1631,7 @@ where
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
         let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+            built_bal.as_ref().map(|bal| compute_block_access_list_hash_preallocated(bal));
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
