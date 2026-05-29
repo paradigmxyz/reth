@@ -193,7 +193,7 @@ where
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                StateRootMessage::StateUpdate(_, state) => {
+                StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
