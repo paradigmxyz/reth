@@ -297,11 +297,15 @@ where
         &self,
         payload: &BigBlockData<ExecutionData>,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        let transactions = payload
+        let transaction_count = payload
             .env_switches
             .iter()
-            .flat_map(|exec_data| exec_data.payload.transactions().clone())
-            .collect::<Vec<_>>();
+            .map(|exec_data| exec_data.payload.transactions().len())
+            .sum();
+        let mut transactions = Vec::with_capacity(transaction_count);
+        for exec_data in &payload.env_switches {
+            transactions.extend(exec_data.payload.transactions().iter().cloned());
+        }
 
         let convert = |tx: Bytes| {
             let tx =
