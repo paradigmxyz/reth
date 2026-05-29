@@ -344,17 +344,19 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             return Some(preferred_anchor)
         }
 
-        let mut hash = parent_hash;
+        let mut block = blocks.get(&parent_hash)?;
 
         loop {
-            let block_parent_hash = blocks.get(&hash)?.recovered_block().parent_hash();
+            let block_parent_hash = block.recovered_block().parent_hash();
             if block_parent_hash == preferred_anchor {
                 return Some(block_parent_hash)
             }
-            if !blocks.contains_key(&block_parent_hash) {
-                return Some(block_parent_hash)
-            }
-            hash = block_parent_hash;
+
+            drop(block);
+            block = match blocks.get(&block_parent_hash) {
+                Some(parent_block) => parent_block,
+                None => return Some(block_parent_hash),
+            };
         }
     }
 }
