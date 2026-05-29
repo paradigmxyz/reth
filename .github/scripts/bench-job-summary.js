@@ -11,7 +11,7 @@
 //
 // Usage from actions/github-script:
 //   const jobSummary = require('./.github/scripts/bench-job-summary.js');
-//   await jobSummary({ core, context, chartSha, logsUrl, tracesUrl, runId });
+//   await jobSummary({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId });
 
 const fs = require('fs');
 const { verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows, fmtChange } = require('./bench-utils');
@@ -30,7 +30,7 @@ function fmtTargetMetricValue(metric, v) {
   return fmtMetricValue(v);
 }
 
-module.exports = async function ({ core, context, chartSha, logsUrl, tracesUrl, runId }) {
+module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId }) {
   let summary;
   try {
     summary = JSON.parse(fs.readFileSync(process.env.BENCH_WORK_DIR + '/summary.json', 'utf8'));
@@ -46,6 +46,7 @@ module.exports = async function ({ core, context, chartSha, logsUrl, tracesUrl, 
 
   const { emoji, label } = verdict(summary.changes);
   const observability = summary.observability || {};
+  const resolvedGrafanaUrl = grafanaUrl || observability.grafana_url;
   const resolvedLogsUrl = logsUrl || observability.logs_url;
   const resolvedTracesUrl = tracesUrl || observability.traces_url;
   const baselineLink = `[\`${summary.baseline.name}\`](${commitUrl}/${summary.baseline.ref})`;
@@ -127,6 +128,7 @@ module.exports = async function ({ core, context, chartSha, logsUrl, tracesUrl, 
 
   // Observability
   const observabilityLinks = [];
+  if (resolvedGrafanaUrl) observabilityLinks.push(`- [Grafana Dashboard](${resolvedGrafanaUrl})`);
   if (resolvedLogsUrl) observabilityLinks.push(`- [Logs](${resolvedLogsUrl})`);
   if (resolvedTracesUrl) observabilityLinks.push(`- [Traces](${resolvedTracesUrl})`);
   if (observabilityLinks.length > 0) {
