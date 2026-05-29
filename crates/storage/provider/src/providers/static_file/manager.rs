@@ -522,12 +522,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            let changeset: Vec<_> = reverts
-                .accounts
-                .into_iter()
-                .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
-                .collect();
+            let changeset_len = reverts.accounts.iter().map(Vec::len).sum();
+            let mut changeset = Vec::with_capacity(changeset_len);
+            for account_reverts in reverts.accounts {
+                for (address, info) in account_reverts {
+                    changeset.push(AccountBeforeTx { address, info: info.map(Into::into) });
+                }
+            }
             w.append_account_changeset(changeset, block_number)?;
         }
         Ok(())
@@ -543,20 +544,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            let changeset: Vec<_> = reverts
-                .storage
-                .into_iter()
-                .flatten()
-                .flat_map(|revert| {
-                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                        StorageBeforeTx {
+            let changeset_len =
+                reverts.storage.iter().flatten().map(|revert| revert.storage_revert.len()).sum();
+            let mut changeset = Vec::with_capacity(changeset_len);
+            for storage_reverts in reverts.storage {
+                for revert in storage_reverts {
+                    for (key, revert_to_slot) in revert.storage_revert {
+                        changeset.push(StorageBeforeTx {
                             address: revert.address,
                             key: B256::from(key.to_be_bytes()),
                             value: revert_to_slot.to_previous_value(),
-                        }
-                    })
-                })
-                .collect();
+                        });
+                    }
+                }
+            }
             w.append_storage_changeset(changeset, block_number)?;
         }
         Ok(())
