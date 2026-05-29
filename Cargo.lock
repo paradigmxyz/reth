@@ -10683,8 +10683,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "15.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a69c3ce73454a09ef89a66177239d7c4f5f697227ae27254c99451866603b19d"
+source = "git+https://github.com/bluealloy/revm?rev=4696fe91#4696fe91efc6d3a65862d687798a0c77b64bc071"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10698,8 +10697,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "12.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2656187f9f9c22ef9dd9300ed71aeaeca3506a6a0a229a07f264649b960d68"
+source = "git+https://github.com/bluealloy/revm?rev=4696fe91#4696fe91efc6d3a65862d687798a0c77b64bc071"
 dependencies = [
  "auto_impl",
  "either",
