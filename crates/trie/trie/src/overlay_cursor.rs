@@ -147,6 +147,10 @@ fn seek_overlay_entries<K, V>(entries: &[(K, V)], position: &mut usize, key: &K)
 where
     K: Ord,
 {
+    if entries.get(*position).is_some_and(|(entry_key, _)| entry_key >= key) {
+        return Some(*position)
+    }
+
     let remaining = &entries[*position..];
     let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
         remaining.partition_point(|(entry_key, _)| entry_key < key)
