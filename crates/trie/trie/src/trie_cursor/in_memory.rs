@@ -178,7 +178,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         };
 
         if should_seek {
-            let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
+            let entry = self.cursor.seek(key)?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -196,7 +196,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         // Exhausted and wiped states are stable; only advance if the DB cursor currently points to
         // an entry.
         if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
-            let entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
+            let entry = self.cursor.next()?;
             self.db_cursor_state.set_entry(entry);
         }
 
