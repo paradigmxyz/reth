@@ -396,7 +396,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 ResolvedOverlayPath { blocks, cached_prefix }
             }
         };
-        let (blocks, parent_overlay) = match path.cached_prefix {
+        let cached_prefix =
+            self.largest_cached_prefix(key.anchor_hash, &path.blocks).or(path.cached_prefix);
+        let (blocks, parent_overlay) = match cached_prefix {
             Some((idx, parent_overlay)) => {
                 let mut blocks = path.blocks;
                 blocks.truncate(idx);
