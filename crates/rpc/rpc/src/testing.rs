@@ -15,7 +15,7 @@
 //! on public-facing RPC endpoints without proper authentication.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::eip2718::Decodable2718;
+use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{map::HashSet, Address, U256};
 use alloy_rlp::Encodable;
@@ -37,6 +37,7 @@ use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
 use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
@@ -47,16 +48,24 @@ use tracing::debug;
 pub struct TestingApi<Eth, Evm> {
     eth_api: Eth,
     evm_config: Evm,
+    /// Desired gas limit to move toward while respecting the consensus gas limit bounds.
+    desired_gas_limit: u64,
     /// If true, skip invalid transactions instead of failing.
     skip_invalid_transactions: bool,
-    /// If set, override the parent block's gas limit in `testing_buildBlockV1`.
+    /// If set, override the block gas limit in `testing_buildBlockV1`.
     gas_limit_override: Option<u64>,
 }
 
 impl<Eth, Evm> TestingApi<Eth, Evm> {
     /// Create a new testing API handler.
-    pub const fn new(eth_api: Eth, evm_config: Evm) -> Self {
-        Self { eth_api, evm_config, skip_invalid_transactions: false, gas_limit_override: None }
+    pub const fn new(eth_api: Eth, evm_config: Evm, desired_gas_limit: u64) -> Self {
+        Self {
+            eth_api,
+            evm_config,
+            desired_gas_limit,
+            skip_invalid_transactions: false,
+            gas_limit_override: None,
+        }
     }
 
     /// Enable skipping invalid transactions instead of failing.
@@ -67,8 +76,7 @@ impl<Eth, Evm> TestingApi<Eth, Evm> {
         self
     }
 
-    /// Override the gas limit used by `testing_buildBlockV1` instead of inheriting from the
-    /// parent block.
+    /// Override the gas limit used by `testing_buildBlockV1`.
     pub const fn with_gas_limit_override(mut self, gas_limit: u64) -> Self {
         self.gas_limit_override = Some(gas_limit);
         self
@@ -79,6 +87,7 @@ impl<Eth, Evm> TestingApi<Eth, Evm>
 where
     Eth: Call<
         Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>,
     >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,
@@ -89,6 +98,7 @@ where
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
         let evm_config = self.evm_config.clone();
         let skip_invalid_transactions = self.skip_invalid_transactions;
+        let desired_gas_limit = self.desired_gas_limit;
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
@@ -115,7 +125,9 @@ where
                     timestamp: request.payload_attributes.timestamp,
                     suggested_fee_recipient: request.payload_attributes.suggested_fee_recipient,
                     prev_randao: request.payload_attributes.prev_randao,
-                    gas_limit: gas_limit_override.unwrap_or_else(|| parent.gas_limit()),
+                    gas_limit: gas_limit_override.unwrap_or_else(|| {
+                        calculate_block_gas_limit(parent.gas_limit(), desired_gas_limit)
+                    }),
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),
@@ -134,16 +146,35 @@ where
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
                 let mut block_transactions_rlp_length = 0usize;
 
-                // Decode and recover all transactions in parallel
-                let recovered_txs = try_recover_signers(&request.transactions, |tx| {
-                    TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
-                        .map_err(RecoveryError::from_source)
-                })
-                .or(Err(EthApiError::InvalidTransactionSignature))?;
+                // If no transactions are provided in the request, use transactions from the pool.
+                let use_pool_transactions = request.transactions.is_empty();
+                let recovered_txs = if use_pool_transactions {
+                    let mut best_txs = eth_api.pool().best_transactions_with_attributes(
+                        BestTransactionsAttributes::new(
+                            base_fee,
+                            builder
+                                .evm_mut()
+                                .block()
+                                .blob_gasprice()
+                                .map(|gasprice| gasprice as u64),
+                        ),
+                    );
+                    best_txs.no_updates();
+                    best_txs.map(|tx| tx.to_consensus()).collect()
+                } else {
+                    // Decode and recover all transactions in parallel
+                    try_recover_signers(&request.transactions, |tx| {
+                        TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
+                            .map_err(RecoveryError::from_source)
+                    })
+                    .or(Err(EthApiError::InvalidTransactionSignature))?
+                };
+                let allow_skip_invalid_transactions =
+                    skip_invalid_transactions || use_pool_transactions;
 
                 for (idx, tx) in recovered_txs.into_iter().enumerate() {
                     let signer = tx.signer();
-                    if skip_invalid_transactions && invalid_senders.contains(&signer) {
+                    if allow_skip_invalid_transactions && invalid_senders.contains(&signer) {
                         continue;
                     }
 
@@ -156,7 +187,7 @@ where
                             withdrawals_rlp_length +
                             1024;
                         if estimated_block_size > MAX_RLP_BLOCK_SIZE {
-                            if skip_invalid_transactions {
+                            if allow_skip_invalid_transactions {
                                 debug!(
                                     target: "rpc::testing",
                                     tx_idx = idx,
@@ -181,7 +212,7 @@ where
                     let gas_used = match builder.execute_transaction(tx) {
                         Ok(gas_used) => gas_used.tx_gas_used(),
                         Err(err) => {
-                            if skip_invalid_transactions {
+                            if allow_skip_invalid_transactions {
                                 debug!(
                                     target: "rpc::testing",
                                     tx_idx = idx,
@@ -209,11 +240,9 @@ where
                 let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
-                let sealed_block = Arc::new(outcome.block.into_sealed_block());
-
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(sealed_block, total_fees, requests, None)
+                EthBuiltPayload::new(Arc::new(outcome.block), total_fees, requests, None)
                     .try_into_v5()
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)
@@ -227,6 +256,7 @@ impl<Eth, Evm> TestingApiServer for TestingApi<Eth, Evm>
 where
     Eth: Call<
         Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>,
     >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,

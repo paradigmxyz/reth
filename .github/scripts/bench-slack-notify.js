@@ -18,7 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
+const { fmtChange, fmtMs, verdict, isWin, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -80,6 +80,32 @@ const SLACK_VERDICT = {
   '⚪': ':white_circle:',
 };
 
+function benchConfigLine() {
+  const parts = [];
+  const add = (label, value, defaultValue = '') => {
+    if (value && value !== defaultValue) {
+      parts.push(`\`${label}=${value}\``);
+    }
+  };
+
+  add('blocks', process.env.BENCH_BLOCKS);
+  add('warmup', process.env.BENCH_WARMUP_BLOCKS);
+  add('big-blocks', process.env.BENCH_BIG_BLOCKS, 'false');
+  add('big-blocks-target-gas', process.env.BENCH_BIG_BLOCKS_TARGET_GAS);
+  add('bal', process.env.BENCH_BAL, 'false');
+  add('samply', process.env.BENCH_SAMPLY, 'false');
+  add('slack', process.env.BENCH_SLACK, 'always');
+  add('cores', process.env.BENCH_CORES, '0');
+  add('run-pairs', process.env.BENCH_RUN_PAIRS);
+  add('run-order', process.env.BENCH_RUN_ORDER);
+  add('otlp', process.env.BENCH_OTLP, 'true');
+  add('wait-time', process.env.BENCH_WAIT_TIME);
+  add('baseline-args', process.env.BENCH_BASELINE_ARGS);
+  add('feature-args', process.env.BENCH_FEATURE_ARGS);
+
+  return parts.length ? `*Workflow:* ${parts.join(' ')}` : '';
+}
+
 function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls }) {
   const { emoji, label } = verdict(summary.changes);
   const headerEmoji = SLACK_VERDICT[emoji] || emoji;
@@ -105,6 +131,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
+  const configLine = benchConfigLine();
 
   const baselineArgs = process.env.BENCH_BASELINE_ARGS || '';
   const featureArgs = process.env.BENCH_FEATURE_ARGS || '';
@@ -112,7 +139,9 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (baselineArgs) argsLines.push(`*Baseline Args:* \`${baselineArgs}\``);
   if (featureArgs) argsLines.push(`*Feature Args:* \`${featureArgs}\``);
 
-  const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, ...argsLines, countsLine].join('\n');
+  const sectionText = [metaParts.join(' | '), configLine, '', baselineLine, featureLine, ...argsLines, countsLine]
+    .filter(line => line !== '')
+    .join('\n');
 
   // Action buttons
   const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -176,6 +205,7 @@ function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, faile
     `by ${actorMention}`,
     `failed while *${failedStep}*`,
   ].filter(Boolean);
+  const configLine = benchConfigLine();
 
   const buttons = [
     {
@@ -193,7 +223,7 @@ function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, faile
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: parts.join(' | ') },
+      text: { type: 'mrkdwn', text: [parts.join(' | '), configLine].filter(Boolean).join('\n') },
     },
     {
       type: 'actions',
@@ -233,24 +263,22 @@ async function success({ core, context }) {
 
   const slackMode = process.env.BENCH_SLACK || 'always';
 
-  // Post to public channel if any metric shows significant improvement or regression
+  // Post to public channel only when the overall verdict is a win.
   const channel = process.env.SLACK_BENCH_CHANNEL;
   let postedToChannel = false;
   if (channel) {
-    const changes = summary.changes || {};
-    const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
-    if (hasImprovement) {
+    if (isWin(summary.changes)) {
       await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
     } else {
-      core.info('No significant improvement, skipping public channel notification');
+      core.info('No unambiguous improvement, skipping public channel notification');
     }
   }
 
-  // In on-win mode, only notify on improvement — skip DM fallback entirely
+  // In on-win mode, only notify on unambiguous improvement. Mixed results are not wins.
   if (slackMode === 'on-win') {
     if (!postedToChannel) {
-      core.info('on-win mode: no improvement detected, skipping all notifications');
+      core.info('on-win mode: no unambiguous improvement detected, skipping all notifications');
     }
     return;
   }
@@ -296,4 +324,4 @@ async function failure({ core, context, failedStep }) {
   // Only DM for failures, don't post to public channel
 }
 
-module.exports = { success, failure };
+module.exports = { success, failure, benchConfigLine, buildSuccessBlocks, buildFailureBlocks };

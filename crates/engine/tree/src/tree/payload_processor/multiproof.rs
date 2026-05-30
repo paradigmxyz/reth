@@ -4,8 +4,8 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 
 pub use reth_trie_parallel::state_root_task::{
-    evm_state_to_hashed_post_state, Source, StateHookSender, StateRootComputeOutcome,
-    StateRootHandle, StateRootMessage,
+    evm_state_to_hashed_post_state, StateHookSender, StateRootComputeOutcome, StateRootHandle,
+    StateRootMessage,
 };
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
@@ -68,9 +68,10 @@ pub(crate) fn dispatch_with_chunking<T, I>(
 ) where
     I: IntoIterator<Item = T>,
 {
+    let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
     let should_chunk = chunking_len > max_targets_for_chunking ||
-        has_multiple_idle_account_workers ||
-        has_multiple_idle_storage_workers;
+        (has_full_chunks &&
+            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
 
     if should_chunk && chunking_len > chunk_size {
         for chunk in chunker(items, chunk_size) {
