@@ -1,6 +1,6 @@
 use std::{fmt, slice, sync::Arc};
 
-const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 64;
+const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 128;
 
 #[derive(Debug)]
 pub(crate) enum DbCursorState<K, V> {
@@ -177,44 +177,8 @@ fn seek_overlay_entries_exact<K, V>(
 where
     K: Ord,
 {
-    if let Some((entry_key, _)) = entries.get(*position) {
-        match entry_key.cmp(key) {
-            std::cmp::Ordering::Less => *position += 1,
-            std::cmp::Ordering::Equal => return Some(*position),
-            std::cmp::Ordering::Greater => return None,
-        }
-    }
-
-    let remaining = &entries[*position..];
-    if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
-        return match remaining.binary_search_by(|(entry_key, _)| entry_key.cmp(key)) {
-            Ok(idx) => {
-                *position += idx;
-                Some(*position)
-            }
-            Err(idx) => {
-                *position += idx;
-                None
-            }
-        }
-    }
-
-    for (advance, (entry_key, _)) in remaining.iter().enumerate() {
-        match entry_key.cmp(key) {
-            std::cmp::Ordering::Less => {}
-            std::cmp::Ordering::Equal => {
-                *position += advance;
-                return Some(*position)
-            }
-            std::cmp::Ordering::Greater => {
-                *position += advance;
-                return None
-            }
-        }
-    }
-
-    *position = entries.len();
-    None
+    let idx = seek_overlay_entries(entries, position, key)?;
+    (&entries[idx].0 == key).then_some(idx)
 }
 
 #[inline(always)]
