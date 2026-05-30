@@ -1758,23 +1758,27 @@ impl<'a> RocksDBBatch<'a> {
     /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
     /// Returns immediately if auto-commit is disabled or threshold not reached.
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
-        if let Some(threshold) = self.auto_commit_threshold &&
-            self.inner.size_in_bytes() >= threshold
-        {
-            tracing::debug!(
-                target: "providers::rocksdb",
-                batch_size = self.inner.size_in_bytes(),
-                threshold,
-                "Auto-committing RocksDB batch"
-            );
-            let old_batch = std::mem::take(&mut self.inner);
-            self.provider.0.db_rw().write_opt(old_batch, &synced_write_options()).map_err(|e| {
-                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
+        let Some(threshold) = self.auto_commit_threshold else { return Ok(()) };
+
+        let batch_size = self.inner.size_in_bytes();
+        if batch_size < threshold {
+            return Ok(())
         }
+
+        tracing::debug!(
+            target: "providers::rocksdb",
+            batch_size,
+            threshold,
+            "Auto-committing RocksDB batch"
+        );
+        let old_batch = std::mem::take(&mut self.inner);
+        self.provider.0.db_rw().write_opt(old_batch, &synced_write_options()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
         Ok(())
     }
 
@@ -1786,6 +1790,10 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
+        if self.inner.is_empty() {
+            return Ok(())
+        }
+
         self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
