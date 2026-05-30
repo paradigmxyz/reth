@@ -52,27 +52,39 @@ where
     let left = core::mem::take(target);
     let mut out = Vec::with_capacity(left.len() + other.len());
 
-    let mut a = left.into_iter().peekable();
-    let mut b = other.iter().peekable();
+    let mut a = left.into_iter();
+    let mut b = other.iter();
+    let mut next_a = a.next();
+    let mut next_b = b.next();
 
-    while let (Some(aa), Some(bb)) = (a.peek(), b.peek()) {
+    while let (Some(aa), Some(bb)) = (next_a.as_ref(), next_b) {
         match aa.0.cmp(&bb.0) {
             Ordering::Less => {
-                out.push(a.next().unwrap());
+                out.push(next_a.take().expect("checked above"));
+                next_a = a.next();
             }
             Ordering::Greater => {
-                out.push(b.next().unwrap().clone());
+                out.push((bb.0.clone(), bb.1.clone()));
+                next_b = b.next();
             }
             Ordering::Equal => {
                 // `other` takes precedence for duplicate keys - reuse key from `a`
-                let (k, _) = a.next().unwrap();
-                out.push((k, b.next().unwrap().1.clone()));
+                let (k, _) = next_a.take().expect("checked above");
+                out.push((k, bb.1.clone()));
+                next_a = a.next();
+                next_b = b.next();
             }
         }
     }
 
     // Drain remaining: `a` moves, `b` clones
+    if let Some(aa) = next_a {
+        out.push(aa);
+    }
     out.extend(a);
+    if let Some(bb) = next_b {
+        out.push((bb.0.clone(), bb.1.clone()));
+    }
     out.extend(b.cloned());
 
     *target = out;
