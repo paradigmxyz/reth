@@ -683,7 +683,11 @@ impl HashedPostStateSorted {
         let storages = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_slots = kway_merge_sorted(entry.slices);
+                let storage_slots = if entry.slices.len() == 1 {
+                    entry.slices[0].to_vec()
+                } else {
+                    kway_merge_sorted(entry.slices)
+                };
                 (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
             })
             .collect();
