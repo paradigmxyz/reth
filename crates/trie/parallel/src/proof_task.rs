@@ -47,7 +47,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
     proof_v2,
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
     cell::RefCell,
@@ -358,13 +358,10 @@ impl ProofWorkerHandle {
                     ProviderError::other(std::io::Error::other("account workers unavailable"));
 
                 let AccountWorkerJob::AccountMultiproof { input } = err.0;
-                let ProofResultContext { sender: result_tx, state, start_time: start } =
-                    input.into_proof_result_sender();
+                let result_tx = input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
                     result: Err(ParallelStateRootError::Provider(error.clone())),
-                    elapsed: start.elapsed(),
-                    state,
                 });
 
                 error
@@ -479,10 +476,6 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 pub struct ProofResultMessage {
     /// The proof calculation result
     pub result: Result<DecodedMultiProofV2, ParallelStateRootError>,
-    /// Time taken for the entire proof calculation (from dispatch to completion)
-    pub elapsed: Duration,
-    /// Original state update that triggered this proof
-    pub state: HashedPostState,
 }
 
 /// Context for sending proof calculation results back to `SparseTrieCacheTask`.
@@ -493,20 +486,12 @@ pub struct ProofResultMessage {
 pub struct ProofResultContext {
     /// Channel sender for result delivery
     pub sender: ProofResultSender,
-    /// Original state update that triggered this proof
-    pub state: HashedPostState,
-    /// Calculation start time for measuring elapsed duration
-    pub start_time: Instant,
 }
 
 impl ProofResultContext {
     /// Creates a new proof result context.
-    pub const fn new(
-        sender: ProofResultSender,
-        state: HashedPostState,
-        start_time: Instant,
-    ) -> Self {
-        Self { sender, state, start_time }
+    pub const fn new(sender: ProofResultSender) -> Self {
+        Self { sender }
     }
 }
 
@@ -1023,15 +1008,13 @@ where
             Err(e) => (Err(e), ValueEncoderStats::default()),
         };
 
-        let ProofResultContext { sender: result_tx, state, start_time: start } =
-            proof_result_sender;
+        let ProofResultContext { sender: result_tx } = proof_result_sender;
 
         let proof_elapsed = proof_start.elapsed();
-        let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx.send(ProofResultMessage { result }).is_err() {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
@@ -1043,7 +1026,6 @@ where
         trace!(
             target: "trie::proof_task",
             proof_time_us = proof_elapsed.as_micros(),
-            total_elapsed_us = total_elapsed.as_micros(),
             total_processed = account_proofs_processed,
             "Account multiproof completed"
         );
@@ -1137,8 +1119,8 @@ pub struct AccountMultiproofInput {
 
 impl AccountMultiproofInput {
     /// Returns the [`ProofResultContext`] for this input, consuming the input.
-    fn into_proof_result_sender(self) -> ProofResultContext {
-        self.proof_result_sender
+    fn into_proof_result_sender(self) -> ProofResultSender {
+        self.proof_result_sender.sender
     }
 }
 

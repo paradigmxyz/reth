@@ -833,11 +833,7 @@ where
                 if let Err(e) =
                     self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
-                        proof_result_sender: ProofResultContext::new(
-                            self.proof_result_tx.clone(),
-                            HashedPostState::default(),
-                            Instant::now(),
-                        ),
+                        proof_result_sender: ProofResultContext::new(self.proof_result_tx.clone()),
                     })
                 {
                     error!("failed to dispatch account multiproof: {e:?}");
