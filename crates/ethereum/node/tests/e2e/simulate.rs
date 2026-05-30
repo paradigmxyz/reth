@@ -1,9 +1,9 @@
 use crate::utils::eth_payload_attributes;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{bytes, Address, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
-    state::StateOverridesBuilder,
+    state::{AccountOverride, StateOverride, StateOverridesBuilder},
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -95,6 +95,59 @@ async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> ey
 
     let expected_remaining_gas = block.header.inner.gas_limit - result[0].calls[0].gas_used;
     assert_eq!(txs[1].gas_limit(), expected_remaining_gas);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let contract = Address::with_last_byte(0x42);
+    let mut state_overrides = StateOverride::default();
+    state_overrides
+        .insert(contract, AccountOverride::default().with_code(bytes!("0x43600103405f5260205ff3")));
+    let input =
+        bytes!("0xee82ac5e000000000000000000000000000000000000000000000000000000000000000f").into();
+
+    let payload = SimulatePayload::default().extend(SimBlock::default()).extend(
+        SimBlock::default()
+            .with_block_overrides(BlockOverrides {
+                number: Some(U256::from(16)),
+                ..Default::default()
+            })
+            .with_state_overrides(state_overrides)
+            .call(TransactionRequest::default().to(contract).input(input)),
+    );
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 16);
+    assert_eq!(result[15].calls.len(), 1);
+    assert!(result[15].calls[0].status);
+    assert_eq!(result[15].calls[0].return_data.as_ref(), result[0].inner.header.hash.as_slice());
 
     Ok(())
 }
