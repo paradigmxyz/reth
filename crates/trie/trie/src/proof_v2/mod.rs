@@ -238,16 +238,34 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
-                            .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
-                        targets
-                            .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                if !check_min_len {
+                    return true;
+                }
+
+                let path_len = path.len();
+                if path_len >= lower.min_len as usize {
+                    return true;
+                }
+
+                for target in &targets.targets[targets.i + 1..] {
+                    if !target.key_nibbles.starts_with(path) {
+                        break;
+                    }
+                    if path_len >= target.min_len as usize {
+                        return true;
+                    }
+                }
+
+                for target in targets.targets[..targets.i].iter().rev() {
+                    if !target.key_nibbles.starts_with(path) {
+                        break;
+                    }
+                    if path_len >= target.min_len as usize {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -1717,16 +1735,6 @@ impl<'a> TargetsCursor<'a> {
         self.current()
     }
 
-    // Iterate forwards over the slice, starting from the [`ProofV2Target`] after the current.
-    fn skip_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
-        self.targets[self.i + 1..].iter()
-    }
-
-    /// Iterated backwards over the slice, starting from the [`ProofV2Target`] previous to the
-    /// current.
-    fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
-        self.targets[..self.i].iter().rev()
-    }
 }
 
 /// Used to track the state of the trie cursor, allowing us to differentiate between a branch having
