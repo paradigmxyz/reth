@@ -93,7 +93,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
+    pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<OverlayExactHit<&V>> {
         if !self.exact_index.is_empty() {
             let Ok(index_idx) = self.exact_index.binary_search_by(|entry| entry.key.cmp(key))
             else {
@@ -106,14 +106,18 @@ where
                 return None
             }
             layer.position = entry.entry_idx;
-            return Some((entry.layer_idx, &layer.entries[entry.entry_idx].1))
+            return Some(OverlayExactHit {
+                layer_idx: entry.layer_idx,
+                value: &layer.entries[entry.entry_idx].1,
+                prefix_positioned: false,
+            })
         }
 
         for (layer_idx, layer) in self.layers.iter_mut().enumerate() {
             let Some(entry) = layer.seek_exact(key) else {
                 continue;
             };
-            return Some((layer_idx, &entry.1))
+            return Some(OverlayExactHit { layer_idx, value: &entry.1, prefix_positioned: true })
         }
 
         None
@@ -302,6 +306,13 @@ pub(crate) struct OverlayExactIndexEntry<K> {
     key: K,
     layer_idx: usize,
     entry_idx: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OverlayExactHit<V> {
+    pub(crate) layer_idx: usize,
+    pub(crate) value: V,
+    pub(crate) prefix_positioned: bool,
 }
 
 pub(crate) fn build_overlay_exact_index<O, K, V>(

@@ -1,7 +1,7 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::overlay_cursor::{
-    build_overlay_exact_index, DbCursorState, OverlayExactIndexEntry, OverlayLayer,
-    PositionedOverlayCursor,
+    build_overlay_exact_index, DbCursorState, OverlayExactHit, OverlayExactIndexEntry,
+    OverlayLayer, PositionedOverlayCursor,
 };
 use alloy_primitives::{map::B256Map, B256, U256};
 use reth_primitives_traits::Account;
@@ -254,14 +254,16 @@ where
 
         self.deferred_overlay_seek_start = None;
         match self.post_state_cursor.seek_until_exact(&key) {
-            Some((idx, Some(value))) => {
-                self.deferred_overlay_seek_start = Some(idx + 1);
-                let entry = Some((key, value));
-                self.set_last_key(&entry);
-                return Ok(entry)
-            }
-            Some((_, None)) => {
-                self.post_state_cursor.seek_from(0, &key);
+            Some(hit) => {
+                if let Some(value) = hit.value {
+                    self.deferred_overlay_seek_start = Some(hit.layer_idx + 1);
+                    let entry = Some((key, value));
+                    self.set_last_key(&entry);
+                    return Ok(entry)
+                }
+
+                let start = if hit.prefix_positioned { hit.layer_idx + 1 } else { 0 };
+                self.post_state_cursor.seek_from(start, &key);
             }
             None => {}
         }
@@ -501,8 +503,12 @@ where
         self.cursor.seek_from(start, key);
     }
 
-    fn seek_until_exact(&mut self, key: &B256) -> Option<(usize, Option<V::NonZero>)> {
-        self.cursor.seek_until_exact(key).map(|(idx, value)| (idx, (*value).into_option()))
+    fn seek_until_exact(&mut self, key: &B256) -> Option<OverlayExactHit<Option<V::NonZero>>> {
+        self.cursor.seek_until_exact(key).map(|hit| OverlayExactHit {
+            layer_idx: hit.layer_idx,
+            value: (*hit.value).into_option(),
+            prefix_positioned: hit.prefix_positioned,
+        })
     }
 
     fn first_after(&mut self, key: &B256) {

@@ -196,11 +196,11 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         }
 
         self.deferred_overlay_seek_start = None;
-        let entry = if let Some((idx, mem_value)) = self.in_memory_cursor.seek_until_exact(&key) {
-            if mem_value.is_some() {
-                self.deferred_overlay_seek_start = Some(idx + 1);
+        let entry = if let Some(hit) = self.in_memory_cursor.seek_until_exact(&key) {
+            if hit.value.is_some() {
+                self.deferred_overlay_seek_start = Some(hit.layer_idx + 1);
             }
-            mem_value.clone().map(|node| (key, node))
+            hit.value.clone().map(|node| (key, node))
         } else {
             let db_entry = self.get_cursor_mut().map(|c| c.seek_exact(key)).transpose()?.flatten();
             self.db_cursor_state.set_entry(db_entry);
@@ -222,14 +222,15 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         self.deferred_overlay_seek_start = None;
         match self.in_memory_cursor.seek_until_exact(&key) {
-            Some((idx, Some(node))) => {
-                self.deferred_overlay_seek_start = Some(idx + 1);
-                let entry = Some((key, node.clone()));
+            Some(hit) if hit.value.is_some() => {
+                self.deferred_overlay_seek_start = Some(hit.layer_idx + 1);
+                let entry = hit.value.clone().map(|node| (key, node));
                 self.set_last_key(&entry);
                 return Ok(entry);
             }
-            Some((_, None)) => {
-                self.in_memory_cursor.seek_from(0, &key);
+            Some(hit) => {
+                let start = if hit.prefix_positioned { hit.layer_idx + 1 } else { 0 };
+                self.in_memory_cursor.seek_from(start, &key);
             }
             None => {}
         }
