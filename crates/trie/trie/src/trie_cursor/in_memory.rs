@@ -1,9 +1,6 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use crate::{
-    overlay_cursor::{
-        build_overlay_exact_index, DbCursorState, OverlayExactIndexEntry, OverlayLayer,
-        PositionedOverlayCursor,
-    },
+    overlay_cursor::{DbCursorState, OverlayLayer, PositionedOverlayCursor},
     updates::TrieUpdatesSorted,
 };
 use alloy_primitives::{map::B256Map, B256};
@@ -196,11 +193,11 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         }
 
         self.deferred_overlay_seek_start = None;
-        let entry = if let Some(hit) = self.in_memory_cursor.seek_until_exact(&key) {
-            if hit.value.is_some() {
-                self.deferred_overlay_seek_start = Some(hit.layer_idx + 1);
+        let entry = if let Some((idx, mem_value)) = self.in_memory_cursor.seek_until_exact(&key) {
+            if mem_value.is_some() {
+                self.deferred_overlay_seek_start = Some(idx + 1);
             }
-            hit.value.clone().map(|node| (key, node))
+            mem_value.clone().map(|node| (key, node))
         } else {
             let db_entry = self.get_cursor_mut().map(|c| c.seek_exact(key)).transpose()?.flatten();
             self.db_cursor_state.set_entry(db_entry);
@@ -222,15 +219,14 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         self.deferred_overlay_seek_start = None;
         match self.in_memory_cursor.seek_until_exact(&key) {
-            Some(hit) if hit.value.is_some() => {
-                self.deferred_overlay_seek_start = Some(hit.layer_idx + 1);
-                let entry = hit.value.clone().map(|node| (key, node));
+            Some((idx, Some(node))) => {
+                self.deferred_overlay_seek_start = Some(idx + 1);
+                let entry = Some((key, node.clone()));
                 self.set_last_key(&entry);
                 return Ok(entry);
             }
-            Some(hit) => {
-                let start = if hit.prefix_positioned { hit.layer_idx + 1 } else { 0 };
-                self.in_memory_cursor.seek_from(start, &key);
+            Some((idx, None)) => {
+                self.in_memory_cursor.seek_from(idx + 1, &key);
             }
             None => {}
         }
@@ -293,9 +289,8 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let (layers, exact_index, db_wiped) =
-            self.trie_updates.storage_overlay_layers(hashed_address);
-        self.in_memory_cursor.retarget(layers, exact_index);
+        let (layers, db_wiped) = self.trie_updates.storage_overlay_layers(hashed_address);
+        self.in_memory_cursor.retarget(layers);
         self.db_cursor_state = DbCursorState::new(db_wiped);
     }
 }
@@ -304,7 +299,6 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 #[derive(Clone, Debug, Default)]
 pub struct TrieUpdatesOverlay {
     account_overlay: Arc<Vec<TrieOverlayLayer>>,
-    account_exact_index: Arc<Vec<OverlayExactIndexEntry<Nibbles>>>,
     storage_overlays: Arc<B256Map<TrieStorageOverlay>>,
 }
 
@@ -312,9 +306,8 @@ impl TrieUpdatesOverlay {
     /// Create a new indexed trie updates overlay stack.
     pub fn new(updates: Vec<Arc<TrieUpdatesSorted>>) -> Self {
         let account_overlay = Self::build_account_overlay(&updates);
-        let account_exact_index = Arc::new(build_overlay_exact_index(account_overlay.as_slice()));
         let storage_overlays = Self::build_storage_overlays(&updates);
-        Self { account_overlay, account_exact_index, storage_overlays }
+        Self { account_overlay, storage_overlays }
     }
 
     /// Returns `true` if the overlay does not contain any trie updates.
@@ -357,31 +350,24 @@ impl TrieUpdatesOverlay {
             }
         }
 
-        for overlay in overlays.values_mut() {
-            overlay.exact_index = build_overlay_exact_index(&overlay.layers);
-        }
-
         Arc::new(overlays)
     }
 
     fn account_overlay(&self) -> OverlayCursor<'_> {
-        OverlayCursor::new(self.account_overlay.as_slice(), self.account_exact_index.as_slice())
+        OverlayCursor::new(self.account_overlay.as_slice())
     }
 
     fn storage_overlay(&self, hashed_address: B256) -> (OverlayCursor<'_>, bool) {
-        let (layers, exact_index, db_wiped) = self.storage_overlay_layers(hashed_address);
-        (OverlayCursor::new(layers, exact_index), db_wiped)
+        let (layers, db_wiped) = self.storage_overlay_layers(hashed_address);
+        (OverlayCursor::new(layers), db_wiped)
     }
 
-    fn storage_overlay_layers(
-        &self,
-        hashed_address: B256,
-    ) -> (&[TrieOverlayLayer], &[OverlayExactIndexEntry<Nibbles>], bool) {
+    fn storage_overlay_layers(&self, hashed_address: B256) -> (&[TrieOverlayLayer], bool) {
         let Some(overlay) = self.storage_overlays.get(&hashed_address) else {
-            return (&[], &[], false);
+            return (&[], false);
         };
 
-        (overlay.layers.as_slice(), overlay.exact_index.as_slice(), overlay.db_wiped)
+        (overlay.layers.as_slice(), overlay.db_wiped)
     }
 }
 
@@ -394,11 +380,11 @@ impl AsRef<Self> for TrieUpdatesOverlay {
 #[derive(Clone, Debug, Default)]
 struct TrieStorageOverlay {
     layers: Vec<TrieOverlayLayer>,
-    exact_index: Vec<OverlayExactIndexEntry<Nibbles>>,
     db_wiped: bool,
 }
 
-type OverlayCursor<'a> = PositionedOverlayCursor<'a, Nibbles, Option<BranchNodeCompact>>;
+type OverlayCursor<'a> =
+    PositionedOverlayCursor<'a, TrieUpdatesSorted, Nibbles, Option<BranchNodeCompact>>;
 type TrieOverlayLayer = OverlayLayer<TrieUpdatesSorted, Nibbles, Option<BranchNodeCompact>>;
 
 #[cfg(test)]
