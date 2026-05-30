@@ -503,10 +503,10 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         };
 
-        if parent.parent_beacon_block_root().is_some() {
-            attributes.parent_beacon_block_root = Some(
-                block_overrides.and_then(|overrides| overrides.beacon_root).unwrap_or_default(),
-            );
+        if attributes.parent_beacon_block_root.is_some() &&
+            let Some(beacon_root) = block_overrides.and_then(|overrides| overrides.beacon_root)
+        {
+            attributes.parent_beacon_block_root = Some(beacon_root);
         }
 
         attributes
@@ -543,6 +543,18 @@ mod tests {
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, Some(&block_overrides));
 
         assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
+    }
+
+    #[test]
+    fn pending_env_ignores_parent_beacon_root_override_before_fork() {
+        let sealed = SealedHeader::new(Header::default(), B256::ZERO);
+        let beacon_root = B256::repeat_byte(0x42);
+        let block_overrides =
+            BlockOverrides { beacon_root: Some(beacon_root), ..Default::default() };
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, Some(&block_overrides));
+
+        assert_eq!(attrs.parent_beacon_block_root, None);
     }
 
     #[test]
