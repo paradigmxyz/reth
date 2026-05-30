@@ -811,7 +811,7 @@ fn test_balance_increment_not_duplicated() {
     let tx_clone = tx.clone();
 
     let _output = executor
-        .execute_with_state_hook(block, move |_, state: &EvmState| {
+        .execute_with_state_hook(block, move |state: &EvmState| {
             if let Some(account) = state.get(&withdrawal_recipient) {
                 let _ = tx_clone.send(account.info.balance);
             }
