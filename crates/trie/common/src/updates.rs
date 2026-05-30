@@ -667,9 +667,19 @@ impl TrieUpdatesSorted {
             return acc;
         }
 
-        // Large k: k-way merge.
-        let account_nodes =
-            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+        // Large k: k-way merge. Empty account slices are common in persistence batches where only
+        // storage tries changed, so avoid setting up a k-way merge when there is at most one
+        // account-node slice to copy.
+        let account_slices = items
+            .iter()
+            .map(|i| i.as_ref().account_nodes.as_slice())
+            .filter(|slice| !slice.is_empty())
+            .collect::<Vec<_>>();
+        let account_nodes = match account_slices.as_slice() {
+            [] => Vec::new(),
+            [slice] => slice.to_vec(),
+            _ => kway_merge_sorted(account_slices),
+        };
 
         struct StorageAcc<'a> {
             is_deleted: bool,
