@@ -1416,7 +1416,7 @@ impl RocksDBProvider {
 
         // Write account history using proper shard append logic
         for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
+            batch.append_account_history_shard_vec(address, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -1455,7 +1455,7 @@ impl RocksDBProvider {
 
         // Write storage history using proper shard append logic
         for ((address, slot), indices) in storage_history {
-            batch.append_storage_history_shard(address, slot, indices)?;
+            batch.append_storage_history_shard_vec(address, slot, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -1845,8 +1845,14 @@ impl<'a> RocksDBBatch<'a> {
         address: Address,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
+        self.append_account_history_shard_vec(address, indices.into_iter().collect())
+    }
 
+    fn append_account_history_shard_vec(
+        &mut self,
+        address: Address,
+        indices: Vec<u64>,
+    ) -> ProviderResult<()> {
         if indices.is_empty() {
             return Ok(());
         }
@@ -1907,8 +1913,15 @@ impl<'a> RocksDBBatch<'a> {
         storage_key: B256,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
+        self.append_storage_history_shard_vec(address, storage_key, indices.into_iter().collect())
+    }
 
+    fn append_storage_history_shard_vec(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: Vec<u64>,
+    ) -> ProviderResult<()> {
         if indices.is_empty() {
             return Ok(());
         }
