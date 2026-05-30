@@ -2651,8 +2651,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return 0;
         }
 
-        let mut retained_leaves = retained_leaves.to_vec();
-        retained_leaves.sort_unstable();
+        let retained_leaves = if retained_leaves.len() > 1 {
+            let mut sorted = retained_leaves.to_vec();
+            sorted.sort_unstable();
+            Cow::Owned(sorted)
+        } else {
+            Cow::Borrowed(retained_leaves)
+        };
 
         let threshold = self.parallelism_thresholds.min_leaves_for_prune;
 
