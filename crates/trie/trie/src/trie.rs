@@ -219,14 +219,13 @@ where
                 .with_intermediate_state(Some(storage_state.state))
                 .with_threshold(remaining_threshold);
 
-                let cursor = hashed_storage_cursor.take().unwrap_or_else(|| {
+                let cursor = hashed_storage_cursor.get_or_insert_with(|| {
                     self.hashed_cursor_factory
                         .hashed_storage_cursor(hashed_address)
                         .expect("failed to create storage cursor")
                 });
-                let (storage_result, returned_cursor) =
+                let storage_result =
                     storage_root_calculator.calculate_with_cursor(cursor, retain_updates)?;
-                hashed_storage_cursor = Some(returned_cursor);
                 if let Some(storage_state) = storage_ctx.process_storage_root_result(
                     storage_result,
                     hashed_address,
@@ -285,14 +284,13 @@ where
                     )
                     .with_threshold(remaining_threshold);
 
-                    let cursor = hashed_storage_cursor.take().unwrap_or_else(|| {
+                    let cursor = hashed_storage_cursor.get_or_insert_with(|| {
                         self.hashed_cursor_factory
                             .hashed_storage_cursor(hashed_address)
                             .expect("failed to create storage cursor")
                     });
-                    let (storage_result, returned_cursor) =
+                    let storage_result =
                         storage_root_calculator.calculate_with_cursor(cursor, retain_updates)?;
-                    hashed_storage_cursor = Some(returned_cursor);
                     if let Some(storage_state) = storage_ctx.process_storage_root_result(
                         storage_result,
                         hashed_address,
@@ -634,30 +632,22 @@ where
         trace!(target: "trie::storage_root", "calculating storage root");
 
         let factory_clone = self.hashed_cursor_factory.clone();
-        let hashed_storage_cursor = factory_clone.hashed_storage_cursor(self.hashed_address)?;
+        let mut hashed_storage_cursor = factory_clone.hashed_storage_cursor(self.hashed_address)?;
 
-        let (result, _cursor) =
-            self.calculate_with_cursor(hashed_storage_cursor, retain_updates)?;
-        Ok(result)
+        self.calculate_with_cursor(&mut hashed_storage_cursor, retain_updates)
     }
 
     /// Walks the hashed storage table entries for a given address and calculates the storage root
-    /// using a pre-created cursor. The cursor will be repositioned to the given hashed address
-    /// and returned for reuse.
+    /// using a pre-created cursor. The cursor will be repositioned to the given hashed address.
     ///
     /// This method allows reusing a single cursor across multiple storage root calculations,
     /// reducing overhead when computing storage roots for many accounts.
-    ///
-    /// # Returns
-    ///
-    /// A tuple of (storage root progress, cursor) where the cursor can be reused for
-    /// subsequent storage root calculations.
     #[instrument(skip_all, level = "trace", target = "trie::storage_root", name = "storage_trie_with_cursor", fields(addr = %self.hashed_address, storage_root))]
     pub fn calculate_with_cursor(
         self,
-        mut hashed_storage_cursor: H::StorageCursor<'_>,
+        hashed_storage_cursor: &mut H::StorageCursor<'_>,
         retain_updates: bool,
-    ) -> Result<(StorageRootProgress, H::StorageCursor<'_>), StorageRootError> {
+    ) -> Result<StorageRootProgress, StorageRootError> {
         trace!(target: "trie::storage_root", "calculating storage root with cursor");
 
         // Reposition the cursor to the current hashed address
@@ -666,9 +656,10 @@ where
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             Span::current().record("storage_root", format!("{EMPTY_ROOT_HASH:?}"));
-            return Ok((
-                StorageRootProgress::Complete(EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()),
-                hashed_storage_cursor,
+            return Ok(StorageRootProgress::Complete(
+                EMPTY_ROOT_HASH,
+                0,
+                StorageTrieUpdates::deleted(),
             ))
         }
 
@@ -729,15 +720,10 @@ where
                             last_hashed_key: hashed_slot,
                         };
 
-                        // Extract cursor from iterator for reuse
-                        let cursor = storage_node_iter.hashed_cursor;
-                        return Ok((
-                            StorageRootProgress::Progress(
-                                Box::new(state),
-                                hashed_entries_walked,
-                                trie_updates,
-                            ),
-                            cursor,
+                        return Ok(StorageRootProgress::Progress(
+                            Box::new(state),
+                            hashed_entries_walked,
+                            trie_updates,
                         ))
                     }
                 }
@@ -766,9 +752,7 @@ where
         );
 
         let storage_slots_walked = stats.leaves_added() as usize;
-        // Extract cursor from iterator for reuse
-        let cursor = storage_node_iter.hashed_cursor;
-        Ok((StorageRootProgress::Complete(root, storage_slots_walked, trie_updates), cursor))
+        Ok(StorageRootProgress::Complete(root, storage_slots_walked, trie_updates))
     }
 }
 
